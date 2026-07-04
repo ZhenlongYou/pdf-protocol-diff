@@ -659,6 +659,76 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("1 Scope / 1.1 Delivery", locations)
         self.assertIn("2 Acceptance", locations)
 
+    def test_single_selected_pcie_page_removes_obvious_margin_furniture(self) -> None:
+        """Single-page windows still need conservative header/footer cleanup."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("single_pcie_page.pdf"),
+            pages=[
+                PageText(
+                    page_number=36,
+                    text=(
+                        "Test Descriptions\n"
+                        "PCI Express Architecture PHY Test Specification | 36\n"
+                        "Revision 4.0, Version 1.2\n"
+                        "August 18, 2021\n"
+                        "2.11.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "For this calibration a real time oscilloscope is used.\n"
+                        "1. Connect the end of the cables to the RX SMPs.\n"
+                    ),
+                )
+            ],
+            selected_start_page=36,
+            selected_end_page=36,
+        )
+
+        sections = section_document(extraction)
+        joined_bodies = "\n".join(section.body for section in sections)
+
+        self.assertIn("2.11.2 Overview of Calibration Steps at 16.0 GT/s", sections[0].location)
+        self.assertIn("1. Connect the end of the cables", joined_bodies)
+        self.assertNotIn("Test Descriptions", joined_bodies)
+        self.assertNotIn("PCI Express Architecture PHY Test Specification", joined_bodies)
+        self.assertNotIn("Revision 4.0", joined_bodies)
+        self.assertNotIn("August 18, 2021", joined_bodies)
+
+    def test_opening_selected_range_keeps_procedure_steps_as_body(self) -> None:
+        """A page window starting mid-procedure should not create fake chapters."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("range_starts_mid_procedure.pdf"),
+            pages=[
+                PageText(
+                    page_number=37,
+                    text=(
+                        "Test Descriptions\n"
+                        "PCI Express Architecture PHY Test Specification | 37\n"
+                        "Revision 4.0, Version 1.2\n"
+                        "August 18, 2021\n"
+                        "6. Adjust the TX equalization preset to the target value.\n"
+                        "6 X 62.5 ps = 375 ps\n"
+                        "7. Capture 2.0 million unit-intervals of data.\n"
+                        "3 Receiver Requirements\n"
+                        "Receiver requirements text."
+                    ),
+                )
+            ],
+            selected_start_page=37,
+            selected_end_page=37,
+        )
+
+        sections = section_document(extraction)
+        locations = [section.location for section in sections]
+
+        self.assertEqual(2, len(sections))
+        self.assertEqual("范围起始页前序内容", sections[0].location)
+        self.assertIn("3 Receiver Requirements", locations)
+        self.assertIn("6. Adjust the TX equalization", sections[0].body)
+        self.assertIn("6 X 62.5 ps = 375 ps", sections[0].body)
+        self.assertIn("7. Capture 2.0 million", sections[0].body)
+        self.assertNotIn("6. Adjust the TX equalization", locations)
+        self.assertNotIn("7. Capture 2.0 million", locations)
+
     def test_cosmetic_case_spacing_and_punctuation_diffs_are_suppressed(self) -> None:
         """Formatting-only extraction differences should not clutter reports."""
 
@@ -799,6 +869,32 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
+    def test_decimal_value_split_across_pdf_lines_stays_one_unit(self) -> None:
+        """A line break inside a decimal value should not create a lone fragment."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_decimal_wrap.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture 2.0 million unit-intervals (125.0 μs).",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_decimal_wrap.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture 2.0 million unit-intervals (125.\n0 μs).",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
     def test_snippet_limit_scans_all_differences_and_reports_omissions(self) -> None:
         """Later substantive changes should not disappear when snippets are capped."""
 
@@ -849,6 +945,75 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("1.0 ps", shown)
         self.assertIn("10 ps", shown)
         self.assertNotIn("Formatting text uses commas", shown)
+
+    def test_unequal_replace_block_pairs_related_units(self) -> None:
+        """Unequal replace blocks should not cross-pair unrelated changed sentences."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_unequal_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The jitter limit is 1.0 ps.\n"
+                        "The preset mode is P5."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_unequal_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The jitter limit is 10 ps.\n"
+                        "Supplier shall provide waveform logs.\n"
+                        "The preset mode is P6."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        pairs = result.changes[0].replaced_snippets
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual(2, len(pairs))
+        self.assertTrue(any("jitter limit" in pair.old and "jitter limit" in pair.new for pair in pairs))
+        self.assertTrue(any("preset mode" in pair.old and "preset mode" in pair.new for pair in pairs))
+        self.assertFalse(any("preset mode" in pair.old and "jitter limit" in pair.new for pair in pairs))
+        self.assertIn("Supplier shall provide waveform logs.", result.changes[0].added_snippets)
+
+        swapped_new_extraction = ExtractionResult(
+            pdf_path=Path("new_unequal_block_swapped.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The preset mode is P6.\n"
+                        "The jitter limit is 10 ps.\n"
+                        "Supplier shall provide waveform logs."
+                    ),
+                )
+            ],
+        )
+
+        swapped_result = compare_extractions(old_extraction, swapped_new_extraction, DiffOptions())
+        swapped_pairs = swapped_result.changes[0].replaced_snippets
+
+        self.assertTrue(
+            any("jitter limit" in pair.old and "jitter limit" in pair.new for pair in swapped_pairs)
+        )
+        self.assertTrue(
+            any("preset mode" in pair.old and "preset mode" in pair.new for pair in swapped_pairs)
+        )
+        self.assertFalse(
+            any("preset mode" in pair.old and "jitter limit" in pair.new for pair in swapped_pairs)
+        )
 
     def test_heading_change_counts_against_snippet_limit(self) -> None:
         """A title snippet should not silently hide a body change."""

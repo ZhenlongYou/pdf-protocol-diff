@@ -85,6 +85,8 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             if not line:
                 continue
             heading = detect_heading(line)
+            if heading and _is_opening_range_body_integer(heading, saw_heading, opening_label):
+                heading = None
             if heading and _is_integer_heading_under_deep_context(heading, deep_numeric_context):
                 if not _looks_like_real_integer_heading_after_deep_context(heading):
                     heading = None
@@ -170,6 +172,8 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
     much less likely to be removed accidentally.
     """
 
+    if len(pages) == 1:
+        return _remove_single_page_furniture(pages)
     if len(pages) < 2:
         return pages
 
@@ -214,6 +218,36 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
                 repeated_static,
             )
         ]
+        cleaned.append(PageText(page_number=page.page_number, text="\n".join(kept_lines)))
+    return cleaned
+
+
+def _remove_single_page_furniture(pages: list[PageText]) -> list[PageText]:
+    """Remove obvious margin furniture when the user selects only one page.
+
+    Repetition-based learning cannot work on a single selected page, but PCIe
+    reports still expose page counters, revision lines, and dates in the page
+    margins. This path only removes lines that already match the conservative
+    dynamic/static furniture recognizers and only when they are in the top or
+    bottom margin.
+    """
+
+    cleaned: list[PageText] = []
+    for page in pages:
+        line_zones = _page_line_zones(page.text)
+        kept_lines = []
+        for index, line in enumerate(page.text.splitlines()):
+            zones = line_zones.get(index, frozenset())
+            normalized = normalize_line(line)
+            if (
+                zones
+                and (
+                    _looks_like_single_page_dynamic_furniture(normalized)
+                    or _looks_like_static_page_furniture(normalized)
+                )
+            ):
+                continue
+            kept_lines.append(line)
         cleaned.append(PageText(page_number=page.page_number, text="\n".join(kept_lines)))
     return cleaned
 
@@ -328,6 +362,15 @@ def _looks_like_dynamic_page_furniture(line: str) -> bool:
         r"^\s*\d+\s*/\s*\d+\s*$",
     )
     return any(re.search(pattern, candidate) for pattern in page_patterns)
+
+
+def _looks_like_single_page_dynamic_furniture(line: str) -> bool:
+    """Single-page cleanup cannot safely remove bare numeric heading markers."""
+
+    candidate = compact_inline(line)
+    if re.fullmatch(r"-?\s*\d+\s*-?", candidate):
+        return False
+    return _looks_like_dynamic_page_furniture(candidate)
 
 
 def _looks_like_static_page_furniture(line: str) -> bool:
@@ -555,6 +598,46 @@ def _is_integer_heading_under_deep_context(
     """Return True for integer numeric candidates under a deep section."""
 
     return bool(deep_numeric_context and heading.number.isdigit() and "." not in heading.number)
+
+
+def _is_opening_range_body_integer(
+    heading: HeadingInfo,
+    saw_heading: bool,
+    opening_label: str,
+) -> bool:
+    """Keep mid-procedure range starts grouped as carry-over body text.
+
+    When a user selects a page window that starts inside an existing PCIe-style
+    procedure, the first visible lines can be ``6. Adjust ...`` or formula
+    continuations such as ``6 X 62.5 ps =``. Without the parent ``2.x.x``
+    heading from the previous page, those integer lines look like new top-level
+    chapters. Treat only instruction-like or formula-like integer candidates as
+    body until a real heading appears; noun-like headings such as
+    ``3 Receiver Requirements`` still start normal sections.
+    """
+
+    if saw_heading or opening_label != "范围起始页前序内容":
+        return False
+    if not heading.number.isdigit() or "." in heading.number:
+        return False
+    return (
+        _looks_like_procedure_step_title(heading.title)
+        or _looks_like_wrapped_numeric_continuation(heading)
+        or _looks_like_formula_fragment_heading(heading)
+    )
+
+
+def _looks_like_formula_fragment_heading(heading: HeadingInfo) -> bool:
+    """Return True for equation fragments misread as integer headings."""
+
+    title = normalize_line(heading.title)
+    if not title:
+        return False
+    has_unit_or_operator = bool(
+        re.search(r"(?i)\b(?:ps|ns|us|ms|ui|mv|v|mhz|ghz|gt/s)\b", title)
+        or re.search(r"[=×*/+-]", title)
+    )
+    return has_unit_or_operator and bool(re.search(r"\d", title))
 
 
 def _looks_like_wrapped_numeric_continuation(heading: HeadingInfo) -> bool:

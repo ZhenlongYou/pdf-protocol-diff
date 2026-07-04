@@ -39,6 +39,16 @@ class _DeltaCandidate:
     pair: SnippetPair | None = None
 
 
+@dataclass(frozen=True)
+class _PendingDeltaCandidate:
+    """One snippet candidate before report ordering and priority are assigned."""
+
+    kind: str
+    priority_values: tuple[str, ...]
+    text: str = ""
+    pair: SnippetPair | None = None
+
+
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
     """Run the complete extraction, sectioning, and comparison pipeline."""
 
@@ -129,6 +139,17 @@ def compare_sections(
                 max_snippets=options.max_snippets_per_section,
                 leading_replacement=heading_pair,
             )
+            if not added and not removed and not replaced and omitted_count == 0:
+                if options.include_unchanged_sections:
+                    changes.append(
+                        SectionChange(
+                            change_type="unchanged",
+                            old_section=old_section,
+                            new_section=new_section,
+                            similarity=similarity,
+                        )
+                    )
+                continue
             changes.append(
                 SectionChange(
                     change_type="modified",
@@ -395,13 +416,15 @@ def _summarize_text_delta(
                         priority_values=(old_unit, new_unit),
                     )
             else:
-                old_block = _best_changed_block(old_block_units, new_block_units)
-                new_block = _best_changed_block(new_block_units, old_block_units)
-                if _review_unit_key(old_block) != _review_unit_key(new_block):
+                for candidate in _unequal_replace_delta_candidates(
+                    old_block_units,
+                    new_block_units,
+                ):
                     add_candidate(
-                        "replaced",
-                        pair=SnippetPair(old=_report_unit(old_block), new=_report_unit(new_block)),
-                        priority_values=(old_block, new_block),
+                        candidate.kind,
+                        text=candidate.text,
+                        pair=candidate.pair,
+                        priority_values=candidate.priority_values,
                     )
 
     return _materialize_delta_candidates(candidates, max_snippets)
@@ -445,8 +468,11 @@ def _merge_wrapped_lines(text: str) -> list[str]:
         if not current:
             current = line
         elif _ends_review_sentence(current) and not _is_standalone_list_marker(current):
-            blocks.append(current)
-            current = line
+            if _looks_like_decimal_continuation(current, line):
+                current = _join_wrapped_line(current, line)
+            else:
+                blocks.append(current)
+                current = line
         elif _looks_like_new_sentence_after_linebreak(current, line):
             blocks.append(current)
             current = line
@@ -475,6 +501,21 @@ def _join_wrapped_line(left: str, right: str) -> str:
     if left.endswith("-") and right and right[0].islower():
         return left[:-1] + right
     return f"{left} {right}"
+
+
+def _looks_like_decimal_continuation(left: str, right: str) -> bool:
+    """Recognize PDF line breaks inside decimal values such as ``125. 0 μs``."""
+
+    left_tail = left.rstrip()
+    right_head = right.lstrip()
+    return bool(
+        re.search(r"\d\.$", left_tail)
+        and re.match(
+            r"^\d+\s*(?:[µμ]s|us|ps|ns|ms|ui|mv|v|db|mhz|ghz|gt/s)\b",
+            right_head,
+            flags=re.I,
+        )
+    )
 
 
 def _ends_review_sentence(value: str) -> bool:
@@ -592,12 +633,175 @@ def _report_unit(value: str) -> str:
     return readable[: cut + 1].strip() + " [片段过长，已截断；请见源 PDF 对应页]"
 
 
-def _best_changed_block(candidate_units: list[str], other_units: list[str]) -> str:
-    """Pick the most useful part of an unequal block for a replacement snippet."""
+_MIN_UNEQUAL_REPLACE_PAIR_SCORE = 0.45
 
-    other_keys = {_review_unit_key(unit) for unit in other_units}
-    changed = [unit for unit in candidate_units if _review_unit_key(unit) not in other_keys]
-    return " ".join(changed or candidate_units)
+_REVIEW_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "be",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "shall",
+        "that",
+        "the",
+        "then",
+        "this",
+        "to",
+        "with",
+    }
+)
+
+
+def _unequal_replace_delta_candidates(
+    old_units: list[str],
+    new_units: list[str],
+) -> list[_PendingDeltaCandidate]:
+    """Pair similar units inside an unequal replace block without misalignment.
+
+    A PDF extraction block can contain two changed sentences plus one inserted
+    sentence. Pairing the shortest old and shortest new sentence independently
+    is compact but unsafe: it can align a preset change with a jitter change.
+    This routine first matches exact normalized units, then greedily pairs
+    remaining old/new units only when they share enough semantic anchors. Any
+    unpaired unit is reported as an addition or deletion instead of a misleading
+    side-by-side replacement.
+    """
+
+    old_keys = [_review_unit_key(unit) for unit in old_units]
+    new_keys = [_review_unit_key(unit) for unit in new_units]
+    matched_old: set[int] = set()
+    matched_new: set[int] = set()
+
+    for old_index, old_key in enumerate(old_keys):
+        if not old_key:
+            continue
+        for new_index, new_key in enumerate(new_keys):
+            if new_index in matched_new:
+                continue
+            if old_key == new_key:
+                matched_old.add(old_index)
+                matched_new.add(new_index)
+                break
+
+    pair_scores: list[tuple[float, float, int, int]] = []
+    for old_index, old_unit in enumerate(old_units):
+        if old_index in matched_old:
+            continue
+        for new_index, new_unit in enumerate(new_units):
+            if new_index in matched_new:
+                continue
+            score = _unit_pair_score(old_unit, new_unit)
+            if score >= _MIN_UNEQUAL_REPLACE_PAIR_SCORE:
+                position_gap = abs(
+                    _relative_position(old_index, len(old_units))
+                    - _relative_position(new_index, len(new_units))
+                )
+                pair_scores.append((score, -position_gap, old_index, new_index))
+
+    paired_indexes: list[tuple[int, int]] = []
+    for _score, _position_gap, old_index, new_index in sorted(pair_scores, reverse=True):
+        if old_index in matched_old or new_index in matched_new:
+            continue
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        paired_indexes.append((old_index, new_index))
+
+    events: list[tuple[float, int, int, _PendingDeltaCandidate]] = []
+    event_sequence = 0
+    for old_index, new_index in paired_indexes:
+        old_unit = old_units[old_index]
+        new_unit = new_units[new_index]
+        if _review_unit_key(old_unit) == _review_unit_key(new_unit):
+            continue
+        events.append(
+            (
+                min(old_index, new_index),
+                0,
+                event_sequence,
+                _PendingDeltaCandidate(
+                    kind="replaced",
+                    pair=SnippetPair(old=_report_unit(old_unit), new=_report_unit(new_unit)),
+                    priority_values=(old_unit, new_unit),
+                ),
+            )
+        )
+        event_sequence += 1
+
+    for old_index, old_unit in enumerate(old_units):
+        if old_index in matched_old:
+            continue
+        events.append(
+            (
+                old_index,
+                1,
+                event_sequence,
+                _PendingDeltaCandidate(
+                    kind="removed",
+                    text=_report_unit(old_unit),
+                    priority_values=(old_unit,),
+                ),
+            )
+        )
+        event_sequence += 1
+    for new_index, new_unit in enumerate(new_units):
+        if new_index in matched_new:
+            continue
+        events.append(
+            (
+                new_index,
+                2,
+                event_sequence,
+                _PendingDeltaCandidate(
+                    kind="added",
+                    text=_report_unit(new_unit),
+                    priority_values=(new_unit,),
+                ),
+            )
+        )
+        event_sequence += 1
+
+    return [candidate for _order, _kind_order, _sequence, candidate in sorted(events)]
+
+
+def _unit_pair_score(old_unit: str, new_unit: str) -> float:
+    """Score whether two unequal units are safe to show as a replacement pair."""
+
+    old_words = _meaningful_review_words(old_unit)
+    new_words = _meaningful_review_words(new_unit)
+    if old_words and new_words and not (old_words & new_words):
+        return 0.0
+    base_score = max(_review_similarity(old_unit, new_unit), _similarity(old_unit, new_unit))
+    if old_words and new_words:
+        overlap = len(old_words & new_words) / min(len(old_words), len(new_words))
+        return base_score * (0.75 + overlap * 0.25)
+    return base_score
+
+
+def _meaningful_review_words(value: str) -> set[str]:
+    """Return non-boilerplate word anchors for pairing changed units."""
+
+    normalized = normalize_for_similarity(value).replace("µ", "u").replace("μ", "u")
+    words = set(re.findall(r"[a-z]+[a-z0-9]*(?:[-_/][a-z0-9]+)*", normalized))
+    return {word for word in words if word not in _REVIEW_STOP_WORDS}
+
+
+def _relative_position(index: int, length: int) -> float:
+    """Normalize an index within a replace block for tie-breaking."""
+
+    if length <= 1:
+        return 0.0
+    return index / (length - 1)
 
 
 def _materialize_delta_candidates(
@@ -728,6 +932,8 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
             previous_text = line[:index].strip()
             if previous_char.isdigit() and next_char.isdigit():
                 should_split = False
+            elif previous_char.isdigit() and _next_non_space_char(line, index + 1).isdigit():
+                should_split = False
             elif (
                 re.fullmatch(r"\d{1,3}", previous_text)
                 and next_char
@@ -755,6 +961,15 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
     if tail:
         units.append(tail)
     return units
+
+
+def _next_non_space_char(value: str, start_index: int) -> str:
+    """Return the next non-space character after a position, if any."""
+
+    for char in value[start_index:]:
+        if not char.isspace():
+            return char
+    return ""
 
 
 def _first_units(text: str, max_snippets: int) -> tuple[list[str], int]:
