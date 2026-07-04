@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import DiffOptions, DiffResult, Section, SectionChange
-from .text_utils import compact_inline, truncate
+from .text_utils import compact_inline, parse_number_word_phrase, truncate
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -28,6 +28,39 @@ _INLINE_TOKEN_RE = re.compile(
     r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+"
 )
 _INLINE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)")
+_PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
+    {
+        "appendix",
+        "clause",
+        "figure",
+        "gen",
+        "generation",
+        "model",
+        "part",
+        "profile",
+        "rev",
+        "revision",
+        "section",
+        "table",
+        "type",
+    }
+)
+_PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
+    {
+        "csv",
+        "dat",
+        "doc",
+        "docx",
+        "html",
+        "json",
+        "pdf",
+        "txt",
+        "xls",
+        "xlsx",
+        "xml",
+        "zip",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -692,14 +725,42 @@ def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
 def _inline_tokens(text: str) -> list[_InlineToken]:
     """Tokenize visible text and compute noise-tolerant keys for highlighting."""
 
-    tokens: list[_InlineToken] = []
+    raw_tokens: list[tuple[str, int, int]] = []
     for match in _INLINE_TOKEN_RE.finditer(text):
         if _is_arrow_operator_noise(text, match.start(), match.end()):
             continue
-        raw = text[match.start() : match.end()]
-        key = _inline_token_key(match.group(0))
+        raw_tokens.append((text[match.start() : match.end()], match.start(), match.end()))
+
+    tokens: list[_InlineToken] = []
+    raw_words = [_inline_context_word(raw) for raw, _start, _end in raw_tokens]
+    index = 0
+    while index < len(raw_tokens):
+        raw, start, end = raw_tokens[index]
+        parsed = parse_number_word_phrase(raw_words, index)
+        if parsed:
+            number_key, consumed = parsed
+            previous_word = raw_words[index - 1] if index > 0 else ""
+            next_index = index + consumed
+            next_word = raw_words[next_index] if next_index < len(raw_words) else ""
+            if (
+                previous_word not in _PROTECTED_NUMBER_WORD_PREFIXES
+                and next_word not in _PROTECTED_NUMBER_WORD_SUFFIXES
+            ):
+                phrase_end = raw_tokens[index + consumed - 1][2]
+                tokens.append(
+                    _InlineToken(
+                        text=text[start:phrase_end],
+                        start=start,
+                        end=phrase_end,
+                        key=number_key,
+                    )
+                )
+                index += consumed
+                continue
+        key = _inline_token_key(raw)
         if key:
-            tokens.append(_InlineToken(text=raw, start=match.start(), end=match.end(), key=key))
+            tokens.append(_InlineToken(text=raw, start=start, end=end, key=key))
+        index += 1
     return tokens
 
 
@@ -717,13 +778,19 @@ def _is_arrow_operator_noise(text: str, start: int, end: int) -> bool:
 def _inline_token_key(token: str) -> str:
     """Normalize one token for display highlighting, not comparison semantics."""
 
-    normalized = token.casefold().replace("µ", "u").replace("μ", "u")
+    normalized = _inline_context_word(token).replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
     normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
     normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
     if _INLINE_NUMBER_RE.fullmatch(normalized):
         return _canonical_inline_number(normalized)
     return normalized
+
+
+def _inline_context_word(token: str) -> str:
+    """Normalize one inline token for context checks."""
+
+    return token.casefold().replace("‐", "-").replace("‑", "-")
 
 
 def _canonical_inline_number(token: str) -> str:

@@ -869,6 +869,93 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
+    def test_cardinal_number_words_and_digits_are_semantically_equal(self) -> None:
+        """Spelled-out counts such as seven should compare equal to digits."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_number_words.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Capture seven waveforms and save them.\n"
+                        "Repeat the measurement twenty-one times.\n"
+                        "Retry after twenty one idle intervals.\n"
+                        "Collect one hundred and five samples."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_number_words.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Capture 7 waveforms and save them.\n"
+                        "Repeat the measurement 21 times.\n"
+                        "Retry after 21 idle intervals.\n"
+                        "Collect 105 samples."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_identifier_like_number_words_and_digits_are_not_collapsed(self) -> None:
+        """Number words in model, generation, section, and file contexts stay visible."""
+
+        cases = [
+            ("PCIe Gen seven mode is enabled.", "PCIe Gen 7 mode is enabled."),
+            ("Use Model seven for calibration.", "Use Model 7 for calibration."),
+            ("See Section seven for details.", "See Section 7 for details."),
+            ("Review Table seven before testing.", "Review Table 7 before testing."),
+            ("Open report seven.pdf.", "Open report 7.pdf."),
+            ("Load profile-seven.csv.", "Load profile-7.csv."),
+        ]
+        for old_text, new_text in cases:
+            with self.subTest(old=old_text, new=new_text):
+                old_extraction = ExtractionResult(
+                    pdf_path=Path("old_identifier_number_word.pdf"),
+                    pages=[PageText(page_number=1, text=f"1 Scope\n{old_text}")],
+                )
+                new_extraction = ExtractionResult(
+                    pdf_path=Path("new_identifier_number_word.pdf"),
+                    pages=[PageText(page_number=1, text=f"1 Scope\n{new_text}")],
+                )
+
+                result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+                self.assertEqual(1, len(result.changes))
+
+    def test_different_cardinal_number_words_are_still_reported(self) -> None:
+        """Semantic numeric changes must not disappear just because both are words."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_number_word_change.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCapture seven waveforms.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_number_word_change.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCapture eight waveforms.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("seven", snippets)
+        self.assertIn("eight", snippets)
+
     def test_decimal_value_split_across_pdf_lines_stays_one_unit(self) -> None:
         """A line break inside a decimal value should not create a lone fragment."""
 
@@ -1137,6 +1224,70 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn('<mark class="ins">RJ</mark>', report_html)
         self.assertIn('<mark class="del">9</mark>', report_html)
         self.assertIn('<mark class="ins">10</mark>', report_html)
+
+    def test_html_inline_highlight_deemphasizes_number_word_noise(self) -> None:
+        """HTML should not highlight seven/7 when another token really changed."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_number_word_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture seven waveforms and save them.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_number_word_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture 7 waveforms and archive them.",
+                )
+            ],
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertNotIn('<mark class="del">seven</mark>', report_html)
+        self.assertNotIn('<mark class="ins">7</mark>', report_html)
+        self.assertIn('<mark class="del">save</mark>', report_html)
+        self.assertIn('<mark class="ins">archive</mark>', report_html)
+
+    def test_html_inline_highlight_keeps_identifier_number_words(self) -> None:
+        """Protected identifier contexts should still highlight Gen seven/Gen 7."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_identifier_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nPCIe Gen seven mode is enabled.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_identifier_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nPCIe Gen 7 mode is disabled.",
+                )
+            ],
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertIn('<mark class="del">seven</mark>', report_html)
+        self.assertIn('<mark class="ins">7</mark>', report_html)
+        self.assertIn('<mark class="del">enabled</mark>', report_html)
+        self.assertIn('<mark class="ins">disabled</mark>', report_html)
 
     def test_opening_range_location_is_human_readable(self) -> None:
         """Selected-range pre-heading text should not expose internal labels."""

@@ -25,7 +25,12 @@ from .models import (
 )
 from .pdf_extract import extract_pdf_text
 from .sectioning import section_document
-from .text_utils import normalize_for_similarity, normalize_line
+from .text_utils import (
+    canonicalize_number_word_token,
+    canonicalize_number_word_tokens,
+    normalize_for_similarity,
+    normalize_line,
+)
 
 
 @dataclass(frozen=True)
@@ -570,6 +575,39 @@ _REVIEW_TOKEN_RE = re.compile(
     r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
     r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+"
 )
+_PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
+    {
+        "appendix",
+        "clause",
+        "figure",
+        "gen",
+        "generation",
+        "model",
+        "part",
+        "profile",
+        "rev",
+        "revision",
+        "section",
+        "table",
+        "type",
+    }
+)
+_PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
+    {
+        "csv",
+        "dat",
+        "doc",
+        "docx",
+        "html",
+        "json",
+        "pdf",
+        "txt",
+        "xls",
+        "xlsx",
+        "xml",
+        "zip",
+    }
+)
 
 
 def _review_unit_key(value: str) -> str:
@@ -590,7 +628,14 @@ def _review_unit_key(value: str) -> str:
     normalized = re.sub(r"\b10\s+([0-9])\b", r"10\1", normalized)
     normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
     normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
-    return " ".join(_canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(normalized))
+    tokens = [_canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(normalized)]
+    return " ".join(
+        canonicalize_number_word_tokens(
+            tokens,
+            protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,
+            protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
+        )
+    )
 
 
 def _canonical_review_token(token: str) -> str:
@@ -869,7 +914,10 @@ def _substantive_priority(*values: str) -> int:
 def _has_numeric_token(value: str) -> bool:
     """Return True when a snippet contains a number-like protocol value."""
 
-    return bool(_NUMBER_TOKEN_RE.search(value))
+    return bool(
+        _NUMBER_TOKEN_RE.search(value)
+        or any(canonicalize_number_word_token(token) for token in _REVIEW_TOKEN_RE.findall(value))
+    )
 
 
 def _has_identifier_token(value: str) -> bool:
