@@ -1,23 +1,17 @@
 """Report writers for protocol PDF comparison results."""
 
-# Codex说明(自动生成)： 从 __future__ 导入 annotations，启用较新的类型标注行为，减少运行期导入或前向引用问题。
 from __future__ import annotations
 
-# Codex说明(自动生成)： 导入 csv，读写 CSV 表格数据。
 import csv
-# Codex说明(自动生成)： 导入 json，读写结构化 JSON 配置或结果文件。
+import difflib
+import html as html_lib
 import json
-# Codex说明(自动生成)： 从 datetime 导入 datetime，提供本文件后续流程需要的库能力。
 from datetime import datetime
-# Codex说明(自动生成)： 从 pathlib 导入 Path，用 Path 对象处理跨平台文件路径。
 from pathlib import Path
 
-# Codex说明(自动生成)： 从 models 导入 DiffOptions, DiffResult, Section, SectionChange，提供本文件后续流程需要的库能力。
 from .models import DiffOptions, DiffResult, Section, SectionChange
-# Codex说明(自动生成)： 从 text_utils 导入 compact_inline, truncate，提供本文件后续流程需要的库能力。
 from .text_utils import compact_inline, truncate
 
-# Codex说明(自动生成)： 计算并保存 _CHANGE_LABELS，供后续语句继续读取或更新。
 _CHANGE_LABELS = {
     "added": "新增",
     "deleted": "删除",
@@ -26,63 +20,57 @@ _CHANGE_LABELS = {
 }
 
 
-# Codex说明(自动生成)： 定义函数 write_reports，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
 def write_reports(
     result: DiffResult,
     output_dir: str | Path,
     options: DiffOptions,
 ) -> dict[str, Path]:
-    """Write Markdown, TXT, CSV, and JSON report artifacts.
+    """Write Markdown, HTML, TXT, CSV, and JSON report artifacts.
 
-    The Markdown/TXT reports are for human review. CSV is meant for filtering in
-    Excel, and JSON preserves parsed section metadata for troubleshooting false
-    positives or missed headings.
+    The HTML report is the most visual review surface: it groups changes by
+    section, shows old/new snippets side by side, and highlights inline
+    replacements. Markdown/TXT remain useful for copy-paste workflows, CSV is
+    meant for filtering in Excel, and JSON preserves parsed section metadata for
+    troubleshooting false positives or missed headings.
     """
 
-    # Codex说明(自动生成)： 计算并保存 base_dir，供后续语句继续读取或更新。
     base_dir = Path(output_dir).expanduser().resolve()
-    # Codex说明(自动生成)： 计算并保存 timestamp，供后续语句继续读取或更新。
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Codex说明(自动生成)： 计算并保存 report_dir，供后续语句继续读取或更新。
     report_dir = base_dir / f"protocol_diff_{timestamp}"
-    # Codex说明(自动生成)： 调用 report_dir.mkdir，执行当前流程需要的具体操作或副作用。
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    # Codex说明(自动生成)： 计算并保存 markdown，供后续语句继续读取或更新。
     markdown = _render_markdown(result, options)
-    # Codex说明(自动生成)： 计算并保存 text，供后续语句继续读取或更新。
+    html = _render_html(result, options)
     text = _markdown_to_plain_text(markdown)
-    # Codex说明(自动生成)： 计算并保存 csv_rows，供后续语句继续读取或更新。
     csv_rows = _rows_for_csv(result.changes)
-    # Codex说明(自动生成)： 计算并保存 sections_payload，供后续语句继续读取或更新。
     sections_payload = {
         "old_pdf": str(result.old_pdf),
         "new_pdf": str(result.new_pdf),
+        "old_total_pages": _source_page_count(result, "old"),
+        "new_total_pages": _source_page_count(result, "new"),
+        "old_selected_pages": _selected_page_payload(result, "old"),
+        "new_selected_pages": _selected_page_payload(result, "new"),
+        "changes": [_change_to_dict(change) for change in result.changes],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
         "warnings": result.warnings,
     }
 
-    # Codex说明(自动生成)： 计算并保存 md_path，供后续语句继续读取或更新。
     md_path = report_dir / "protocol_diff_report.md"
-    # Codex说明(自动生成)： 计算并保存 txt_path，供后续语句继续读取或更新。
+    html_path = report_dir / "protocol_diff_report.html"
     txt_path = report_dir / "protocol_diff_report.txt"
-    # Codex说明(自动生成)： 计算并保存 csv_path，供后续语句继续读取或更新。
     csv_path = report_dir / "changes.csv"
-    # Codex说明(自动生成)： 计算并保存 json_path，供后续语句继续读取或更新。
-    json_path = report_dir / "parsed_sections.json"
+    json_path = report_dir / "protocol_diff_data.json"
 
-    # Codex说明(自动生成)： 调用 md_path.write_text 写出文件或数据，保存当前处理结果。
     md_path.write_text(markdown, encoding="utf-8")
-    # Codex说明(自动生成)： 调用 txt_path.write_text 写出文件或数据，保存当前处理结果。
+    html_path.write_text(html, encoding="utf-8")
     txt_path.write_text(text, encoding="utf-8")
-    # Codex说明(自动生成)： 进入上下文 csv_path.open('w', encoding='utf-8-sig', newline='')，确保文件、资源或临时状态按作用域正确释放。
     with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
-        # Codex说明(自动生成)： 计算并保存 writer，供后续语句继续读取或更新。
         writer = csv.DictWriter(
             handle,
             fieldnames=[
                 "change_type",
+                "report_location",
                 "new_location",
                 "old_location",
                 "new_pages",
@@ -94,40 +82,40 @@ def write_reports(
                 "replaced_snippets",
             ],
         )
-        # Codex说明(自动生成)： 调用 writer.writeheader 写出文件或数据，保存当前处理结果。
         writer.writeheader()
-        # Codex说明(自动生成)： 调用 writer.writerows 写出文件或数据，保存当前处理结果。
         writer.writerows(csv_rows)
-    # Codex说明(自动生成)： 调用 json_path.write_text 写出文件或数据，保存当前处理结果。
     json_path.write_text(json.dumps(sections_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Codex说明(自动生成)： 返回 {'report_dir': report_dir, 'markdown': md_path, 'text':...，让调用方取得本函数的处理结果。
     return {
         "report_dir": report_dir,
         "markdown": md_path,
+        "html": html_path,
         "text": txt_path,
         "csv": csv_path,
         "json": json_path,
     }
 
 
-# Codex说明(自动生成)： 定义函数 _render_markdown，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
 def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
     """Render the main review report in Markdown."""
 
-    # Codex说明(自动生成)： 计算并保存 counts，供后续语句继续读取或更新。
     counts = _change_counts(result.changes)
-    # Codex说明(自动生成)： 计算并保存 generated_at，供后续语句继续读取或更新。
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Codex说明(自动生成)： 声明并保存 lines，同时保留类型信息方便维护和静态检查。
+    comparison_note = _comparison_method_note(result)
+    scope_note = _report_scope_note(options)
     lines: list[str] = [
         "# 协议 PDF 差异报告",
         "",
         f"- 旧协议: `{result.old_pdf}`",
         f"- 新协议: `{result.new_pdf}`",
         f"- 生成时间: {generated_at}",
+        f"- 旧/新页数: {_source_page_count(result, 'old')} / {_source_page_count(result, 'new')}",
+        f"- 旧选择页: {_selected_page_label(result, 'old')}",
+        f"- 新选择页: {_selected_page_label(result, 'new')}",
         f"- 章节匹配阈值: {options.min_section_match_similarity:.2f}",
         f"- 未变化判定阈值: {options.unchanged_similarity:.3f}",
+        f"- 比较方式: {comparison_note}",
+        f"- 报告范围: {scope_note}",
         "",
         "## 汇总",
         "",
@@ -140,18 +128,12 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
         "",
     ]
 
-    # Codex说明(自动生成)： 检查条件 result.warnings，根据结果选择后续执行路径。
     if result.warnings:
-        # Codex说明(自动生成)： 调用 lines.extend 更新列表或集合，把当前步骤产生的数据加入结果。
         lines.extend(["## 抽取警告", ""])
-        # Codex说明(自动生成)： 遍历 result.warnings 中的 warning，逐项执行循环体逻辑。
         for warning in result.warnings:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append(f"- {warning}")
-        # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
         lines.append("")
 
-    # Codex说明(自动生成)： 调用 lines.extend 更新列表或集合，把当前步骤产生的数据加入结果。
     lines.extend(
         [
             "## 详细差异",
@@ -161,124 +143,446 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
         ]
     )
 
-    # Codex说明(自动生成)： 检查条件 not result.changes，根据结果选择后续执行路径。
     if not result.changes:
-        # Codex说明(自动生成)： 调用 lines.extend 更新列表或集合，把当前步骤产生的数据加入结果。
-        lines.extend(["未发现章节级差异。", ""])
-        # Codex说明(自动生成)： 返回 '\n'.join(lines)，让调用方取得本函数的处理结果。
+        lines.extend([_empty_report_message(result), ""])
         return "\n".join(lines)
 
-    # Codex说明(自动生成)： 遍历 enumerate(result.changes, start=1) 中的 (index, change)，逐项执行循环体逻辑。
     for index, change in enumerate(result.changes, start=1):
-        # Codex说明(自动生成)： 计算并保存 label，供后续语句继续读取或更新。
         label = _CHANGE_LABELS.get(change.change_type, change.change_type)
-        # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
         lines.append(f"### {index}. {label}: {change.report_location}")
-        # Codex说明(自动生成)： 检查条件 change.old_section，根据结果选择后续执行路径。
         if change.old_section:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append(
                 f"- 旧位置: {change.old_section.location}（页 {change.old_section.page_range}）"
             )
-        # Codex说明(自动生成)： 检查条件 change.new_section，根据结果选择后续执行路径。
         if change.new_section:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append(
                 f"- 新位置: {change.new_section.location}（页 {change.new_section.page_range}）"
             )
-        # Codex说明(自动生成)： 检查条件 change.old_section and change.new_section，根据结果选择后续执行路径。
         if change.old_section and change.new_section:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append(f"- 相似度: {change.similarity:.3f}")
 
-        # Codex说明(自动生成)： 检查条件 change.replaced_snippets，根据结果选择后续执行路径。
         if change.replaced_snippets:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append("- 替换片段:")
-            # Codex说明(自动生成)： 遍历 change.replaced_snippets 中的 pair，逐项执行循环体逻辑。
             for pair in change.replaced_snippets:
-                # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
                 lines.append(f"  - 旧: {pair.old}")
-                # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
                 lines.append(f"    新: {pair.new}")
-        # Codex说明(自动生成)： 检查条件 change.added_snippets，根据结果选择后续执行路径。
         if change.added_snippets:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append("- 新增片段:")
-            # Codex说明(自动生成)： 遍历 change.added_snippets 中的 snippet，逐项执行循环体逻辑。
             for snippet in change.added_snippets:
-                # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
                 lines.append(f"  - {snippet}")
-        # Codex说明(自动生成)： 检查条件 change.removed_snippets，根据结果选择后续执行路径。
         if change.removed_snippets:
-            # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
             lines.append("- 删除片段:")
-            # Codex说明(自动生成)： 遍历 change.removed_snippets 中的 snippet，逐项执行循环体逻辑。
             for snippet in change.removed_snippets:
-                # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
                 lines.append(f"  - {snippet}")
-        # Codex说明(自动生成)： 调用 lines.append 更新列表或集合，把当前步骤产生的数据加入结果。
         lines.append("")
 
-    # Codex说明(自动生成)： 返回 '\n'.join(lines)，让调用方取得本函数的处理结果。
     return "\n".join(lines)
 
 
-# Codex说明(自动生成)： 定义函数 _markdown_to_plain_text，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
 def _markdown_to_plain_text(markdown: str) -> str:
-    """Convert the Markdown report into a lightweight TXT version."""
+    """Convert the Markdown report into a readable plain-text review note.
 
-    # Codex说明(自动生成)： 计算并保存 replacements，供后续语句继续读取或更新。
-    replacements = {
-        "# ": "",
-        "## ": "",
-        "### ": "",
-        "`": "",
-        "|": " ",
-        "---": "",
-    }
-    # Codex说明(自动生成)： 计算并保存 text，供后续语句继续读取或更新。
-    text = markdown
-    # Codex说明(自动生成)： 遍历 replacements.items() 中的 (old, new)，逐项执行循环体逻辑。
-    for old, new in replacements.items():
-        # Codex说明(自动生成)： 计算并保存 text，供后续语句继续读取或更新。
-        text = text.replace(old, new)
-    # Codex说明(自动生成)： 计算并保存 lines，供后续语句继续读取或更新。
-    lines = [line.rstrip() for line in text.splitlines()]
-    # Codex说明(自动生成)： 返回 '\n'.join(lines).strip() + '\n'，让调用方取得本函数的处理结果。
-    return "\n".join(lines).strip() + "\n"
+    The Markdown report contains heading markers and table separators that are
+    useful in a renderer but distracting in `.txt`. This converter keeps the
+    semantic content, flattens small tables into aligned-ish rows, and avoids
+    copying formatting artifacts such as `##` or `|---|---:|` into the text
+    report that users may paste into email or chat.
+    """
+
+    lines: list[str] = []
+    for raw_line in markdown.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            lines.append("")
+            continue
+        if stripped.startswith("### "):
+            lines.append(stripped[4:].replace("`", ""))
+            continue
+        if stripped.startswith("## "):
+            lines.append(stripped[3:].replace("`", ""))
+            continue
+        if stripped.startswith("# "):
+            lines.append(stripped[2:].replace("`", ""))
+            continue
+        if stripped.startswith("|"):
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if cells and all(set(cell) <= {"-", ":"} for cell in cells):
+                continue
+            lines.append("  ".join(cells))
+            continue
+        lines.append(line.replace("`", ""))
+
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines) + "\n"
 
 
-# Codex说明(自动生成)： 定义函数 _rows_for_csv，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
+def _render_html(result: DiffResult, options: DiffOptions) -> str:
+    """Render an easy-to-scan standalone HTML review report."""
+
+    counts = _change_counts(result.changes)
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    comparison_note = _comparison_method_note(result)
+    scope_note = _report_scope_note(options)
+    title = "协议 PDF 差异报告"
+    warning_html = ""
+    if result.warnings:
+        warning_items = "\n".join(
+            f"<li>{_escape(warning)}</li>" for warning in result.warnings
+        )
+        warning_html = f"""
+        <section class="warnings">
+          <h2>抽取警告</h2>
+          <ul>{warning_items}</ul>
+        </section>
+        """
+
+    nav_items = "\n".join(
+        _render_nav_item(index, change)
+        for index, change in enumerate(result.changes, start=1)
+    )
+    if not nav_items:
+        nav_items = f'<div class="empty-nav">{_escape(_empty_report_message(result))}</div>'
+
+    change_cards = "\n".join(
+        _render_change_html(index, change)
+        for index, change in enumerate(result.changes, start=1)
+    )
+    if not change_cards:
+        change_cards = f'<section class="empty-state">{_escape(_empty_report_message(result))}</section>'
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    :root {{
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #18202a;
+      --muted: #647184;
+      --line: #d8dee8;
+      --add: #16794c;
+      --add-bg: #e7f6ee;
+      --del: #b3261e;
+      --del-bg: #fdebea;
+      --mod: #8a5a00;
+      --mod-bg: #fff4d8;
+      --blue: #255c99;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.55;
+    }}
+    header {{
+      padding: 24px 32px;
+      color: #fff;
+      background: #1f3757;
+    }}
+    h1, h2, h3 {{ margin: 0; }}
+    header p {{ margin: 8px 0 0; color: #dbe6f5; }}
+    .layout {{
+      display: grid;
+      grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+      min-height: calc(100vh - 112px);
+    }}
+    aside {{
+      border-right: 1px solid var(--line);
+      background: #fff;
+      padding: 18px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+    }}
+    main {{ padding: 22px; max-width: 1180px; width: 100%; }}
+    .summary {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }}
+    .metric {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }}
+    .metric strong {{ display: block; font-size: 28px; line-height: 1.1; }}
+    .metric span {{ color: var(--muted); font-size: 13px; }}
+    .meta, .warnings, .change-card, .empty-state {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      padding: 16px;
+    }}
+    .meta dl {{ display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 6px 12px; margin: 0; }}
+    .meta dt {{ color: var(--muted); }}
+    .meta dd {{ margin: 0; overflow-wrap: anywhere; }}
+    .nav-title {{ color: var(--muted); font-size: 13px; margin-bottom: 10px; }}
+    .nav-item {{
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      color: var(--text);
+      text-decoration: none;
+      padding: 9px 8px;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      border-left: 4px solid transparent;
+    }}
+    .nav-item:hover {{ background: #eef3f8; }}
+    .nav-item span {{
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }}
+    .nav-body {{ min-width: 0; }}
+    .nav-label {{
+      display: inline-block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 2px;
+    }}
+    .nav-location {{ overflow-wrap: anywhere; }}
+    .nav-added {{ border-left-color: var(--add); }}
+    .nav-deleted {{ border-left-color: var(--del); }}
+    .nav-modified {{ border-left-color: var(--mod); }}
+    .nav-unchanged {{ border-left-color: var(--blue); }}
+    .badge {{
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 13px;
+      margin-right: 8px;
+      border: 1px solid transparent;
+    }}
+    .badge-added {{ color: var(--add); background: var(--add-bg); border-color: #b8e5ce; }}
+    .badge-deleted {{ color: var(--del); background: var(--del-bg); border-color: #f5c4c0; }}
+    .badge-modified {{ color: var(--mod); background: var(--mod-bg); border-color: #f1d489; }}
+    .badge-unchanged {{ color: var(--blue); background: #e7f0fb; border-color: #c5d8f0; }}
+    .change-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 12px;
+    }}
+    .change-title {{ font-size: 18px; }}
+    .pages {{ color: var(--muted); font-size: 13px; white-space: nowrap; }}
+    .compare-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }}
+    .pane {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fbfcfe;
+    }}
+    .pane h4 {{
+      margin: 0;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--muted);
+      background: #edf1f6;
+      border-bottom: 1px solid var(--line);
+    }}
+    .snippet {{ padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }}
+    mark {{ border-radius: 3px; padding: 0 2px; }}
+    .ins {{ color: var(--add); background: var(--add-bg); }}
+    .del {{ color: var(--del); background: var(--del-bg); text-decoration: line-through; }}
+    .single-list {{ margin: 10px 0 0 0; padding-left: 18px; }}
+    .single-list li {{ margin: 6px 0; }}
+    @media (max-width: 860px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
+      main {{ padding: 14px; }}
+      .summary, .compare-grid {{ grid-template-columns: 1fr; }}
+      .change-head {{ display: block; }}
+      .pages {{ margin-top: 4px; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{title}</h1>
+    <p>生成时间: {_escape(generated_at)} · 章节匹配阈值: {options.min_section_match_similarity:.2f}</p>
+  </header>
+  <div class="layout">
+    <aside>
+      <div class="nav-title">差异导航</div>
+      {nav_items}
+    </aside>
+    <main>
+      <section class="summary">
+        <div class="metric"><strong>{counts.get("modified", 0)}</strong><span>修改</span></div>
+        <div class="metric"><strong>{counts.get("added", 0)}</strong><span>新增</span></div>
+        <div class="metric"><strong>{counts.get("deleted", 0)}</strong><span>删除</span></div>
+        <div class="metric"><strong>{len(result.changes)}</strong><span>总差异</span></div>
+      </section>
+      <section class="meta">
+        <dl>
+          <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
+          <dt>新协议</dt><dd>{_escape(str(result.new_pdf))}</dd>
+          <dt>旧/新页数</dt><dd>{_source_page_count(result, "old")} / {_source_page_count(result, "new")}</dd>
+          <dt>旧选择页</dt><dd>{_escape(_selected_page_label(result, "old"))}</dd>
+          <dt>新选择页</dt><dd>{_escape(_selected_page_label(result, "new"))}</dd>
+          <dt>比较方式</dt><dd>{_escape(comparison_note)}</dd>
+          <dt>报告范围</dt><dd>{_escape(scope_note)}</dd>
+          <dt>提示</dt><dd>页码来自 PDF 抽取顺序；最终结论请回到源 PDF 复核。</dd>
+        </dl>
+      </section>
+      {warning_html}
+      {change_cards}
+    </main>
+  </div>
+</body>
+</html>
+"""
+
+
+def _render_change_html(index: int, change: SectionChange) -> str:
+    """Render one change as a side-by-side HTML block."""
+
+    label = _CHANGE_LABELS.get(change.change_type, change.change_type)
+    old_pages = change.old_section.page_range if change.old_section else "-"
+    new_pages = change.new_section.page_range if change.new_section else "-"
+    similarity = (
+        f" · 相似度 {change.similarity:.3f}"
+        if change.old_section and change.new_section
+        else ""
+    )
+    pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
+    added = _render_single_list("新增片段", change.added_snippets, "ins")
+    removed = _render_single_list("删除片段", change.removed_snippets, "del")
+    body = pairs or ""
+    body += added
+    body += removed
+    if not body:
+        body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
+    return f"""
+      <section class="change-card" id="change-{index}">
+        <div class="change-head">
+          <h3 class="change-title"><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(change.report_location)}</h3>
+          <div class="pages">旧定位页 {_escape(old_pages)} · 新定位页 {_escape(new_pages)}{_escape(similarity)}</div>
+        </div>
+        {body}
+      </section>
+    """
+
+
+def _render_nav_item(index: int, change: SectionChange) -> str:
+    """Render one left-navigation entry with an explicit change type label."""
+
+    label = _CHANGE_LABELS.get(change.change_type, change.change_type)
+    return (
+        f'<a class="nav-item nav-{change.change_type}" href="#change-{index}">'
+        f"<span>{index}</span>"
+        '<div class="nav-body">'
+        f'<div class="nav-label">{_escape(label)}</div>'
+        f'<div class="nav-location">{_escape(change.report_location)}</div>'
+        "</div></a>"
+    )
+
+
+def _empty_change_message(change: SectionChange) -> str:
+    """Explain why a change card has no snippet body."""
+
+    if change.change_type == "unchanged":
+        return "该章节未发现正文或标题变化。"
+    if change.old_section and change.new_section:
+        return "该章节发生变化，但当前片段数量设置未展开具体文本；可调大 MAX_SNIPPETS_PER_SECTION 后复跑。"
+    return "该章节没有可展示的正文片段，请回到源 PDF 对应页复核。"
+
+
+def _render_pair_html(old_text: str, new_text: str) -> str:
+    """Render old/new replacement snippets with inline highlighting."""
+
+    old_html, new_html = _inline_diff_html(old_text, new_text)
+    return f"""
+        <div class="compare-grid">
+          <div class="pane">
+            <h4>旧协议</h4>
+            <div class="snippet">{old_html}</div>
+          </div>
+          <div class="pane">
+            <h4>新协议</h4>
+            <div class="snippet">{new_html}</div>
+          </div>
+        </div>
+    """
+
+
+def _render_single_list(title: str, snippets: list[str], css_class: str) -> str:
+    """Render added-only or removed-only snippets."""
+
+    if not snippets:
+        return ""
+    items = "\n".join(
+        f'<li><mark class="{css_class}">{_escape(snippet)}</mark></li>'
+        for snippet in snippets
+    )
+    return f"<h4>{title}</h4><ul class=\"single-list\">{items}</ul>"
+
+
+def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
+    """Highlight changed spans inside a pair of snippets."""
+
+    matcher = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False)
+    old_parts: list[str] = []
+    new_parts: list[str] = []
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        old_part = _escape(old_text[old_start:old_end])
+        new_part = _escape(new_text[new_start:new_end])
+        if tag == "equal":
+            old_parts.append(old_part)
+            new_parts.append(new_part)
+        elif tag == "delete":
+            old_parts.append(f'<mark class="del">{old_part}</mark>')
+        elif tag == "insert":
+            new_parts.append(f'<mark class="ins">{new_part}</mark>')
+        elif tag == "replace":
+            old_parts.append(f'<mark class="del">{old_part}</mark>')
+            new_parts.append(f'<mark class="ins">{new_part}</mark>')
+    return "".join(old_parts), "".join(new_parts)
+
+
+def _escape(value: object) -> str:
+    """HTML-escape values while preserving readable line breaks."""
+
+    return html_lib.escape(str(value), quote=True)
+
+
 def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
     """Flatten section changes for spreadsheet review."""
 
-    # Codex说明(自动生成)： 声明并保存 rows，同时保留类型信息方便维护和静态检查。
     rows: list[dict[str, str]] = []
-    # Codex说明(自动生成)： 遍历 changes 中的 change，逐项执行循环体逻辑。
     for change in changes:
-        # Codex说明(自动生成)： 计算并保存 replaced，供后续语句继续读取或更新。
         replaced = [
             f"旧: {pair.old} / 新: {pair.new}" for pair in change.replaced_snippets
         ]
-        # Codex说明(自动生成)： 计算并保存 summary_parts，供后续语句继续读取或更新。
         summary_parts = []
-        # Codex说明(自动生成)： 检查条件 change.replaced_snippets，根据结果选择后续执行路径。
         if change.replaced_snippets:
-            # Codex说明(自动生成)： 调用 summary_parts.append 更新列表或集合，把当前步骤产生的数据加入结果。
             summary_parts.append(f"{len(change.replaced_snippets)} 处替换")
-        # Codex说明(自动生成)： 检查条件 change.added_snippets，根据结果选择后续执行路径。
         if change.added_snippets:
-            # Codex说明(自动生成)： 调用 summary_parts.append 更新列表或集合，把当前步骤产生的数据加入结果。
             summary_parts.append(f"{len(change.added_snippets)} 处新增")
-        # Codex说明(自动生成)： 检查条件 change.removed_snippets，根据结果选择后续执行路径。
         if change.removed_snippets:
-            # Codex说明(自动生成)： 调用 summary_parts.append 更新列表或集合，把当前步骤产生的数据加入结果。
             summary_parts.append(f"{len(change.removed_snippets)} 处删除")
-        # Codex说明(自动生成)： 调用 rows.append 更新列表或集合，把当前步骤产生的数据加入结果。
         rows.append(
             {
                 "change_type": _CHANGE_LABELS.get(change.change_type, change.change_type),
+                "report_location": change.report_location,
                 "new_location": change.new_section.location if change.new_section else "",
                 "old_location": change.old_section.location if change.old_section else "",
                 "new_pages": change.new_section.page_range if change.new_section else "",
@@ -290,29 +594,142 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
                 "replaced_snippets": "\n".join(replaced),
             }
         )
-    # Codex说明(自动生成)： 返回 rows，让调用方取得本函数的处理结果。
     return rows
 
 
-# Codex说明(自动生成)： 定义函数 _change_counts，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
 def _change_counts(changes: list[SectionChange]) -> dict[str, int]:
     """Count changes by type."""
 
-    # Codex说明(自动生成)： 声明并保存 counts，同时保留类型信息方便维护和静态检查。
     counts: dict[str, int] = {}
-    # Codex说明(自动生成)： 遍历 changes 中的 change，逐项执行循环体逻辑。
     for change in changes:
-        # Codex说明(自动生成)： 更新 counts[change.change_type]，把当前配置或计算结果写入对应对象。
         counts[change.change_type] = counts.get(change.change_type, 0) + 1
-    # Codex说明(自动生成)： 返回 counts，让调用方取得本函数的处理结果。
     return counts
 
 
-# Codex说明(自动生成)： 定义函数 _section_to_dict，把一段可复用的业务步骤、计算过程或入口逻辑封装起来。
+def _comparison_method_note(result: DiffResult) -> str:
+    """Describe the matching strategy used for this report."""
+
+    fallback_count = _page_fallback_section_count(result)
+    total_sections = len(result.old_sections) + len(result.new_sections)
+    if fallback_count and fallback_count == total_sections:
+        return "未识别到稳定章节，已退回按页块和正文相似度比较；页码用于定位，不作为唯一匹配依据。"
+    if fallback_count:
+        return "至少一份 PDF 未识别到稳定章节，已混合使用章节、页块和正文相似度比较；页码用于定位，不作为唯一匹配依据。"
+    return "按章节编号、标题和正文相似度匹配；页码只用于定位，不用于直接对齐。"
+
+
+def _report_scope_note(options: DiffOptions) -> str:
+    """Explain output boundaries that matter during protocol review."""
+
+    return (
+        "仅比较 PDF 中可抽取文字；图片、印章、矢量图等视觉元素不比较；"
+        "重复页眉页脚和动态页码会尽量过滤；"
+        f"每个章节最多展示 {options.max_snippets_per_section} 条片段。"
+    )
+
+
+def _empty_report_message(result: DiffResult) -> str:
+    """Return an empty-state message that matches the active comparison mode."""
+
+    if _page_fallback_section_count(result):
+        return "未发现章节/文本块级差异。"
+    return "未发现章节级差异。"
+
+
+def _page_fallback_section_count(result: DiffResult) -> int:
+    """Count synthetic no-heading page chunks across both documents."""
+
+    return sum(
+        1
+        for section in result.old_sections + result.new_sections
+        if section.section_id.startswith("P")
+    )
+
+
+def _page_count(sections: list[Section]) -> int:
+    """Estimate total document pages from extracted section metadata."""
+
+    if not sections:
+        return 0
+    return max(section.end_page for section in sections)
+
+
+def _source_page_count(result: DiffResult, side: str) -> int:
+    """Return the source PDF page count for one side of the comparison."""
+
+    if side == "old":
+        return result.old_total_pages or _page_count(result.old_sections)
+    return result.new_total_pages or _page_count(result.new_sections)
+
+
+def _selected_pages(result: DiffResult, side: str) -> tuple[int | None, int | None]:
+    """Return the one-based inclusive selected source page range."""
+
+    if side == "old":
+        start = result.old_selected_start_page
+        end = result.old_selected_end_page
+        sections = result.old_sections
+    else:
+        start = result.new_selected_start_page
+        end = result.new_selected_end_page
+        sections = result.new_sections
+    if start is not None and end is not None:
+        return start, end
+    if not sections:
+        return None, None
+    return min(section.start_page for section in sections), max(section.end_page for section in sections)
+
+
+def _selected_page_label(result: DiffResult, side: str) -> str:
+    """Format the selected page range for human-facing reports."""
+
+    start, end = _selected_pages(result, side)
+    total_pages = _source_page_count(result, side)
+    if start is None or end is None:
+        return "无可比较页"
+    if total_pages and start == 1 and end == total_pages:
+        return f"全部 (1-{total_pages})" if total_pages > 1 else "全部 (1)"
+    if start == end:
+        return str(start)
+    return f"{start}-{end}"
+
+
+def _selected_page_payload(result: DiffResult, side: str) -> dict[str, object]:
+    """Serialize selected-page metadata for the JSON audit file."""
+
+    start, end = _selected_pages(result, side)
+    total_pages = _source_page_count(result, side)
+    return {
+        "start_page": start,
+        "end_page": end,
+        "label": _selected_page_label(result, side),
+        "is_full_document": bool(total_pages and start == 1 and end == total_pages),
+    }
+
+
+def _change_to_dict(change: SectionChange) -> dict[str, object]:
+    """Serialize one user-facing section change for machine-readable reports."""
+
+    return {
+        "change_type": change.change_type,
+        "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
+        "report_location": change.report_location,
+        "old_location": change.old_section.location if change.old_section else None,
+        "new_location": change.new_section.location if change.new_section else None,
+        "old_pages": change.old_section.page_range if change.old_section else None,
+        "new_pages": change.new_section.page_range if change.new_section else None,
+        "similarity": round(change.similarity, 6),
+        "added_snippets": list(change.added_snippets),
+        "removed_snippets": list(change.removed_snippets),
+        "replaced_snippets": [
+            {"old": pair.old, "new": pair.new} for pair in change.replaced_snippets
+        ],
+    }
+
+
 def _section_to_dict(section: Section) -> dict[str, object]:
     """Serialize section metadata for debug/audit output."""
 
-    # Codex说明(自动生成)： 返回 {'section_id': section.section_id, 'heading': section.h...，让调用方取得本函数的处理结果。
     return {
         "section_id": section.section_id,
         "heading": section.heading,
