@@ -26,6 +26,7 @@ from .models import (
 from .pdf_extract import extract_pdf_text
 from .sectioning import section_document
 from .text_utils import (
+    canonicalize_chinese_number_expressions,
     canonicalize_number_word_token,
     canonicalize_number_word_tokens,
     normalize_for_similarity,
@@ -569,10 +570,12 @@ def _split_long_unit(unit: str, max_chars: int = 720) -> list[str]:
     return chunks
 
 
-_NUMBER_TOKEN_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)")
+_NUMBER_TOKEN_RE = re.compile(
+    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
+)
 _REVIEW_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
-    r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
     r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+"
 )
 _PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
@@ -620,6 +623,7 @@ def _review_unit_key(value: str) -> str:
     """
 
     normalized = normalize_for_similarity(value)
+    normalized = canonicalize_chinese_number_expressions(normalized)
     normalized = normalized.replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("&", " and ")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
@@ -644,7 +648,7 @@ def _canonical_review_token(token: str) -> str:
     if not _NUMBER_TOKEN_RE.fullmatch(token):
         return token
     sign = "-" if token.startswith("-") else ""
-    body = token.lstrip("+-")
+    body = token.lstrip("+-").replace(",", "")
     if body.startswith("."):
         body = f"0{body}"
     try:
@@ -914,9 +918,13 @@ def _substantive_priority(*values: str) -> int:
 def _has_numeric_token(value: str) -> bool:
     """Return True when a snippet contains a number-like protocol value."""
 
+    normalized = canonicalize_chinese_number_expressions(value)
     return bool(
-        _NUMBER_TOKEN_RE.search(value)
-        or any(canonicalize_number_word_token(token) for token in _REVIEW_TOKEN_RE.findall(value))
+        _NUMBER_TOKEN_RE.search(normalized)
+        or any(
+            canonicalize_number_word_token(token)
+            for token in _REVIEW_TOKEN_RE.findall(normalized)
+        )
     )
 
 

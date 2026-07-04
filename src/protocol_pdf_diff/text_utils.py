@@ -44,6 +44,87 @@ _NUMBER_WORD_TENS = {
     "eighty": 80,
     "ninety": 90,
 }
+CHINESE_NUMBER_CHARS = "零〇一二两三四五六七八九十百千万"
+CHINESE_COUNT_UNITS = (
+    "数据包",
+    "工作日",
+    "小时",
+    "分钟",
+    "毫秒",
+    "微秒",
+    "纳秒",
+    "皮秒",
+    "字节",
+    "比特",
+    "波形",
+    "样本",
+    "报文",
+    "通道",
+    "sample",
+    "samples",
+    "waveform",
+    "waveforms",
+    "lane",
+    "lanes",
+    "bits",
+    "bytes",
+    "bit",
+    "个",
+    "次",
+    "项",
+    "条",
+    "页",
+    "章",
+    "节",
+    "点",
+    "种",
+    "类",
+    "路",
+    "组",
+    "位",
+    "天",
+    "日",
+    "周",
+    "月",
+    "年",
+    "秒",
+)
+
+
+def _count_unit_pattern(unit: str) -> str:
+    """Build a count-unit regex, protecting ASCII identifier prefixes."""
+
+    escaped = re.escape(unit)
+    if re.fullmatch(r"[A-Za-z0-9_]+", unit):
+        return escaped + r"(?![A-Za-z0-9_])"
+    return escaped
+
+
+CHINESE_COUNT_UNIT_PATTERN = "|".join(
+    _count_unit_pattern(unit) for unit in sorted(CHINESE_COUNT_UNITS, key=len, reverse=True)
+)
+_CHINESE_CONTEXT_NUMBER_RE = re.compile(
+    rf"([{CHINESE_NUMBER_CHARS}]+)(?=\s*(?:{CHINESE_COUNT_UNIT_PATTERN}))",
+    flags=re.I,
+)
+_CHINESE_ORDINAL_NUMBER_RE = re.compile(
+    rf"第\s*([{CHINESE_NUMBER_CHARS}]+)\s*([章节条项部分])"
+)
+_CHINESE_DIGITS = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+_CHINESE_UNITS = {"十": 10, "百": 100, "千": 1000}
 
 
 def normalize_line(line: str) -> str:
@@ -171,6 +252,46 @@ def canonicalize_number_word_tokens(
     return canonical
 
 
+def canonicalize_chinese_number_token(token: str) -> str | None:
+    """Return the digit string for one Chinese cardinal number token.
+
+    The parser is intentionally limited to ordinary counts used in protocol
+    prose, for example ``七``/``7`` or ``一百零五``/``105``. It is not a general
+    Chinese NLP parser; callers should apply it only in numeric contexts such as
+    counts, units, or section ordinals.
+    """
+
+    normalized = normalize_line(token)
+    if not normalized or any(char not in CHINESE_NUMBER_CHARS for char in normalized):
+        return None
+    value = _parse_chinese_number(normalized)
+    return str(value) if value is not None else None
+
+
+def canonicalize_chinese_number_expressions(text: str) -> str:
+    """Canonicalize Chinese count expressions that are safely numeric.
+
+    Chinese text has no mandatory word spaces, so a bare ``七`` inside a word is
+    ambiguous. This function only rewrites numerals when a following measure
+    word or an ordinal marker makes the numeric meaning clear: ``七个`` becomes
+    ``7个`` and ``第七章`` becomes ``第 7 章``. That keeps common protocol counts
+    quiet without erasing words such as ``一体化``.
+    """
+
+    def replace_ordinal(match: re.Match[str]) -> str:
+        value = canonicalize_chinese_number_token(match.group(1))
+        if value is None:
+            return match.group(0)
+        return f"第 {value} {match.group(2)}"
+
+    def replace_count(match: re.Match[str]) -> str:
+        value = canonicalize_chinese_number_token(match.group(1))
+        return value if value is not None else match.group(0)
+
+    value = _CHINESE_ORDINAL_NUMBER_RE.sub(replace_ordinal, text)
+    return _CHINESE_CONTEXT_NUMBER_RE.sub(replace_count, value)
+
+
 def _normalize_number_word_token(token: str) -> str:
     """Normalize a candidate number-word token for parsing only."""
 
@@ -222,3 +343,43 @@ def _parse_under_hundred(tokens: list[str], start_index: int) -> tuple[int, int]
     if compact_value is not None and compact_value < 100:
         return compact_value, 1
     return None
+
+
+def _parse_chinese_number(token: str) -> int | None:
+    """Parse a compact Chinese cardinal number used in protocol counts."""
+
+    if not token:
+        return None
+    if not any(char in _CHINESE_UNITS or char == "万" for char in token):
+        digits: list[str] = []
+        for char in token:
+            digit = _CHINESE_DIGITS.get(char)
+            if digit is None:
+                return None
+            digits.append(str(digit))
+        return int("".join(digits))
+
+    total = 0
+    section = 0
+    number = 0
+    for char in token:
+        if char in _CHINESE_DIGITS:
+            number = _CHINESE_DIGITS[char]
+            continue
+        if char in _CHINESE_UNITS:
+            unit = _CHINESE_UNITS[char]
+            if number == 0:
+                number = 1
+            section += number * unit
+            number = 0
+            continue
+        if char == "万":
+            section += number
+            if section == 0:
+                section = 1
+            total += section * 10000
+            section = 0
+            number = 0
+            continue
+        return None
+    return total + section + number

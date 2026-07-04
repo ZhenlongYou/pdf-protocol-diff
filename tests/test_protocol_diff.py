@@ -119,6 +119,41 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual({"start_page": 2, "end_page": 3, "label": "2-3", "is_full_document": False}, payload["old_selected_pages"])
         self.assertEqual({"start_page": 2, "end_page": 4, "label": "2-4", "is_full_document": False}, payload["new_selected_pages"])
 
+    def test_reports_preserve_different_old_and_new_source_start_pages(self) -> None:
+        """Reports should show real source pages when selected windows start apart."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_window.pdf"),
+            pages=[
+                PageText(page_number=36, text="2.13 Calibration\nCapture 7 waveforms."),
+                PageText(page_number=37, text="2.14 Acceptance\nStable requirement."),
+            ],
+            total_pages=80,
+            selected_start_page=36,
+            selected_end_page=37,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_window.pdf"),
+            pages=[
+                PageText(page_number=78, text="2.13 Calibration\nCapture 8 waveforms."),
+                PageText(page_number=79, text="2.14 Acceptance\nStable requirement."),
+            ],
+            total_pages=188,
+            selected_start_page=78,
+            selected_end_page=79,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual({"start_page": 36, "end_page": 37, "label": "36-37", "is_full_document": False}, payload["old_selected_pages"])
+        self.assertEqual({"start_page": 78, "end_page": 79, "label": "78-79", "is_full_document": False}, payload["new_selected_pages"])
+        self.assertIn("<dt>旧选择页</dt><dd>36-37</dd>", report_html)
+        self.assertIn("<dt>新选择页</dt><dd>78-79</dd>", report_html)
+
     def test_reports_are_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -351,6 +386,114 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn(("modified", "2", "2"), page_pairs)
         self.assertIn(("added", "-", "2"), page_pairs)
         self.assertIn(("deleted", "2", "-"), page_pairs)
+
+    def test_deleted_section_is_reported_with_old_location(self) -> None:
+        """Whole-section removals should stay visible instead of becoming vague text loss."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_deleted_section.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Common requirement stays unchanged.\n"
+                        "1.1 Delivery\n"
+                        "Supplier shall deliver samples.\n"
+                        "1.2 Warranty\n"
+                        "Supplier shall provide a one-year warranty."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_deleted_section.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Common requirement stays unchanged.\n"
+                        "1.1 Delivery\n"
+                        "Supplier shall deliver samples."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("deleted", change.change_type)
+        self.assertEqual("1 Scope / 1.2 Warranty", change.report_location)
+        self.assertIn("one-year warranty", "\n".join(change.removed_snippets))
+
+    def test_heading_renumbering_is_reported_when_body_is_same(self) -> None:
+        """A moved or renumbered clause title is still a reviewable protocol change."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_renumbered_heading.pdf"),
+            pages=[PageText(page_number=1, text="2.1 Security\nSupplier shall encrypt logs.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_renumbered_heading.pdf"),
+            pages=[PageText(page_number=1, text="2.2 Security\nSupplier shall encrypt logs.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertEqual(
+            [("章节标题: 2.1 Security", "章节标题: 2.2 Security")],
+            [(pair.old, pair.new) for pair in result.changes[0].replaced_snippets],
+        )
+
+    def test_table_row_value_changes_are_reported(self) -> None:
+        """Dense table-like rows should not be discarded when numeric limits change."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_table_value.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Lane | Max jitter | Max voltage\n"
+                        "Lane 0 | 0.30 UI | 800 mV\n"
+                        "Lane 1 | 0.32 UI | 800 mV"
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_table_value.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Lane | Max jitter | Max voltage\n"
+                        "Lane 0 | 0.28 UI | 800 mV\n"
+                        "Lane 1 | 0.32 UI | 760 mV"
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("0.30 UI", snippets)
+        self.assertIn("0.28 UI", snippets)
+        self.assertIn("800 mV", snippets)
+        self.assertIn("760 mV", snippets)
 
     def test_report_labels_mixed_heading_and_page_fallback_mode(self) -> None:
         """Reports should not claim pure chapter matching when one side falls back."""
@@ -869,6 +1012,45 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
+    def test_numeric_thousands_separator_noise_is_suppressed(self) -> None:
+        """Valid thousands separators should compare equal to plain digits."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_thousands.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 1,000 samples.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_thousands.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 1000 samples.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_numeric_thousands_separator_does_not_hide_value_changes(self) -> None:
+        """Comma normalization must not hide real numeric changes."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_thousands_change.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 1,000 samples.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_thousands_change.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 1001 samples.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("1,000", snippets)
+        self.assertIn("1001", snippets)
+
     def test_cardinal_number_words_and_digits_are_semantically_equal(self) -> None:
         """Spelled-out counts such as seven should compare equal to digits."""
 
@@ -906,6 +1088,85 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
         self.assertEqual([], result.changes)
+
+    def test_pcie_capture_number_word_only_noise_is_suppressed(self) -> None:
+        """The real PCIe seven/7 sentence shape should not change on count spelling alone."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_pcie_capture_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "39. Capture seven 2.0 million unit-interval waveforms "
+                        "(2.0 X 106 X 62.5 ps = 125.0 μs) with a real time oscilloscope "
+                        "and save to separate files."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_pcie_capture_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "39. Capture 7, 2.0 million unit-interval waveforms "
+                        "(2.0 X 106 X 62.5 ps = 125.0 μs) with a real time oscilloscope "
+                        "and save to separate files."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_pcie_capture_real_wording_change_survives_number_word_noise(self) -> None:
+        """Mixed PCIe sentence changes should highlight wording, not seven/7."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_pcie_capture_wording.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "39. Capture seven 2.0 million unit-interval waveforms "
+                        "with a real time oscilloscope and save to separate files."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_pcie_capture_wording.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "39. Capture 7, 2.0 million unit-interval waveforms "
+                        "with a real time oscilloscope and save them to separate files."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("save to separate files", result.changes[0].replaced_snippets[0].old)
+        self.assertIn("save them to separate files", result.changes[0].replaced_snippets[0].new)
+        self.assertNotIn('<mark class="del">seven</mark>', report_html)
+        self.assertNotIn('<mark class="ins">7</mark>', report_html)
+        self.assertIn('<mark class="ins">them</mark>', report_html)
 
     def test_identifier_like_number_words_and_digits_are_not_collapsed(self) -> None:
         """Number words in model, generation, section, and file contexts stay visible."""
@@ -981,6 +1242,185 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
         self.assertEqual([], result.changes)
+
+    def test_hyphenated_pdf_line_wrap_is_suppressed(self) -> None:
+        """PDF hyphen line wraps should not create false word-level changes."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_hyphen_wrap.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nThe transmitter shall enter recovery after timeout.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_hyphen_wrap.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nThe trans-\nmitter shall enter recovery after timeout.",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_chinese_spacing_and_sentence_punctuation_are_suppressed(self) -> None:
+        """Chinese text should ignore harmless spacing and terminal punctuation."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_spacing.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应在7个工作日内交付。")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_spacing.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应在 7 个工作日内交付")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_chinese_count_words_and_digits_are_semantically_equal(self) -> None:
+        """Chinese count words such as 七个 should compare equal to Arabic digits."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 范围\n"
+                        "供应商应捕获七个波形并保存。\n"
+                        "设备应收集一百零五个样本。"
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 范围\n"
+                        "供应商应捕获 7 个波形并保存\n"
+                        "设备应收集 105 个样本"
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_chinese_count_words_before_ascii_units_are_semantically_equal(self) -> None:
+        """Chinese counts before standalone ASCII units should compare equal."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_ascii_unit_count.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 七 samples before analysis.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_ascii_unit_count.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCollect 7 samples before analysis.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_chinese_number_inside_identifier_is_not_collapsed(self) -> None:
+        """Chinese numerals in identifier-like words should remain visible."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_identifier.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nUse 七sampleRate for logging.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_identifier.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nUse 7sampleRate for logging.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn('<mark class="del">七</mark>', report_html)
+        self.assertIn('<mark class="ins">7</mark>', report_html)
+
+    def test_bare_chinese_number_identifier_change_is_highlighted(self) -> None:
+        """Bare Chinese numbers should not silently compare equal to digits."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_bare_chinese_number.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n方案 一 可用。")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_bare_chinese_number.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n方案 1 可用。")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn('<mark class="del">一</mark>', report_html)
+        self.assertIn('<mark class="ins">1</mark>', report_html)
+
+    def test_chinese_count_noise_does_not_hide_real_wording_change(self) -> None:
+        """Chinese seven/7 noise should not hide a real sentence edit."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_count_wording.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应捕获七个波形并保存。")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_count_wording.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应捕获 7 个波形并立即保存。")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("立即保存", report_html)
+        self.assertNotIn('<mark class="del">七</mark>', report_html)
+        self.assertNotIn('<mark class="ins">7</mark>', report_html)
+
+    def test_different_chinese_count_words_are_still_reported(self) -> None:
+        """Chinese count values must not disappear when the numeric meaning changes."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_chinese_count_change.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应捕获七个波形。")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_chinese_count_change.pdf"),
+            pages=[PageText(page_number=1, text="1 范围\n供应商应捕获八个波形。")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("七个波形", snippets)
+        self.assertIn("八个波形", snippets)
 
     def test_snippet_limit_scans_all_differences_and_reports_omissions(self) -> None:
         """Later substantive changes should not disappear when snippets are capped."""

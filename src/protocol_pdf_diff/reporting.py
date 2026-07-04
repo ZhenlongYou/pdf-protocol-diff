@@ -13,7 +13,14 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import DiffOptions, DiffResult, Section, SectionChange
-from .text_utils import compact_inline, parse_number_word_phrase, truncate
+from .text_utils import (
+    CHINESE_COUNT_UNIT_PATTERN,
+    CHINESE_NUMBER_CHARS,
+    canonicalize_chinese_number_token,
+    compact_inline,
+    parse_number_word_phrase,
+    truncate,
+)
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -24,10 +31,16 @@ _CHANGE_LABELS = {
 
 _INLINE_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
-    r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
     r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+"
 )
-_INLINE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)")
+_INLINE_NUMBER_RE = re.compile(
+    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
+)
+_CHINESE_INLINE_NUMBER_RE = re.compile(
+    rf"[{CHINESE_NUMBER_CHARS}]+(?=\s*(?:{CHINESE_COUNT_UNIT_PATTERN}))",
+    flags=re.I,
+)
 _PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
     {
         "appendix",
@@ -729,7 +742,12 @@ def _inline_tokens(text: str) -> list[_InlineToken]:
     for match in _INLINE_TOKEN_RE.finditer(text):
         if _is_arrow_operator_noise(text, match.start(), match.end()):
             continue
-        raw_tokens.append((text[match.start() : match.end()], match.start(), match.end()))
+        raw_tokens.extend(
+            _expand_chinese_inline_token(
+                text[match.start() : match.end()],
+                match.start(),
+            )
+        )
 
     tokens: list[_InlineToken] = []
     raw_words = [_inline_context_word(raw) for raw, _start, _end in raw_tokens]
@@ -757,7 +775,7 @@ def _inline_tokens(text: str) -> list[_InlineToken]:
                 )
                 index += consumed
                 continue
-        key = _inline_token_key(raw)
+        key = _inline_token_key(raw, text, start, end)
         if key:
             tokens.append(_InlineToken(text=raw, start=start, end=end, key=key))
         index += 1
@@ -775,16 +793,68 @@ def _is_arrow_operator_noise(text: str, start: int, end: int) -> bool:
     return bool(re.search(r"-\s*$", left) or re.match(r"^\s*-", right))
 
 
-def _inline_token_key(token: str) -> str:
+def _expand_chinese_inline_token(raw: str, start: int) -> list[tuple[str, int, int]]:
+    """Split Chinese count numerals out of a larger Chinese token.
+
+    PDF text extraction often returns ``供应商应捕获七个波形`` as one token while
+    ``供应商应捕获 7 个波形`` becomes three tokens. Splitting only clear numeric
+    spans lets the highlighter align ``七`` and ``7`` without over-tokenizing all
+    Chinese prose.
+    """
+
+    if not raw or not re.fullmatch(r"[\u4e00-\u9fff]+", raw):
+        return [(raw, start, start + len(raw))]
+
+    expanded: list[tuple[str, int, int]] = []
+    cursor = 0
+    for match in _CHINESE_INLINE_NUMBER_RE.finditer(raw):
+        if canonicalize_chinese_number_token(match.group(0)) is None:
+            continue
+        if match.start() > cursor:
+            expanded.append((raw[cursor : match.start()], start + cursor, start + match.start()))
+        expanded.append((match.group(0), start + match.start(), start + match.end()))
+        cursor = match.end()
+    if not expanded:
+        return [(raw, start, start + len(raw))]
+    if cursor < len(raw):
+        expanded.append((raw[cursor:], start + cursor, start + len(raw)))
+    return expanded
+
+
+def _inline_token_key(token: str, source_text: str, start: int, end: int) -> str:
     """Normalize one token for display highlighting, not comparison semantics."""
 
     normalized = _inline_context_word(token).replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
     normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
     normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
+    chinese_number = _contextual_chinese_number_key(normalized, source_text, start, end)
+    if chinese_number is not None:
+        return chinese_number
     if _INLINE_NUMBER_RE.fullmatch(normalized):
         return _canonical_inline_number(normalized)
     return normalized
+
+
+def _contextual_chinese_number_key(
+    normalized_token: str,
+    source_text: str,
+    start: int,
+    end: int,
+) -> str | None:
+    """Canonicalize Chinese numerals only in explicit count/ordinal contexts."""
+
+    value = canonicalize_chinese_number_token(normalized_token)
+    if value is None:
+        return None
+
+    before = source_text[max(0, start - 8) : start]
+    after = source_text[end : min(len(source_text), end + 32)]
+    if re.match(rf"^\s*(?:{CHINESE_COUNT_UNIT_PATTERN})", after, flags=re.I):
+        return value
+    if re.search(r"第\s*$", before) and re.match(r"^\s*[章节条项部分]", after):
+        return value
+    return None
 
 
 def _inline_context_word(token: str) -> str:
@@ -801,7 +871,7 @@ def _canonical_inline_number(token: str) -> str:
     if body.startswith("."):
         body = f"0{body}"
     try:
-        value = Decimal(body)
+        value = Decimal(body.replace(",", ""))
     except InvalidOperation:
         return token
     if value == 0:
