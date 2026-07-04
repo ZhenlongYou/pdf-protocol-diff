@@ -10,6 +10,9 @@ section context, but final sign-off should still inspect the source PDFs.
 from __future__ import annotations
 
 import difflib
+import re
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .models import (
@@ -22,7 +25,18 @@ from .models import (
 )
 from .pdf_extract import extract_pdf_text
 from .sectioning import section_document
-from .text_utils import normalize_for_similarity, normalize_line, truncate
+from .text_utils import normalize_for_similarity, normalize_line
+
+
+@dataclass(frozen=True)
+class _DeltaCandidate:
+    """One reportable snippet before max-snippet limiting is applied."""
+
+    kind: str
+    order: int
+    priority: int
+    text: str = ""
+    pair: SnippetPair | None = None
 
 
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
@@ -101,19 +115,20 @@ def compare_sections(
                         )
                     )
                 continue
-            added, removed, replaced = _summarize_text_delta(
+            heading_pair = (
+                SnippetPair(
+                    old=f"章节标题: {old_section.heading}",
+                    new=f"章节标题: {new_section.heading}",
+                )
+                if _section_heading_changed(old_section, new_section)
+                else None
+            )
+            added, removed, replaced, omitted_count = _summarize_text_delta(
                 old_section.body,
                 new_section.body,
                 max_snippets=options.max_snippets_per_section,
+                leading_replacement=heading_pair,
             )
-            if _section_heading_changed(old_section, new_section):
-                replaced.insert(
-                    0,
-                    SnippetPair(
-                        old=f"章节标题: {old_section.heading}",
-                        new=f"章节标题: {new_section.heading}",
-                    ),
-                )
             changes.append(
                 SectionChange(
                     change_type="modified",
@@ -122,27 +137,38 @@ def compare_sections(
                     similarity=similarity,
                     added_snippets=added,
                     removed_snippets=removed,
-                    replaced_snippets=replaced[: options.max_snippets_per_section],
+                    replaced_snippets=replaced,
+                    omitted_snippet_count=omitted_count,
                 )
             )
         elif new_section:
+            added_snippets, omitted_count = _first_units(
+                new_section.body,
+                options.max_snippets_per_section,
+            )
             changes.append(
                 SectionChange(
                     change_type="added",
                     old_section=None,
                     new_section=new_section,
                     similarity=0.0,
-                    added_snippets=_first_units(new_section.body, options.max_snippets_per_section),
+                    added_snippets=added_snippets,
+                    omitted_snippet_count=omitted_count,
                 )
             )
         elif old_section:
+            removed_snippets, omitted_count = _first_units(
+                old_section.body,
+                options.max_snippets_per_section,
+            )
             changes.append(
                 SectionChange(
                     change_type="deleted",
                     old_section=old_section,
                     new_section=None,
                     similarity=0.0,
-                    removed_snippets=_first_units(old_section.body, options.max_snippets_per_section),
+                    removed_snippets=removed_snippets,
+                    omitted_snippet_count=omitted_count,
                 )
             )
 
@@ -175,9 +201,15 @@ def _match_sections(
         exact_match = next((idx for idx in exact_candidates if idx not in matched_old), None)
         if exact_match is not None:
             matched_old.add(exact_match)
-            similarity = _similarity(
-                old_sections[exact_match].comparable_text,
-                new_section.comparable_text,
+            similarity = max(
+                _similarity(
+                    old_sections[exact_match].comparable_text,
+                    new_section.comparable_text,
+                ),
+                _review_similarity(
+                    old_sections[exact_match].comparable_text,
+                    new_section.comparable_text,
+                ),
             )
             matches.append((exact_match, new_index, similarity))
             matched_new.add(new_index)
@@ -198,9 +230,15 @@ def _match_sections(
             continue
         matched_old.add(old_index)
         matched_new.add(new_index)
-        similarity = _similarity(
-            old_sections[old_index].comparable_text,
-            new_sections[new_index].comparable_text,
+        similarity = max(
+            _similarity(
+                old_sections[old_index].comparable_text,
+                new_sections[new_index].comparable_text,
+            ),
+            _review_similarity(
+                old_sections[old_index].comparable_text,
+                new_sections[new_index].comparable_text,
+            ),
         )
         matches.append((old_index, new_index, min(score, similarity)))
 
@@ -220,13 +258,31 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
     if _both_page_fallback_sections(old_section, new_section):
         return _similarity(old_section.body, new_section.body)
 
-    title_score = _similarity(old_section.title, new_section.title)
-    location_score = _similarity(old_section.location, new_section.location)
-    text_score = _similarity(
-        old_section.comparable_text[:4000],
-        new_section.comparable_text[:4000],
+    title_score = _review_similarity(old_section.title, new_section.title)
+    location_score = _review_similarity(old_section.location, new_section.location)
+    text_score = max(
+        _review_similarity(
+            old_section.comparable_text[:4000],
+            new_section.comparable_text[:4000],
+        ),
+        _similarity(
+            old_section.comparable_text[:4000],
+            new_section.comparable_text[:4000],
+        ),
     )
     return max(title_score * 0.85 + text_score * 0.15, location_score * 0.4 + text_score * 0.6)
+
+
+def _review_similarity(left: str, right: str) -> float:
+    """Return a similarity score after display-only punctuation is normalized."""
+
+    left_norm = _review_unit_key(left)
+    right_norm = _review_unit_key(right)
+    if not left_norm and not right_norm:
+        return 1.0
+    if not left_norm or not right_norm:
+        return 0.0
+    return difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
 
 
 def _similarity(left: str, right: str) -> float:
@@ -248,7 +304,7 @@ def _sections_effectively_unchanged(
 ) -> bool:
     """Treat a matched section as unchanged only when title and body are stable."""
 
-    body_same = _similarity(old_section.body, new_section.body) >= options.unchanged_similarity
+    body_same = _review_unit_key(old_section.body) == _review_unit_key(new_section.body)
     return body_same and not _section_heading_changed(old_section, new_section)
 
 
@@ -257,7 +313,7 @@ def _section_heading_changed(old_section: Section, new_section: Section) -> bool
 
     if _both_page_fallback_sections(old_section, new_section):
         return False
-    return normalize_for_similarity(old_section.heading) != normalize_for_similarity(new_section.heading)
+    return _review_unit_key(old_section.heading) != _review_unit_key(new_section.heading)
 
 
 def _both_page_fallback_sections(old_section: Section, new_section: Section) -> bool:
@@ -270,42 +326,85 @@ def _summarize_text_delta(
     old_text: str,
     new_text: str,
     max_snippets: int,
-) -> tuple[list[str], list[str], list[SnippetPair]]:
+    leading_replacement: SnippetPair | None = None,
+) -> tuple[list[str], list[str], list[SnippetPair], int]:
     """Create compact added/removed/replaced snippets for one section."""
 
     old_units = _split_units(old_text)
     new_units = _split_units(new_text)
-    matcher = difflib.SequenceMatcher(None, old_units, new_units, autojunk=False)
+    old_keys = [_review_unit_key(unit) for unit in old_units]
+    new_keys = [_review_unit_key(unit) for unit in new_units]
+    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
 
-    added: list[str] = []
-    removed: list[str] = []
-    replaced: list[SnippetPair] = []
+    candidates: list[_DeltaCandidate] = []
+    candidate_order = 0
+
+    def add_candidate(
+        kind: str,
+        *,
+        text: str = "",
+        pair: SnippetPair | None = None,
+        priority_values: tuple[str, ...],
+    ) -> None:
+        nonlocal candidate_order
+        candidates.append(
+            _DeltaCandidate(
+                kind=kind,
+                order=candidate_order,
+                priority=_substantive_priority(*priority_values),
+                text=text,
+                pair=pair,
+            )
+        )
+        candidate_order += 1
+
+    if leading_replacement:
+        add_candidate(
+            "replaced",
+            pair=leading_replacement,
+            priority_values=(leading_replacement.old, leading_replacement.new),
+        )
 
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
         if tag == "equal":
             continue
         if tag == "insert":
-            added.extend(truncate(unit) for unit in new_units[new_start:new_end])
+            for unit in new_units[new_start:new_end]:
+                add_candidate(
+                    "added",
+                    text=_report_unit(unit),
+                    priority_values=(unit,),
+                )
         elif tag == "delete":
-            removed.extend(truncate(unit) for unit in old_units[old_start:old_end])
+            for unit in old_units[old_start:old_end]:
+                add_candidate(
+                    "removed",
+                    text=_report_unit(unit),
+                    priority_values=(unit,),
+                )
         elif tag == "replace":
             old_block_units = old_units[old_start:old_end]
             new_block_units = new_units[new_start:new_end]
             if len(old_block_units) == len(new_block_units):
                 for old_unit, new_unit in zip(old_block_units, new_block_units, strict=True):
-                    replaced.append(SnippetPair(old=truncate(old_unit), new=truncate(new_unit)))
+                    if _review_unit_key(old_unit) == _review_unit_key(new_unit):
+                        continue
+                    add_candidate(
+                        "replaced",
+                        pair=SnippetPair(old=_report_unit(old_unit), new=_report_unit(new_unit)),
+                        priority_values=(old_unit, new_unit),
+                    )
             else:
-                old_block = " ".join(old_block_units)
-                new_block = " ".join(new_block_units)
-                replaced.append(SnippetPair(old=truncate(old_block), new=truncate(new_block)))
-        if len(added) + len(removed) + len(replaced) >= max_snippets:
-            break
+                old_block = _best_changed_block(old_block_units, new_block_units)
+                new_block = _best_changed_block(new_block_units, old_block_units)
+                if _review_unit_key(old_block) != _review_unit_key(new_block):
+                    add_candidate(
+                        "replaced",
+                        pair=SnippetPair(old=_report_unit(old_block), new=_report_unit(new_block)),
+                        priority_values=(old_block, new_block),
+                    )
 
-    return (
-        _dedupe_keep_order(added)[:max_snippets],
-        _dedupe_keep_order(removed)[:max_snippets],
-        replaced[:max_snippets],
-    )
+    return _materialize_delta_candidates(candidates, max_snippets)
 
 
 def _split_units(text: str) -> list[str]:
@@ -317,22 +416,263 @@ def _split_units(text: str) -> list[str]:
     """
 
     raw_units: list[str] = []
-    for line in text.splitlines():
-        normalized_line = normalize_line(line)
-        if not normalized_line:
-            continue
-        raw_units.extend(_split_line_preserving_numbers(normalized_line))
+    for block in _merge_wrapped_lines(text):
+        raw_units.extend(_split_line_preserving_numbers(block))
 
     units: list[str] = []
     for unit in raw_units:
-        if len(unit) <= 320:
+        if len(unit) <= 720:
             units.append(unit)
             continue
-        for start in range(0, len(unit), 260):
-            chunk = unit[start : start + 260].strip()
-            if chunk:
-                units.append(chunk)
+        units.extend(_split_long_unit(unit))
     return units
+
+
+def _merge_wrapped_lines(text: str) -> list[str]:
+    """Merge PDF line wraps into review-sized sentences or procedure steps."""
+
+    blocks: list[str] = []
+    current = ""
+    for raw_line in text.splitlines():
+        line = normalize_line(raw_line)
+        if not line:
+            continue
+        if _starts_new_review_block(line):
+            if current:
+                blocks.append(current)
+            current = line
+            continue
+        if not current:
+            current = line
+        elif _ends_review_sentence(current) and not _is_standalone_list_marker(current):
+            blocks.append(current)
+            current = line
+        elif _looks_like_new_sentence_after_linebreak(current, line):
+            blocks.append(current)
+            current = line
+        else:
+            current = _join_wrapped_line(current, line)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _starts_new_review_block(line: str) -> bool:
+    """Return True when a line starts a new list item or procedure step."""
+
+    patterns = (
+        r"^\d{1,3}[.)](?:\s+\S.*|\s*)$",
+        r"^[a-zA-Z][.)](?:\s+\S.*|\s*)$",
+        r"^[•●⚫-]\s+\S",
+        r"^Note:\s+",
+    )
+    return any(re.match(pattern, line) for pattern in patterns)
+
+
+def _join_wrapped_line(left: str, right: str) -> str:
+    """Join one PDF-wrapped line while repairing common hyphen breaks."""
+
+    if left.endswith("-") and right and right[0].islower():
+        return left[:-1] + right
+    return f"{left} {right}"
+
+
+def _ends_review_sentence(value: str) -> bool:
+    """Return True when a buffered line already looks like a complete sentence."""
+
+    return value.rstrip().endswith((".", "。", ";", "；", "!", "！", "?", "？"))
+
+
+def _is_standalone_list_marker(value: str) -> bool:
+    """Keep markers such as ``a.`` or ``2.`` attached to their following text."""
+
+    return bool(re.fullmatch(r"(?:\d{1,3}|[A-Za-z])[.)]", value.strip()))
+
+
+def _looks_like_new_sentence_after_linebreak(left: str, right: str) -> bool:
+    """Avoid gluing adjacent extracted sentences when punctuation is missing."""
+
+    if _is_standalone_list_marker(left) or left.endswith("-"):
+        return False
+    first = right[:1]
+    return bool(len(left) <= 60 and first and first.isascii() and first.isupper())
+
+
+def _split_long_unit(unit: str, max_chars: int = 720) -> list[str]:
+    """Split a very long unit at readable boundaries instead of mid-word."""
+
+    chunks: list[str] = []
+    remaining = unit.strip()
+    while len(remaining) > max_chars:
+        cut = max(
+            remaining.rfind(". ", 0, max_chars),
+            remaining.rfind("; ", 0, max_chars),
+            remaining.rfind("。", 0, max_chars),
+            remaining.rfind("；", 0, max_chars),
+        )
+        if cut < max_chars // 2:
+            cut = remaining.rfind(" ", 0, max_chars)
+        if cut < max_chars // 2:
+            cut = max_chars
+        chunk = remaining[: cut + 1].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut + 1 :].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+_NUMBER_TOKEN_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)")
+_REVIEW_TOKEN_RE = re.compile(
+    r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
+    r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+"
+)
+
+
+def _review_unit_key(value: str) -> str:
+    """Normalize a unit for deciding whether a visible diff is substantive.
+
+    The key ignores case, whitespace, and sentence punctuation, but keeps
+    meaningful numeric tokens intact. That prevents false equivalence between
+    values such as ``1.0 ps`` and ``10 ps`` while still suppressing PDF wrapping
+    and comma/period noise.
+    """
+
+    normalized = normalize_for_similarity(value)
+    normalized = normalized.replace("µ", "u").replace("μ", "u")
+    normalized = normalized.replace("&", " and ")
+    normalized = normalized.replace("≤", "<=").replace("≥", ">=")
+    normalized = re.sub(r"-\s*[<>]\s*", " ", normalized)
+    normalized = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", normalized)
+    normalized = re.sub(r"\b10\s+([0-9])\b", r"10\1", normalized)
+    normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
+    normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
+    return " ".join(_canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(normalized))
+
+
+def _canonical_review_token(token: str) -> str:
+    """Canonicalize token values only where protocol meaning is preserved."""
+
+    if not _NUMBER_TOKEN_RE.fullmatch(token):
+        return token
+    sign = "-" if token.startswith("-") else ""
+    body = token.lstrip("+-")
+    if body.startswith("."):
+        body = f"0{body}"
+    try:
+        value = Decimal(body)
+    except InvalidOperation:
+        return token
+    if value == 0:
+        sign = ""
+    numeric = format(value.normalize(), "f")
+    if "." in numeric:
+        numeric = numeric.rstrip("0").rstrip(".")
+    return f"{sign}{numeric}"
+
+
+def _report_unit(value: str) -> str:
+    """Return a human-readable snippet without odd mid-sentence ellipses."""
+
+    readable = " ".join(_split_long_unit(value, max_chars=1200))
+    if len(readable) <= 1400:
+        return readable
+    cut = max(
+        readable.rfind(". ", 0, 1200),
+        readable.rfind("; ", 0, 1200),
+        readable.rfind("。", 0, 1200),
+        readable.rfind("；", 0, 1200),
+    )
+    if cut < 600:
+        cut = readable.rfind(" ", 0, 1200)
+    if cut < 600:
+        cut = 1200
+    return readable[: cut + 1].strip() + " [片段过长，已截断；请见源 PDF 对应页]"
+
+
+def _best_changed_block(candidate_units: list[str], other_units: list[str]) -> str:
+    """Pick the most useful part of an unequal block for a replacement snippet."""
+
+    other_keys = {_review_unit_key(unit) for unit in other_units}
+    changed = [unit for unit in candidate_units if _review_unit_key(unit) not in other_keys]
+    return " ".join(changed or candidate_units)
+
+
+def _materialize_delta_candidates(
+    candidates: list[_DeltaCandidate],
+    max_snippets: int,
+) -> tuple[list[str], list[str], list[SnippetPair], int]:
+    """Apply snippet limits after all meaningful differences have been scanned."""
+
+    unique_candidates = _dedupe_candidates(candidates)
+    if max_snippets <= 0:
+        return [], [], [], len(unique_candidates)
+
+    if len(unique_candidates) <= max_snippets:
+        selected = unique_candidates
+        omitted_count = 0
+    else:
+        prioritized = sorted(unique_candidates, key=lambda item: (-item.priority, item.order))
+        selected = sorted(prioritized[:max_snippets], key=lambda item: item.order)
+        omitted_count = len(unique_candidates) - len(selected)
+
+    added: list[str] = []
+    removed: list[str] = []
+    replaced: list[SnippetPair] = []
+    for candidate in selected:
+        if candidate.kind == "added":
+            added.append(candidate.text)
+        elif candidate.kind == "removed":
+            removed.append(candidate.text)
+        elif candidate.kind == "replaced" and candidate.pair:
+            replaced.append(candidate.pair)
+    return added, removed, replaced, omitted_count
+
+
+def _dedupe_candidates(candidates: list[_DeltaCandidate]) -> list[_DeltaCandidate]:
+    """Remove duplicate snippets while preserving first occurrence and priority."""
+
+    by_key: dict[tuple[str, str], _DeltaCandidate] = {}
+    for candidate in candidates:
+        key = _candidate_key(candidate)
+        existing = by_key.get(key)
+        if existing is None or candidate.priority > existing.priority:
+            by_key[key] = candidate
+    return sorted(by_key.values(), key=lambda item: item.order)
+
+
+def _candidate_key(candidate: _DeltaCandidate) -> tuple[str, str]:
+    """Build a stable dedupe key for one candidate."""
+
+    if candidate.pair:
+        return (candidate.kind, f"{candidate.pair.old}\n---\n{candidate.pair.new}")
+    return (candidate.kind, candidate.text)
+
+
+def _substantive_priority(*values: str) -> int:
+    """Rank protocol-risky deltas above ordinary wording changes."""
+
+    joined = "\n".join(values)
+    if _has_numeric_token(joined):
+        return 3
+    if _has_identifier_token(joined):
+        return 2
+    return 1
+
+
+def _has_numeric_token(value: str) -> bool:
+    """Return True when a snippet contains a number-like protocol value."""
+
+    return bool(_NUMBER_TOKEN_RE.search(value))
+
+
+def _has_identifier_token(value: str) -> bool:
+    """Return True for compact identifiers such as TS1/TS2, P5, or Gen6."""
+
+    normalized = normalize_for_similarity(value)
+    return bool(re.search(r"\b[a-z]+[0-9]+(?:[-_/][a-z0-9]+)*\b", normalized))
 
 
 def _source_page_count(extraction: ExtractionResult) -> int:
@@ -385,7 +725,20 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
         elif char == ".":
             previous_char = line[index - 1] if index > 0 else ""
             next_char = line[index + 1] if index + 1 < len(line) else ""
+            previous_text = line[:index].strip()
             if previous_char.isdigit() and next_char.isdigit():
+                should_split = False
+            elif (
+                re.fullmatch(r"\d{1,3}", previous_text)
+                and next_char
+                and next_char.isspace()
+            ):
+                should_split = False
+            elif (
+                re.fullmatch(r"[A-Za-z]", previous_text)
+                and next_char
+                and next_char.isspace()
+            ):
                 should_split = False
             elif next_char and not next_char.isspace():
                 should_split = False
@@ -404,22 +757,13 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
     return units
 
 
-def _first_units(text: str, max_snippets: int) -> list[str]:
+def _first_units(text: str, max_snippets: int) -> tuple[list[str], int]:
     """Return leading snippets for added or deleted whole sections."""
 
-    return [truncate(unit) for unit in _split_units(text)[:max_snippets]]
-
-
-def _dedupe_keep_order(values: list[str]) -> list[str]:
-    """Remove repeated snippets without changing the visible order."""
-
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            result.append(value)
-    return result
+    units = [_report_unit(unit) for unit in _split_units(text)]
+    if max_snippets <= 0:
+        return [], len(units)
+    return units[:max_snippets], max(0, len(units) - max_snippets)
 
 
 def _change_sort_key(change: SectionChange) -> tuple[int, int, str]:

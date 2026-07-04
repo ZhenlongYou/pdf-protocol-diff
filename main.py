@@ -46,7 +46,7 @@ UNCHANGED_SIMILARITY = 0.985
 
 # Maximum snippets shown for each changed section. The full PDF is not copied
 # into the report, so this keeps reports readable and copyright-safe.
-MAX_SNIPPETS_PER_SECTION = 8
+MAX_SNIPPETS_PER_SECTION = 20
 
 # When both paths above are blank, generate multi-page demo PDFs so the
 # no-argument run demonstrates page drift, headers/footers, and section changes.

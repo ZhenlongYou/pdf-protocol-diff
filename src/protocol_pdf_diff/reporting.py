@@ -6,6 +6,9 @@ import csv
 import difflib
 import html as html_lib
 import json
+import re
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +21,23 @@ _CHANGE_LABELS = {
     "modified": "修改",
     "unchanged": "未变化",
 }
+
+_INLINE_TOKEN_RE = re.compile(
+    r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
+    r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+"
+)
+_INLINE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)")
+
+
+@dataclass(frozen=True)
+class _InlineToken:
+    """A visible token used for noise-aware HTML highlighting."""
+
+    text: str
+    start: int
+    end: int
+    key: str
 
 
 def write_reports(
@@ -80,6 +100,7 @@ def write_reports(
                 "added_snippets",
                 "removed_snippets",
                 "replaced_snippets",
+                "omitted_snippet_count",
             ],
         )
         writer.writeheader()
@@ -149,17 +170,21 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
 
     for index, change in enumerate(result.changes, start=1):
         label = _CHANGE_LABELS.get(change.change_type, change.change_type)
-        lines.append(f"### {index}. {label}: {change.report_location}")
+        display_location = _display_change_location(change)
+        lines.append(f"### {index}. {label}: {display_location}")
         if change.old_section:
             lines.append(
-                f"- 旧位置: {change.old_section.location}（页 {change.old_section.page_range}）"
+                f"- 旧位置: {_display_section_location(change.old_section, '旧')}（页 {change.old_section.page_range}）"
             )
         if change.new_section:
             lines.append(
-                f"- 新位置: {change.new_section.location}（页 {change.new_section.page_range}）"
+                f"- 新位置: {_display_section_location(change.new_section, '新')}（页 {change.new_section.page_range}）"
             )
         if change.old_section and change.new_section:
             lines.append(f"- 相似度: {change.similarity:.3f}")
+        summary = _change_summary(change)
+        if summary:
+            lines.append(f"- 差异摘要: {summary}")
 
         if change.replaced_snippets:
             lines.append("- 替换片段:")
@@ -174,6 +199,8 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
             lines.append("- 删除片段:")
             for snippet in change.removed_snippets:
                 lines.append(f"  - {snippet}")
+        if change.omitted_snippet_count:
+            lines.append(f"- {_omitted_snippet_message(change.omitted_snippet_count)}")
         lines.append("")
 
     return "\n".join(lines)
@@ -402,8 +429,24 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
     mark {{ border-radius: 3px; padding: 0 2px; }}
     .ins {{ color: var(--add); background: var(--add-bg); }}
     .del {{ color: var(--del); background: var(--del-bg); text-decoration: line-through; }}
+    .change-summary {{
+      color: var(--muted);
+      background: #f7f9fc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      margin: 10px 0 12px;
+    }}
     .single-list {{ margin: 10px 0 0 0; padding-left: 18px; }}
     .single-list li {{ margin: 6px 0; }}
+    .omitted-note {{
+      color: var(--muted);
+      background: #f2f5f9;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 12px;
+    }}
     @media (max-width: 860px) {{
       .layout {{ grid-template-columns: 1fr; }}
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
@@ -463,20 +506,29 @@ def _render_change_html(index: int, change: SectionChange) -> str:
         if change.old_section and change.new_section
         else ""
     )
+    summary = _change_summary(change)
+    summary_html = (
+        f'<div class="change-summary">{_escape(summary)}</div>'
+        if summary
+        else ""
+    )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
     added = _render_single_list("新增片段", change.added_snippets, "ins")
     removed = _render_single_list("删除片段", change.removed_snippets, "del")
+    omitted = _render_omitted_html(change.omitted_snippet_count)
     body = pairs or ""
     body += added
     body += removed
+    body += omitted
     if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
     return f"""
       <section class="change-card" id="change-{index}">
         <div class="change-head">
-          <h3 class="change-title"><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(change.report_location)}</h3>
+          <h3 class="change-title"><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(_display_change_location(change))}</h3>
           <div class="pages">旧定位页 {_escape(old_pages)} · 新定位页 {_escape(new_pages)}{_escape(similarity)}</div>
         </div>
+        {summary_html}
         {body}
       </section>
     """
@@ -491,9 +543,28 @@ def _render_nav_item(index: int, change: SectionChange) -> str:
         f"<span>{index}</span>"
         '<div class="nav-body">'
         f'<div class="nav-label">{_escape(label)}</div>'
-        f'<div class="nav-location">{_escape(change.report_location)}</div>'
+        f'<div class="nav-location">{_escape(_display_change_location(change))}</div>'
         "</div></a>"
     )
+
+
+def _display_change_location(change: SectionChange) -> str:
+    """Return a friendlier location label for human-facing reports."""
+
+    if change.report_location == "范围起始页前序内容":
+        section = change.new_section or change.old_section
+        if section:
+            side = "新" if change.new_section else "旧"
+            return _display_section_location(section, side)
+    return change.report_location
+
+
+def _display_section_location(section: Section, side: str) -> str:
+    """Return a friendly section location for reports."""
+
+    if section.location == "范围起始页前序内容":
+        return f"{side}选择范围第 {section.start_page} 页的章节前内容"
+    return section.location
 
 
 def _empty_change_message(change: SectionChange) -> str:
@@ -504,6 +575,46 @@ def _empty_change_message(change: SectionChange) -> str:
     if change.old_section and change.new_section:
         return "该章节发生变化，但当前片段数量设置未展开具体文本；可调大 MAX_SNIPPETS_PER_SECTION 后复跑。"
     return "该章节没有可展示的正文片段，请回到源 PDF 对应页复核。"
+
+
+def _change_summary(change: SectionChange) -> str:
+    """Summarize visible snippet counts and likely review focus."""
+
+    parts: list[str] = []
+    if change.replaced_snippets:
+        parts.append(f"{len(change.replaced_snippets)} 处替换")
+    if change.added_snippets:
+        parts.append(f"{len(change.added_snippets)} 处新增")
+    if change.removed_snippets:
+        parts.append(f"{len(change.removed_snippets)} 处删除")
+    if change.omitted_snippet_count:
+        parts.append(f"{change.omitted_snippet_count} 处未展示")
+
+    natures = _change_natures(change)
+    if natures:
+        parts.append("重点关注: " + "、".join(natures))
+    return "；".join(parts)
+
+
+def _change_natures(change: SectionChange) -> list[str]:
+    """Infer high-level review categories from displayed snippets."""
+
+    texts: list[str] = []
+    for pair in change.replaced_snippets:
+        texts.extend([pair.old, pair.new])
+    texts.extend(change.added_snippets)
+    texts.extend(change.removed_snippets)
+    joined = "\n".join(texts)
+    natures: list[str] = []
+    if re.search(r"(?i)\b(?:step|steps)\s+\d+|\b\d+\s+through\s+\d+\b", joined):
+        natures.append("步骤编号/步骤范围")
+    if re.search(r"(?i)\b(?:appendix|section)\s+[A-Z0-9]+(?:\.\d+)*\b", joined):
+        natures.append("附录/章节引用")
+    if re.search(r"(?i)\b(?:<=|>=|≤|≥|<|>|=|[+-]?\d+(?:\.\d+)?\s*(?:ps|mv|db|gt/s|mhz|ghz|ui|%))\b", joined):
+        natures.append("数值或限值")
+    if re.search(r"(?i)\b(?:revision|cem|clb|cbb|preset|template|sigtest)\b", joined):
+        natures.append("术语/设备/模板")
+    return natures[:4]
 
 
 def _render_pair_html(old_text: str, new_text: str) -> str:
@@ -536,26 +647,117 @@ def _render_single_list(title: str, snippets: list[str], css_class: str) -> str:
     return f"<h4>{title}</h4><ul class=\"single-list\">{items}</ul>"
 
 
-def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
-    """Highlight changed spans inside a pair of snippets."""
+def _render_omitted_html(omitted_count: int) -> str:
+    """Render an explicit note when snippet limiting hides additional deltas."""
 
-    matcher = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False)
-    old_parts: list[str] = []
-    new_parts: list[str] = []
+    if omitted_count <= 0:
+        return ""
+    return f'<div class="omitted-note">{_escape(_omitted_snippet_message(omitted_count))}</div>'
+
+
+def _omitted_snippet_message(omitted_count: int) -> str:
+    """Explain that more substantive differences exist than are displayed."""
+
+    return f"另有 {omitted_count} 条差异片段未展示；可调大 --max-snippets / MAX_SNIPPETS_PER_SECTION 后复跑。"
+
+
+def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
+    """Highlight substantive token changes without emphasizing PDF noise."""
+
+    old_tokens = _inline_tokens(old_text)
+    new_tokens = _inline_tokens(new_text)
+    matcher = difflib.SequenceMatcher(
+        None,
+        [token.key for token in old_tokens],
+        [token.key for token in new_tokens],
+        autojunk=False,
+    )
+    old_highlights: list[tuple[int, int, str]] = []
+    new_highlights: list[tuple[int, int, str]] = []
+
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        old_part = _escape(old_text[old_start:old_end])
-        new_part = _escape(new_text[new_start:new_end])
         if tag == "equal":
-            old_parts.append(old_part)
-            new_parts.append(new_part)
-        elif tag == "delete":
-            old_parts.append(f'<mark class="del">{old_part}</mark>')
-        elif tag == "insert":
-            new_parts.append(f'<mark class="ins">{new_part}</mark>')
-        elif tag == "replace":
-            old_parts.append(f'<mark class="del">{old_part}</mark>')
-            new_parts.append(f'<mark class="ins">{new_part}</mark>')
-    return "".join(old_parts), "".join(new_parts)
+            continue
+        old_changed = old_tokens[old_start:old_end]
+        new_changed = new_tokens[new_start:new_end]
+        old_highlights.extend((token.start, token.end, "del") for token in old_changed)
+        new_highlights.extend((token.start, token.end, "ins") for token in new_changed)
+
+    return (
+        _render_text_with_highlights(old_text, old_highlights),
+        _render_text_with_highlights(new_text, new_highlights),
+    )
+
+
+def _inline_tokens(text: str) -> list[_InlineToken]:
+    """Tokenize visible text and compute noise-tolerant keys for highlighting."""
+
+    tokens: list[_InlineToken] = []
+    for match in _INLINE_TOKEN_RE.finditer(text):
+        if _is_arrow_operator_noise(text, match.start(), match.end()):
+            continue
+        raw = text[match.start() : match.end()]
+        key = _inline_token_key(match.group(0))
+        if key:
+            tokens.append(_InlineToken(text=raw, start=match.start(), end=match.end(), key=key))
+    return tokens
+
+
+def _is_arrow_operator_noise(text: str, start: int, end: int) -> bool:
+    """Return True when ``<``/``>`` is part of an extracted arrow, not a limit."""
+
+    token = text[start:end]
+    if token not in {"<", ">"}:
+        return False
+    left = text[max(0, start - 3) : start]
+    right = text[end : min(len(text), end + 3)]
+    return bool(re.search(r"-\s*$", left) or re.match(r"^\s*-", right))
+
+
+def _inline_token_key(token: str) -> str:
+    """Normalize one token for display highlighting, not comparison semantics."""
+
+    normalized = token.casefold().replace("µ", "u").replace("μ", "u")
+    normalized = normalized.replace("≤", "<=").replace("≥", ">=")
+    normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
+    normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
+    if _INLINE_NUMBER_RE.fullmatch(normalized):
+        return _canonical_inline_number(normalized)
+    return normalized
+
+
+def _canonical_inline_number(token: str) -> str:
+    """Normalize visually different but numerically equal values for highlighting."""
+
+    sign = "-" if token.startswith("-") else ""
+    body = token.lstrip("+-")
+    if body.startswith("."):
+        body = f"0{body}"
+    try:
+        value = Decimal(body)
+    except InvalidOperation:
+        return token
+    if value == 0:
+        sign = ""
+    numeric = format(value.normalize(), "f")
+    if "." in numeric:
+        numeric = numeric.rstrip("0").rstrip(".")
+    return f"{sign}{numeric}"
+
+
+def _render_text_with_highlights(text: str, highlights: list[tuple[int, int, str]]) -> str:
+    """Render text with non-overlapping token highlights."""
+
+    parts: list[str] = []
+    cursor = 0
+    for start, end, css_class in sorted(highlights):
+        if start < cursor:
+            continue
+        parts.append(_escape(text[cursor:start]))
+        parts.append(f'<mark class="{css_class}">{_escape(text[start:end])}</mark>')
+        cursor = end
+    parts.append(_escape(text[cursor:]))
+    return "".join(parts)
 
 
 def _escape(value: object) -> str:
@@ -579,12 +781,25 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
             summary_parts.append(f"{len(change.added_snippets)} 处新增")
         if change.removed_snippets:
             summary_parts.append(f"{len(change.removed_snippets)} 处删除")
+        if change.omitted_snippet_count:
+            summary_parts.append(f"{change.omitted_snippet_count} 处未展示")
+        natures = _change_natures(change)
+        if natures:
+            summary_parts.append("重点关注: " + "、".join(natures))
         rows.append(
             {
                 "change_type": _CHANGE_LABELS.get(change.change_type, change.change_type),
-                "report_location": change.report_location,
-                "new_location": change.new_section.location if change.new_section else "",
-                "old_location": change.old_section.location if change.old_section else "",
+                "report_location": _display_change_location(change),
+                "new_location": (
+                    _display_section_location(change.new_section, "新")
+                    if change.new_section
+                    else ""
+                ),
+                "old_location": (
+                    _display_section_location(change.old_section, "旧")
+                    if change.old_section
+                    else ""
+                ),
                 "new_pages": change.new_section.page_range if change.new_section else "",
                 "old_pages": change.old_section.page_range if change.old_section else "",
                 "similarity": f"{change.similarity:.3f}" if change.old_section and change.new_section else "",
@@ -592,6 +807,7 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
                 "added_snippets": "\n".join(change.added_snippets),
                 "removed_snippets": "\n".join(change.removed_snippets),
                 "replaced_snippets": "\n".join(replaced),
+                "omitted_snippet_count": str(change.omitted_snippet_count),
             }
         )
     return rows
@@ -714,16 +930,30 @@ def _change_to_dict(change: SectionChange) -> dict[str, object]:
         "change_type": change.change_type,
         "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
         "report_location": change.report_location,
+        "display_report_location": _display_change_location(change),
         "old_location": change.old_section.location if change.old_section else None,
         "new_location": change.new_section.location if change.new_section else None,
+        "display_old_location": (
+            _display_section_location(change.old_section, "旧")
+            if change.old_section
+            else None
+        ),
+        "display_new_location": (
+            _display_section_location(change.new_section, "新")
+            if change.new_section
+            else None
+        ),
         "old_pages": change.old_section.page_range if change.old_section else None,
         "new_pages": change.new_section.page_range if change.new_section else None,
         "similarity": round(change.similarity, 6),
+        "summary": _change_summary(change),
+        "change_nature": _change_natures(change),
         "added_snippets": list(change.added_snippets),
         "removed_snippets": list(change.removed_snippets),
         "replaced_snippets": [
             {"old": pair.old, "new": pair.new} for pair in change.replaced_snippets
         ],
+        "omitted_snippet_count": change.omitted_snippet_count,
     }
 
 

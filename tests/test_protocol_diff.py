@@ -559,13 +559,78 @@ class ProtocolDiffTests(unittest.TestCase):
         locations = [section.location for section in sections]
         body = "\n".join(section.body for section in sections)
 
-        self.assertEqual(["2.11.2 Overview of Calibration Steps at 16.0 GT/s"], locations)
-        self.assertIn("1. Connect the end of the cables", body)
-        self.assertIn("14. Turn all jitter and noise sources off", body)
+        self.assertEqual(1, len(sections))
+        self.assertIn("2.11.2 Overview of Calibration Steps at 16.0 GT/s", locations)
+        self.assertNotIn(
+            "2.11.2 Overview of Calibration Steps at 16.0 GT/s / 6 X 62.5 ps =",
+            locations,
+        )
+        self.assertIn("1. Connect the end of the cables to the RX SMPs.", body)
         self.assertIn("128 bits of a 1010 clock pattern", body)
+        self.assertIn("14. Turn all jitter and noise sources off.", body)
+        self.assertIn("16. Capture 2.0 million unit-intervals of data.", body)
         self.assertNotIn("PCI Express Architecture PHY Test Specification", body)
         self.assertNotIn("Revision 4.0", body)
         self.assertNotIn("August 18, 2021", body)
+
+    def test_deep_section_keeps_unlisted_procedure_verbs(self) -> None:
+        """Deep PCIe-like sections should not drop numbered steps by verb list."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("unlisted_steps.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "Intro text.\n"
+                        "1. Ensure CTLE enabled.\n"
+                        "2. Allow settling.\n"
+                        "3. Calibrate the source jitter to the required limit.\n"
+                        "4. Observe the recovered clock output.\n"
+                        "5. Use the saved template for analysis."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+        body = "\n".join(section.body for section in sections)
+
+        self.assertEqual(1, len(sections))
+        self.assertIn("1. Ensure CTLE enabled.", body)
+        self.assertIn("2. Allow settling.", body)
+        self.assertIn("3. Calibrate the source jitter", body)
+        self.assertIn("4. Observe the recovered clock", body)
+        self.assertIn("5. Use the saved template", body)
+
+    def test_real_integer_heading_after_deep_steps_is_preserved(self) -> None:
+        """A top-level chapter after deep procedure steps should not be swallowed."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("deep_then_top.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "2.13.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "Intro text.\n"
+                        "1. Calibrate the source jitter to the required limit.\n"
+                        "2. Observe the recovered clock output.\n"
+                        "3 Receiver Requirements\n"
+                        "Receiver requirements text."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+        locations = [section.location for section in sections]
+
+        self.assertIn("2.13.2 Overview of Calibration Steps at 16.0 GT/s", locations)
+        self.assertIn("3 Receiver Requirements", locations)
+        self.assertIn("1. Calibrate the source jitter", sections[0].body)
+        self.assertNotIn("3 Receiver Requirements", sections[0].body)
 
     def test_top_level_numbered_headings_after_subsections_are_preserved(self) -> None:
         """A real top-level heading after a dotted subsection must remain a section."""
@@ -593,6 +658,350 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("1 Scope", locations)
         self.assertIn("1 Scope / 1.1 Delivery", locations)
         self.assertIn("2 Acceptance", locations)
+
+    def test_cosmetic_case_spacing_and_punctuation_diffs_are_suppressed(self) -> None:
+        """Formatting-only extraction differences should not clutter reports."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_cosmetic.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Enable 100 MHz Sj and set the value to 0.0ps, then save the waveform."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_cosmetic.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Enable 100 MHz SJ and set the value to 0.0 ps then save the waveform"
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_numeric_punctuation_changes_are_not_suppressed(self) -> None:
+        """Numeric punctuation and tolerance signs can carry protocol meaning."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_numeric.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Set the residual jitter limit to 1.0 ps.\n"
+                        "Apply the voltage tolerance of +0/-2 mV."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_numeric.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Set the residual jitter limit to 10 ps.\n"
+                        "Apply the voltage tolerance of 0/2 mV."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("1.0 ps", snippets)
+        self.assertIn("10 ps", snippets)
+        self.assertIn("+0/-2 mV", snippets)
+        self.assertIn("0/2 mV", snippets)
+
+    def test_comparison_operator_changes_are_not_suppressed(self) -> None:
+        """Inequality operators are protocol content, not display punctuation."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_operator.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nEye height must be <= 15 mV.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_operator.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nEye height must be >= 15 mV.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("<= 15 mV", snippets)
+        self.assertIn(">= 15 mV", snippets)
+
+    def test_arrow_symbol_differences_are_suppressed(self) -> None:
+        """Connection arrows are layout noise unless nearby tokens also change."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_arrows.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nGenerator→Cable→Scope.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_arrows.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nGenerator- >Cable->Scope.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_pdf_numeric_extraction_artifacts_are_suppressed(self) -> None:
+        """PDF spacing around units, decimals, and exponents should not be noise."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_numeric_artifact.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture 2.0 X 106 X 62.5ps = 125.0μs.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_numeric_artifact.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture 2.0 X 10 6 X 62.5 ps = 125. 0 μs.",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_snippet_limit_scans_all_differences_and_reports_omissions(self) -> None:
+        """Later substantive changes should not disappear when snippets are capped."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_many.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Formatting text uses commas, only.\n"
+                        "Unchanged anchor one.\n"
+                        "The jitter limit is 1.0 ps.\n"
+                        "Unchanged anchor two.\n"
+                        "The preset mode is P5."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_many.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Formatting text uses commas only\n"
+                        "Unchanged anchor one.\n"
+                        "The jitter limit is 10 ps.\n"
+                        "Unchanged anchor two.\n"
+                        "The preset mode is P6."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(max_snippets_per_section=1),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual(1, result.changes[0].omitted_snippet_count)
+        shown = "\n".join(
+            pair.old + "\n" + pair.new for pair in result.changes[0].replaced_snippets
+        )
+        self.assertIn("1.0 ps", shown)
+        self.assertIn("10 ps", shown)
+        self.assertNotIn("Formatting text uses commas", shown)
+
+    def test_heading_change_counts_against_snippet_limit(self) -> None:
+        """A title snippet should not silently hide a body change."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_heading_limit.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nSet jitter limit to 1.0 ps.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_heading_limit.pdf"),
+            pages=[PageText(page_number=1, text="1 Applicability\nSet jitter limit to 10 ps.")],
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(max_snippets_per_section=1),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual(1, result.changes[0].omitted_snippet_count)
+        self.assertEqual(1, len(result.changes[0].replaced_snippets))
+
+    def test_wrapped_sentence_snippets_are_reported_as_complete_units(self) -> None:
+        """Line-wrapped PDF text should produce readable sentence-level snippets."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_wrapped.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The supplier shall provide the calibration report before shipment and include\n"
+                        "the original waveform files for audit."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_wrapped.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The supplier shall provide the calibration report before shipment and include\n"
+                        "the original waveform files plus SigTest logs for audit."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual(1, len(result.changes))
+        pair = result.changes[0].replaced_snippets[0]
+        self.assertIn("include the original waveform files for audit.", pair.old)
+        self.assertIn("include the original waveform files plus SigTest logs for audit.", pair.new)
+        self.assertNotIn("…", pair.old)
+        self.assertNotIn("…", pair.new)
+
+    def test_wrapped_lettered_list_marker_stays_with_sentence(self) -> None:
+        """List markers split by PDF extraction should not become lone snippets."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\na.\nSet transmitter amplitude to 720 mV.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\na.\nSet transmitter amplitude to 800 mV.",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        pair = result.changes[0].replaced_snippets[0]
+
+        self.assertIn("a. Set transmitter amplitude to 720 mV.", pair.old)
+        self.assertIn("a. Set transmitter amplitude to 800 mV.", pair.new)
+        self.assertNotEqual("a.", pair.old)
+        self.assertNotEqual("a.", pair.new)
+
+    def test_html_inline_highlight_deemphasizes_case_noise(self) -> None:
+        """HTML should highlight substantive token changes, not case-only noise."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nIf the computed Rj is valid, repeat steps 9 through 11.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nIf the computed RJ is valid, repeat steps 10 through 11.",
+                )
+            ],
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertNotIn('<mark class="del">Rj</mark>', report_html)
+        self.assertNotIn('<mark class="ins">RJ</mark>', report_html)
+        self.assertIn('<mark class="del">9</mark>', report_html)
+        self.assertIn('<mark class="ins">10</mark>', report_html)
+
+    def test_opening_range_location_is_human_readable(self) -> None:
+        """Selected-range pre-heading text should not expose internal labels."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_range.pdf"),
+            pages=[PageText(page_number=10, text="1 Scope\nCommon requirement.")],
+            selected_start_page=10,
+            selected_end_page=10,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_range.pdf"),
+            pages=[
+                PageText(
+                    page_number=20,
+                    text="New preface requirement.\n1 Scope\nCommon requirement.",
+                )
+            ],
+            selected_start_page=20,
+            selected_end_page=20,
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_md = outputs["markdown"].read_text(encoding="utf-8")
+
+        self.assertIn("新增: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertIn("新位置: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertNotIn("范围起始页前序内容", report_md)
 
     def test_invalid_explicit_paths_do_not_fall_back_to_demo(self) -> None:
         args = Namespace(
@@ -666,7 +1075,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("第一章 总则", locations[0])
         self.assertEqual("第一章 总则 / 第2节 交付要求", locations[1])
 
-    def test_html_explains_when_snippets_are_suppressed(self) -> None:
+    def test_html_explains_when_snippets_are_omitted_by_limit(self) -> None:
         old_extraction = ExtractionResult(
             pdf_path=Path("old.pdf"),
             pages=[PageText(page_number=1, text="1 Scope\nOld requirement.")],
@@ -682,7 +1091,7 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, Path(temp_dir), options)
             report_html = outputs["html"].read_text(encoding="utf-8")
 
-        self.assertIn("当前片段数量设置未展开具体文本", report_html)
+        self.assertIn("另有 1 条差异片段未展示", report_html)
         self.assertNotIn("仅元数据或位置发生变化", report_html)
 
 

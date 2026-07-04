@@ -133,7 +133,7 @@ class DiffOptions:
 
     min_section_match_similarity: float = 0.72
     unchanged_similarity: float = 0.985
-    max_snippets_per_section: int = 8
+    max_snippets_per_section: int = 20
     include_unchanged_sections: bool = False
     old_start_page: int | None = None
     old_end_page: int | None = None
@@ -160,6 +160,7 @@ class SectionChange:
     added_snippets: list[str] = field(default_factory=list)
     removed_snippets: list[str] = field(default_factory=list)
     replaced_snippets: list[SnippetPair] = field(default_factory=list)
+    omitted_snippet_count: int = 0
 
     @property
     def report_location(self) -> str:

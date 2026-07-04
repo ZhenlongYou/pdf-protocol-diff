@@ -85,8 +85,9 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             if not line:
                 continue
             heading = detect_heading(line)
-            if heading and _is_procedure_step_under_deep_context(heading, deep_numeric_context):
-                heading = None
+            if heading and _is_integer_heading_under_deep_context(heading, deep_numeric_context):
+                if not _looks_like_real_integer_heading_after_deep_context(heading):
+                    heading = None
             if heading:
                 saw_heading = True
                 if current:
@@ -483,6 +484,13 @@ def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:
 
     if number == "0":
         return True
+    if number.count(".") == 1 and (
+        title[:1].islower()
+        or re.match(r"(?i)^(ps|ns|us|ms|ui|mv|v|db|mhz|ghz|gt/s|hz)\b", title)
+    ):
+        return True
+    if number.isdigit() and int(number) > 99 and title[:1].islower():
+        return True
     if "." not in number and len(number) == 4 and number.startswith(("19", "20")):
         return True
     if not title:
@@ -523,24 +531,83 @@ def _is_procedure_step_under_deep_context(
     heading: HeadingInfo,
     deep_numeric_context: tuple[str, ...],
 ) -> bool:
-    """Keep numbered procedure steps inside their parent technical section.
+    """Recognize numbered procedure steps under their parent technical section.
 
     PCIe-style specifications often have real deep sections such as
     ``2.13.2 Overview...`` followed by dozens of numbered calibration steps like
-    ``14. Turn all jitter...``. Treating every step as a new section makes the
-    report noisy and hides the fact that the parent section matched across PDF
-    versions. The guard is intentionally narrow: it only applies to integer
-    numeric candidates after an already-detected deep numeric section.
+    ``14. Turn all jitter...``. These steps should remain visible as diff
+    units, but they should stay under the parent section path instead of being
+    mistaken for top-level protocol chapters.
     """
 
-    if not heading.number.isdigit() or "." in heading.number:
-        return False
-    if not deep_numeric_context:
+    if not _is_integer_heading_under_deep_context(heading, deep_numeric_context):
         return False
     parent_number = deep_numeric_context[-1]
     if not _is_deep_numeric_number(parent_number):
         return False
     return _looks_like_procedure_step_title(heading.title)
+
+
+def _is_integer_heading_under_deep_context(
+    heading: HeadingInfo,
+    deep_numeric_context: tuple[str, ...],
+) -> bool:
+    """Return True for integer numeric candidates under a deep section."""
+
+    return bool(deep_numeric_context and heading.number.isdigit() and "." not in heading.number)
+
+
+def _looks_like_wrapped_numeric_continuation(heading: HeadingInfo) -> bool:
+    """Reject wrapped text fragments such as ``9 must all be calibrated``."""
+
+    title = normalize_line(heading.title)
+    return bool(title and title[:1].islower())
+
+
+def _looks_like_real_integer_heading_after_deep_context(heading: HeadingInfo) -> bool:
+    """Allow obvious top-level headings after a deep procedure section.
+
+    Under PCIe-style deep sections, integer-numbered lines are much more often
+    procedure steps than new chapters. A missed step is worse than a conservative
+    parent section, so only short noun-like titles with common section-heading
+    words are allowed to break out of the parent context.
+    """
+
+    if _looks_like_wrapped_numeric_continuation(heading):
+        return False
+    title = normalize_line(heading.title)
+    if not title:
+        return False
+    if _is_procedure_step_under_deep_context(heading, ("0.0.0",)):
+        return False
+    words = re.findall(r"[A-Za-z]+", title.casefold())
+    if not words or len(words) > 6:
+        return False
+    heading_words = {
+        "acceptance",
+        "appendix",
+        "architecture",
+        "background",
+        "calibration",
+        "compliance",
+        "configuration",
+        "definitions",
+        "description",
+        "electrical",
+        "introduction",
+        "method",
+        "overview",
+        "procedure",
+        "receiver",
+        "references",
+        "requirements",
+        "scope",
+        "specification",
+        "test",
+        "tests",
+        "transmitter",
+    }
+    return bool(set(words) & heading_words)
 
 
 def _is_deep_numeric_heading(heading: HeadingInfo) -> bool:
@@ -566,19 +633,31 @@ def _looks_like_procedure_step_title(title: str) -> bool:
     procedure_words = {
         "adjust",
         "analyze",
+        "apply",
+        "attach",
+        "calibrate",
         "capture",
         "change",
+        "check",
+        "choose",
+        "configure",
         "connect",
         "decrease",
         "determine",
+        "disconnect",
         "enable",
+        "enter",
         "find",
         "for",
         "have",
         "if",
         "install",
+        "load",
         "measure",
         "note",
+        "observe",
+        "perform",
+        "power",
         "prepare",
         "record",
         "remove",
@@ -590,14 +669,48 @@ def _looks_like_procedure_step_title(title: str) -> bool:
         "set",
         "transmit",
         "turn",
+        "use",
         "using",
         "verify",
+        "wait",
     }
     if first_word in procedure_words:
+        return True
+    if _looks_like_instruction_sentence(normalized):
         return True
     if len(normalized) > 45:
         return True
     return bool(re.match(r"^[a-z0-9]", normalized))
+
+
+def _looks_like_instruction_sentence(title: str) -> bool:
+    """Return True for numbered lines that read like procedure instructions."""
+
+    words = re.findall(r"[A-Za-z]+", title)
+    if len(words) < 4:
+        return False
+    instruction_markers = {
+        "a",
+        "an",
+        "after",
+        "all",
+        "and",
+        "before",
+        "from",
+        "if",
+        "into",
+        "of",
+        "the",
+        "then",
+        "to",
+        "until",
+        "using",
+        "when",
+        "with",
+        "within",
+    }
+    lowered = {word.casefold() for word in words}
+    return bool(lowered & instruction_markers)
 
 
 def _next_non_empty_line(lines: list[str], start_index: int) -> str | None:
