@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "protocol-pdf-diff"
+version = "1.0.0"
+description = "Compare old/new protocol PDFs and report chapter or section-level changes."
+requires-python = ">=3.10"
+dependencies = [
+    "pypdf>=4.2.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

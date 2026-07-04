@@ -19,6 +19,11 @@
 python3 -m pip install -r requirements.txt
 ```
 
+如果你是在 `/Users/mac/PycharmProjects/RinysProject` 根目录打开 PyCharm，
+也可以在根目录运行 `python3 -m pip install -r requirements.txt`。根目录
+依赖文件会把本工具以 editable package 安装进当前解释器，PyCharm 就能识别
+`protocol_pdf_diff` 导入。
+
 ## PyCharm 直接运行
 
 打开 `main.py`，只需要改顶部用户参数区：
