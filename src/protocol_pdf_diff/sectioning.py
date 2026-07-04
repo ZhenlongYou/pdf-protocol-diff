@@ -75,7 +75,9 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     sections: list[Section] = []
     current: _OpenSection | None = None
     heading_stack: list[HeadingInfo] = []
+    deep_numeric_context: tuple[str, ...] = ()
     saw_heading = False
+    opening_label = _opening_section_label(extraction)
 
     for page in cleaned_pages:
         for raw_line in page.text.splitlines():
@@ -83,11 +85,17 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             if not line:
                 continue
             heading = detect_heading(line)
+            if heading and _is_procedure_step_under_deep_context(heading, deep_numeric_context):
+                heading = None
             if heading:
                 saw_heading = True
                 if current:
                     sections.append(_close_section(current, len(sections) + 1))
                 heading_stack = _updated_stack(heading_stack, heading)
+                if _is_deep_numeric_heading(heading):
+                    deep_numeric_context = tuple(item.number for item in heading_stack if item.number)
+                else:
+                    deep_numeric_context = ()
                 current = _OpenSection(
                     heading=heading.raw,
                     title=heading.title or heading.raw,
@@ -102,10 +110,10 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
 
             if current is None:
                 current = _OpenSection(
-                    heading="文档开头",
-                    title="文档开头",
+                    heading=opening_label,
+                    title=opening_label,
                     level=0,
-                    heading_path=("文档开头",),
+                    heading_path=(opening_label,),
                     number_path=(),
                     start_page=page.page_number,
                     end_page=page.page_number,
@@ -166,6 +174,7 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
 
     edge_counts: Counter[tuple[str, str]] = Counter()
     dynamic_counts: Counter[tuple[str, str]] = Counter()
+    static_furniture_counts: Counter[tuple[str, str]] = Counter()
     for page in pages:
         unique_candidates = set(_page_margin_candidates(page.text))
         for zones, line in unique_candidates:
@@ -175,13 +184,19 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
                 if _looks_like_dynamic_page_furniture(line):
                     for margin_position in _margin_positions(zones):
                         dynamic_counts[(margin_position, _furniture_fingerprint(line))] += 1
+                if _looks_like_static_page_furniture(line):
+                    for margin_position in _margin_positions(zones):
+                        static_furniture_counts[(margin_position, line)] += 1
 
     min_repeats = max(2, ceil(len(pages) * 0.55))
     repeated_edges = {line for line, count in edge_counts.items() if count >= min_repeats}
     repeated_dynamic = {
         line for line, count in dynamic_counts.items() if count >= min_repeats
     }
-    if not repeated_edges and not repeated_dynamic:
+    repeated_static = {
+        line for line, count in static_furniture_counts.items() if count >= min_repeats
+    }
+    if not repeated_edges and not repeated_dynamic and not repeated_static:
         return pages
 
     cleaned: list[PageText] = []
@@ -195,6 +210,7 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
                 line_zones.get(index, frozenset()),
                 repeated_edges,
                 repeated_dynamic,
+                repeated_static,
             )
         ]
         cleaned.append(PageText(page_number=page.page_number, text="\n".join(kept_lines)))
@@ -214,7 +230,7 @@ def _page_margin_candidates(text: str) -> list[tuple[frozenset[str], str]]:
     return candidates
 
 
-def _page_line_zones(text: str, margin_size: int = 3) -> dict[int, frozenset[str]]:
+def _page_line_zones(text: str, margin_size: int = 4) -> dict[int, frozenset[str]]:
     """Map raw line indexes to conservative page-furniture zones.
 
     Exact repeated lines are removed only at the first/last non-empty line. Dynamic
@@ -246,6 +262,7 @@ def _is_removed_page_furniture(
     zones: frozenset[str],
     repeated_edges: set[tuple[str, str]],
     repeated_dynamic: set[tuple[str, str]],
+    repeated_static: set[tuple[str, str]],
 ) -> bool:
     """Decide whether one extracted line is learned header/footer furniture."""
 
@@ -255,6 +272,14 @@ def _is_removed_page_furniture(
     if "top-edge" in zones and ("top", line) in repeated_edges:
         return True
     if "bottom-edge" in zones and ("bottom", line) in repeated_edges:
+        return True
+    if (
+        _looks_like_static_page_furniture(line)
+        and (
+            ("top-margin" in zones and ("top", line) in repeated_static)
+            or ("bottom-margin" in zones and ("bottom", line) in repeated_static)
+        )
+    ):
         return True
     if not _looks_like_dynamic_page_furniture(line):
         return False
@@ -296,11 +321,33 @@ def _looks_like_dynamic_page_furniture(line: str) -> bool:
     page_patterns = (
         r"(?i)\bpage\s*\d+\s*(?:of|/|-)\s*\d+\b",
         r"(?i)\bpage\s*\d+\b",
+        r"\|\s*\d+\s*$",
         r"第\s*\d+\s*页(?:\s*(?:/|共)\s*\d+\s*页?)?",
         r"^\s*-?\s*\d+\s*-?\s*$",
         r"^\s*\d+\s*/\s*\d+\s*$",
     )
     return any(re.search(pattern, candidate) for pattern in page_patterns)
+
+
+def _looks_like_static_page_furniture(line: str) -> bool:
+    """Recognize repeated non-page-number header/footer lines.
+
+    Some technical specifications split the running header across several
+    extracted lines, for example title, revision, and date. These lines do not
+    always contain a literal page counter, so they need a separate conservative
+    recognizer. The caller still requires repetition in the page margin before
+    removing them, which protects ordinary repeated body clauses.
+    """
+
+    candidate = compact_inline(line)
+    if len(candidate) > 120:
+        return False
+    static_patterns = (
+        r"(?i)^revision\s+\d+(?:\.\d+)*(?:,\s*version\s+\d+(?:\.\d+)*)?$",
+        r"(?i)^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}$",
+        r"(?i)^(test descriptions|revision history|table of contents)$",
+    )
+    return any(re.search(pattern, candidate) for pattern in static_patterns)
 
 
 def _furniture_fingerprint(line: str) -> str:
@@ -329,7 +376,11 @@ def _merge_standalone_heading_lines(pages: list[PageText]) -> list[PageText]:
                 index += 1
                 continue
             next_line = _next_non_empty_line(raw_lines, index + 1)
-            if next_line and _is_standalone_heading_marker(line) and _can_be_heading_title(next_line):
+            if (
+                next_line
+                and _is_standalone_heading_marker(line)
+                and _can_be_heading_title(next_line)
+            ):
                 merged_lines.append(f"{line} {next_line}")
                 index = _index_after_next_non_empty(raw_lines, index + 1)
                 continue
@@ -363,6 +414,22 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         end_page=open_section.end_page,
         body=body,
     )
+
+
+def _opening_section_label(extraction: ExtractionResult) -> str:
+    """Name text that appears before the first detected heading.
+
+    When the user compares a selected page range that starts mid-document, text
+    before the first heading is usually carry-over content from the previous
+    section rather than the beginning of the whole PDF.
+    """
+
+    start_page = extraction.selected_start_page
+    if start_page is None and extraction.pages:
+        start_page = min(page.page_number for page in extraction.pages)
+    if start_page and start_page > 1:
+        return "范围起始页前序内容"
+    return "文档开头"
 
 
 def _page_fallback_sections(pages: list[PageText]) -> list[Section]:
@@ -414,11 +481,15 @@ def _looks_like_table_row(line: str) -> bool:
 def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:
     """Avoid treating dates or plain numeric values as section headings."""
 
+    if number == "0":
+        return True
     if "." not in number and len(number) == 4 and number.startswith(("19", "20")):
         return True
     if not title:
         return True
     if len(title) <= 2 and re.fullmatch(r"[\d.%:/-]+", title):
+        return True
+    if re.match(r"(?i)^x\s*\d", title):
         return True
     return False
 
@@ -441,9 +512,92 @@ def _can_be_heading_title(line: str) -> bool:
     title = normalize_line(line)
     if not title or len(title) > 100:
         return False
+    if re.match(r"^\d", title):
+        return False
     if detect_heading(title):
         return False
     return not _looks_like_table_row(title)
+
+
+def _is_procedure_step_under_deep_context(
+    heading: HeadingInfo,
+    deep_numeric_context: tuple[str, ...],
+) -> bool:
+    """Keep numbered procedure steps inside their parent technical section.
+
+    PCIe-style specifications often have real deep sections such as
+    ``2.13.2 Overview...`` followed by dozens of numbered calibration steps like
+    ``14. Turn all jitter...``. Treating every step as a new section makes the
+    report noisy and hides the fact that the parent section matched across PDF
+    versions. The guard is intentionally narrow: it only applies to integer
+    numeric candidates after an already-detected deep numeric section.
+    """
+
+    if not heading.number.isdigit() or "." in heading.number:
+        return False
+    if not deep_numeric_context:
+        return False
+    parent_number = deep_numeric_context[-1]
+    if not _is_deep_numeric_number(parent_number):
+        return False
+    return _looks_like_procedure_step_title(heading.title)
+
+
+def _is_deep_numeric_heading(heading: HeadingInfo) -> bool:
+    """Return True for headings such as ``2.13.2`` that commonly own steps."""
+
+    return _is_deep_numeric_number(heading.number)
+
+
+def _is_deep_numeric_number(number: str) -> bool:
+    """Return True for dotted numeric headings at depth three or deeper."""
+
+    return number.count(".") >= 2
+
+
+def _looks_like_procedure_step_title(title: str) -> bool:
+    """Return True when a numeric heading is more likely a list step."""
+
+    normalized = normalize_line(title)
+    if not normalized:
+        return False
+    first_word_match = re.match(r"([A-Za-z]+)", normalized)
+    first_word = first_word_match.group(1).casefold() if first_word_match else ""
+    procedure_words = {
+        "adjust",
+        "analyze",
+        "capture",
+        "change",
+        "connect",
+        "decrease",
+        "determine",
+        "enable",
+        "find",
+        "for",
+        "have",
+        "if",
+        "install",
+        "measure",
+        "note",
+        "prepare",
+        "record",
+        "remove",
+        "repeat",
+        "report",
+        "run",
+        "save",
+        "select",
+        "set",
+        "transmit",
+        "turn",
+        "using",
+        "verify",
+    }
+    if first_word in procedure_words:
+        return True
+    if len(normalized) > 45:
+        return True
+    return bool(re.match(r"^[a-z0-9]", normalized))
 
 
 def _next_non_empty_line(lines: list[str], start_index: int) -> str | None:

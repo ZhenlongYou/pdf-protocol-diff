@@ -518,6 +518,82 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("Confidential", joined_bodies)
         self.assertNotIn("Page 2 of 3", joined_bodies)
 
+    def test_pcie_style_numbered_steps_stay_inside_deep_section(self) -> None:
+        """Procedure steps under sections like 2.11.2 should not become sections."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("pcie_steps.pdf"),
+            pages=[
+                PageText(
+                    page_number=36,
+                    text=(
+                        "Test Descriptions\n"
+                        "PCI Express Architecture PHY Test Specification | 36\n"
+                        "Revision 4.0, Version 1.2\n"
+                        "August 18, 2021\n"
+                        "2.11.2 Overview of Calibration Steps at 16.0 GT/s\n"
+                        "For this calibration a real time oscilloscope is used.\n"
+                        "1. Connect the end of the cables to the RX SMPs.\n"
+                        "2.\n"
+                        "128 bits of a 1010 clock pattern at 16.0 GT/s.\n"
+                        "14. Turn all jitter and noise sources off.\n"
+                        "6 X 62.5 ps =\n"
+                        "125.0 us) and adjust it to the target range.\n"
+                    ),
+                ),
+                PageText(
+                    page_number=37,
+                    text=(
+                        "Test Descriptions\n"
+                        "PCI Express Architecture PHY Test Specification | 37\n"
+                        "Revision 4.0, Version 1.2\n"
+                        "August 18, 2021\n"
+                        "16. Capture 2.0 million unit-intervals of data.\n"
+                        "17. Analyze the waveform using SigTest.\n"
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+        locations = [section.location for section in sections]
+        body = "\n".join(section.body for section in sections)
+
+        self.assertEqual(["2.11.2 Overview of Calibration Steps at 16.0 GT/s"], locations)
+        self.assertIn("1. Connect the end of the cables", body)
+        self.assertIn("14. Turn all jitter and noise sources off", body)
+        self.assertIn("128 bits of a 1010 clock pattern", body)
+        self.assertNotIn("PCI Express Architecture PHY Test Specification", body)
+        self.assertNotIn("Revision 4.0", body)
+        self.assertNotIn("August 18, 2021", body)
+
+    def test_top_level_numbered_headings_after_subsections_are_preserved(self) -> None:
+        """A real top-level heading after a dotted subsection must remain a section."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("top_level_after_subsection.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Scope text.\n"
+                        "1.1 Delivery\n"
+                        "Delivery text.\n"
+                        "2 Acceptance\n"
+                        "Acceptance text."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+        locations = [section.location for section in sections]
+
+        self.assertIn("1 Scope", locations)
+        self.assertIn("1 Scope / 1.1 Delivery", locations)
+        self.assertIn("2 Acceptance", locations)
+
     def test_invalid_explicit_paths_do_not_fall_back_to_demo(self) -> None:
         args = Namespace(
             demo=False,
