@@ -113,7 +113,7 @@ class ProtocolDiffDesktopApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("协议 PDF 差异对比工具")
-        self.root.minsize(900, 640)
+        self.root.minsize(980, 700)
 
         self.old_pdf_var = tk.StringVar()
         self.new_pdf_var = tk.StringVar()
@@ -132,8 +132,9 @@ class ProtocolDiffDesktopApp:
 
         self._last_outputs: dict[str, Path] | None = None
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.page_entry_widgets: dict[str, ttk.Entry] = {}  # 保存四个页码输入框，供 smoke test 检查真实输入能力。
+        self.page_entry_widgets: dict[str, tk.Entry] = {}  # 保存四个原生页码输入框，供 smoke test 检查真实输入能力。
         self.file_browse_buttons: list[ttk.Button] = []  # 保存三个“选择”按钮，供打包后自测确认按钮存在。
+        self.demo_button: ttk.Button | None = None  # 记录 Demo 按钮，运行比较时临时禁用，避免重复触发。
 
         self._configure_style()
         self._build_layout()
@@ -142,7 +143,8 @@ class ProtocolDiffDesktopApp:
         """Apply restrained desktop styling while keeping native controls."""
 
         style = ttk.Style(self.root)
-        if "clam" in style.theme_names():
+        if sys.platform != "darwin" and "clam" in style.theme_names():
+            # macOS 原生 Aqua 主题的输入焦点更稳；其它系统才使用 clam 统一观感。
             style.theme_use("clam")
         style.configure(".", font=("Arial", 12))
         style.configure("Title.TLabel", font=("Arial", 20, "bold"))
@@ -207,7 +209,8 @@ class ProtocolDiffDesktopApp:
             command=self.run_comparison,  # 点击后进入输入校验和后台比较流程。
         )
         self.run_button.grid(row=0, column=0, sticky="w", padx=10, pady=12)  # 固定在操作区最左侧。
-        ttk.Button(action_frame, text="运行 Demo", command=self.run_demo).grid(
+        self.demo_button = ttk.Button(action_frame, text="填入 Demo 文件", command=self.run_demo)
+        self.demo_button.grid(
             row=0, column=1, sticky="w", padx=(0, 10), pady=12  # Demo 按钮紧跟主按钮，方便自测。
         )
         self.open_html_button = ttk.Button(
@@ -288,17 +291,35 @@ class ProtocolDiffDesktopApp:
         """Add start/end page fields for one side of the comparison."""
 
         ttk.Label(parent, text=start_label).grid(row=row, column=0, sticky="w", padx=10, pady=8)
-        start_entry = ttk.Entry(parent, textvariable=start_var, width=10)  # 起始页输入框，留空表示默认起点。
+        start_entry = self._create_page_entry(parent, start_var)  # 起始页输入框，留空表示默认起点。
         start_entry.grid(
-            row=row, column=1, sticky="w", padx=(0, 18), pady=8  # 短输入框足够容纳常见页码。
+            row=row, column=1, sticky="w", padx=(0, 18), pady=8, ipady=4  # 加高输入框，点击区域更明确。
         )
         ttk.Label(parent, text=end_label).grid(row=row, column=2, sticky="w", padx=10, pady=8)
-        end_entry = ttk.Entry(parent, textvariable=end_var, width=10)  # 终止页输入框，留空表示默认终点。
+        end_entry = self._create_page_entry(parent, end_var)  # 终止页输入框，留空表示默认终点。
         end_entry.grid(
-            row=row, column=3, sticky="w", padx=(0, 18), pady=8  # 与起始页输入框保持同样宽度。
+            row=row, column=3, sticky="w", padx=(0, 18), pady=8, ipady=4  # 与起始页输入框保持同样宽度。
         )
         self.page_entry_widgets[start_label] = start_entry  # 记录起始页控件，供回归测试直接验证可输入。
         self.page_entry_widgets[end_label] = end_entry  # 记录终止页控件，供回归测试直接验证可输入。
+
+    def _create_page_entry(self, parent: ttk.Frame, variable: tk.StringVar) -> tk.Entry:
+        """Create a native page-number entry with a visible edit affordance."""
+
+        entry = tk.Entry(
+            parent,  # 原生 Entry 在 macOS 上比 ttk.Entry 的焦点/输入表现更直接。
+            textvariable=variable,  # 绑定到对应页码变量，collect_config 会读取这些值。
+            width=12,  # 比旧版略宽，避免用户误以为只是窄标签。
+            justify="center",  # 页码通常较短，居中显示更像可编辑数字框。
+            relief="solid",  # 明确画出边框，减少“不知道哪里能输入”的问题。
+            borderwidth=1,  # 保持边框克制，不让界面显得很重。
+            highlightthickness=1,  # 焦点边框让当前编辑框更明显。
+            highlightbackground="#8ea0b8",  # 未聚焦时使用柔和灰蓝边框。
+            highlightcolor="#2563eb",  # 聚焦时使用蓝色边框提示可输入。
+            insertwidth=2,  # 光标稍宽，便于看出输入焦点。
+            takefocus=True,  # 允许 Tab 键切换到页码框。
+        )
+        return entry  # 返回真实可编辑控件，调用方负责布局和保存引用。
 
     def _add_setting_entry(
         self,
@@ -379,11 +400,14 @@ class ProtocolDiffDesktopApp:
             return
         self.old_pdf_var.set(str(old_pdf))
         self.new_pdf_var.set(str(new_pdf))
+        self.output_dir_var.set(str(default_output_dir()))
         self.old_start_var.set("")
         self.old_end_var.set("")
         self.new_start_var.set("")
         self.new_end_var.set("")
-        self.run_comparison()
+        self.summary_var.set("Demo 文件已填入")
+        self.report_path_var.set("")
+        self.status_var.set("Demo 文件已填入；可先填写页码范围，再点击开始比较。")
 
     def run_comparison(self) -> None:
         """Validate inputs and run the comparison in a background thread."""
@@ -397,9 +421,15 @@ class ProtocolDiffDesktopApp:
 
         self._set_running(True)
         self.status_var.set("正在抽取 PDF 文本并比较章节...")
+        # 先让按钮禁用、进度条和忙碌光标刷新出来，再启动耗时任务，减少“点击后卡住”的感觉。
+        self.root.after(40, self._start_worker, config)
+
+    def _start_worker(self, config: DesktopRunConfig) -> None:
+        """Start the background comparison after the UI has repainted."""
+
         worker = threading.Thread(target=self._run_worker, args=(config,), daemon=True)
         worker.start()
-        self.root.after(120, self._poll_result_queue)
+        self.root.after(250, self._poll_result_queue)
 
     def _run_worker(self, config: DesktopRunConfig) -> None:
         """Background worker that keeps the Tk event loop responsive."""
@@ -420,7 +450,7 @@ class ProtocolDiffDesktopApp:
         try:
             status, payload = self._result_queue.get_nowait()
         except queue.Empty:
-            self.root.after(120, self._poll_result_queue)
+            self.root.after(250, self._poll_result_queue)
             return
 
         self._set_running(False)
@@ -464,11 +494,17 @@ class ProtocolDiffDesktopApp:
 
         if running:
             self.run_button.configure(state="disabled")
+            if self.demo_button is not None:
+                self.demo_button.configure(state="disabled")
             self.open_html_button.configure(state="disabled")
             self.open_dir_button.configure(state="disabled")
-            self.progress.start(12)
+            self.root.configure(cursor="watch")
+            self.progress.start(24)
         else:
             self.run_button.configure(state="normal")
+            if self.demo_button is not None:
+                self.demo_button.configure(state="normal")
+            self.root.configure(cursor="")
             self.progress.stop()
 
     def open_html_report(self) -> None:
@@ -507,7 +543,7 @@ def run_smoke_test() -> None:
     """
 
     root = tk.Tk()
-    root.withdraw()
+    root.geometry("980x700+0+0")  # 用接近真实首屏的窗口尺寸做控件输入检查。
     app = ProtocolDiffDesktopApp(root)
     assert root.title() == "协议 PDF 差异对比工具"
     assert app.output_dir_var.get()
@@ -526,10 +562,13 @@ def run_smoke_test() -> None:
     assert not missing_labels, f"桌面界面缺少关键控件: {', '.join(missing_labels)}"  # 缺控件时直接失败。
     assert len(app.file_browse_buttons) == 3  # 旧 PDF、新 PDF、输出目录都必须有选择按钮。
     for label, entry in app.page_entry_widgets.items():
-        assert entry.winfo_class() == "TEntry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
+        assert entry.winfo_class() == "Entry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
         assert entry.winfo_manager() == "grid", f"{label} 未加入布局"  # 防止控件创建了但没有显示。
+        entry.focus_force()  # 强制聚焦输入框，模拟用户点击后准备输入。
         entry.delete(0, tk.END)  # 清空输入框，模拟用户准备输入页码。
-        entry.insert(0, "2")  # 写入一个合法页码，确认冻结环境里输入框可编辑。
+        entry.event_generate("<KeyPress-2>")  # 通过键盘事件输入数字，覆盖“只能程序写值”的假通过。
+        entry.event_generate("<KeyRelease-2>")  # 释放按键事件让 Tk 完成输入状态更新。
+        root.update()  # 处理键盘事件，确认输入框值已经变化。
         assert entry.get() == "2", f"{label} 无法输入页码"  # 如果 Entry 被错误禁用，这里会暴露。
     root.destroy()
 

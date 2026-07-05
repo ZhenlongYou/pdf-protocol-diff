@@ -79,31 +79,45 @@ class ProtocolDiffTests(unittest.TestCase):
     def test_desktop_gui_collects_valid_form_config(self) -> None:
         """Form values should map cleanly into the shared DiffOptions model."""
 
-        import tkinter as tk
+        import tkinter as tk  # Tk 用于创建真实 GUI 控件，验证页码框可编辑。
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            old_pdf, new_pdf = write_demo_pdfs(temp_path / "inputs")
-            root = tk.Tk()
-            root.withdraw()
+            temp_path = Path(temp_dir)  # 临时目录隔离测试 PDF 和报告输出。
+            old_pdf, new_pdf = write_demo_pdfs(temp_path / "inputs")  # 生成可抽取文本的示例 PDF。
+            root = tk.Tk()  # 创建真实 Tk 窗口，便于测试输入控件行为。
+            root.geometry("980x700+0+0")  # 固定窗口大小，贴近用户打开 GUI 的首屏尺寸。
             try:
-                app = ProtocolDiffDesktopApp(root)
-                app.old_pdf_var.set(str(old_pdf))
-                app.new_pdf_var.set(str(new_pdf))
-                app.output_dir_var.set(str(temp_path / "reports"))
-                app.old_start_var.set("2")
-                app.old_end_var.set("3")
-                app.new_start_var.set("2")
-                app.new_end_var.set("4")
-                app.min_similarity_var.set("0.8")
-                app.unchanged_similarity_var.set("0.99")
-                app.max_snippets_var.set("12")
-                app.include_unchanged_var.set(True)
+                app = ProtocolDiffDesktopApp(root)  # 构建完整桌面应用。
+                root.update()  # 让窗口完成布局和焦点初始化。
+                app.old_pdf_var.set(str(old_pdf))  # 填入旧 PDF 路径。
+                app.new_pdf_var.set(str(new_pdf))  # 填入新 PDF 路径。
+                app.output_dir_var.set(str(temp_path / "reports"))  # 填入报告输出目录。
+                app.min_similarity_var.set("0.8")  # 调整章节匹配阈值，验证高级参数仍能读取。
+                app.unchanged_similarity_var.set("0.99")  # 调整未变化阈值，验证高级参数仍能读取。
+                app.max_snippets_var.set("12")  # 调整片段数量，验证数字输入仍能读取。
+                app.include_unchanged_var.set(True)  # 打开未变化章节选项。
                 widget_texts = collect_widget_texts(root)  # 收集当前窗口所有可见控件文案。
+
+                page_values = {  # 这些值模拟用户逐个点击页码框并键盘输入。
+                    "旧协议起始页": "2",
+                    "旧协议终止页": "3",
+                    "新协议起始页": "2",
+                    "新协议终止页": "4",
+                }
+                for label, value in page_values.items():
+                    entry = app.page_entry_widgets[label]  # 取到真实页码输入框，而不是直接写 StringVar。
+                    entry.focus_force()  # 模拟用户点击该输入框获得焦点。
+                    root.update()  # 处理焦点事件，确保后续键盘事件送到该控件。
+                    entry.delete(0, tk.END)  # 清空旧值，模拟重新输入。
+                    for character in value:
+                        entry.event_generate(f"<KeyPress-{character}>")  # 发送真实按键按下事件。
+                        entry.event_generate(f"<KeyRelease-{character}>")  # 发送真实按键释放事件。
+                    root.update()  # 处理键盘事件，让输入框文本完成更新。
+
                 page_entry_facts = {
-                    label: (entry.winfo_class(), entry.winfo_manager())
+                    label: (entry.winfo_class(), entry.winfo_manager(), entry.get())
                     for label, entry in app.page_entry_widgets.items()
-                }  # 在销毁窗口前记录页码输入框的类型和布局状态。
+                }  # 在销毁窗口前记录页码输入框的类型、布局状态和实际输入结果。
                 browse_button_facts = [
                     (button.cget("text"), button.cget("command"))
                     for button in app.file_browse_buttons
@@ -130,14 +144,62 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("新协议起始页", widget_texts)  # 新 PDF 起始页输入标签必须存在。
         self.assertIn("新协议终止页", widget_texts)  # 新 PDF 终止页输入标签必须存在。
         self.assertIn("开始比较 / 生成报告", widget_texts)  # 主运行按钮必须存在。
+        self.assertIn("填入 Demo 文件", widget_texts)  # Demo 按钮只填路径，不再自动开跑导致卡顿。
         self.assertEqual(4, len(page_entry_facts))  # 四个页码输入框必须真实创建。
         self.assertEqual(3, len(browse_button_facts))  # 旧 PDF、新 PDF、输出目录三行都必须有“选择”按钮。
-        for label, (widget_class, layout_manager) in page_entry_facts.items():
-            self.assertEqual("TEntry", widget_class, f"{label} 应该是可输入控件")  # 防止只剩标签没有输入框。
+        expected_page_values = {
+            "旧协议起始页": "2",
+            "旧协议终止页": "3",
+            "新协议起始页": "2",
+            "新协议终止页": "4",
+        }  # 期望输入框通过键盘事件得到的最终值。
+        for label, (widget_class, layout_manager, typed_value) in page_entry_facts.items():
+            self.assertEqual("Entry", widget_class, f"{label} 应该是原生可输入控件")  # 防止只剩标签没有输入框。
             self.assertEqual("grid", layout_manager, f"{label} 应该已加入布局")  # 防止控件存在但不可见。
+            self.assertEqual(expected_page_values[label], typed_value, f"{label} 应该能接收键盘输入")  # 防止无法输入页码的回归。
         for button_text, button_command in browse_button_facts:
             self.assertEqual("选择", button_text)  # 三个浏览按钮都应显示相同入口文案。
             self.assertTrue(button_command)  # 浏览按钮必须绑定文件/目录选择回调。
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk demo test needs a desktop session",
+    )
+    def test_desktop_gui_demo_button_only_fills_inputs(self) -> None:
+        """Demo action should prepare sample files without starting a comparison."""
+
+        import tkinter as tk  # Tk 用于创建真实桌面窗口并调用 Demo 按钮逻辑。
+
+        root = tk.Tk()  # 创建窗口，确保 Demo 行为在真实 Tk 环境中运行。
+        root.geometry("980x700+0+0")  # 固定窗口尺寸，避免布局差异影响控件状态。
+        try:
+            app = ProtocolDiffDesktopApp(root)  # 构建完整 GUI。
+            root.update()  # 处理初始布局事件。
+            app.old_start_var.set("9")  # 先填一个旧值，用于确认 Demo 会清空页码范围。
+            app.new_end_var.set("10")  # 先填一个旧值，用于确认 Demo 会清空页码范围。
+
+            app.run_demo()  # 调用 Demo 行为；它应该只填 PDF 路径，不启动比较线程。
+            root.update()  # 处理 Demo 更新到界面的状态文本。
+
+            old_pdf_path = Path(app.old_pdf_var.get())  # 读取 Demo 填入的旧 PDF 路径。
+            new_pdf_path = Path(app.new_pdf_var.get())  # 读取 Demo 填入的新 PDF 路径。
+            summary_text = app.summary_var.get()  # 读取结果摘要，确认没有进入比较完成状态。
+            status_text = app.status_var.get()  # 读取状态栏，确认提示用户手动开始比较。
+            report_text = app.report_path_var.get()  # 读取报告路径，确认还没有生成报告。
+            last_outputs = app._last_outputs  # 读取最近输出，确认没有后台比较结果。
+            old_start_value = app.old_start_var.get()  # 销毁窗口前缓存旧协议起始页变量。
+            new_end_value = app.new_end_var.get()  # 销毁窗口前缓存新协议终止页变量。
+        finally:
+            root.destroy()  # 销毁窗口，避免影响后续测试。
+
+        self.assertTrue(old_pdf_path.exists())  # Demo 应该生成并填入旧 PDF。
+        self.assertTrue(new_pdf_path.exists())  # Demo 应该生成并填入新 PDF。
+        self.assertEqual("", old_start_value)  # Demo 应清空旧协议起始页，方便用户重新输入。
+        self.assertEqual("", new_end_value)  # Demo 应清空新协议终止页，方便用户重新输入。
+        self.assertEqual("Demo 文件已填入", summary_text)  # 摘要应停留在“已填入”，而不是“比较完成”。
+        self.assertIn("点击开始比较", status_text)  # 状态栏应提示用户手动开始。
+        self.assertEqual("", report_text)  # 未点击开始前不应该有报告路径。
+        self.assertIsNone(last_outputs)  # 未点击开始前不应该有比较输出。
 
     def test_demo_pdfs_produce_modified_and_added_sections(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
