@@ -7,3 +7,6 @@ __pycache__/
 work/
 results/
 *.egg-info/
+build/
+dist/
+*.spec

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from main import resolve_inputs
 from protocol_pdf_diff.compare import compare_extractions
 from protocol_pdf_diff.compare import run_diff
+from protocol_pdf_diff.desktop_gui import (
+    ProtocolDiffDesktopApp,
+    parse_optional_page,
+    parse_positive_float,
+    parse_positive_int,
+    run_smoke_test,
+)
 from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.reporting import write_reports
@@ -34,6 +42,75 @@ from protocol_pdf_diff.sectioning import section_document
 
 class ProtocolDiffTests(unittest.TestCase):
     """End-to-end tests over generated old/new sample PDFs."""
+
+    def test_desktop_gui_input_parsers_validate_user_fields(self) -> None:
+        """GUI page and numeric fields should fail early with readable errors."""
+
+        self.assertIsNone(parse_optional_page("", "旧协议起始页"))
+        self.assertEqual(36, parse_optional_page("36", "旧协议起始页"))
+        self.assertEqual(0.72, parse_positive_float("0.72", "章节匹配阈值"))
+        self.assertEqual(20, parse_positive_int("20", "最大片段数"))
+
+        with self.assertRaisesRegex(ValueError, "旧协议起始页 必须是正整数"):
+            parse_optional_page("abc", "旧协议起始页")
+        with self.assertRaisesRegex(ValueError, "旧协议起始页 必须大于等于 1"):
+            parse_optional_page("0", "旧协议起始页")
+        with self.assertRaisesRegex(ValueError, "章节匹配阈值 必须大于 0"):
+            parse_positive_float("0", "章节匹配阈值")
+        with self.assertRaisesRegex(ValueError, "最大片段数 不能小于 0"):
+            parse_positive_int("-1", "最大片段数")
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk smoke test needs a desktop session",
+    )
+    def test_desktop_gui_smoke_test_builds_widgets(self) -> None:
+        """The desktop UI should instantiate cleanly for packaged startup checks."""
+
+        run_smoke_test()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk form test needs a desktop session",
+    )
+    def test_desktop_gui_collects_valid_form_config(self) -> None:
+        """Form values should map cleanly into the shared DiffOptions model."""
+
+        import tkinter as tk
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf, new_pdf = write_demo_pdfs(temp_path / "inputs")
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                app = ProtocolDiffDesktopApp(root)
+                app.old_pdf_var.set(str(old_pdf))
+                app.new_pdf_var.set(str(new_pdf))
+                app.output_dir_var.set(str(temp_path / "reports"))
+                app.old_start_var.set("2")
+                app.old_end_var.set("3")
+                app.new_start_var.set("2")
+                app.new_end_var.set("4")
+                app.min_similarity_var.set("0.8")
+                app.unchanged_similarity_var.set("0.99")
+                app.max_snippets_var.set("12")
+                app.include_unchanged_var.set(True)
+
+                config = app.collect_config()
+            finally:
+                root.destroy()
+
+        self.assertEqual(old_pdf, config.old_pdf)
+        self.assertEqual(new_pdf, config.new_pdf)
+        self.assertEqual(2, config.options.old_start_page)
+        self.assertEqual(3, config.options.old_end_page)
+        self.assertEqual(2, config.options.new_start_page)
+        self.assertEqual(4, config.options.new_end_page)
+        self.assertEqual(0.8, config.options.min_section_match_similarity)
+        self.assertEqual(0.99, config.options.unchanged_similarity)
+        self.assertEqual(12, config.options.max_snippets_per_section)
+        self.assertTrue(config.options.include_unchanged_sections)
 
     def test_demo_pdfs_produce_modified_and_added_sections(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

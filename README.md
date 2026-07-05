@@ -117,3 +117,66 @@ python3 main.py
 ```
 
 第二条命令会用内置多页 demo PDF 验证从“PDF 输入”到“HTML/CSV/JSON 报告输出”的完整路径。
+
+## 桌面版 GUI
+
+如果要给不熟悉命令行的同事使用，可以运行桌面界面：
+
+```bash
+python3 gui_app.py
+```
+
+界面支持：
+
+- 选择旧协议 PDF、新协议 PDF 和报告输出目录。
+- 分别填写旧 PDF 与新 PDF 的起始页/终止页；留空表示从开头或到结尾。
+- 调整章节匹配阈值、未变化阈值、每章最大片段数。
+- 运行内置 demo，快速确认软件和依赖正常。
+- 比较完成后直接打开 HTML 报告或报告目录。
+
+GUI 与命令行复用同一套比较逻辑，生成的报告格式也完全一致。
+
+## 打包成无 Python 桌面程序
+
+打包使用 PyInstaller。它不能跨系统编译：macOS 只能构建 macOS app，
+Windows 需要在 Windows 机器上构建 `.exe`。
+
+macOS 构建：
+
+```bash
+./build_macos.sh
+```
+
+产物：
+
+```text
+dist/ProtocolPdfDiff.app
+```
+
+Windows 构建：
+
+```bat
+build_windows.bat
+```
+
+产物：
+
+```text
+dist\ProtocolPdfDiff.exe
+```
+
+如果想手动执行，也可以在目标系统运行：
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
+python build_desktop.py --clean
+```
+
+生成后的 app/exe 已包含 Python、Tkinter、pypdf 和本项目代码，普通用户不需要
+单独安装 Python。macOS 未签名 app 第一次打开时可能需要在 Finder 中右键选择
+“打开”；Windows 未签名 exe 可能会触发 SmartScreen，需要按公司内部软件分发流程处理。
+
+如果项目放在 GitHub 仓库根目录，也可以在 Actions 里手动触发
+`Build desktop apps` 工作流，让 GitHub 的 Windows runner 生成 `.exe`，
+macOS runner 生成 `.app`。这适合没有 Windows 开发机但需要 Windows 产物的场景。
