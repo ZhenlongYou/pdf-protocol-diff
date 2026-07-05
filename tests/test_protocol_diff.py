@@ -28,6 +28,9 @@ from protocol_pdf_diff.compare import compare_extractions
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.desktop_gui import (
     ProtocolDiffDesktopApp,
+    collect_widget_texts,  # 用于确认桌面界面真的渲染了关键按钮和页码标签。
+    default_demo_dir,  # 用于确认 demo 输入文件也写到用户可写目录。
+    default_output_dir,  # 用于确认打包版默认输出到用户可写的文档目录。
     parse_optional_page,
     parse_positive_float,
     parse_positive_int,
@@ -96,6 +99,15 @@ class ProtocolDiffTests(unittest.TestCase):
                 app.unchanged_similarity_var.set("0.99")
                 app.max_snippets_var.set("12")
                 app.include_unchanged_var.set(True)
+                widget_texts = collect_widget_texts(root)  # 收集当前窗口所有可见控件文案。
+                page_entry_facts = {
+                    label: (entry.winfo_class(), entry.winfo_manager())
+                    for label, entry in app.page_entry_widgets.items()
+                }  # 在销毁窗口前记录页码输入框的类型和布局状态。
+                browse_button_facts = [
+                    (button.cget("text"), button.cget("command"))
+                    for button in app.file_browse_buttons
+                ]  # 在销毁窗口前记录“选择”按钮文案和回调绑定。
 
                 config = app.collect_config()
             finally:
@@ -111,6 +123,21 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(0.99, config.options.unchanged_similarity)
         self.assertEqual(12, config.options.max_snippets_per_section)
         self.assertTrue(config.options.include_unchanged_sections)
+        self.assertEqual(str(default_output_dir()), str(Path.home() / "Documents" / "ProtocolPdfDiffReports"))  # 默认输出目录不能落到 app 包内部。
+        self.assertEqual(default_output_dir() / "_demo_inputs", default_demo_dir())  # Demo PDF 也应落在用户可写区域。
+        self.assertIn("旧协议起始页", widget_texts)  # 旧 PDF 起始页输入标签必须存在。
+        self.assertIn("旧协议终止页", widget_texts)  # 旧 PDF 终止页输入标签必须存在。
+        self.assertIn("新协议起始页", widget_texts)  # 新 PDF 起始页输入标签必须存在。
+        self.assertIn("新协议终止页", widget_texts)  # 新 PDF 终止页输入标签必须存在。
+        self.assertIn("开始比较 / 生成报告", widget_texts)  # 主运行按钮必须存在。
+        self.assertEqual(4, len(page_entry_facts))  # 四个页码输入框必须真实创建。
+        self.assertEqual(3, len(browse_button_facts))  # 旧 PDF、新 PDF、输出目录三行都必须有“选择”按钮。
+        for label, (widget_class, layout_manager) in page_entry_facts.items():
+            self.assertEqual("TEntry", widget_class, f"{label} 应该是可输入控件")  # 防止只剩标签没有输入框。
+            self.assertEqual("grid", layout_manager, f"{label} 应该已加入布局")  # 防止控件存在但不可见。
+        for button_text, button_command in browse_button_facts:
+            self.assertEqual("选择", button_text)  # 三个浏览按钮都应显示相同入口文案。
+            self.assertTrue(button_command)  # 浏览按钮必须绑定文件/目录选择回调。
 
     def test_demo_pdfs_produce_modified_and_added_sections(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

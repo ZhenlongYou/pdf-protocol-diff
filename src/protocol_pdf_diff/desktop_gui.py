@@ -31,6 +31,20 @@ from .sample_data import write_demo_pdfs
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def default_output_dir() -> Path:
+    """Return a user-writable report folder outside the packaged app bundle."""
+
+    # 把默认报告目录放在用户文档目录，避免打包后的 app 尝试写入只读 bundle。
+    return Path.home() / "Documents" / "ProtocolPdfDiffReports"
+
+
+def default_demo_dir() -> Path:
+    """Return the folder used for GUI demo PDFs."""
+
+    # Demo PDF 也放到用户文档目录下，避免冻结 app 在自身 bundle 附近写文件失败。
+    return default_output_dir() / "_demo_inputs"
+
+
 @dataclass(frozen=True)
 class DesktopRunConfig:
     """Validated settings collected from the desktop form before a run."""
@@ -103,7 +117,7 @@ class ProtocolDiffDesktopApp:
 
         self.old_pdf_var = tk.StringVar()
         self.new_pdf_var = tk.StringVar()
-        self.output_dir_var = tk.StringVar(value=str(PROJECT_ROOT / "results"))
+        self.output_dir_var = tk.StringVar(value=str(default_output_dir()))  # 默认输出到用户可写目录。
         self.old_start_var = tk.StringVar()
         self.old_end_var = tk.StringVar()
         self.new_start_var = tk.StringVar()
@@ -118,6 +132,8 @@ class ProtocolDiffDesktopApp:
 
         self._last_outputs: dict[str, Path] | None = None
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.page_entry_widgets: dict[str, ttk.Entry] = {}  # 保存四个页码输入框，供 smoke test 检查真实输入能力。
+        self.file_browse_buttons: list[ttk.Button] = []  # 保存三个“选择”按钮，供打包后自测确认按钮存在。
 
         self._configure_style()
         self._build_layout()
@@ -180,8 +196,37 @@ class ProtocolDiffDesktopApp:
             self.new_end_var,
         )
 
+        # 把主操作区前移到匹配设置之前，让用户首屏就能看到开始按钮。
+        action_frame = ttk.LabelFrame(container, text="开始生成报告", style="Section.TLabelframe")
+        action_frame.grid(row=4, column=0, sticky="ew", pady=(0, 14))  # 操作区紧跟页码范围。
+        action_frame.columnconfigure(4, weight=1)  # 右侧留出弹性空间，避免按钮挤压。
+        self.run_button = ttk.Button(
+            action_frame,  # 按钮放在“开始生成报告”区域内。
+            text="开始比较 / 生成报告",  # 文案同时说明点击后会生成报告。
+            style="Primary.TButton",  # 使用主按钮样式突出最常用操作。
+            command=self.run_comparison,  # 点击后进入输入校验和后台比较流程。
+        )
+        self.run_button.grid(row=0, column=0, sticky="w", padx=10, pady=12)  # 固定在操作区最左侧。
+        ttk.Button(action_frame, text="运行 Demo", command=self.run_demo).grid(
+            row=0, column=1, sticky="w", padx=(0, 10), pady=12  # Demo 按钮紧跟主按钮，方便自测。
+        )
+        self.open_html_button = ttk.Button(
+            action_frame,  # 报告按钮也放在同一操作区。
+            text="打开 HTML 报告",  # 运行成功后直接打开最直观的 HTML 报告。
+            command=self.open_html_report,  # 点击后用默认浏览器打开最近一次 HTML。
+            state="disabled",  # 未生成报告前禁用，避免用户打开空路径。
+        )
+        self.open_html_button.grid(row=0, column=2, sticky="w", padx=(0, 10), pady=12)  # 与主按钮同一行。
+        self.open_dir_button = ttk.Button(
+            action_frame,  # 输出目录按钮放在报告按钮后面。
+            text="打开输出目录",  # 方便用户查看 TXT/CSV/JSON 等其它文件。
+            command=self.open_report_directory,  # 点击后打开最近一次报告目录。
+            state="disabled",  # 未生成报告前禁用，避免打开无效目录。
+        )
+        self.open_dir_button.grid(row=0, column=3, sticky="w", pady=12)  # 保持操作区按钮横向排列。
+
         settings_frame = ttk.LabelFrame(container, text="匹配设置", style="Section.TLabelframe")
-        settings_frame.grid(row=4, column=0, sticky="ew", pady=(0, 14))
+        settings_frame.grid(row=5, column=0, sticky="ew", pady=(0, 14))  # 高级参数放在主操作区之后。
         for column in range(8):
             settings_frame.columnconfigure(column, weight=1)
         self._add_setting_entry(settings_frame, 0, 0, "章节匹配阈值", self.min_similarity_var)
@@ -192,34 +237,6 @@ class ProtocolDiffDesktopApp:
             text="列出未变化章节",
             variable=self.include_unchanged_var,
         ).grid(row=0, column=6, columnspan=2, sticky="w", padx=8, pady=10)
-
-        action_frame = ttk.Frame(container)
-        action_frame.grid(row=5, column=0, sticky="ew", pady=(0, 14))
-        action_frame.columnconfigure(5, weight=1)
-        self.run_button = ttk.Button(
-            action_frame,
-            text="运行比较",
-            style="Primary.TButton",
-            command=self.run_comparison,
-        )
-        self.run_button.grid(row=0, column=0, sticky="w", padx=(0, 10))
-        ttk.Button(action_frame, text="运行 Demo", command=self.run_demo).grid(
-            row=0, column=1, sticky="w", padx=(0, 10)
-        )
-        self.open_html_button = ttk.Button(
-            action_frame,
-            text="打开 HTML 报告",
-            command=self.open_html_report,
-            state="disabled",
-        )
-        self.open_html_button.grid(row=0, column=2, sticky="w", padx=(0, 10))
-        self.open_dir_button = ttk.Button(
-            action_frame,
-            text="打开输出目录",
-            command=self.open_report_directory,
-            state="disabled",
-        )
-        self.open_dir_button.grid(row=0, column=3, sticky="w")
 
         self.progress = ttk.Progressbar(container, mode="indeterminate")
         self.progress.grid(row=6, column=0, sticky="ew")
@@ -249,12 +266,15 @@ class ProtocolDiffDesktopApp:
         """Add one path entry row with a browse button."""
 
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=10, pady=8)
-        ttk.Entry(parent, textvariable=variable).grid(
-            row=row, column=1, sticky="ew", padx=(0, 10), pady=8
+        path_entry = ttk.Entry(parent, textvariable=variable)  # 路径输入框允许用户直接粘贴 PDF 或目录路径。
+        path_entry.grid(
+            row=row, column=1, sticky="ew", padx=(0, 10), pady=8  # 输入框横向拉伸，长路径也能看清。
         )
-        ttk.Button(parent, text="选择", command=command).grid(
-            row=row, column=2, sticky="e", padx=(0, 10), pady=8
+        browse_button = ttk.Button(parent, text="选择", command=command)  # “选择”按钮打开文件或目录选择器。
+        browse_button.grid(
+            row=row, column=2, sticky="e", padx=(0, 10), pady=8  # 按钮固定在每行右侧。
         )
+        self.file_browse_buttons.append(browse_button)  # 记录按钮，避免未来打包时漏掉选择控件。
 
     def _add_page_fields(
         self,
@@ -268,13 +288,17 @@ class ProtocolDiffDesktopApp:
         """Add start/end page fields for one side of the comparison."""
 
         ttk.Label(parent, text=start_label).grid(row=row, column=0, sticky="w", padx=10, pady=8)
-        ttk.Entry(parent, textvariable=start_var, width=10).grid(
-            row=row, column=1, sticky="w", padx=(0, 18), pady=8
+        start_entry = ttk.Entry(parent, textvariable=start_var, width=10)  # 起始页输入框，留空表示默认起点。
+        start_entry.grid(
+            row=row, column=1, sticky="w", padx=(0, 18), pady=8  # 短输入框足够容纳常见页码。
         )
         ttk.Label(parent, text=end_label).grid(row=row, column=2, sticky="w", padx=10, pady=8)
-        ttk.Entry(parent, textvariable=end_var, width=10).grid(
-            row=row, column=3, sticky="w", padx=(0, 18), pady=8
+        end_entry = ttk.Entry(parent, textvariable=end_var, width=10)  # 终止页输入框，留空表示默认终点。
+        end_entry.grid(
+            row=row, column=3, sticky="w", padx=(0, 18), pady=8  # 与起始页输入框保持同样宽度。
         )
+        self.page_entry_widgets[start_label] = start_entry  # 记录起始页控件，供回归测试直接验证可输入。
+        self.page_entry_widgets[end_label] = end_entry  # 记录终止页控件，供回归测试直接验证可输入。
 
     def _add_setting_entry(
         self,
@@ -349,7 +373,7 @@ class ProtocolDiffDesktopApp:
         """Generate demo PDFs and run the GUI workflow with those inputs."""
 
         try:
-            old_pdf, new_pdf = write_demo_pdfs(PROJECT_ROOT / "work" / "demo_inputs")
+            old_pdf, new_pdf = write_demo_pdfs(default_demo_dir())
         except Exception as exc:  # pragma: no cover - defensive UI fallback.
             messagebox.showerror("Demo 生成失败", str(exc))
             return
@@ -487,8 +511,42 @@ def run_smoke_test() -> None:
     app = ProtocolDiffDesktopApp(root)
     assert root.title() == "协议 PDF 差异对比工具"
     assert app.output_dir_var.get()
-    root.update_idletasks()
+    root.update_idletasks()  # 先让 Tk 完成布局，后续才能检查控件是否真正挂到 grid 上。
+    assert app.run_button.cget("text") == "开始比较 / 生成报告"  # 确认主按钮不是旧文案或旧界面。
+    assert app.run_button.cget("command")  # 确认主按钮绑定了回调，而不是只有静态文字。
+    widget_texts = collect_widget_texts(root)  # 收集所有可见控件文案，检查关键输入是否存在。
+    required_labels = {
+        "旧协议起始页",  # 旧 PDF 范围起点输入框必须可见。
+        "旧协议终止页",  # 旧 PDF 范围终点输入框必须可见。
+        "新协议起始页",  # 新 PDF 范围起点输入框必须可见。
+        "新协议终止页",  # 新 PDF 范围终点输入框必须可见。
+        "开始比较 / 生成报告",  # 主运行按钮必须可见。
+    }
+    missing_labels = sorted(required_labels - widget_texts)  # 找出缺失控件，方便构建失败时定位。
+    assert not missing_labels, f"桌面界面缺少关键控件: {', '.join(missing_labels)}"  # 缺控件时直接失败。
+    assert len(app.file_browse_buttons) == 3  # 旧 PDF、新 PDF、输出目录都必须有选择按钮。
+    for label, entry in app.page_entry_widgets.items():
+        assert entry.winfo_class() == "TEntry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
+        assert entry.winfo_manager() == "grid", f"{label} 未加入布局"  # 防止控件创建了但没有显示。
+        entry.delete(0, tk.END)  # 清空输入框，模拟用户准备输入页码。
+        entry.insert(0, "2")  # 写入一个合法页码，确认冻结环境里输入框可编辑。
+        assert entry.get() == "2", f"{label} 无法输入页码"  # 如果 Entry 被错误禁用，这里会暴露。
     root.destroy()
+
+
+def collect_widget_texts(widget: tk.Widget) -> set[str]:
+    """Collect visible widget labels for smoke tests and packaged checks."""
+
+    texts: set[str] = set()  # 保存当前控件及子控件的所有可见文字。
+    try:
+        text = widget.cget("text")  # Tk/ttk 的 Label、Button、Frame 等通常都有 text 属性。
+    except tk.TclError:
+        text = ""  # Entry 等控件没有 text 属性时跳过即可。
+    if isinstance(text, str) and text:
+        texts.add(text)  # 只记录非空文字，避免无意义空字符串干扰检查。
+    for child in widget.winfo_children():
+        texts.update(collect_widget_texts(child))  # 递归检查嵌套区域里的按钮和标签。
+    return texts  # 返回完整文案集合，供 smoke test 断言关键控件。
 
 
 def main() -> int:

@@ -103,12 +103,20 @@ def expected_artifact(onefile: bool) -> Path:
 def smoke_test_artifact(artifact: Path, onefile: bool) -> None:
     """Run a non-interactive startup check for command-style artifacts.
 
-    macOS ``.app`` bundles are smoke-tested separately because launching a GUI
-    bundle from a shell is asynchronous. Windows and onefile artifacts support
-    passing ``--smoke-test`` directly to the executable.
+    macOS ``.app`` bundles are checked through the executable inside the bundle.
+    Windows and onefile artifacts support passing ``--smoke-test`` directly to
+    the executable.
     """
 
     if sys.platform == "darwin" and artifact.suffix == ".app" and not onefile:
+        # macOS 的 .app 是目录，真正可执行文件在 Contents/MacOS 下面。
+        executable = artifact / "Contents" / "MacOS" / APP_NAME
+        if not executable.exists():
+            # 如果 bundle 内没有可执行文件，说明打包产物不完整，必须立刻失败。
+            raise FileNotFoundError(f"Expected app executable was not created: {executable}")
+        # 直接调用 bundle 内可执行文件，验证 GUI 关键控件在冻结环境里也存在。
+        subprocess.run([str(executable), "--smoke-test"], check=True)
+        # macOS bundle 已经完成专门检查，不再走普通文件路径。
         return
     if not artifact.exists():
         raise FileNotFoundError(f"Expected build artifact was not created: {artifact}")
