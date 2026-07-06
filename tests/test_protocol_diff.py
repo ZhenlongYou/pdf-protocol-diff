@@ -37,10 +37,18 @@ from protocol_pdf_diff.desktop_gui import (
     run_smoke_test,
 )
 from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText
-from protocol_pdf_diff.pdf_extract import extract_pdf_text
+from protocol_pdf_diff.pdf_extract import (
+    _combine_text_and_table_lines,  # 验证结构化表格行覆盖原始长表格文本后的降噪行为。
+    _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
+    _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
+    extract_pdf_text,
+)
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_demo_pdfs, write_multipage_text_pdf
-from protocol_pdf_diff.sectioning import section_document
+from protocol_pdf_diff.sectioning import detect_heading, section_document
+
+OIF_OLD_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.11.pdf")  # 真实回归样本旧版路径；文件不存在时测试会跳过，避免影响 CI。
+OIF_NEW_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.13.pdf")  # 真实回归样本新版路径；用于验证用户反馈的 OIF 表格差异。
 
 
 class ProtocolDiffTests(unittest.TestCase):
@@ -320,6 +328,257 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("<dt>旧选择页</dt><dd>36-37</dd>", report_html)
         self.assertIn("<dt>新选择页</dt><dd>78-79</dd>", report_html)
 
+    @unittest.skipUnless(
+        OIF_OLD_SAMPLE.exists() and OIF_NEW_SAMPLE.exists(),
+        "OIF regression PDFs are local user samples",
+    )
+    def test_oif_table_changes_are_reported_as_concise_table_rows(self) -> None:
+        """The OIF COM table should expose row-level value changes."""
+
+        result = run_diff(  # 运行完整 PDF 比较链路，复现用户反馈的真实表格场景。
+            OIF_OLD_SAMPLE,
+            OIF_NEW_SAMPLE,
+            DiffOptions(max_snippets_per_section=80),
+        )
+        snippet_text = "\n".join(  # 汇总所有报告片段，便于断言是否出现结构化表格行。
+            "\n".join(change.added_snippets + change.removed_snippets)
+            + "\n".join(f"{pair.old}\n{pair.new}" for pair in change.replaced_snippets)
+            for change in result.changes
+        )
+        replaced_pairs = [  # 单独收集替换对，确保旧值和新值属于同一个参数行。
+            (pair.old, pair.new)
+            for change in result.changes
+            for pair in change.replaced_snippets
+        ]
+        reference_pairs = [  # 只检查用户反馈的 Single-ended reference resistance 行。
+            (old, new)
+            for old, new in replaced_pairs
+            if "Single-ended reference resistance" in old and "Single-ended reference resistance" in new
+        ]
+
+        self.assertIn("表格行:", snippet_text)  # 表格差异应以独立行出现，而不是埋在整页长文本里。
+        self.assertIn("Single-ended reference resistance", snippet_text)  # 用户关心的参数名必须可直接搜索定位。
+        self.assertTrue(
+            any(
+                "Parameter=Single-ended reference resistance" in old
+                and "Parameter=Single-ended reference resistance" in new
+                and "Value=50" in old
+                and "Value=46.25" in new
+                for old, new in reference_pairs
+            ),
+            reference_pairs,
+        )  # 旧值和新值必须在同一个参数替换对里，避免测试靠全局文本偶然命中。
+
+    def test_table_rows_scan_headers_and_expand_continuation_cells(self) -> None:
+        """Table extraction should recover headers and split multi-row cells."""
+
+        header_delayed_rows = [  # 模拟 pdfplumber 把表题放在表头之前的情况。
+            ["Table 1 - Electrical parameters"],
+            ["NOTE 1: Values are measured at package edge."],
+            ["NOTE 2: Reserved rows are omitted."],
+            ["Class B operating point"],
+            ["Unless otherwise specified"],
+            ["All values are reference values"],
+            ["Parameter", "Symbol", "Value", "Units"],
+            ["Single-ended reference resistance", "R\n0", "46.25", "Ω"],
+        ]
+        delayed_lines = _table_lines_from_rows(header_delayed_rows, table_number=1)  # 表头不在第一行也应被扫描到。
+
+        continuation_rows = [  # 模拟 OIF 续页：没有表头，多个参数被塞进同一个物理表格行。
+            [
+                "Device package model interface parameters\n"
+                "Single-ended reference resistance\n"
+                "Single-ended termination resistance",
+                "R\n0\nR\nd",
+                "50\n46.25",
+                "Ω\nΩ",
+            ]
+        ]
+        continuation_lines = _table_lines_from_rows(continuation_rows, table_number=1)  # 缺表头时应按 4 列参数表补默认列名。
+
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended reference resistance | Symbol=R0 | Value=46.25 | Units=Ω",
+            delayed_lines,
+        )  # 延迟表头路径必须输出 Header=Value，而不是裸列文本。
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended reference resistance | Symbol=R0 | Value=50 | Units=Ω",
+            continuation_lines,
+        )  # 续页第一条参数必须被拆成独立结构化行。
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended termination resistance | Symbol=Rd | Value=46.25 | Units=Ω",
+            continuation_lines,
+        )  # 符号上下标碎片应合并为 Rd，并和对应数值同行。
+
+    def test_table_expansion_skips_device_package_group_label(self) -> None:
+        """Embedded table group labels should not shift parameter/value alignment."""
+
+        rows = [  # 模拟 OIF COM 表中组标题占据参数列第一行的抽取形态。
+            [
+                "Device package model: Class B (Note 1)\n"
+                "Single-ended PKG capacitance\n"
+                "Transmission line 2 characteristic impedance",
+                "C\np\nZ\nc2",
+                "40\n87.5",
+                "fF\nΩ",
+            ]
+        ]
+
+        lines = _table_lines_from_rows(rows, table_number=1)  # 缺表头时走 4 列默认参数表和多行拆分。
+
+        rows_with_stray_value = [  # 模拟新版 OIF 中 Value 列多抽出一个孤立 T 的错位形态。
+            [
+                "D\n"
+                "Device package model: Class B (Note 1)\n"
+                "Transmission line length, Tx Test 1,2\n"
+                "Single-ended PKG capacitance at pkg-to-board IF\n"
+                "Transmission line characteristic impedance\n"
+                "Transmission line 2 characteristic impedance",
+                "z\np\nC\np\nZ\nc\nZ\nc2",
+                "44,45\n40\n87.5\nT\n95",
+                "mm\nfF\nΩ\nΩ",
+            ]
+        ]
+        lines_with_stray_value = _table_lines_from_rows(rows_with_stray_value, table_number=1)  # T 不应把后续值整体错位。
+
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended PKG capacitance | Symbol=Cp | Value=40 | Units=fF",
+            lines,
+        )  # 第一条参数不能拿到下一行的 87.5Ω。
+        self.assertIn(
+            "表格行: T1 | Parameter=Transmission line 2 characteristic impedance | Symbol=Zc2 | Value=87.5 | Units=Ω",
+            lines,
+        )  # 特性阻抗应与 87.5Ω 对齐。
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended PKG capacitance at pkg-to-board IF | Symbol=Cp | Value=40 | Units=fF",
+            lines_with_stray_value,
+        )  # 孤立 T 不能让 PKG capacitance 错拿 87.5Ω。
+        self.assertIn(
+            "表格行: T1 | Parameter=Transmission line 2 characteristic impedance | Symbol=Zc2 | Value=95 | Units=Ω",
+            lines_with_stray_value,
+        )  # 孤立 T 被过滤后，后续阻抗值应继续对齐。
+        self.assertFalse(
+            any("Parameter=D / Device package model" in line for line in lines_with_stray_value),
+            lines_with_stray_value,
+        )  # DRAFT 水印残片不能让整张表退化成一条巨大聚合行。
+
+    def test_single_letter_table_values_are_preserved(self) -> None:
+        """A/B/C style table values should not be treated as extraction noise."""
+
+        old_lines = _table_lines_from_rows(
+            [
+                ["Parameter", "Symbol", "Value", "Units"],
+                ["Preset 1\nPreset 2\nPreset 3", "P1\nP2\nP3", "10\nA\n20", "UI\nUI\nUI"],
+            ],
+            table_number=1,
+        )  # 旧表格中间行的 Value=A 是合法等级值。
+        new_lines = _table_lines_from_rows(
+            [
+                ["Parameter", "Symbol", "Value", "Units"],
+                ["Preset 1\nPreset 2\nPreset 3", "P1\nP2\nP3", "10\nB\n20", "UI\nUI\nUI"],
+            ],
+            table_number=1,
+        )  # 新表格只把等级值从 A 改成 B。
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_letter_value.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(old_lines))],
+        )  # 旧版使用结构化表格行作为章节正文。
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_letter_value.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(new_lines))],
+        )  # 新版同一参数同一符号只改 Value。
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 diff，防止 A/B 被清洗成相同。
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )  # 收集替换片段。
+
+        self.assertIn("Symbol=P2", "\n".join(old_lines + new_lines))  # P1/P2/P3 不应被误合并为 P1P2。
+        self.assertIn("Value=A", snippets)  # 旧合法单字母值必须进入报告。
+        self.assertIn("Value=B", snippets)  # 新合法单字母值必须进入报告。
+
+    def test_extra_single_letter_table_values_are_not_silently_dropped(self) -> None:
+        """A/B value changes should survive even when the value column has an extra item."""
+
+        old_lines = _table_lines_from_rows(
+            [
+                ["Parameter", "Symbol", "Value", "Units"],
+                ["Preset 1\nPreset 2\nPreset 3", "P1\nP2\nP3", "10\nA\n20\n30", "UI\nUI\nUI"],
+            ],
+            table_number=1,
+        )  # Value 列多一项时，A 仍可能是合法等级值，不能被泛化删除。
+        new_lines = _table_lines_from_rows(
+            [
+                ["Parameter", "Symbol", "Value", "Units"],
+                ["Preset 1\nPreset 2\nPreset 3", "P1\nP2\nP3", "10\nB\n20\n30", "UI\nUI\nUI"],
+            ],
+            table_number=1,
+        )  # 新版只把 A 改成 B，额外 30 不应掩盖该变化。
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_extra_letter_value.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(old_lines))],
+        )  # 旧版结构化行。
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_extra_letter_value.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(new_lines))],
+        )  # 新版结构化行。
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整比较，验证不会 false negative。
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )  # 收集替换片段。
+
+        self.assertIn("Value=A", snippets)  # 旧值 A 必须保留。
+        self.assertIn("Value=B", snippets)  # 新值 B 必须保留。
+
+    def test_structured_table_lines_suppress_duplicate_raw_table_text(self) -> None:
+        """Raw long table text should disappear when structured rows cover it."""
+
+        raw_short_table_row = "Single-ended reference resistance R 0 50 Ω"  # 模拟正文抽取保留下来的单条原始表格行。
+        raw_table_line = (  # 模拟 pdfplumber 正文抽取把整张参数表压成一个超长自然语言行。
+            "Transmission line parameter a2 2.93x10-4 ns/mm "
+            "Single-ended reference resistance R 0 50 Ω "
+            "Single-ended termination resistance R d 46.25 Ω "
+            "Receiver 3 dB bandwidth f b 0.55 GHz "
+            "Transmitter equalizer coefficient c(0) 0.54 maximum value 0.16 step size 0.02"
+        )
+        text = "\n".join(  # 普通正文和重复表格噪声混在同一页抽取文本中。
+            [
+                "1 Scope",
+                "This ordinary paragraph should stay visible.",
+                raw_short_table_row,
+                raw_table_line,
+            ]
+        )
+        table_lines = [  # 结构化表格行已经覆盖了 raw_table_line 里的关键参数和值。
+            "表格行: T1 | Parameter=Single-ended reference resistance | Symbol=R0 | Value=50 | Units=Ω",
+            "表格行: T1 | Parameter=Single-ended termination resistance | Symbol=Rd | Value=46.25 | Units=Ω",
+            "表格行: T1 | Parameter=Receiver 3 dB bandwidth | Symbol=fb | Value=0.55 | Units=GHz",
+        ]
+
+        combined = _combine_text_and_table_lines(text, table_lines)  # 合并正文和结构化表格行，并执行重复表格长行过滤。
+
+        self.assertIn("This ordinary paragraph should stay visible.", combined)  # 普通正文不应被降噪误删。
+        self.assertNotIn(raw_short_table_row, combined)  # 已结构化的单条原始表格行也不应再进入 diff 合并阶段。
+        self.assertNotIn(raw_table_line, combined)  # 已被结构化表格覆盖的超长原始表格行应被删除。
+        self.assertIn("Parameter=Single-ended reference resistance", combined)  # 结构化表格行必须保留用于后续 diff。
+
+    def test_large_non_draft_text_is_not_filtered_as_watermark(self) -> None:
+        """Watermark filtering should not delete legitimate large headings."""
+
+        self.assertTrue(
+            _keep_non_watermark_object({"object_type": "char", "size": 72, "text": "D", "upright": True})
+        )  # 大号普通标题字符应保留，避免封面/章节标题丢失。
+        self.assertFalse(
+            _keep_non_watermark_object({"object_type": "char", "size": 72, "text": "D", "upright": False})
+        )  # 旋转的大号 DRAFT 字符仍应被过滤，避免水印污染正文和表格。
+        self.assertTrue(
+            _keep_non_watermark_object({"object_type": "line", "size": 72, "text": "D"})
+        )  # 非字符对象必须保留，表格线条需要参与 pdfplumber 表格识别。
+
     def test_reports_are_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -466,6 +725,33 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("Page 2 of", all_snippets)
         self.assertIn("旧定位页 3 · 新定位页 4", report_html)
         self.assertIn("按章节编号、标题和正文相似度匹配", report_html)
+
+    def test_long_renamed_sections_can_match_by_middle_content(self) -> None:
+        """Long sections should not depend only on their head and tail text."""
+
+        shared_middle = "\n".join(
+            f"Shared compliance matrix row {index} keeps the same calibration rule and review anchor."
+            for index in range(1, 24)
+        )  # 中段主体内容保持一致，模拟长章节中间的大段稳定要求。
+        old_head = "\n".join(f"Old introductory context {index} differs materially." for index in range(1, 12))
+        new_head = "\n".join(f"New introductory context {index} differs materially." for index in range(1, 12))
+        old_tail = "\n".join(f"Old closing note {index} differs materially." for index in range(1, 12))
+        new_tail = "\n".join(f"New closing note {index} differs materially." for index in range(1, 12))
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_long_middle.pdf"),
+            pages=[PageText(page_number=1, text=f"2 Calibration Procedure\n{old_head}\n{shared_middle}\n{old_tail}")],
+        )  # 旧章节编号和标题略不同，头尾也不同。
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_long_middle.pdf"),
+            pages=[PageText(page_number=1, text=f"3 Calibration Process\n{new_head}\n{shared_middle}\n{new_tail}")],
+        )  # 新章节应通过标题相似度和中段共同内容匹配为 modified。
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 使用默认阈值验证真实匹配行为。
+        change_types = [change.change_type for change in result.changes]  # 收集类型，避免新增+删除错配。
+
+        self.assertIn("modified", change_types)  # 中段采样应帮助长章节匹配成修改。
+        self.assertNotIn("added", change_types)  # 不应把新版章节当作孤立新增。
+        self.assertNotIn("deleted", change_types)  # 不应把旧版章节当作孤立删除。
 
     def test_page_fallback_matches_content_when_headings_are_missing(self) -> None:
         """When headings fail, page fallback still avoids page-number hard pairing."""
@@ -660,6 +946,152 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("0.28 UI", snippets)
         self.assertIn("800 mV", snippets)
         self.assertIn("760 mV", snippets)
+
+    def test_table_rows_pair_by_parameter_identity_inside_insertions(self) -> None:
+        """Inserted table rows should not misalign a changed parameter row."""
+
+        old_extraction = ExtractionResult(  # 构造旧版表格片段，第一行是后续要比较的参数。
+            pdf_path=Path("old_table_identity.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "表格行: T1 | Parameter=Reference resistance | Symbol=R0 | Value=50 | Units=Ω\n"
+                        "表格行: T1 | Parameter=Termination resistance | Symbol=Rd | Value=46.25 | Units=Ω"
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(  # 构造新版表格片段，在变更行前插入一条新参数，验证配对不被打乱。
+            pdf_path=Path("new_table_identity.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "表格行: T1 | Parameter=New impedance | Symbol=Zp | Value=40 | Units=Ω\n"
+                        "表格行: T1 | Parameter=Reference resistance | Symbol=R0 | Value=46.25 | Units=Ω\n"
+                        "表格行: T1 | Parameter=Termination resistance | Symbol=Rd | Value=46.25 | Units=Ω"
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 section+diff 流程，不直接调私有配对函数。
+        replaced_pairs = [  # 收集替换对，确认同一参数行被配在一起。
+            (pair.old, pair.new)
+            for change in result.changes
+            for pair in change.replaced_snippets
+        ]
+        added_snippets = [  # 收集新增片段，确认插入的新参数没有被错配成替换。
+            snippet
+            for change in result.changes
+            for snippet in change.added_snippets
+        ]
+
+        self.assertTrue(
+            any(
+                "Parameter=Reference resistance" in old
+                and "Value=50" in old
+                and "Parameter=Reference resistance" in new
+                and "Value=46.25" in new
+                for old, new in replaced_pairs
+            ),
+            replaced_pairs,
+        )  # 表格行身份一致时，应输出清晰的旧值/新值替换对。
+        self.assertTrue(
+            any("Parameter=New impedance" in snippet for snippet in added_snippets),
+            added_snippets,
+        )  # 新插入的表格行应保持为新增，而不是和 Reference resistance 错配。
+
+    def test_raw_table_blocks_are_suppressed_when_structured_rows_exist(self) -> None:
+        """Diff snippets should prefer structured table rows over raw table blocks."""
+
+        old_raw_block = (  # 模拟 section body 中残留的旧版原始表格块。
+            "COM Parameter Values Device package model Class B Transmission line parameter a2 "
+            "2.93x10-4 ns1/2/mm Single-ended reference resistance R 0 50 Ω "
+            "Single-ended termination resistance R d 46.25 Ω Receiver 3 dB bandwidth f b 0.55 GHz "
+            "Transmitter equalizer coefficient c(0) 0.54 Minimum value 0 Maximum value 0.16 Step size 0.02"
+        )
+        new_raw_block = (  # 模拟新版同一表格块，文本顺序和符号碎片略有不同。
+            "COM Parameter Values Device package model Class B Transmission line parameter a2 "
+            "2.93×10-4 ns/mm Single-ended reference resistance R 46.25 Ω 0 "
+            "Single-ended termination resistance R 46.25 Ω d Receiver 3 dB bandwidth f b 0.55 GHz "
+            "Transmitter equalizer coefficient c(0) 0.54 Minimum value 0 Maximum value 0.16 Step size 0.02"
+        )
+        old_extraction = ExtractionResult(  # 旧版同时含有残留原始块和结构化表格行。
+            pdf_path=Path("old_raw_table_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        f"{old_raw_block}\n"
+                        "表格行: T1 | Parameter=Single-ended reference resistance | Symbol=R0 | Value=50 | Units=Ω"
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(  # 新版结构化行表达真正需要审阅的值变化。
+            pdf_path=Path("new_raw_table_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        f"{new_raw_block}\n"
+                        "表格行: T1 | Parameter=Single-ended reference resistance | Symbol=R0 | Value=46.25 | Units=Ω"
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走真实比较路径，验证片段输出。
+        snippets = "\n".join(  # 汇总所有可见 diff 片段。
+            snippet
+            for change in result.changes
+            for snippet in (
+                change.added_snippets
+                + change.removed_snippets
+                + [pair.old for pair in change.replaced_snippets]
+                + [pair.new for pair in change.replaced_snippets]
+            )
+        )
+
+        self.assertNotIn("COM Parameter Values Device package model", snippets)  # 原始大块表格文本不应污染报告。
+        self.assertIn("Parameter=Single-ended reference resistance", snippets)  # 结构化表格行仍应作为主要差异出现。
+        self.assertIn("Value=50", snippets)  # 旧值必须保留。
+        self.assertIn("Value=46.25", snippets)  # 新值必须保留。
+
+    def test_table_noise_suppression_keeps_nonduplicate_prose(self) -> None:
+        """Table-like prose must not be dropped without structured-row overlap."""
+
+        old_prose = (  # 这段长正文故意包含表格词和多个数字，但内容不是结构化表格行的重复。
+            "The interoperability parameter values shall be reviewed across 10 operating windows, "
+            "with minimum value 1, maximum value 9, condition 3, voltage 800 mV, frequency 26 GHz, "
+            "and receiver observation 4 before transmitter observation 5. The procedure remains normative."
+        )
+        new_prose = old_prose.replace("10 operating windows", "12 operating windows")  # 只改一个真实正文数值。
+        shared_table = "表格行: T1 | Parameter=Reference resistance | Symbol=R0 | Value=50 | Units=Ω"  # 同章节存在表格行，但 token 不覆盖正文。
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_table_like_prose.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{old_prose}\n{shared_table}")],
+        )  # 旧版正文和稳定表格行。
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_table_like_prose.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{new_prose}\n{shared_table}")],
+        )  # 新版正文有真实数值变化。
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 diff，验证正文不会被降噪隐藏。
+        snippets = "\n".join(
+            pair.old + "\n" + pair.new
+            for change in result.changes
+            for pair in change.replaced_snippets
+        )  # 收集替换片段，确认真实正文变化还在。
+
+        self.assertIn("10 operating windows", snippets)  # 旧正文数值必须可见。
+        self.assertIn("12 operating windows", snippets)  # 新正文数值必须可见。
 
     def test_report_labels_mixed_heading_and_page_fallback_mode(self) -> None:
         """Reports should not claim pure chapter matching when one side falls back."""
@@ -967,6 +1399,73 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("1 Scope", locations)
         self.assertIn("1 Scope / 1.1 Delivery", locations)
         self.assertIn("2 Acceptance", locations)
+
+    def test_procedure_word_integer_headings_are_preserved_when_title_like(self) -> None:
+        """Short title-like headings should not be swallowed as numbered steps."""
+
+        extraction = ExtractionResult(  # 这些标题首词也可能是动词，但在这里是章节名。
+            pdf_path=Path("procedure_word_headings.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Scope overview text.\n"
+                        "2 Power\n"
+                        "Power chapter text.\n"
+                        "3 Transmit Direction\n"
+                        "Direction chapter text.\n"
+                        "4 Shall Requirements\n"
+                        "Requirement chapter text."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)  # 走章节器，确认短标题不会被步骤启发式吞掉。
+        locations = [section.location for section in sections]  # 收集章节定位。
+
+        self.assertIn("2 Power", locations)  # Power 可以是章节名。
+        self.assertIn("3 Transmit Direction", locations)  # Transmit Direction 可以是章节名。
+        self.assertIn("4 Shall Requirements", locations)  # Shall Requirements 可以是章节名。
+        self.assertNotIn("2 Power", sections[0].body)  # 第二章不能进入第一章正文。
+
+    def test_use_cases_integer_heading_is_not_swallowed_as_step(self) -> None:
+        """Noun-like top-level headings such as 2 Use Cases should remain sections."""
+
+        extraction = ExtractionResult(  # 构造真实协议常见结构：Scope 后接 Use Cases 顶层章节。
+            pdf_path=Path("use_cases_heading.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Scope overview text.\n"
+                        "2 Use Cases\n"
+                        "Use case overview text."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)  # 走章节器，验证整数标题不被列表项启发式吞掉。
+        locations = [section.location for section in sections]  # 收集章节位置，便于断言层级。
+
+        self.assertIn("1 Scope", locations)  # 第一章仍应正常存在。
+        self.assertIn("2 Use Cases", locations)  # Use Cases 必须作为顶层章节出现。
+        self.assertNotIn("2 Use Cases", sections[0].body)  # 不能把第二章标题并进第一章正文。
+
+    def test_digit_leading_numeric_headings_are_detected(self) -> None:
+        """Headings such as 2 400G Interfaces should not be mistaken for decimals."""
+
+        heading_400g = detect_heading("2 400G Interfaces")  # 数字开头标题是高速协议常见章节名。
+        heading_100g = detect_heading("2 100G Ethernet")  # Ethernet 章节同样可能以速率开头。
+        table_value = detect_heading("2.93x10-4 ns/mm")  # 表格数值仍不应被当成章节。
+
+        self.assertIsNotNone(heading_400g)  # 400G Interfaces 应识别为 heading。
+        self.assertEqual("400G Interfaces", heading_400g.title)  # 标题文本应完整保留。
+        self.assertIsNotNone(heading_100g)  # 100G Ethernet 应识别为 heading。
+        self.assertIsNone(table_value)  # 小数/科学计数法表格值仍应过滤。
 
     def test_single_selected_pcie_page_removes_obvious_margin_furniture(self) -> None:
         """Single-page windows still need conservative header/footer cleanup."""

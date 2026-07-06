@@ -9,6 +9,7 @@ description = "Compare old/new protocol PDFs and report chapter or section-level
 requires-python = ">=3.10"
 dependencies = [
     "pypdf>=4.2.0",
+    "pdfplumber>=0.11.10",
 ]
 
 [tool.setuptools]

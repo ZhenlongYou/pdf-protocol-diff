@@ -87,6 +87,9 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             heading = detect_heading(line)
             if heading and _is_opening_range_body_integer(heading, saw_heading, opening_label):
                 heading = None
+            # 已有父章节时，动词/shall 开头的整数编号更像条款列表，不应拆成新章节。
+            if heading and _is_integer_list_item_under_context(heading, heading_stack):
+                heading = None
             if heading and _is_integer_heading_under_deep_context(heading, deep_numeric_context):
                 if not _looks_like_real_integer_heading_after_deep_context(heading):
                     heading = None
@@ -387,6 +390,13 @@ def _looks_like_static_page_furniture(line: str) -> bool:
     if len(candidate) > 120:
         return False
     static_patterns = (
+        # OIF 草稿 PDF 会在页边反复出现这些版权、草稿和运行标题行；它们不是协议正文差异。
+        r"(?i)^draft$",
+        r"(?i)^copyright\s+©?\s*\d{4}\s+optical\s+internetworking\s+forum$",
+        r"(?i)^this\s+is\s+a\s+draft\s+and\s+not\s+to\s+be\s+shared\.?",
+        r"(?i)^the\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed",
+        r"(?i)^optical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
+        r"(?i)^implementation\s+agreement\s+oif-cei",
         r"(?i)^revision\s+\d+(?:\.\d+)*(?:,\s*version\s+\d+(?:\.\d+)*)?$",
         r"(?i)^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}$",
         r"(?i)^(test descriptions|revision history|table of contents)$",
@@ -525,12 +535,17 @@ def _looks_like_table_row(line: str) -> bool:
 def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:
     """Avoid treating dates or plain numeric values as section headings."""
 
+    # 形如 2.93x10-4 会被正则拆成 number=2、title=93x10-4；这里把它识别为数值。
+    if _looks_like_numeric_fragment_title(title):
+        return True
     if number == "0":
         return True
     if number.count(".") == 1 and (
         title[:1].islower()
         or re.match(r"(?i)^(ps|ns|us|ms|ui|mv|v|db|mhz|ghz|gt/s|hz)\b", title)
     ):
+        return True
+    if number.count(".") == 1 and _looks_like_decimal_table_value_title(title):
         return True
     if number.isdigit() and int(number) > 99 and title[:1].islower():
         return True
@@ -543,6 +558,39 @@ def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:
     if re.match(r"(?i)^x\s*\d", title):
         return True
     return False
+
+
+def _looks_like_numeric_fragment_title(title: str) -> bool:
+    """Return True when the title part is really a numeric/table-value tail."""
+
+    candidate = normalize_line(title)  # 数字开头可能是 400G Interfaces，也可能是 93x10-4。
+    if not candidate or not candidate[:1].isdigit():
+        return False
+    if re.match(r"^\d+\s*[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]+)+", candidate):
+        return False  # 100G Ethernet / 400G Interfaces 是合法章节标题，不是小数尾巴。
+    if re.match(r"(?i)^\d+(?:\.\d+)?\s*(?:x|×|e[+-]?\d|-|\+|/)", candidate):
+        return True  # 93x10-4、2/3、2-4 这类更像数值碎片。
+    if re.match(r"(?i)^\d+(?:\.\d+)?\s*(?:ps|ns|us|ms|ui|mv|v|db|mhz|ghz|gt/s|hz|ohm|mm|ff|pf|ph)\b", candidate):
+        return True  # 数字后直接跟单位，通常是表格值而不是标题。
+    return _looks_like_decimal_table_value_title(candidate)
+
+
+def _looks_like_decimal_table_value_title(title: str) -> bool:
+    """Reject table rows that begin with decimal values instead of headings."""
+
+    candidate = normalize_line(title)  # 表格错序时，标题部分常保留参数名、单位或符号。
+    if not candidate:
+        return False
+    unit_or_symbol = re.search(
+        r"(?:Ω|—)|\b(?:ohm|mm|ff|pf|ph|ghz|mhz|gsym/s|ui|mv|v|db|ns/mm|1/mm)\b",
+        candidate,
+        flags=re.I,
+    )  # 带单位的十进制前缀通常是表格值，不是章节号。
+    table_words = re.search(
+        r"(?i)\b(?:transmission|impedance|capacitance|resistance|equalizer|coefficient|frequency|voltage|bandwidth|parameter)\b",
+        candidate,
+    )  # 常见参数描述词进一步确认这是表格行。
+    return bool(unit_or_symbol or table_words)
 
 
 def _is_standalone_heading_marker(line: str) -> bool:
@@ -598,6 +646,25 @@ def _is_integer_heading_under_deep_context(
     """Return True for integer numeric candidates under a deep section."""
 
     return bool(deep_numeric_context and heading.number.isdigit() and "." not in heading.number)
+
+
+def _is_integer_list_item_under_context(
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+) -> bool:
+    """Keep numbered requirement bullets inside their parent section."""
+
+    # 没有父章节时，整数编号仍可能是真正的顶层章节。
+    if not heading_stack:
+        return False
+    # 只有纯整数编号才按列表项处理；32.2 这类 dotted 编号仍是章节候选。
+    if not heading.number.isdigit() or "." in heading.number:
+        return False
+    # 短名词性标题即使在父章节后出现，也更可能是真正的顶层章节，如 ``2 Use Cases``。
+    if _looks_like_real_integer_heading_after_deep_context(heading):
+        return False
+    # 动词或 shall 开头的标题通常是要求/步骤正文，而不是“第 6 章”。
+    return _looks_like_procedure_step_title(heading.title)
 
 
 def _is_opening_range_body_integer(
@@ -661,10 +728,10 @@ def _looks_like_real_integer_heading_after_deep_context(heading: HeadingInfo) ->
     title = normalize_line(heading.title)
     if not title:
         return False
-    if _is_procedure_step_under_deep_context(heading, ("0.0.0",)):
+    if title.rstrip().endswith((".", ";", "；", "。")) and _looks_like_procedure_step_title(title):
         return False
     words = re.findall(r"[A-Za-z]+", title.casefold())
-    if not words or len(words) > 6:
+    if not words or len(words) > 8:
         return False
     heading_words = {
         "acceptance",
@@ -674,12 +741,17 @@ def _looks_like_real_integer_heading_after_deep_context(heading: HeadingInfo) ->
         "calibration",
         "compliance",
         "configuration",
+        "direction",
         "definitions",
         "description",
         "electrical",
+        "ethernet",
         "introduction",
+        "interface",
+        "interfaces",
         "method",
         "overview",
+        "power",
         "procedure",
         "receiver",
         "references",
@@ -689,8 +761,26 @@ def _looks_like_real_integer_heading_after_deep_context(heading: HeadingInfo) ->
         "test",
         "tests",
         "transmitter",
+        "use",
     }
-    return bool(set(words) & heading_words)
+    if set(words) & heading_words:
+        return True
+    return _looks_like_title_case_heading(title)
+
+
+def _looks_like_title_case_heading(title: str) -> bool:
+    """Return True for short title-like noun phrases without sentence punctuation."""
+
+    if title.rstrip().endswith((".", ";", "；", "。")):
+        return False
+    words = re.findall(r"[A-Za-z0-9]+", title)
+    if not words or len(words) > 6:
+        return False
+    lower_function_words = {"a", "an", "and", "for", "in", "of", "on", "the", "to", "with"}
+    content_words = [word for word in words if word.casefold() not in lower_function_words]
+    if not content_words:
+        return False
+    return all(word[:1].isupper() or word[:1].isdigit() for word in content_words)
 
 
 def _is_deep_numeric_heading(heading: HeadingInfo) -> bool:
@@ -750,9 +840,9 @@ def _looks_like_procedure_step_title(title: str) -> bool:
         "save",
         "select",
         "set",
+        "shall",
         "transmit",
         "turn",
-        "use",
         "using",
         "verify",
         "wait",

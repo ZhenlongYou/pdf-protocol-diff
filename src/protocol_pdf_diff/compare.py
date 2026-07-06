@@ -228,15 +228,9 @@ def _match_sections(
         exact_match = next((idx for idx in exact_candidates if idx not in matched_old), None)
         if exact_match is not None:
             matched_old.add(exact_match)
-            similarity = max(
-                _similarity(
-                    old_sections[exact_match].comparable_text,
-                    new_section.comparable_text,
-                ),
-                _review_similarity(
-                    old_sections[exact_match].comparable_text,
-                    new_section.comparable_text,
-                ),
+            similarity = _section_similarity(
+                old_sections[exact_match].comparable_text,
+                new_section.comparable_text,
             )
             matches.append((exact_match, new_index, similarity))
             matched_new.add(new_index)
@@ -257,15 +251,9 @@ def _match_sections(
             continue
         matched_old.add(old_index)
         matched_new.add(new_index)
-        similarity = max(
-            _similarity(
-                old_sections[old_index].comparable_text,
-                new_sections[new_index].comparable_text,
-            ),
-            _review_similarity(
-                old_sections[old_index].comparable_text,
-                new_sections[new_index].comparable_text,
-            ),
+        similarity = _section_similarity(
+            old_sections[old_index].comparable_text,
+            new_sections[new_index].comparable_text,
         )
         matches.append((old_index, new_index, min(score, similarity)))
 
@@ -287,17 +275,32 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
 
     title_score = _review_similarity(old_section.title, new_section.title)
     location_score = _review_similarity(old_section.location, new_section.location)
-    text_score = max(
-        _review_similarity(
-            old_section.comparable_text[:4000],
-            new_section.comparable_text[:4000],
-        ),
-        _similarity(
-            old_section.comparable_text[:4000],
-            new_section.comparable_text[:4000],
-        ),
-    )
+    text_score = _section_similarity(old_section.comparable_text, new_section.comparable_text)
     return max(title_score * 0.85 + text_score * 0.15, location_score * 0.4 + text_score * 0.6)
+
+
+_SECTION_MATCH_SAMPLE_CHARS = 1200  # 长章节匹配采样代表性文本，避免反复对整章做昂贵相似度计算。
+
+
+def _section_similarity(left: str, right: str) -> float:
+    """Return a bounded similarity score for section matching and reporting."""
+
+    left_sample = _sample_section_text(left)  # 采样保留章节开头和结尾，兼顾标题、定义和表格续行。
+    right_sample = _sample_section_text(right)  # 两边使用同样采样策略，分数才可比较。
+    return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
+
+
+def _sample_section_text(value: str) -> str:
+    """Keep representative text from long sections for cheap matching."""
+
+    if len(value) <= _SECTION_MATCH_SAMPLE_CHARS:  # 短章节直接完整比较，避免采样丢信息。
+        return value
+    head_chars = int(_SECTION_MATCH_SAMPLE_CHARS * 0.4)  # 开头通常包含标题和核心定义。
+    middle_chars = int(_SECTION_MATCH_SAMPLE_CHARS * 0.3)  # 中段可覆盖长章节里真正稳定的主体内容。
+    tail_chars = _SECTION_MATCH_SAMPLE_CHARS - head_chars - middle_chars  # 结尾常包含跨页表格续行或总结句。
+    middle_start = max(0, (len(value) // 2) - (middle_chars // 2))  # 从正文中心附近取样，避免只看头尾。
+    middle_end = min(len(value), middle_start + middle_chars)  # 防止切片越界，保持总采样规模可控。
+    return f"{value[:head_chars]}\n...\n{value[middle_start:middle_end]}\n...\n{value[-tail_chars:]}"
 
 
 def _review_similarity(left: str, right: str) -> float:
@@ -454,7 +457,97 @@ def _split_units(text: str) -> list[str]:
             units.append(unit)
             continue
         units.extend(_split_long_unit(unit))
-    return units
+    return _drop_duplicate_raw_table_units(units)
+
+
+_RAW_TABLE_NOISE_WORDS = frozenset(
+    {
+        "bandwidth",
+        "capacitance",
+        "characteristic",
+        "coefficient",
+        "condition",
+        "equalizer",
+        "frequency",
+        "impedance",
+        "maximum",
+        "minimum",
+        "parameter",
+        "receiver",
+        "resistance",
+        "symbol",
+        "termination",
+        "transmitter",
+        "units",
+        "value",
+        "voltage",
+    }
+)  # diff 层兜底使用的表格噪声词表，和抽取层保持同一语义口径。
+
+
+def _drop_duplicate_raw_table_units(units: list[str]) -> list[str]:
+    """Remove raw table-like text units when structured table rows are present."""
+
+    table_units = [unit for unit in units if _is_table_review_unit(unit)]  # 只有抽取层已给出结构化表格行时才降噪。
+    if not table_units:
+        return units
+    table_tokens = _raw_table_noise_token_index(table_units)  # 用结构化表格行建立同章节 token 覆盖范围。
+    return [
+        unit
+        for unit in units
+        if _is_table_review_unit(unit) or not _looks_like_duplicate_raw_table_unit(unit, table_tokens)
+    ]  # 保留结构化行和普通正文，删除重复的原始表格块。
+
+
+def _looks_like_duplicate_raw_table_unit(unit: str, table_tokens: set[str]) -> bool:
+    """Return True for a noisy raw table block already covered by table rows."""
+
+    if len(unit) < 160:  # 短文本在 diff 层不兜底删除，短行已在抽取层处理。
+        return False
+    number_count = len(_NUMBER_TOKEN_RE.findall(unit))  # 原始表格块通常含有大量数值。
+    if number_count < 6:
+        return False
+    words = set(re.findall(r"[A-Za-z]+", unit.casefold()))  # 表格词数量用于区分正文长段落和参数块。
+    table_word_count = len(words & _RAW_TABLE_NOISE_WORDS)
+    if table_word_count < 2:
+        return False
+    tokens = _raw_table_noise_tokens(unit)  # 和结构化表格行做 token 覆盖判断。
+    overlap = len(tokens & table_tokens)
+    required_overlap = min(12, max(6, len(tokens) // 6))
+    if overlap >= required_overlap:
+        return True
+    return overlap >= 4 and table_word_count >= 4 and number_count >= 10 and _has_table_block_phrase(unit)
+
+
+def _has_table_block_phrase(unit: str) -> bool:
+    """Return True for phrases that rarely occur outside raw parameter tables."""
+
+    return bool(
+        re.search(
+            r"(?i)\b(?:parameter values|minimum value|maximum value|step size|characteristic impedance|termination resistance)\b",
+            unit,
+        )
+    )  # 强表格短语能兜住 pdfplumber 正文路径残留的大块表格文本。
+
+
+def _raw_table_noise_token_index(table_units: list[str]) -> set[str]:
+    """Build a token index from structured table units."""
+
+    tokens: set[str] = set()  # 汇总结构化表格 token，便于判断原始块是否重复。
+    for unit in table_units:
+        tokens.update(_raw_table_noise_tokens(unit))
+    return tokens
+
+
+def _raw_table_noise_tokens(value: str) -> set[str]:
+    """Tokenize table-ish text for duplicate suppression."""
+
+    lowered = value.casefold().replace("µ", "u").replace("μ", "u")  # 单位符号归一化，减少 μ/u 差异。
+    return {
+        token
+        for token in re.findall(r"[a-z]+[a-z0-9]*|[+-]?\d+(?:\.\d+)?", lowered)
+        if len(token) > 1
+    }  # 删除单字符 token，避免 a、b、R 被过度计入重叠。
 
 
 def _merge_wrapped_lines(text: str) -> list[str]:
@@ -497,6 +590,8 @@ def _starts_new_review_block(line: str) -> bool:
         r"^[a-zA-Z][.)](?:\s+\S.*|\s*)$",
         r"^[•●⚫-]\s+\S",
         r"^Note:\s+",
+        # 表格行是提取器新增的结构化单位，需要保留为独立差异片段。
+        r"^表格行:\s+",
     )
     return any(re.match(pattern, line) for pattern in patterns)
 
@@ -826,6 +921,10 @@ def _unequal_replace_delta_candidates(
 def _unit_pair_score(old_unit: str, new_unit: str) -> float:
     """Score whether two unequal units are safe to show as a replacement pair."""
 
+    table_score = _table_unit_pair_score(old_unit, new_unit)  # 表格行先按参数身份配对，避免相邻行错配造成噪声。
+    if table_score is not None:
+        return table_score
+
     old_words = _meaningful_review_words(old_unit)
     new_words = _meaningful_review_words(new_unit)
     if old_words and new_words and not (old_words & new_words):
@@ -835,6 +934,89 @@ def _unit_pair_score(old_unit: str, new_unit: str) -> float:
         overlap = len(old_words & new_words) / min(len(old_words), len(new_words))
         return base_score * (0.75 + overlap * 0.25)
     return base_score
+
+
+def _table_unit_pair_score(old_unit: str, new_unit: str) -> float | None:
+    """Return a table-specific pair score, or None for normal text units."""
+
+    old_is_table = _is_table_review_unit(old_unit)  # 表格行由抽取层显式加上中文前缀。
+    new_is_table = _is_table_review_unit(new_unit)  # 两侧都必须是表格行才允许表格身份配对。
+    if not old_is_table and not new_is_table:
+        return None
+    if old_is_table != new_is_table:
+        return 0.0
+    old_identity = _table_row_identity(old_unit)  # 参数名/特性名是表格行的主身份，不包含 Value。
+    new_identity = _table_row_identity(new_unit)  # 新旧表格同一参数应拥有相同身份键。
+    if old_identity and new_identity:
+        return 1.0 if old_identity == new_identity else 0.0
+    return None
+
+
+def _is_table_review_unit(value: str) -> bool:
+    """Return True for structured table rows emitted by the extractor."""
+
+    return normalize_line(value).startswith("表格行:")  # 前缀是内部稳定契约，不暴露新的外部 API。
+
+
+def _table_row_identity(value: str) -> str:
+    """Build a stable identity key for one structured table row."""
+
+    fields = _table_row_fields(value)  # 先解析 Header=Value 字段，便于忽略数值列。
+    identity_values: list[str] = []  # 收集能代表“同一行”的参数文本。
+    for key in ("parameter", "characteristic", "description", "name"):
+        field_value = fields.get(key)
+        if field_value:
+            identity_values.append(field_value)
+            break
+    if fields.get("symbol"):
+        identity_values.append(fields["symbol"])  # 符号能区分同名参数的不同变体。
+    if identity_values:
+        return _review_unit_key(" ".join(identity_values))
+
+    for cell in _table_row_cells(value):  # 兼容未标注表头的旧片段，选第一个描述性单元格作为身份。
+        if _looks_like_table_identity_cell(cell):
+            return _review_unit_key(cell)
+    return ""
+
+
+def _table_row_fields(value: str) -> dict[str, str]:
+    """Parse Header=Value parts from a structured table row."""
+
+    fields: dict[str, str] = {}  # 小写字段名映射到原始值，保留可读文本供身份归一化。
+    for cell in _table_row_cells(value):
+        if "=" not in cell:
+            continue
+        key, raw_value = cell.split("=", 1)
+        normalized_key = normalize_for_similarity(key).strip()
+        normalized_value = normalize_line(raw_value)
+        if normalized_key and normalized_value:
+            fields[normalized_key] = normalized_value
+    return fields
+
+
+def _table_row_cells(value: str) -> list[str]:
+    """Split one table row snippet into pipe-separated payload cells."""
+
+    text = normalize_line(value)  # 统一空白后再切分，减少 PDF 抽取空格差异。
+    if text.startswith("表格行:"):
+        text = text[len("表格行:") :].strip()
+    cells = [cell.strip() for cell in text.split("|") if cell.strip()]  # 表格行内部用竖线分隔列。
+    if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
+        return cells[1:]  # T1/T2 只是物理表编号，不参与行身份。
+    return cells
+
+
+def _looks_like_table_identity_cell(value: str) -> bool:
+    """Return True for an unlabeled cell that can identify a table row."""
+
+    normalized = normalize_line(value)  # 参数名单元格通常包含字母和说明词，而不是纯数值/单位。
+    if not normalized or len(normalized) <= 1:
+        return False
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?(?:\s*/\s*[+-]?\d+(?:\.\d+)?)*", normalized):
+        return False
+    if re.fullmatch(r"(?i)(?:Ω|ohm|ff|pf|ph|mhz|ghz|ui|mv|v|db|ns/mm|1/mm|unit|units)", normalized):
+        return False
+    return bool(re.search(r"[A-Za-z\u4e00-\u9fff]", normalized))
 
 
 def _meaningful_review_words(value: str) -> set[str]:
