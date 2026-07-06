@@ -44,8 +44,8 @@ MIN_SECTION_MATCH_SIMILARITY = 0.72
 # default report. Lower this if you want tiny punctuation changes to show up.
 UNCHANGED_SIMILARITY = 0.985
 
-# Maximum snippets shown for each changed section. The full PDF is not copied
-# into the report, so this keeps reports readable and copyright-safe.
+# Maximum visible diff snippets per changed section. This does not limit
+# section matching or comparison; it only keeps the generated report readable.
 MAX_SNIPPETS_PER_SECTION = 20
 
 # When both paths above are blank, generate multi-page demo PDFs so the
@@ -121,7 +121,7 @@ def parse_args() -> argparse.Namespace:
         "--max-snippets",
         type=int,
         default=MAX_SNIPPETS_PER_SECTION,
-        help="每个章节最多展示的差异片段数",
+        help="每个章节最多展示的差异片段数；不限制完整章节匹配和比较",
     )
     parser.add_argument(
         "--include-unchanged",

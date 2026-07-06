@@ -12,6 +12,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 import sys
 from argparse import Namespace
@@ -36,8 +37,11 @@ from protocol_pdf_diff.desktop_gui import (
     parse_positive_int,
     run_smoke_test,
 )
-from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText
+import protocol_pdf_diff.pdf_extract as pdf_extract_module
+from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText, TableVisual
 from protocol_pdf_diff.pdf_extract import (
+    MissingDependencyError,  # 验证缺少 pdfplumber 时直接失败，而不是静默退回 pypdf。
+    _clean_extracted_page_text,  # 验证抽取层先过滤页边行号、DRAFT 和版权页脚。
     _combine_text_and_table_lines,  # 验证结构化表格行覆盖原始长表格文本后的降噪行为。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
@@ -46,6 +50,7 @@ from protocol_pdf_diff.pdf_extract import (
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_demo_pdfs, write_multipage_text_pdf
 from protocol_pdf_diff.sectioning import detect_heading, section_document
+from protocol_pdf_diff.text_utils import remove_draft_watermark_letter_artifacts
 
 OIF_OLD_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.11.pdf")  # 真实回归样本旧版路径；文件不存在时测试会跳过，避免影响 CI。
 OIF_NEW_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.13.pdf")  # 真实回归样本新版路径；用于验证用户反馈的 OIF 表格差异。
@@ -70,6 +75,348 @@ class ProtocolDiffTests(unittest.TestCase):
             parse_positive_float("0", "章节匹配阈值")
         with self.assertRaisesRegex(ValueError, "最大片段数 不能小于 0"):
             parse_positive_int("-1", "最大片段数")
+
+    def test_extraction_requires_pdfplumber_without_pypdf_fallback(self) -> None:
+        """Missing pdfplumber should fail clearly instead of using pypdf silently."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:  # 临时目录隔离依赖失败测试文件。
+            pdf_path = Path(temp_dir) / "placeholder.pdf"  # 只需要存在即可，底层提取函数会被 mock。
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")  # 写入极小 PDF 占位内容，触发路径存在检查。
+            with mock.patch(
+                "protocol_pdf_diff.pdf_extract._extract_pdf_text_with_pdfplumber",
+                side_effect=ModuleNotFoundError("pdfplumber"),
+            ):  # 模拟打包环境漏装 pdfplumber 的真实故障。
+                with self.assertRaises(MissingDependencyError):  # 入口必须抛出明确依赖错误。
+                    extract_pdf_text(pdf_path)
+
+        self.assertFalse(
+            hasattr(pdf_extract_module, "_extract_pdf_text_with_pypdf")
+        )  # 源码中不再保留可被误接回去的 pypdf 提取 fallback。
+
+    def test_extraction_filters_margin_line_numbers_draft_and_copyright(self) -> None:
+        """Extraction cleanup should remove page furniture before sectioning."""
+
+        line_numbers = " ".join(str(value) for value in range(1, 50))  # 模拟 PDF 页边 1~49 行号整段抽取。
+        raw_text = "\n".join(
+            [
+                "DRAFT",  # 草稿水印单独成行时必须删除。
+                "D",  # 竖排 DRAFT 第 1 行。
+                "R",  # 竖排 DRAFT 第 2 行。
+                "A",  # 竖排 DRAFT 第 3 行。
+                "F",  # 竖排 DRAFT 第 4 行。
+                "T",  # 竖排 DRAFT 第 5 行。
+                *[str(value) for value in range(1, 50)],  # 页边行号逐行抽取时也必须删除。
+                line_numbers,  # 页边行号整行必须删除。
+                f"{line_numbers} Receiver calibration shall remain.",  # 行号拼入正文时只删除行号。
+                "Copyright © 2024 Optical Internetworking Forum",  # 页脚版权行必须删除。
+                "Optical Internetworking Forum - Clause 3: Electrical",  # OIF 运行页眉必须删除。
+                "Receiver calibration shall remain.",  # 普通正文必须保留。
+            ]
+        )
+        cleaned = _clean_extracted_page_text(raw_text)  # 直接验证抽取层清洗函数，避免依赖真实 PDF。
+
+        self.assertNotIn("DRAFT", cleaned)  # 水印不应进入后续章节或 diff。
+        self.assertNotIn("Copyright", cleaned)  # 版权页脚不应进入用户报告。
+        self.assertNotIn("Optical Internetworking Forum - Clause", cleaned)  # 运行页眉不应成为正文。
+        self.assertNotIn(line_numbers, cleaned)  # 1~49 行号串不应残留。
+        self.assertIn("Receiver calibration shall remain.", cleaned)  # 正文句子仍应保留。
+
+    def test_heading_detection_rejects_units_formulas_and_footnotes(self) -> None:
+        """Unit values, formulas, and footnotes should not become section headings."""
+
+        self.assertIsNone(detect_heading("1 UI"))  # 单位值不是章节。
+        self.assertIsNone(detect_heading("5 UIpp"))  # 抖动单位值不是章节。
+        self.assertIsNone(detect_heading("6 X 62.5 ps ="))  # 公式片段不是章节。
+        self.assertIsNone(detect_heading("(408)309-9299"))  # 电话/脚注形态不是章节。
+        self.assertIsNone(detect_heading("39221 Paseo Padre Pkwy, Suit J"))  # 邮寄地址不是章节。
+        self.assertIsNone(detect_heading("15 R"))  # 数字加单字母符号不是章节。
+        self.assertIsNone(detect_heading("1. Measured as described in Section 32.3.1.7."))  # 表格脚注不是章节。
+        self.assertIsNone(detect_heading("03 NOTES:"))  # 表格 NOTES 标记不是章节。
+        self.assertIsNone(detect_heading("5. T_RLM is defined in Appendix 16.C.4.3."))  # 符号定义脚注不是章节。
+        self.assertIsNone(detect_heading("1 2 3 4 5 6 7 8 9 10 11 12"))  # 页边行号串不是章节。
+        self.assertIsNotNone(detect_heading("2 400G Interfaces"))  # 合法协议章节仍应识别。
+        self.assertIsNotNone(
+            detect_heading("2.13.2 Overview of Calibration Steps at 16.0 GT/s")
+        )  # 带 GT/s 单位的深层章节标题仍应识别。
+        self.assertIsNotNone(detect_heading("1 The Protocol Architecture."))  # 合法 The 开头标题不能被脚注规则误删。
+        cleaned_heading = detect_heading("32.1 RequirRements")  # 标题里的 DRAFT 字母残片应在分节前清理。
+        self.assertIsNotNone(cleaned_heading)  # 清理后的标题仍应保留为合法章节。
+        self.assertEqual("32.1 Requirements", cleaned_heading.raw)  # 报告位置不应显示 RequirRements。
+
+    def test_symbol_normalization_suppresses_multiply_and_exponent_noise(self) -> None:
+        """Equivalent x/×/* and exponent renderings should not create diffs."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 手工构造旧 PDF 抽取结果，专注比较层行为。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The limit is 5x10-6 and the timing window is 2xT_Vf. "
+                        "The clock relation is fb*n."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 手工构造新 PDF 抽取结果，内容仅变换符号形态。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The limit is 5×10-6 and the timing window is 2×T_Vf. "
+                        "The clock relation is fb×n."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 执行完整 section/diff 流程。
+
+        self.assertEqual([], result.changes)  # 纯符号渲染差异不应出现在报告。
+
+    def test_draft_watermark_letter_fragments_do_not_create_text_diffs(self) -> None:
+        """Leaked DRAFT letters inside prose should be treated as extraction noise."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 手工构造旧正文，避免真实 PDF 干扰。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "A compliant receiver shall deliver the specified raw BER. "
+                        "The single-ended transmitter output voltage shall remain stable."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新正文只包含 DRAFT 水印字母残片。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "F\n"
+                        "A T compliant receiver shall deliver the specified raw BER. "
+                        "The single-ended trRansmitter output voltage shall remain stable."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 执行完整比较流程。
+
+        self.assertEqual([], result.changes)  # 水印字母残片不应成为用户可见差异。
+        self.assertEqual(
+            "laneTraining shall remain visible.",
+            remove_draft_watermark_letter_artifacts("laneTraining shall remain visible."),
+        )  # 白名单外的合法驼峰标识符不能被清理成 laneraining。
+
+        old_identifier = ExtractionResult(
+            pdf_path=Path("old_identifier.pdf"),  # 旧侧使用合法训练标识符。
+            pages=[PageText(page_number=1, text="1 Scope\nlaneTraining shall remain visible.")],
+            total_pages=1,
+        )
+        new_identifier = ExtractionResult(
+            pdf_path=Path("new_identifier.pdf"),  # 新侧真实删除 T，应当作为正文变化报告。
+            pages=[PageText(page_number=1, text="1 Scope\nlaneraining shall remain visible.")],
+            total_pages=1,
+        )
+        identifier_result = compare_extractions(old_identifier, new_identifier, DiffOptions())
+        self.assertEqual(1, len(identifier_result.changes))  # 真实标识符变化不能被水印清理隐藏。
+
+    def test_oif_contact_notice_boilerplate_is_suppressed(self) -> None:
+        """OIF front-matter contact notice should not become a user-facing diff."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧只有真实正文。
+            pages=[PageText(page_number=1, text="1 Scope\nCore requirement remains.")],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧额外混入 OIF 前言联系信息。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Core requirement remains.\n"
+                        "Optical Internetworking Forum (OIF) 39221 Paseo Padre Pkwy, "
+                        "Suit J Fremont CA 94538 USA +1.510.392.4903 / "
+                        "info@oiforum.com www.oiforum.com Notice: This Technical Document "
+                        "has been created by the Optical Internetworking Forum (OIF)."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 执行完整比较和噪声 suppress。
+
+        self.assertEqual([], result.changes)  # 前言联系信息不应成为报告卡片。
+
+    def test_table_visual_section_keeps_long_text_diffs(self) -> None:
+        """Table screenshots should supplement, not replace, paragraph diffs."""
+
+        old_table = TableVisual(
+            page_number=2,  # 旧 PDF 表格定位页。
+            table_number=1,  # 单页内第一张表。
+            title="Table 3-1 Receiver parameters",  # 表题用于视觉表格配对。
+            bbox=(10.0, 20.0, 300.0, 160.0),  # 伪 bbox 足够报告渲染定位文本。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小内嵌图占位。
+            row_texts=["表格行: T1 | Parameter=Input jitter | Value=0.30 UI"],  # 旧表结构化行。
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 3 条",  # 旧表视觉证据摘要。
+            ocr_status="OCR 未启用：未发现 tesseract；使用截图和 pdfplumber 表格行。",  # 状态应短且可读。
+        )
+        new_table = TableVisual(
+            page_number=2,  # 新 PDF 表格定位页。
+            table_number=1,  # 单页内第一张表。
+            title="Table 3-1 Receiver parameters",  # 同表题应被配成一组。
+            bbox=(10.0, 20.0, 300.0, 160.0),  # 新表 bbox 与旧表对应。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小内嵌图占位。
+            row_texts=["表格行: T1 | Parameter=Input jitter | Value=0.28 UI"],  # 新表结构化行。
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 3 条",  # 新表视觉证据摘要。
+            ocr_status="OCR 未启用：未发现 tesseract；使用截图和 pdfplumber 表格行。",  # 状态应短且可读。
+        )
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧包含正文和表格视觉结果。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Receiver calibration\n"
+                        "The receiver calibration chapter describes 10 operating windows, "
+                        "long settling behavior, and measurement setup details for review."
+                    ),
+                )
+            ],
+            total_pages=2,
+            table_visuals=[old_table],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧包含正文和表格视觉结果。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Receiver calibration\n"
+                        "The receiver calibration chapter describes 12 operating windows, "
+                        "long settling behavior, and measurement setup details for review."
+                    ),
+                )
+            ],
+            total_pages=2,
+            table_visuals=[new_table],
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 正文 diff 和表格视觉都进入结果。
+
+        with tempfile.TemporaryDirectory() as temp_dir:  # 报告输出写入临时目录，避免污染项目结果。
+            paths = write_reports(result, temp_dir, DiffOptions())  # 生成 HTML 以验证用户最终看到的页面。
+            html = paths["html"].read_text(encoding="utf-8")  # 读取完整 HTML 文本做断言。
+
+        self.assertIn("operating windows", html)  # 大段正文句子必须仍在报告里。
+        self.assertIn('class="del">10</mark>', html)  # 旧正文数值必须被保留并高亮。
+        self.assertIn('class="ins">12</mark>', html)  # 新正文数值必须被保留并高亮。
+        self.assertIn("表格截图识别", html)  # 表格截图区也必须存在。
+        self.assertIn("旧版表格行", html)  # 表格行级摘要应使用用户可读标题。
+        self.assertIn("新版表格行", html)  # 新表行级摘要应使用用户可读标题。
+        self.assertNotIn("OpenCV", html)  # 用户报告不显示内部图像库名称。
+        self.assertNotIn("pdfplumber", html)  # 用户报告不显示内部文本库名称。
+        self.assertNotIn("OCR 未启用", html)  # 缺少 OCR 引擎不应作为表格比较正文展示。
+        self.assertNotIn("bbox", html)  # 用户报告不显示内部坐标。
+        self.assertNotIn("为什么", html)  # 报告不应包含实现自述式文案。
+        self.assertNotIn("不接入", html)  # 报告不应解释内部集成取舍。
+
+    def test_table_visual_summary_reports_omissions_and_avoids_bad_pairing(self) -> None:
+        """Visual table summaries should avoid false pairs and visible truncation."""
+
+        old_rows = [f"表格行: T1 | Parameter=P{index} | Value={index}" for index in range(20)]  # 构造 20 行旧表变化。
+        new_rows = [f"表格行: T1 | Parameter=P{index} | Value={index + 1}" for index in range(20)]  # 构造 20 行新表变化。
+        old_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 1 Matching rows",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=old_rows,
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 3 条",
+        )
+        new_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 1 Matching rows",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=new_rows,
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 3 条",
+        )
+        old_unmatched = TableVisual(
+            page_number=2,
+            table_number=1,
+            title="Table A Old only",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=["表格行: T1 | Parameter=Old only | Value=1"],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+        )
+        new_unmatched = TableVisual(
+            page_number=2,
+            table_number=1,
+            title="Completely different inserted table",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=["表格行: T1 | Parameter=Inserted | Value=2"],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+        )
+        old_math = TableVisual(
+            page_number=3,
+            table_number=1,
+            title="Table math notation",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=["表格行: T1 | Parameter=Clock relation | Value=fb*n"],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+        )
+        new_math = TableVisual(
+            page_number=3,
+            table_number=1,
+            title="Table math notation",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
+            row_texts=["表格行: T1 | Parameter=Clock relation | Value=fb×n"],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nNo text change.")],
+                total_pages=3,
+                table_visuals=[old_table, old_unmatched, old_math],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nNo text change.")],
+                total_pages=3,
+                table_visuals=[new_table, new_unmatched, new_math],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+
+        self.assertIn("另有 8 行表格变化未展示", html)  # 20 行变化只展示 12 行时必须说明遗漏数量。
+        self.assertGreaterEqual(html.count("无对应表格截图"), 2)  # 不相似的新旧表不能按顺序硬凑成一组。
+        self.assertIn("未检测到行级变化", html)  # fb*n 与 fb×n 是同一数学表达，不应报表格变化。
 
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
@@ -598,11 +945,11 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("旧/新页数", report_html)
             self.assertIn("4 / 5", report_html)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_html)
-            self.assertIn("仅比较 PDF 中可抽取文字", report_html)
+            self.assertIn("主要比较 PDF 中可抽取文字", report_html)
             self.assertIn("协议 PDF 差异报告", report_text)
             self.assertIn("- 旧/新页数: 4 / 5", report_text)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_text)
-            self.assertIn("图片、印章、矢量图等视觉元素不比较", report_text)
+            self.assertIn("表格会额外提供截图辅助复核", report_text)
             self.assertIn("Delivery", report_text)
             self.assertIn("3.0 V", report_text)
             self.assertIn("2.8 V", report_text)

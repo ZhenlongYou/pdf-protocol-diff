@@ -45,6 +45,23 @@ class ExtractionResult:
     total_pages: int = 0
     selected_start_page: int | None = None
     selected_end_page: int | None = None
+    table_visuals: list["TableVisual"] = field(default_factory=list)  # 保存表格截图和识别摘要，供 HTML 报告展示视觉证据。
+
+
+@dataclass(frozen=True)
+class TableVisual:
+    """One table-like visual region extracted from a PDF page."""
+
+    page_number: int  # 使用源 PDF 的 1-based 页码，方便用户回到原文复核。
+    table_number: int  # 同一页内的表格序号，用于生成稳定定位标签。
+    title: str  # 从表格上方文本推断出的表题；没有表题时允许为空。
+    bbox: tuple[float, float, float, float]  # pdfplumber 坐标系中的表格边界框。
+    image_data_uri: str  # 内嵌 JPEG 截图，HTML 可以离线打开。
+    row_texts: list[str]  # pdfplumber 抽取出的结构化表格行，用于行级摘要。
+    grid_summary: str  # OpenCV 网格检测摘要，说明截图中横线/竖线证据强弱。
+    ocr_text: str = ""  # 可选 OCR 文本；缺少 tesseract 引擎时保持为空。
+    ocr_status: str = ""  # OCR 状态说明，必须明确成功、跳过或失败原因。
+    is_continuation: bool = False  # 续页表格没有表题时，用该标记提示报告按上一表延续理解。
 
 
 @dataclass(frozen=True)
@@ -186,6 +203,8 @@ class DiffResult:
     old_selected_end_page: int | None = None
     new_selected_start_page: int | None = None
     new_selected_end_page: int | None = None
+    old_table_visuals: list[TableVisual] = field(default_factory=list)  # 旧 PDF 的表格截图识别结果。
+    new_table_visuals: list[TableVisual] = field(default_factory=list)  # 新 PDF 的表格截图识别结果。
 
 
 def _normalize_key(value: str) -> str:

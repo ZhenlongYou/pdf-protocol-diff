@@ -29,8 +29,10 @@ from .text_utils import (
     canonicalize_chinese_number_expressions,
     canonicalize_number_word_token,
     canonicalize_number_word_tokens,
+    compact_inline,
     normalize_for_similarity,
     normalize_line,
+    remove_draft_watermark_letter_artifacts,
 )
 
 
@@ -87,6 +89,11 @@ def compare_extractions(
     new_sections = section_document(new_extraction)
     changes = compare_sections(old_sections, new_sections, options)
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
+    changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
+    if suppressed_noise_count:
+        warnings.append(
+            f"已隐藏 {suppressed_noise_count} 条全局重复页眉页脚、DRAFT、版权或行号噪声差异。"
+        )
     if not old_sections:
         warnings.append(f"{old_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     if not new_sections:
@@ -104,6 +111,8 @@ def compare_extractions(
         old_selected_end_page=_selected_end_page(old_extraction),
         new_selected_start_page=_selected_start_page(new_extraction),
         new_selected_end_page=_selected_end_page(new_extraction),
+        old_table_visuals=list(old_extraction.table_visuals),
+        new_table_visuals=list(new_extraction.table_visuals),
     )
 
 
@@ -666,12 +675,14 @@ def _split_long_unit(unit: str, max_chars: int = 720) -> list[str]:
 
 
 _NUMBER_TOKEN_RE = re.compile(
-    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
+    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?",
+    flags=re.I,
 )
 _REVIEW_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
-    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
-    r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+"
+    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
+    r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+",
+    flags=re.I,
 )
 _PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
     {
@@ -717,11 +728,13 @@ def _review_unit_key(value: str) -> str:
     and comma/period noise.
     """
 
+    value = remove_draft_watermark_letter_artifacts(value)  # 先去掉 DRAFT 水印字母残片，再生成比较 key。
     normalized = normalize_for_similarity(value)
     normalized = canonicalize_chinese_number_expressions(normalized)
     normalized = normalized.replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("&", " and ")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
+    normalized = _normalize_math_symbol_artifacts(normalized)
     normalized = re.sub(r"-\s*[<>]\s*", " ", normalized)
     normalized = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", normalized)
     normalized = re.sub(r"\b10\s+([0-9])\b", r"10\1", normalized)
@@ -735,6 +748,29 @@ def _review_unit_key(value: str) -> str:
             protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
         )
     )
+
+
+def _normalize_math_symbol_artifacts(value: str) -> str:
+    """Normalize PDF variants of multiplication, exponents, hyphens, and spaces."""
+
+    normalized = value.replace("−", "-").replace("–", "-").replace("—", " - ")  # 统一数学负号和破折号形态。
+    normalized = re.sub(
+        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*([+-]?\d+)",
+        r"\1e\2",
+        normalized,
+    )  # 5x10-6、5×10-6、5*10-6 都归一成 5e-6。
+    normalized = re.sub(
+        r"(?i)(?<=\d)\s*(?:x|×|\*)\s*(?=[a-z_])",
+        " ",
+        normalized,
+    )  # 2xT_Vf 与 2×T_Vf 都变成 2 T_Vf，避免乘号格式噪声。
+    normalized = re.sub(
+        r"(?i)(?<=[a-z_])\s*(?:×|\*)\s*(?=[a-z0-9_])",
+        " ",
+        normalized,
+    )  # fb×n 与 fb*n 的乘号在 token 比较中等价。
+    normalized = re.sub(r"(?<=\d)\s+(?=[+-]\d\b)", "", normalized)  # 10 -6 这类指数空格收紧。
+    return normalized
 
 
 def _canonical_review_token(token: str) -> str:
@@ -1076,6 +1112,92 @@ def _dedupe_candidates(candidates: list[_DeltaCandidate]) -> list[_DeltaCandidat
         if existing is None or candidate.priority > existing.priority:
             by_key[key] = candidate
     return sorted(by_key.values(), key=lambda item: item.order)
+
+
+def _suppress_global_noise_changes(changes: list[SectionChange]) -> tuple[list[SectionChange], int]:
+    """Remove report snippets that are clearly repeated layout or boilerplate noise."""
+
+    suppressed_count = 0  # 统计被隐藏的噪声片段数量，最终写进报告警告。
+    cleaned_changes: list[SectionChange] = []  # 保存仍有用户可审阅内容的章节变化。
+    for change in changes:
+        added = [snippet for snippet in change.added_snippets if not _is_global_noise_snippet(snippet)]
+        removed = [snippet for snippet in change.removed_snippets if not _is_global_noise_snippet(snippet)]
+        replaced = [
+            pair
+            for pair in change.replaced_snippets
+            if not (
+                _is_global_noise_snippet(pair.old)
+                and _is_global_noise_snippet(pair.new)
+            )
+        ]
+        suppressed_count += len(change.added_snippets) - len(added)
+        suppressed_count += len(change.removed_snippets) - len(removed)
+        suppressed_count += len(change.replaced_snippets) - len(replaced)
+        if not added and not removed and not replaced and change.omitted_snippet_count == 0:
+            suppressed_count += 1  # 所有可见片段都被判定为版面噪声时，整张空卡片也隐藏。
+            continue
+        cleaned_changes.append(
+            SectionChange(
+                change_type=change.change_type,
+                old_section=change.old_section,
+                new_section=change.new_section,
+                similarity=change.similarity,
+                added_snippets=added,
+                removed_snippets=removed,
+                replaced_snippets=replaced,
+                omitted_snippet_count=change.omitted_snippet_count,
+            )
+        )
+    return cleaned_changes, suppressed_count
+
+
+def _is_global_noise_snippet(value: str) -> bool:
+    """Identify DRAFT, copyright, running header, and margin line-number noise."""
+
+    candidate = compact_inline(value)  # 压成单行，便于识别跨行抽取出来的页眉页脚。
+    if not candidate:
+        return False
+    lowered = candidate.casefold()  # 大小写不影响 DRAFT/boilerplate 判断。
+    if _looks_like_margin_line_number_run(candidate):
+        return True
+    if re.fullmatch(r"[DRAFT]\.?", candidate):
+        return True  # 单独成片段的 D/R/A/F/T 通常是 DRAFT 水印残字，不是协议内容。
+    if re.fullmatch(r"(?i)(?:draft\s*){1,8}", candidate):
+        return True  # 单独出现或重复出现的 DRAFT 水印不是正文差异。
+    noise_patterns = (
+        r"\bcopyright\s+©?\s*\d{4}\s+optical\s+internetworking\s+forum\b",
+        r"\bthis\s+is\s+a\s+draft\s+and\s+not\s+to\s+be\s+shared\b",
+        r"\bthe\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed\b",
+        r"\boptical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
+        r"\boptical\s+internetworking\s+forum\s+\(oif\)\s+\d{3,}.*\bwww\.oiforum\.com\b",
+        r"\bnotice:\s+this\s+technical\s+document\s+has\s+been\s+created\s+by\s+the\s+optical\s+internetworking\s+forum\b",
+        r"\bimplementation\s+agreement\s+oif-cei\b",
+    )  # 这些短语在用户样本中反复出现在页眉页脚或草稿水印中。
+    return any(re.search(pattern, lowered) for pattern in noise_patterns)
+
+
+def _looks_like_margin_line_number_run(value: str) -> bool:
+    """Return True for extracted margin runs such as ``1 2 3 ... 49``."""
+
+    tokens = re.findall(r"\d+", value)  # 页边行号抽取后通常是一串纯数字 token。
+    if len(tokens) < 12:
+        return False
+    numbers = [int(token) for token in tokens if token.isdigit()]  # 转成数字后可以检查 1~49 连续段。
+    if not numbers or min(numbers) < 1 or max(numbers) > 49:
+        return False
+    non_number_text = re.sub(r"[\d\s]+", "", value)  # 除数字和空白外仍有大量文本时不能按行号删除。
+    if len(non_number_text) > 24:
+        return False
+    unique_numbers = sorted(set(numbers))  # 去重后检查最长连续区间。
+    longest_run = 1  # 至少一个数字时连续段长度从 1 开始。
+    current_run = 1  # 当前连续段长度。
+    for previous, current in zip(unique_numbers, unique_numbers[1:], strict=False):
+        if current == previous + 1:
+            current_run += 1
+        else:
+            longest_run = max(longest_run, current_run)
+            current_run = 1
+    return max(longest_run, current_run) >= 10
 
 
 def _candidate_key(candidate: _DeltaCandidate) -> tuple[str, str]:

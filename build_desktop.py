@@ -3,7 +3,8 @@
 PyInstaller cannot cross-compile between macOS and Windows. Run this script on
 the target operating system: on macOS it creates ``dist/ProtocolPdfDiff.app``;
 on Windows it creates ``dist/ProtocolPdfDiff.exe``. The app bundles Python,
-Tkinter, pypdf, and the project source so end users do not need Python.
+Tkinter, pdfplumber, table screenshot dependencies, and the project source so
+end users do not need Python.
 """
 
 from __future__ import annotations
@@ -61,6 +62,21 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    missing = _missing_runtime_modules()
+    if missing:
+        print(
+            "缺少运行依赖，不能打包不完整应用: "
+            + ", ".join(missing)
+            + "。请先运行: python -m pip install -r requirements-build.txt",
+            file=sys.stderr,
+        )
+        return 2
+    if shutil.which("tesseract") is None:
+        print(
+            "警告: 未发现 tesseract 可执行文件；打包应用仍会生成表格截图和行级表格差异，"
+            "但不会执行表格 OCR。需要 OCR 时请在目标系统安装 Tesseract。",
+            file=sys.stderr,
+        )
 
     command = [
         "--noconfirm",
@@ -98,6 +114,19 @@ def expected_artifact(onefile: bool) -> Path:
         return PROJECT_ROOT / "dist" / f"{APP_NAME}.app"
     suffix = ".exe" if sys.platform.startswith("win") else ""
     return PROJECT_ROOT / "dist" / f"{APP_NAME}{suffix}"
+
+
+def _missing_runtime_modules() -> list[str]:
+    """Return required runtime modules that are missing before packaging."""
+
+    required = ["pdfplumber", "pypdfium2", "PIL", "cv2", "pytesseract"]  # 表格截图和识别能力依赖这些模块。
+    missing: list[str] = []  # 收集缺失模块，构建入口一次性提示。
+    for module_name in required:
+        try:
+            __import__(module_name)
+        except ModuleNotFoundError:
+            missing.append(module_name)
+    return missing
 
 
 def smoke_test_artifact(artifact: Path, onefile: bool) -> None:

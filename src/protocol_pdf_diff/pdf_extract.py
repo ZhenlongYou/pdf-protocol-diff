@@ -1,19 +1,24 @@
 """PDF text extraction helpers.
 
-The primary path uses ``pdfplumber`` so table rows and page-coordinate cleanup
-can improve protocol-review reports. A ``pypdf`` fallback remains for older
-installations, but that fallback cannot provide the same row-level table
-snippets. Scanned image PDFs, some CAD exports, and badly embedded fonts may
-still need OCR before this tool can compare them.
+The extractor requires ``pdfplumber`` so table rows, page-coordinate cleanup,
+and table screenshots use one consistent layout source. Scanned image PDFs,
+some CAD exports, and badly embedded fonts may still need OCR before this tool
+can compare them.
 """
 
 from __future__ import annotations
 
 import re  # 使用正则识别行号边栏、表头和表格值模式。
+import base64  # 把表格截图编码成 data URI，HTML 报告可以离线打开。
+import io  # 在内存中保存 JPEG 截图，避免生成临时图片文件。
+import shutil  # 检测 tesseract 可执行文件是否存在，决定是否启用 OCR。
 from pathlib import Path
 
-from .models import ExtractionResult, PageText
-from .text_utils import normalize_line  # 复用统一空白规整逻辑，保证提取层和比较层口径一致。
+from .models import ExtractionResult, PageText, TableVisual
+from .text_utils import (
+    normalize_line,  # 复用统一空白规整逻辑，保证提取层和比较层口径一致。
+    remove_draft_watermark_letter_artifacts,  # 清理混入正文单词的 DRAFT 水印字母残片。
+)
 
 
 class MissingDependencyError(RuntimeError):
@@ -30,6 +35,8 @@ _LINE_NUMBER_MIN_COUNT = 12  # 行号边栏通常有几十个连续数字；少�
 _LINE_NUMBER_MIN_RUN = 10  # 需要存在较长连续数字段，才把窄边栏判定为行号栏。
 _TABLE_ROW_PREFIX = "表格行:"  # 报告里的表格行标记，方便比较器把表格行当作独立审阅单元。
 _TABLE_HEADER_SCAN_ROWS = 12  # pdfplumber 有时把标题/注释放在表格开头，需要在前十余行内寻找表头。
+_TABLE_SCREENSHOT_RESOLUTION = 144  # 表格截图使用 2x PDF 点阵，兼顾清晰度和 HTML 体积。
+_TABLE_SCREENSHOT_PADDING = 10.0  # 截图在表格 bbox 外保留少量边距，方便看见表题和边框。
 _UNSTRUCTURED_TABLE_MIN_CHARS = 160  # 超过该长度且数字密集的正文行，才可能是表格被抽成的一整行。
 _UNSTRUCTURED_TABLE_WORDS = frozenset(
     {
@@ -81,8 +88,8 @@ def extract_pdf_text(
 
     Raises:
         FileNotFoundError: The PDF path does not exist.
-        MissingDependencyError: pypdf is missing.
-        PdfReadError: pypdf cannot open the file.
+        MissingDependencyError: pdfplumber is missing.
+        PdfReadError: pdfplumber cannot open the file.
         ValueError: The requested page range is invalid for this PDF.
     """
 
@@ -90,14 +97,13 @@ def extract_pdf_text(
     if not path.exists():  # 提前检查路径，避免底层 PDF 库给出难懂的打开错误。
         raise FileNotFoundError(f"PDF 文件不存在: {path}")
 
-    try:  # 优先使用 pdfplumber，因为它能识别表格和页面坐标。
+    try:  # 必须使用 pdfplumber，因为表格截图、坐标过滤和行级表格识别都依赖它。
         return _extract_pdf_text_with_pdfplumber(path, start_page, end_page)
-    except ModuleNotFoundError:  # 旧环境可能只安装了 pypdf；保留降级路径让工具仍可运行。
-        warning = (
-            f"{path.name}: 缺少依赖 pdfplumber，已退回 pypdf 文本抽取；"
-            "表格行级差异可能不完整。请运行: python3 -m pip install -r requirements.txt"
-        )  # 降级警告会进入最终报告，提醒用户表格能力受限。
-        return _extract_pdf_text_with_pypdf(path, start_page, end_page, [warning])
+    except ModuleNotFoundError as exc:  # 缺少 pdfplumber 时直接失败，禁止静默退回 pypdf。
+        raise MissingDependencyError(
+            "缺少依赖 pdfplumber，无法执行表格截图和坐标过滤。"
+            "请在项目目录运行: .venv/bin/python -m pip install -r requirements.txt"
+        ) from exc
 
 
 def _extract_pdf_text_with_pdfplumber(
@@ -107,9 +113,9 @@ def _extract_pdf_text_with_pdfplumber(
 ) -> ExtractionResult:
     """Extract layout-aware text and structured table rows with pdfplumber."""
 
-    try:  # 延迟导入使缺失依赖可以被清晰地转成降级路径。
+    try:  # 延迟导入使缺失依赖可以被清晰地转成用户可理解的错误。
         import pdfplumber
-    except ModuleNotFoundError:  # 让外层决定是否退回 pypdf。
+    except ModuleNotFoundError:  # 外层会转成明确的依赖安装提示，禁止退回低保真提取器。
         raise
 
     warnings: list[str] = []  # 收集非致命抽取问题，最终写进报告。
@@ -125,12 +131,14 @@ def _extract_pdf_text_with_pdfplumber(
             start_page=start_page,
             end_page=end_page,
             pdf_name=path.name,
-        )  # 复用统一页码校验，保证 pypdf/pdfplumber 行为一致。
+        )  # 复用统一页码校验，保证不同入口的页码口径一致。
         pages: list[PageText] = []  # 保存每一页清洗后的正文和表格行。
+        table_visuals: list[TableVisual] = []  # 保存表格截图和识别摘要，供 HTML 报告显示。
         for index in range(selected_start, selected_end + 1):  # 页码是用户看到的 1-based 范围。
             page = pdf.pages[index - 1]  # pdfplumber 页列表是 0-based，需要减一取页。
-            text, page_warnings = _extract_pdfplumber_page_text(page, path.name, index)
+            text, page_warnings, page_visuals = _extract_pdfplumber_page_text(page, path.name, index)
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
+            table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
             pages.append(PageText(page_number=index, text=text))  # 保留原始页码供报告定位。
     finally:
         pdf.close()  # 明确关闭 pdfplumber 打开的文件资源。
@@ -142,71 +150,15 @@ def _extract_pdf_text_with_pdfplumber(
         total_pages=total_pages,
         selected_start=selected_start,
         selected_end=selected_end,
+        table_visuals=table_visuals,
     )  # 统一追加空页和低字符数警告。
 
 
-def _extract_pdf_text_with_pypdf(
-    path: Path,
-    start_page: int | None,
-    end_page: int | None,
-    initial_warnings: list[str] | None = None,
-) -> ExtractionResult:
-    """Fallback extractor for environments that have not installed pdfplumber."""
-
-    try:
-        from pypdf import PdfReader
-        from pypdf.errors import PdfReadError as PyPdfReadError
-    except ModuleNotFoundError as exc:
-        raise MissingDependencyError(
-            "缺少依赖 pypdf。请在项目目录运行: python3 -m pip install -r requirements.txt"
-        ) from exc
-
-    warnings: list[str] = list(initial_warnings or [])  # 保留外层传入的降级说明。
-    try:
-        reader = PdfReader(str(path))
-    except PyPdfReadError as exc:
-        raise PdfReadError(f"无法读取 PDF: {path}\n原因: {exc}") from exc
-
-    if getattr(reader, "is_encrypted", False):
-        try:
-            decrypt_result = reader.decrypt("")
-        except Exception as exc:  # pypdf can raise different backend errors.
-            raise PdfReadError(f"PDF 已加密，且无法用空密码打开: {path}") from exc
-        if not decrypt_result:
-            raise PdfReadError(f"PDF 已加密，请先另存为未加密版本: {path}")
-        warnings.append(f"{path.name}: PDF 已加密，已尝试使用空密码读取。")
-
-    total_pages = len(reader.pages)
-    selected_start, selected_end = _resolve_page_range(
-        total_pages=total_pages,
-        start_page=start_page,
-        end_page=end_page,
-        pdf_name=path.name,
-    )
-    pages: list[PageText] = []
-    empty_pages: list[int] = []
-    for index in range(selected_start, selected_end + 1):
-        page = reader.pages[index - 1]
-        try:
-            text = page.extract_text() or ""
-        except Exception as exc:  # Keep the run useful even if one page is odd.
-            text = ""
-            warnings.append(f"{path.name}: 第 {index} 页文本抽取失败: {exc}")
-        if not text.strip():
-            empty_pages.append(index)
-        pages.append(PageText(page_number=index, text=text))
-
-    return _finalize_extraction_result(
-        path=path,
-        pages=pages,
-        warnings=warnings,
-        total_pages=total_pages,
-        selected_start=selected_start,
-        selected_end=selected_end,
-    )
-
-
-def _extract_pdfplumber_page_text(page: object, pdf_name: str, page_number: int) -> tuple[str, list[str]]:
+def _extract_pdfplumber_page_text(
+    page: object,
+    pdf_name: str,
+    page_number: int,
+) -> tuple[str, list[str], list[TableVisual]]:
     """Extract one page after removing layout noise and adding table rows."""
 
     warnings: list[str] = []  # 单页内部的非致命问题独立收集，便于定位页码。
@@ -217,12 +169,139 @@ def _extract_pdfplumber_page_text(page: object, pdf_name: str, page_number: int)
         text = ""
         warnings.append(f"{pdf_name}: 第 {page_number} 页布局文本抽取失败: {exc}")
 
+    text = _clean_extracted_page_text(text)  # 在抽取层过滤 DRAFT、copyright、页眉页脚和 1~49 行号残留。
     if _page_may_contain_table(filtered_page, text):  # 只有疑似表格页才调用较慢的表格识别。
-        table_lines, table_warnings = _extract_table_lines(filtered_page, pdf_name, page_number)
+        table_lines, table_visuals, table_warnings = _extract_table_lines_and_visuals(
+            filtered_page,
+            pdf_name,
+            page_number,
+        )
         warnings.extend(table_warnings)  # 表格失败不阻塞正文比较。
     else:
         table_lines = []  # 普通正文页无需追加结构化表格行。
-    return _combine_text_and_table_lines(text, table_lines), warnings
+        table_visuals = []  # 普通正文页也不生成表格截图。
+    return _combine_text_and_table_lines(text, table_lines), warnings, table_visuals
+
+
+def _clean_extracted_page_text(text: str) -> str:
+    """Remove obvious margin and boilerplate noise at the extraction layer."""
+
+    cleaned_lines: list[str] = []  # 按行保留正文，避免整页级正则误删正常段落。
+    raw_lines = [normalize_line(raw_line) for raw_line in text.splitlines()]  # 先统一空白，便于识别竖排噪声。
+    for line in _drop_vertical_extraction_noise_lines(raw_lines):
+        if not line:
+            continue
+        line = _remove_inline_margin_line_number_run(line)  # 有些 PDF 会把 1~49 行号拼进一行。
+        line = remove_draft_watermark_letter_artifacts(line)  # 清理 trRansmitter / a F transmitter 这类水印字母残片。
+        line = normalize_line(line)  # 删除行号后再次收紧空白。
+        if not line:
+            continue
+        if _looks_like_extraction_boilerplate(line):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
+
+
+def _drop_vertical_extraction_noise_lines(lines: list[str]) -> list[str]:
+    """Remove D/R/A/F/T and 1..49 when PDF extraction emits them one per line."""
+
+    kept: list[str] = []  # 保存删除竖排噪声后的行。
+    index = 0  # 手动索引便于一次跳过整段竖排噪声。
+    while index < len(lines):
+        draft_run_length = _vertical_draft_run_length(lines, index)
+        if draft_run_length:
+            index += draft_run_length
+            continue
+        line_number_run_length = _vertical_line_number_run_length(lines, index)
+        if line_number_run_length:
+            index += line_number_run_length
+            continue
+        kept.append(lines[index])
+        index += 1
+    return kept
+
+
+def _vertical_draft_run_length(lines: list[str], start_index: int) -> int:
+    """Return 5 when lines at start form a vertical DRAFT watermark."""
+
+    draft_letters = ["D", "R", "A", "F", "T"]  # 竖排 DRAFT 通常被抽成五个独立大写字母。
+    end_index = start_index + len(draft_letters)  # 检查窗口刚好覆盖 DRAFT 五行。
+    if end_index > len(lines):
+        return 0
+    candidate = [line.upper() for line in lines[start_index:end_index]]  # 大小写差异不影响水印判断。
+    return len(draft_letters) if candidate == draft_letters else 0
+
+
+def _vertical_line_number_run_length(lines: list[str], start_index: int) -> int:
+    """Return the length of a vertical 1..49 margin line-number run."""
+
+    numbers: list[int] = []  # 保存从当前位置开始连续出现的纯数字行。
+    index = start_index  # 当前扫描行号。
+    while index < len(lines) and re.fullmatch(r"(?:[1-9]|[1-4]\d)", lines[index]):
+        numbers.append(int(lines[index]))
+        index += 1
+    if len(numbers) < 10:
+        return 0
+    longest = 1  # 纯数字行足够多时检查是否构成连续行号段。
+    current = 1  # 当前连续段长度。
+    for previous, value in zip(numbers, numbers[1:], strict=False):
+        if value == previous + 1:
+            current += 1
+        else:
+            longest = max(longest, current)
+            current = 1
+    return len(numbers) if max(longest, current) >= 10 else 0
+
+
+def _remove_inline_margin_line_number_run(line: str) -> str:
+    """Remove extracted margin line-number runs such as ``1 2 ... 49``."""
+
+    return re.sub(
+        r"(?:^|\s)(?:[1-9]|[1-4]\d)(?:\s+(?:[1-9]|[1-4]\d)){11,}(?=\s|$)",
+        " ",
+        line,
+    )
+
+
+def _looks_like_extraction_boilerplate(line: str) -> bool:
+    """Return True for DRAFT, copyright, and repeated OIF page furniture."""
+
+    candidate = normalize_line(line)  # 单行噪声判断使用统一空白后的文本。
+    if not candidate:
+        return False
+    if _looks_like_margin_line_number_only(candidate):
+        return True
+    boilerplate_patterns = (
+        r"(?i)^draft$",
+        r"(?i)\bthis\s+is\s+a\s+draft\s+and\s+not\s+to\s+be\s+shared\b",
+        r"(?i)\bthe\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed\b",
+        r"(?i)\bcopyright\s+©?\s*\d{4}\s+optical\s+internetworking\s+forum\b",
+        r"(?i)^optical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
+    )
+    return any(re.search(pattern, candidate) for pattern in boilerplate_patterns)
+
+
+def _looks_like_margin_line_number_only(line: str) -> bool:
+    """Return True when a line is mostly the 1~49 margin line-number gutter."""
+
+    numbers = [int(value) for value in re.findall(r"\d+", line)]  # 提取数字后检查是否全在行号范围内。
+    if len(numbers) < 12:
+        return False
+    if min(numbers) < 1 or max(numbers) > 49:
+        return False
+    remainder = re.sub(r"[\d\s]+", "", line)  # 除数字和空白外仍有内容时不能当纯行号删除。
+    if remainder:
+        return False
+    unique_numbers = sorted(set(numbers))  # 去重后计算最长连续行号段。
+    longest = 1  # 至少一个数字时最长段从 1 开始。
+    current = 1  # 当前连续段长度。
+    for previous, value in zip(unique_numbers, unique_numbers[1:], strict=False):
+        if value == previous + 1:
+            current += 1
+        else:
+            longest = max(longest, current)
+            current = 1
+    return max(longest, current) >= 10
 
 
 def _filtered_layout_page(page: object) -> object:
@@ -341,14 +420,215 @@ def _keep_non_watermark_object(obj: dict[str, object]) -> bool:
 def _extract_table_lines(page: object, pdf_name: str, page_number: int) -> tuple[list[str], list[str]]:
     """Extract tables from one filtered page and format them as review lines."""
 
+    table_lines, _table_visuals, warnings = _extract_table_lines_and_visuals(
+        page,
+        pdf_name,
+        page_number,
+    )  # 兼容旧测试和旧调用，只返回文本行和警告。
+    return table_lines, warnings
+
+
+def _extract_table_lines_and_visuals(
+    page: object,
+    pdf_name: str,
+    page_number: int,
+) -> tuple[list[str], list[TableVisual], list[str]]:
+    """Extract structured table rows and screenshot visual evidence."""
+
     try:
-        tables = page.extract_tables() or []
+        table_objects = page.find_tables() or []
     except Exception as exc:
-        return [], [f"{pdf_name}: 第 {page_number} 页表格抽取失败: {exc}"]
+        return [], [], [f"{pdf_name}: 第 {page_number} 页表格定位失败: {exc}"]
     lines: list[str] = []  # 汇总该页所有表格行。
-    for table_number, table in enumerate(tables, start=1):
-        lines.extend(_table_lines_from_rows(table, table_number))  # 每个物理表格都转成稳定文本行。
-    return lines, []
+    visuals: list[TableVisual] = []  # 汇总该页所有表格截图和视觉识别摘要。
+    warnings: list[str] = []  # 单页表格截图和 OCR 相关的非致命问题。
+    for table_number, table in enumerate(table_objects, start=1):
+        try:
+            rows = table.extract() or []
+        except Exception as exc:
+            warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格行抽取失败: {exc}")
+            rows = []
+        table_lines = _table_lines_from_rows(rows, table_number)  # 每个物理表格都转成稳定文本行。
+        lines.extend(table_lines)  # 表格行继续进入主文本 diff。
+        visual, visual_warning = _build_table_visual(page, table, table_lines, page_number, table_number)
+        if visual_warning:
+            warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
+        if visual is not None:
+            visuals.append(visual)
+    return lines, visuals, warnings
+
+
+def _build_table_visual(
+    page: object,
+    table: object,
+    table_lines: list[str],
+    page_number: int,
+    table_number: int,
+) -> tuple[TableVisual | None, str]:
+    """Build one screenshot-backed table visual record."""
+
+    bbox = tuple(float(value) for value in getattr(table, "bbox", ()) or ())  # pdfplumber Table 提供表格边界框。
+    if len(bbox) != 4:
+        return None, "未取得可靠表格边界"
+    image, padded_bbox, image_status = _table_screenshot_image(page, bbox)  # 生成带橙色边框的表格截图。
+    if image is None:
+        return None, image_status or "截图为空"
+    title = _table_title_above_bbox(page, bbox)  # 尽量从表格上方提取 Table 题名。
+    image_data_uri = _image_to_data_uri(image)  # 把截图内嵌到 HTML，便于手机直接查看。
+    grid_summary = _opencv_grid_summary(image)  # 用 OpenCV 检测截图内网格线，说明视觉表格证据强弱。
+    ocr_text, ocr_status = _ocr_table_image(image)  # 有 tesseract 引擎时做 OCR，否则明确说明跳过。
+    if image_status:
+        grid_summary = f"{grid_summary}; {image_status}"
+    return (
+        TableVisual(
+            page_number=page_number,
+            table_number=table_number,
+            title=title,
+            bbox=padded_bbox,
+            image_data_uri=image_data_uri,
+            row_texts=table_lines,
+            grid_summary=grid_summary,
+            ocr_text=ocr_text,
+            ocr_status=ocr_status,
+            is_continuation=not bool(title),
+        ),
+        "",
+    )
+
+
+def _table_screenshot_image(
+    page: object,
+    bbox: tuple[float, float, float, float],
+) -> tuple[object | None, tuple[float, float, float, float], str]:
+    """Render a padded table crop and draw the detected bbox in orange."""
+
+    padded_bbox = _padded_bbox(page, bbox, _TABLE_SCREENSHOT_PADDING)  # 截图外扩一点边距，保留表题和边框上下文。
+    try:
+        cropped_page = page.crop(padded_bbox)  # pdfplumber 使用 PDF 点坐标裁剪页面。
+        image = cropped_page.to_image(resolution=_TABLE_SCREENSHOT_RESOLUTION).original.convert("RGB")
+    except Exception as exc:
+        return None, padded_bbox, f"截图失败: {exc}"
+    try:
+        from PIL import ImageDraw
+
+        scale = _TABLE_SCREENSHOT_RESOLUTION / 72.0  # PDF point 到截图像素的比例。
+        draw = ImageDraw.Draw(image)  # 在截图上画橙框，标出自动识别的表格网格区域。
+        x0 = max(0, int((bbox[0] - padded_bbox[0]) * scale))
+        y0 = max(0, int((bbox[1] - padded_bbox[1]) * scale))
+        x1 = min(image.width - 1, int((bbox[2] - padded_bbox[0]) * scale))
+        y1 = min(image.height - 1, int((bbox[3] - padded_bbox[1]) * scale))
+        draw.rectangle([x0, y0, x1, y1], outline=(217, 119, 6), width=4)
+    except Exception as exc:
+        return image, padded_bbox, f"橙框绘制失败: {exc}"
+    return image, padded_bbox, ""
+
+
+def _padded_bbox(
+    page: object,
+    bbox: tuple[float, float, float, float],
+    padding: float,
+) -> tuple[float, float, float, float]:
+    """Expand a bbox while staying inside page bounds."""
+
+    width = float(getattr(page, "width", 0) or 0)  # 页面宽度用于限制右边界。
+    height = float(getattr(page, "height", 0) or 0)  # 页面高度用于限制下边界。
+    page_bbox = tuple(float(value) for value in (getattr(page, "bbox", None) or (0.0, 0.0, width, height)))  # 裁剪页可能有非零父坐标。
+    page_left, page_top, page_right, page_bottom = page_bbox  # 使用父页面坐标限制截图范围，避免 crop 越界。
+    left = max(page_left, bbox[0] - padding)  # 左侧外扩但不越过当前页面视图。
+    top = max(page_top, bbox[1] - padding * 2.5)  # 顶部多留一点空间，尽量包含表题。
+    right = min(page_right, bbox[2] + padding) if page_right else bbox[2] + padding
+    bottom = min(page_bottom, bbox[3] + padding) if page_bottom else bbox[3] + padding
+    return left, top, right, bottom
+
+
+def _image_to_data_uri(image: object) -> str:
+    """Encode a PIL image as a compact JPEG data URI."""
+
+    buffer = io.BytesIO()  # 使用内存缓冲区，避免写临时图片文件。
+    image.save(buffer, format="JPEG", quality=82, optimize=True)  # JPEG 体积更适合嵌入 HTML。
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")  # data URI 需要 ASCII base64。
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def _opencv_grid_summary(image: object) -> str:
+    """Summarize visible table-grid evidence with OpenCV when available."""
+
+    try:
+        import cv2
+        import numpy as np
+    except ModuleNotFoundError:
+        return "OpenCV 未安装，未执行网格检测"
+    try:
+        rgb = np.array(image)  # PIL 图像转成 numpy 数组供 OpenCV 处理。
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)  # 灰度图足够检测表格线。
+        threshold = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            15,
+            10,
+        )
+        height, width = threshold.shape  # 截图尺寸决定形态学核的最小长度。
+        horizontal = cv2.morphologyEx(
+            threshold,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (max(20, width // 35), 1)),
+            iterations=1,
+        )
+        vertical = cv2.morphologyEx(
+            threshold,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(20, height // 35))),
+            iterations=1,
+        )
+        horizontal_count = _opencv_contour_count(cv2, horizontal)  # 横线数量反映表格行边界证据。
+        vertical_count = _opencv_contour_count(cv2, vertical)  # 竖线数量反映表格列边界证据。
+    except Exception as exc:
+        return f"OpenCV 网格检测失败: {exc}"
+    return f"OpenCV 网格检测: 横线 {horizontal_count} 条，竖线 {vertical_count} 条"
+
+
+def _opencv_contour_count(cv2_module: object, mask: object) -> int:
+    """Count contours in one binary line mask."""
+
+    contours, _hierarchy = cv2_module.findContours(mask, cv2_module.RETR_EXTERNAL, cv2_module.CHAIN_APPROX_SIMPLE)
+    return len(contours)
+
+
+def _ocr_table_image(image: object) -> tuple[str, str]:
+    """Run OCR only when both pytesseract and the tesseract binary are available."""
+
+    if shutil.which("tesseract") is None:
+        return "", "OCR 未启用：未发现 tesseract；使用截图和 pdfplumber 表格行。"
+    try:
+        import pytesseract
+    except ModuleNotFoundError:
+        return "", "OCR 未启用：pytesseract 未安装。"
+    try:
+        text = pytesseract.image_to_string(image, config="--psm 6")  # psm 6 适合统一块状表格区域。
+    except Exception as exc:
+        return "", f"OCR 失败: {exc}"
+    normalized = "\n".join(line for line in (normalize_line(raw) for raw in text.splitlines()) if line)
+    if not normalized:
+        return "", "OCR 未识别到可用文本；使用截图和 pdfplumber 表格行。"
+    return normalized[:1600], "OCR 已执行。"
+
+
+def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float]) -> str:
+    """Extract a likely table caption immediately above a table bbox."""
+
+    top = max(0.0, bbox[1] - 54.0)  # 表题通常在表格上方一到三行内。
+    try:
+        caption_page = page.crop((bbox[0], top, bbox[2], bbox[1]))
+        caption_text = caption_page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+    except Exception:
+        return ""
+    candidates = [normalize_line(line) for line in caption_text.splitlines() if normalize_line(line)]
+    for candidate in reversed(candidates):
+        if re.search(r"(?i)\btable\s+\d+(?:[-–]\d+)?\b|表\s*\d+", candidate):
+            return candidate
+    return candidates[-1] if candidates else ""
 
 
 def _page_may_contain_table(page: object, text: str) -> bool:
@@ -828,6 +1108,7 @@ def _finalize_extraction_result(
     total_pages: int,
     selected_start: int,
     selected_end: int,
+    table_visuals: list[TableVisual] | None = None,
 ) -> ExtractionResult:
     """Add common extraction warnings and build the final result object."""
 
@@ -853,6 +1134,7 @@ def _finalize_extraction_result(
         total_pages=total_pages,
         selected_start_page=selected_start,
         selected_end_page=selected_end,
+        table_visuals=list(table_visuals or []),
     )
 
 

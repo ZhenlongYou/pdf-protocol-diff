@@ -16,7 +16,12 @@ from hashlib import sha1
 from math import ceil
 
 from .models import ExtractionResult, HeadingInfo, PageText, Section
-from .text_utils import compact_inline, normalize_for_similarity, normalize_line
+from .text_utils import (
+    compact_inline,
+    normalize_for_similarity,
+    normalize_line,
+    remove_draft_watermark_letter_artifacts,
+)
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
 
@@ -81,7 +86,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
 
     for page in cleaned_pages:
         for raw_line in page.text.splitlines():
-            line = normalize_line(raw_line)
+            line = normalize_line(remove_draft_watermark_letter_artifacts(raw_line))
             if not line:
                 continue
             heading = detect_heading(line)
@@ -140,7 +145,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
 def detect_heading(line: str) -> HeadingInfo | None:
     """Return heading metadata if a line looks like a protocol heading."""
 
-    candidate = compact_inline(line)
+    candidate = compact_inline(remove_draft_watermark_letter_artifacts(line))
     if not candidate or len(candidate) > 140:
         return None
     if _looks_like_table_row(candidate):
@@ -160,6 +165,8 @@ def detect_heading(line: str) -> HeadingInfo | None:
             level = number.count(".") + 1
         else:
             level = configured_level
+        if _looks_like_forbidden_heading_candidate(candidate, number, title, kind):
+            continue
         return HeadingInfo(raw=candidate, number=number, title=title, level=level)
     return None
 
@@ -530,6 +537,115 @@ def _looks_like_table_row(line: str) -> bool:
     separators = line.count("|") + line.count("\t")
     many_numbers = len(re.findall(r"\d+(?:\.\d+)?", line)) >= 4
     return separators >= 2 or (many_numbers and len(line) > 40)
+
+
+def _looks_like_forbidden_heading_candidate(
+    candidate: str,
+    number: str,
+    title: str,
+    kind: str,
+) -> bool:
+    """Reject units, formulas, footnotes, phone numbers, and table values."""
+
+    normalized_title = normalize_line(title)  # 标题部分决定数字行是不是章节。
+    normalized_candidate = normalize_line(candidate)  # 全行用于识别公式和脚注形态。
+    if kind == "paren" and _looks_like_phone_or_footnote(candidate, normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_unit_only_heading(normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_formula_or_table_value_heading(number, normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_footnote_sentence_heading(number, normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_address_heading(number, normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_margin_line_heading(normalized_candidate):
+        return True
+    return False
+
+
+def _looks_like_phone_or_footnote(candidate: str, title: str) -> bool:
+    """Return True for ``(408)309...`` and similar non-heading fragments."""
+
+    if re.match(r"^\(\d{3,}\)\s*\d", candidate):
+        return True
+    if title and re.fullmatch(r"[\d\s().+-]+", title):
+        return True
+    return False
+
+
+def _looks_like_unit_only_heading(title: str) -> bool:
+    """Return True when a numeric heading title is only a measurement unit."""
+
+    if not title:
+        return False
+    unit_pattern = (
+        r"(?i)^(?:ui|uipp|uirms|mv|v|db|dbc|ghz|mhz|hz|ps|ns|us|ms|"
+        r"ohm|ω|ff|pf|ph|mm|ns/mm|1/mm|v2/ghz|gb/s|gsym/s|gt/s|%)$"
+    )
+    return bool(re.fullmatch(unit_pattern, title.strip()))
+
+
+def _looks_like_formula_or_table_value_heading(number: str, title: str) -> bool:
+    """Return True when a numeric candidate is really a formula or table value."""
+
+    joined = f"{number} {title}".strip()  # 部分公式被正则拆成 number/title 两段，需要拼回判断。
+    if not title:
+        return True
+    if re.fullmatch(r"[A-Za-z]", title):
+        return True  # 数字后只有一个符号字母时，更像表格值/公式残片，不是章节标题。
+    formula_pattern = r"(?i)[=×*]|\b\d+(?:\.\d+)?\s*x\s*\d|(?:\b10\s*[+-]?\d\b)"  # 保留 GT/s 这类单位斜杠，只拦截明确公式符号。
+    if re.search(formula_pattern, joined) and re.search(r"\d", joined):
+        return True
+    if re.fullmatch(r"(?i)[+-]?\d+(?:\.\d+)?\s*(?:ui|uipp|uirms|mv|v|db|ghz|mhz|ps|ns|us|ms|ω|ohm|ff|pf|mm)", joined):
+        return True
+    if re.match(r"(?i)^(?:min|max|typ|value|units?|symbol|parameter)\b", title):
+        return True
+    return False
+
+
+def _looks_like_address_heading(number: str, title: str) -> bool:
+    """Return True for postal addresses that start with a street number."""
+
+    if not number.isdigit() or int(number) < 100:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:pkwy|parkway|blvd|boulevard|suite|suit|street|st\.?|road|rd\.?|drive|dr\.?|avenue|ave\.?)\b",
+            title,
+        )
+    )  # OIF front matter addresses must not become protocol sections.
+
+
+def _looks_like_footnote_sentence_heading(number: str, title: str) -> bool:
+    """Return True for numbered footnote sentences misread as headings."""
+
+    if not number.isdigit() or "." in number:
+        return False
+    if re.fullmatch(r"(?i)notes?[:.]?", title):
+        return True
+    if not title.endswith("."):
+        return False
+    if re.search(r"(?i)\bis\s+(?:defined|measured|specified|described)\b", title):
+        return True
+    return bool(
+        re.match(
+            r"(?i)^(?:measured|defined|specified|see|where|for|when|values?)\b",
+            title,
+        )
+    )  # 表格脚注常以完整句出现，不能拆成章节。
+
+
+def _looks_like_margin_line_heading(candidate: str) -> bool:
+    """Return True for extracted line-number runs mistaken as headings."""
+
+    numbers = [int(value) for value in re.findall(r"\d+", candidate)]  # 页边行号通常是一串 1~49 数字。
+    if len(numbers) < 10:
+        return False
+    if min(numbers) < 1 or max(numbers) > 49:
+        return False
+    non_numbers = re.sub(r"[\d\s]+", "", candidate)
+    return len(non_numbers) <= 8
 
 
 def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:

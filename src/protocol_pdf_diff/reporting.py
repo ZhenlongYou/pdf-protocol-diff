@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 
-from .models import DiffOptions, DiffResult, Section, SectionChange
+from .models import DiffOptions, DiffResult, Section, SectionChange, TableVisual
 from .text_utils import (
     CHINESE_COUNT_UNIT_PATTERN,
     CHINESE_NUMBER_CHARS,
@@ -31,11 +31,14 @@ _CHANGE_LABELS = {
 
 _INLINE_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
-    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
-    r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+"
+    r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*(?:x|×|\*)\s*10\s*[+-]?\d+"
+    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
+    r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+",
+    flags=re.I,
 )
 _INLINE_NUMBER_RE = re.compile(
-    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
+    r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?",
+    flags=re.I,
 )
 _CHINESE_INLINE_NUMBER_RE = re.compile(
     rf"[{CHINESE_NUMBER_CHARS}]+(?=\s*(?:{CHINESE_COUNT_UNIT_PATTERN}))",
@@ -119,6 +122,8 @@ def write_reports(
         "changes": [_change_to_dict(change) for change in result.changes],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
+        "old_table_visuals": [_table_visual_to_dict(table) for table in result.old_table_visuals],
+        "new_table_visuals": [_table_visual_to_dict(table) for table in result.new_table_visuals],
         "warnings": result.warnings,
     }
 
@@ -324,6 +329,7 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
     )
     if not change_cards:
         change_cards = f'<section class="empty-state">{_escape(_empty_report_message(result))}</section>'
+    table_visual_html = _render_table_visuals_html(result)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -493,11 +499,69 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
       padding: 10px;
       margin-top: 12px;
     }}
+    .table-visuals {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      padding: 16px;
+    }}
+    .table-visual-card {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      background: #fbfcfe;
+    }}
+    .table-shot-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 10px;
+    }}
+    .table-shot {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+      background: #fff;
+    }}
+    .table-shot h4 {{
+      margin: 0;
+      padding: 8px 10px;
+      color: var(--muted);
+      background: #edf1f6;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }}
+    .table-shot img {{
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #fff;
+    }}
+    .table-status {{
+      color: var(--muted);
+      font-size: 12px;
+      margin: 6px 0 12px;
+    }}
+    .table-row-summary {{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }}
+    .table-row-summary th, .table-row-summary td {{
+      border: 1px solid var(--line);
+      padding: 7px 8px;
+      vertical-align: top;
+      text-align: left;
+    }}
+    .table-row-summary th {{ background: #edf1f6; color: var(--muted); }}
     @media (max-width: 860px) {{
       .layout {{ grid-template-columns: 1fr; }}
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
       main {{ padding: 14px; }}
-      .summary, .compare-grid {{ grid-template-columns: 1fr; }}
+      .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: 1fr; }}
       .change-head {{ display: block; }}
       .pages {{ margin-top: 4px; }}
     }}
@@ -534,6 +598,7 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
       </section>
       {warning_html}
       {change_cards}
+      {table_visual_html}
     </main>
   </div>
 </body>
@@ -580,6 +645,222 @@ def _render_change_html(index: int, change: SectionChange) -> str:
     """
 
 
+def _render_table_visuals_html(result: DiffResult) -> str:
+    """Render screenshot-backed table evidence without replacing text diffs."""
+
+    if not result.old_table_visuals and not result.new_table_visuals:
+        return ""
+    pairs = _paired_table_visuals(result.old_table_visuals, result.new_table_visuals)
+    cards = "\n".join(
+        _render_table_visual_pair(index, old_table, new_table)
+        for index, (old_table, new_table) in enumerate(pairs, start=1)
+    )
+    return f"""
+      <section class="table-visuals">
+        <h2>表格截图识别</h2>
+        <p class="change-summary">上方保留正文和章节差异；本区集中展示表格截图、网格证据和行级变化，方便直接回看表格内容。</p>
+        {cards}
+      </section>
+    """
+
+
+def _paired_table_visuals(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+) -> list[tuple[TableVisual | None, TableVisual | None]]:
+    """Pair table visuals by title/row identity without forcing weak matches."""
+
+    old_unused = set(range(len(old_tables)))  # 未匹配旧表索引。
+    new_unused = set(range(len(new_tables)))  # 未匹配新表索引。
+    pairs: list[tuple[TableVisual | None, TableVisual | None]] = []  # 输出旧/新表格视觉配对。
+    scored: list[tuple[float, int, int]] = []  # 保存所有足够可信的候选配对。
+    for old_index, old_table in enumerate(old_tables):
+        for new_index, new_table in enumerate(new_tables):
+            score = _table_visual_similarity(old_table, new_table)
+            if score >= 0.65:
+                scored.append((score, old_index, new_index))
+    for _score, old_index, new_index in sorted(scored, reverse=True):
+        if old_index not in old_unused or new_index not in new_unused:
+            continue
+        old_unused.remove(old_index)
+        new_unused.remove(new_index)
+        pairs.append((old_tables[old_index], new_tables[new_index]))
+    for old_index in sorted(old_unused):
+        pairs.append((old_tables[old_index], None))
+    for new_index in sorted(new_unused):
+        pairs.append((None, new_tables[new_index]))
+    return pairs
+
+
+def _table_visual_similarity(old_table: TableVisual, new_table: TableVisual) -> float:
+    """Score whether two screenshot table regions likely represent the same table."""
+
+    old_key = _table_visual_identity(old_table)  # 标题和前几行共同构成旧表身份。
+    new_key = _table_visual_identity(new_table)  # 新表同样使用标题和行文本。
+    if not old_key or not new_key:
+        return 0.0
+    return difflib.SequenceMatcher(None, old_key, new_key, autojunk=False).ratio()
+
+
+def _table_visual_identity(table: TableVisual) -> str:
+    """Return a compact identity string for pairing table screenshots."""
+
+    title = compact_inline(table.title).casefold()  # 表题通常是最强身份信号。
+    rows = " ".join(compact_inline(row) for row in table.row_texts[:6])  # 前几行表头/参数名可辅助跨页配对。
+    return compact_inline(f"{title} {rows}").casefold()
+
+
+def _render_table_visual_pair(
+    index: int,
+    old_table: TableVisual | None,
+    new_table: TableVisual | None,
+) -> str:
+    """Render one old/new table screenshot pair."""
+
+    title = _table_pair_title(index, old_table, new_table)
+    old_shot = _render_one_table_shot("旧版截图", old_table)
+    new_shot = _render_one_table_shot("新版截图", new_table)
+    rows_html = _render_table_row_summary(old_table, new_table)
+    return f"""
+        <div class="table-visual-card">
+          <h3>{_escape(title)}</h3>
+          <div class="table-shot-grid">{old_shot}{new_shot}</div>
+          {rows_html}
+        </div>
+    """
+
+
+def _table_pair_title(
+    index: int,
+    old_table: TableVisual | None,
+    new_table: TableVisual | None,
+) -> str:
+    """Build a readable title for one visual table pair."""
+
+    table = new_table or old_table
+    if table is None:
+        return f"表格 {index}"
+    title = table.title or ("跨页表格续段" if table.is_continuation else "")
+    if title:
+        return f"{index}. {title}"
+    return f"{index}. 第 {table.page_number} 页表格 {table.table_number}"
+
+
+def _render_one_table_shot(label: str, table: TableVisual | None) -> str:
+    """Render one side of a table screenshot pair."""
+
+    if table is None:
+        return f'<div class="table-shot"><h4>{_escape(label)}</h4><div class="snippet">无对应表格截图</div></div>'
+    caption = f"{label} · 页 {table.page_number} · 表格 {table.table_number}"
+    grid_summary = _display_table_grid_summary(table.grid_summary)
+    return (
+        f'<div class="table-shot"><h4>{_escape(caption)}</h4>'
+        f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
+        f'<div class="snippet">{_escape(grid_summary)}</div></div>'
+    )
+
+
+def _display_table_grid_summary(summary: str) -> str:
+    """Convert internal grid diagnostics into user-facing table evidence text."""
+
+    match = re.search(r"横线\s*(\d+)\s*条，竖线\s*(\d+)\s*条", summary)
+    if match:
+        return f"表格网格：横线 {match.group(1)} 条，竖线 {match.group(2)} 条"
+    if summary:
+        return "表格网格：检测未完成"
+    return "表格网格：未检测到稳定网格"
+
+
+def _render_table_row_summary(
+    old_table: TableVisual | None,
+    new_table: TableVisual | None,
+) -> str:
+    """Render a compact row-level summary from structured table rows."""
+
+    old_rows = old_table.row_texts if old_table else []
+    new_rows = new_table.row_texts if new_table else []
+    old_keys = [_table_row_display_key(row) for row in old_rows]
+    new_keys = [_table_row_display_key(row) for row in new_rows]
+    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
+    body_rows: list[str] = []  # 保存 HTML 表格行。
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        old_block = old_rows[old_start:old_end]
+        new_block = new_rows[new_start:new_end]
+        block_count = max(len(old_block), len(new_block))
+        for offset in range(block_count):
+            old_value = old_block[offset] if offset < len(old_block) else ""
+            new_value = new_block[offset] if offset < len(new_block) else ""
+            body_rows.append(
+                "<tr>"
+                f"<td>{_escape(_table_diff_kind(old_value, new_value))}</td>"
+                f"<td>{_escape(old_value)}</td>"
+                f"<td>{_escape(new_value)}</td>"
+                "</tr>"
+            )
+    if not body_rows:
+        body_rows.append('<tr><td>未检测到行级变化</td><td></td><td></td></tr>')
+    visible_rows = body_rows[:12]  # 表格摘要保持可读，超出的行数必须显式提示。
+    omitted_count = max(0, len(body_rows) - len(visible_rows))  # 统计被折叠的表格行变化。
+    omitted_note = (
+        f'<div class="omitted-note">另有 {omitted_count} 行表格变化未展示；完整表格行已参与正文差异比较。</div>'
+        if omitted_count
+        else ""
+    )
+    return (
+        '<table class="table-row-summary"><thead><tr>'
+        '<th>类型</th><th>旧版表格行</th><th>新版表格行</th>'
+        '</tr></thead><tbody>'
+        + "\n".join(visible_rows)
+        + "</tbody></table>"
+        + omitted_note
+    )
+
+
+def _table_row_display_key(row: str) -> str:
+    """Normalize one visual table row for row-level summary matching."""
+
+    normalized = compact_inline(row).casefold()
+    normalized = normalized.replace("µ", "u").replace("μ", "u")
+    normalized = _normalize_table_row_math_text(normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def _normalize_table_row_math_text(value: str) -> str:
+    """Normalize table-row math notation for visual summary matching."""
+
+    normalized = value.replace("−", "-").replace("–", "-").replace("—", " - ")  # 数学负号和破折号统一。
+    normalized = re.sub(
+        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*([+-]?\d+)",
+        r"\1e\2",
+        normalized,
+    )  # 5x10-6、5×10-6、5*10-6 在表格摘要中等价。
+    normalized = re.sub(
+        r"(?i)(?<=\d)\s*(?:x|×|\*)\s*(?=[a-z_])",
+        " ",
+        normalized,
+    )  # 2xT_Vf 与 2×T_Vf 等价。
+    normalized = re.sub(
+        r"(?i)(?<=[a-z_])\s*(?:×|\*)\s*(?=[a-z0-9_])",
+        " ",
+        normalized,
+    )  # fb*n 与 fb×n 等价。
+    normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)  # 词内换行连字符不造成表格伪差异。
+    return normalized
+
+
+def _table_diff_kind(old_value: str, new_value: str) -> str:
+    """Classify one visual table row diff for the summary column."""
+
+    if old_value and new_value:
+        return "替换/修改"
+    if old_value:
+        return "旧表删除行"
+    return "新表新增行"
+
+
 def _render_nav_item(index: int, change: SectionChange) -> str:
     """Render one left-navigation entry with an explicit change type label."""
 
@@ -619,7 +900,7 @@ def _empty_change_message(change: SectionChange) -> str:
     if change.change_type == "unchanged":
         return "该章节未发现正文或标题变化。"
     if change.old_section and change.new_section:
-        return "该章节发生变化，但当前片段数量设置未展开具体文本；可调大 MAX_SNIPPETS_PER_SECTION 后复跑。"
+        return "该章节发生变化，但当前每章展示片段数未展开具体文本；可调大 --max-snippets 后复跑。"
     return "该章节没有可展示的正文片段，请回到源 PDF 对应页复核。"
 
 
@@ -704,7 +985,7 @@ def _render_omitted_html(omitted_count: int) -> str:
 def _omitted_snippet_message(omitted_count: int) -> str:
     """Explain that more substantive differences exist than are displayed."""
 
-    return f"另有 {omitted_count} 条差异片段未展示；可调大 --max-snippets / MAX_SNIPPETS_PER_SECTION 后复跑。"
+    return f"另有 {omitted_count} 条差异片段未展示；完整章节已比较，可调大 --max-snippets 展开更多报告片段。"
 
 
 def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
@@ -826,6 +1107,7 @@ def _inline_token_key(token: str, source_text: str, start: int, end: int) -> str
 
     normalized = _inline_context_word(token).replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
+    normalized = _normalize_inline_math_token(normalized, source_text, start)
     normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
     normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
     chinese_number = _contextual_chinese_number_key(normalized, source_text, start, end)
@@ -833,6 +1115,20 @@ def _inline_token_key(token: str, source_text: str, start: int, end: int) -> str
         return chinese_number
     if _INLINE_NUMBER_RE.fullmatch(normalized):
         return _canonical_inline_number(normalized)
+    return normalized
+
+
+def _normalize_inline_math_token(token: str, source_text: str, start: int) -> str:
+    """Normalize visual-only multiplication/exponent token variants."""
+
+    normalized = token.replace("−", "-").replace("–", "-")  # 数学负号和短横线都归一为 ASCII hyphen。
+    normalized = re.sub(
+        r"(?i)^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*([+-]?\d+)$",
+        r"\1e\2",
+        normalized,
+    )  # 5x10-6、5×10-6、5*10-6 在高亮层等价。
+    if normalized.startswith("x") and start > 0 and source_text[start - 1 : start].isdigit():
+        normalized = normalized[1:]  # 2xT_Vf 抽成 token xT_Vf 时，去掉作为乘号的 x。
     return normalized
 
 
@@ -975,9 +1271,9 @@ def _report_scope_note(options: DiffOptions) -> str:
     """Explain output boundaries that matter during protocol review."""
 
     return (
-        "仅比较 PDF 中可抽取文字；图片、印章、矢量图等视觉元素不比较；"
+        "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核；图片、印章、普通矢量图等其它视觉元素不比较；"
         "重复页眉页脚和动态页码会尽量过滤；"
-        f"每个章节最多展示 {options.max_snippets_per_section} 条片段。"
+        f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
     )
 
 
@@ -1106,4 +1402,21 @@ def _section_to_dict(section: Section) -> dict[str, object]:
         "number_path": list(section.number_path),
         "page_range": section.page_range,
         "body_preview": truncate(compact_inline(section.body), 500),
+    }
+
+
+def _table_visual_to_dict(table: TableVisual) -> dict[str, object]:
+    """Serialize table visual metadata without duplicating huge image payloads."""
+
+    return {
+        "page_number": table.page_number,
+        "table_number": table.table_number,
+        "title": table.title,
+        "bbox": list(table.bbox),
+        "row_texts": list(table.row_texts),
+        "grid_summary": table.grid_summary,
+        "ocr_status": table.ocr_status,
+        "ocr_text_preview": truncate(compact_inline(table.ocr_text), 500),
+        "has_embedded_image": bool(table.image_data_uri),
+        "is_continuation": table.is_continuation,
     }

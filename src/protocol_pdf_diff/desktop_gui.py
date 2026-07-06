@@ -234,7 +234,7 @@ class ProtocolDiffDesktopApp:
             settings_frame.columnconfigure(column, weight=1)
         self._add_setting_entry(settings_frame, 0, 0, "章节匹配阈值", self.min_similarity_var)
         self._add_setting_entry(settings_frame, 0, 2, "未变化阈值", self.unchanged_similarity_var)
-        self._add_setting_entry(settings_frame, 0, 4, "最大片段数", self.max_snippets_var)
+        self._add_setting_entry(settings_frame, 0, 4, "每章展示片段数", self.max_snippets_var)
         ttk.Checkbutton(
             settings_frame,
             text="列出未变化章节",
@@ -380,7 +380,7 @@ class ProtocolDiffDesktopApp:
                 self.unchanged_similarity_var.get(), "未变化阈值"
             ),
             max_snippets_per_section=parse_positive_int(
-                self.max_snippets_var.get(), "最大片段数"
+                self.max_snippets_var.get(), "每章展示片段数"
             ),
             include_unchanged_sections=self.include_unchanged_var.get(),
             old_start_page=parse_optional_page(self.old_start_var.get(), "旧协议起始页"),

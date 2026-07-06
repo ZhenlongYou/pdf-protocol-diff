@@ -12,6 +12,34 @@ import unicodedata
 
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
+_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(r"\b[A-Za-z]*[a-z][DRAFT][a-z][A-Za-z]*\b")
+_DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
+    {
+        "characteristic",
+        "characteristics",
+        "compliance",
+        "condition",
+        "conditions",
+        "differential",
+        "frequency",
+        "measured",
+        "measurement",
+        "parameter",
+        "parameters",
+        "receiver",
+        "reference",
+        "reflection",
+        "requirement",
+        "requirements",
+        "return",
+        "signal",
+        "signals",
+        "transmitter",
+        "transmission",
+        "voltage",
+        "waveform",
+    }
+)  # 只有删除残字后命中这些常见协议词，才认为是 DRAFT 水印污染。
 _NUMBER_WORD_UNITS = {
     "zero": 0,
     "one": 1,
@@ -152,6 +180,38 @@ def compact_inline(text: str) -> str:
     """Make a short single-line snippet for reports and CSV fields."""
 
     return _WHITESPACE_RE.sub(" ", " ".join(text.split())).strip()
+
+
+def remove_draft_watermark_letter_artifacts(text: str) -> str:
+    """Remove isolated DRAFT watermark letters that leaked into body text."""
+
+    if "表格行:" in text:  # 结构化表格行可能合法包含单字母符号，不能按水印残片清理。
+        return text
+    cleaned = _EMBEDDED_DRAFT_LETTER_WORD_RE.sub(_clean_embedded_draft_letter_word, text)  # 先处理 RequirRements 这类词内污染。
+    word_count = len(re.findall(r"[A-Za-z]{3,}", cleaned))  # 只有长正文句子才启用独立残片删除，降低误删符号的风险。
+    if word_count < 4:
+        return cleaned
+    cleaned = re.sub(r"(?<![A-Za-z0-9_])[DRFT](?![A-Za-z0-9_])", " ", cleaned)  # 删除独立 D/R/F/T，保留常见正文冠词 A。
+    return _WHITESPACE_RE.sub(" ", cleaned).strip()
+
+
+def _clean_embedded_draft_letter_word(match: re.Match[str]) -> str:
+    """Remove one leaked DRAFT letter from a long mixed-case word."""
+
+    word = match.group(0)  # 取出包含疑似水印字母的完整单词。
+    if len(word) < 8:
+        return word
+    for index, character in enumerate(word):
+        if character not in "DRAFT":
+            continue
+        previous_character = word[index - 1] if index > 0 else ""
+        next_character = word[index + 1] if index + 1 < len(word) else ""
+        if not previous_character.islower() or not next_character.islower():
+            continue
+        candidate = word[:index] + word[index + 1 :]
+        if candidate.casefold() in _DRAFT_FRAGMENT_CORRECTION_WORDS:
+            return candidate  # 例如 trRansmitter -> transmitter，但 laneTraining 不会被改写。
+    return word
 
 
 def truncate(text: str, max_chars: int = 260) -> str:
