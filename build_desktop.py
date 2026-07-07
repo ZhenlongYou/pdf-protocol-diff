@@ -18,6 +18,17 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+# 打包脚本也必须先进入项目 .venv，避免 PyInstaller 误用 Anaconda/base 的 GUI 栈。
+from protocol_pdf_diff.venv_bootstrap import reexec_into_project_venv  # noqa: E402
+
+
+if __name__ == "__main__":  # 只有直接执行打包脚本时才替换解释器，测试导入不触发 exec。
+    reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 保留原始打包参数并切到 .venv。
+
 APP_NAME = "ProtocolPdfDiff"
 
 

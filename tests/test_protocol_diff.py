@@ -51,6 +51,13 @@ from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_demo_pdfs, write_multipage_text_pdf
 from protocol_pdf_diff.sectioning import detect_heading, section_document
 from protocol_pdf_diff.text_utils import remove_draft_watermark_letter_artifacts
+from protocol_pdf_diff.venv_bootstrap import (  # 验证 GUI/命令行入口会优先使用项目本地 .venv。
+    BOOTSTRAP_ATTEMPT_ENV,
+    project_venv_python,
+    project_venv_root,
+    reexec_into_project_venv,
+    should_reexec_into_project_venv,
+)
 
 OIF_OLD_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.11.pdf")  # 真实回归样本旧版路径；文件不存在时测试会跳过，避免影响 CI。
 OIF_NEW_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.13.pdf")  # 真实回归样本新版路径；用于验证用户反馈的 OIF 表格差异。
@@ -58,6 +65,64 @@ OIF_NEW_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.13.pdf")  # 真实回归
 
 class ProtocolDiffTests(unittest.TestCase):
     """End-to-end tests over generated old/new sample PDFs."""
+
+    def test_entry_points_bootstrap_project_venv_before_heavy_imports(self) -> None:
+        """GUI and PyCharm entry points should enter .venv before PDF/Tk imports."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:  # 临时项目根目录用于模拟不同解释器前缀。
+            project_root = Path(temp_dir)  # 把临时目录当作一个最小项目根目录。
+            expected_python = project_venv_python(project_root)  # 计算当前平台应该使用的 .venv Python。
+            expected_python.parent.mkdir(parents=True)  # 创建 bin 或 Scripts 目录，模拟已初始化 .venv。
+            expected_python.write_text("# fake python\n", encoding="utf-8")  # 写一个占位文件，让存在性判断通过。
+            outside_prefix = project_root / "external-python"  # 模拟 PyCharm/Anaconda 传入的错误解释器前缀。
+            outside_prefix.mkdir()  # 创建错误前缀目录，保证 resolve 后路径稳定。
+            active_venv_prefix = project_root / ".venv"  # 模拟已经位于项目 .venv 的正确前缀。
+
+            self.assertTrue(
+                should_reexec_into_project_venv(project_root, outside_prefix)
+            )  # 错误解释器必须触发重启，否则会再次缺 pdfplumber。
+            self.assertFalse(
+                should_reexec_into_project_venv(project_root, active_venv_prefix)
+            )  # 已经在项目 .venv 时不能重复重启，避免无限循环。
+            with mock.patch.dict(
+                os.environ,
+                {BOOTSTRAP_ATTEMPT_ENV: str(project_venv_root(project_root).resolve())},
+            ):  # 模拟上一轮已经尝试过进入同一个 .venv。
+                self.assertFalse(
+                    should_reexec_into_project_venv(project_root, outside_prefix)
+                )  # 损坏 .venv 导致 sys.prefix 仍不对时，也不能无限重复 exec。
+            with mock.patch.dict(os.environ, {}, clear=False):  # 保留系统环境，只临时检查 exec 参数。
+                os.environ.pop(BOOTSTRAP_ATTEMPT_ENV, None)  # 确保测试从“未尝试重启”的状态开始。
+                with mock.patch.object(sys, "argv", ["gui_app.py", "--smoke-test"]):  # 模拟用户启动 GUI 自测。
+                    with mock.patch("os.execv", side_effect=RuntimeError("exec-called")) as execv_mock:
+                        with self.assertRaisesRegex(RuntimeError, "exec-called"):
+                            reexec_into_project_venv(project_root, project_root / "gui_app.py")
+                execv_mock.assert_called_once()  # 确认确实会替换进程，而不是继续用错误解释器。
+                exec_path, exec_argv = execv_mock.call_args.args  # 读取 execv 的目标和参数。
+                self.assertEqual(str(expected_python), exec_path)  # exec 目标必须是项目 .venv 的 Python。
+                self.assertEqual(str(expected_python), exec_argv[0])  # argv[0] 也应指向 .venv Python。
+                self.assertEqual(str(project_root / "gui_app.py"), exec_argv[1])  # 保留原入口脚本路径。
+                self.assertEqual("--smoke-test", exec_argv[2])  # 保留用户传入的命令行参数。
+                self.assertEqual(
+                    str(project_venv_root(project_root).resolve()),
+                    os.environ[BOOTSTRAP_ATTEMPT_ENV],
+                )  # exec 前设置一次性保护标记，防止坏 .venv 循环。
+
+        gui_source = (PROJECT_ROOT / "gui_app.py").read_text(encoding="utf-8")  # 读取 GUI 入口源码检查启动顺序。
+        main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")  # 读取 PyCharm 入口源码检查启动顺序。
+        build_source = (PROJECT_ROOT / "build_desktop.py").read_text(encoding="utf-8")  # 读取打包入口源码检查解释器顺序。
+        self.assertLess(
+            gui_source.index("reexec_into_project_venv("),
+            gui_source.index("from protocol_pdf_diff.desktop_gui"),
+        )  # GUI 必须先切 .venv，再导入 Tkinter 相关模块。
+        self.assertLess(
+            main_source.index("reexec_into_project_venv("),
+            main_source.index("from protocol_pdf_diff.compare"),
+        )  # 命令行入口必须先切 .venv，再导入 pdfplumber 相关链路。
+        self.assertLess(
+            build_source.index("reexec_into_project_venv("),
+            build_source.index("import PyInstaller.__main__"),
+        )  # 打包入口必须先切 .venv，再导入 PyInstaller 和运行依赖检查。
 
     def test_desktop_gui_input_parsers_validate_user_fields(self) -> None:
         """GUI page and numeric fields should fail early with readable errors."""

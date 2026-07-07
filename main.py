@@ -65,6 +65,13 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+# 导入只依赖标准库的启动辅助；它必须早于 PDF 抽取和比较模块导入。
+from protocol_pdf_diff.venv_bootstrap import reexec_into_project_venv  # noqa: E402
+
+
+if __name__ == "__main__":  # PyCharm 直接运行 main.py 时先切到项目 .venv，避免缺少 pdfplumber。
+    reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 使用 sys.prefix 判断环境，避开 macOS 软链接误判。
+
 from protocol_pdf_diff.compare import run_diff  # noqa: E402
 from protocol_pdf_diff.models import DiffOptions  # noqa: E402
 from protocol_pdf_diff.pdf_extract import MissingDependencyError, PdfReadError  # noqa: E402
