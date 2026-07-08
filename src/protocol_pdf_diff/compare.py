@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import difflib
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -70,21 +70,7 @@ def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> 
         start_page=options.new_start_page,
         end_page=options.new_end_page,
     )
-    result = compare_extractions(old_extraction, new_extraction, options)  # 旧的章节文字 diff 仍作为兼容兜底。
-    try:
-        from .region_matcher import run_layout_diff  # 延迟导入，避免 layout 依赖影响纯文本单测。
-
-        region_changes, layout_warnings = run_layout_diff(old_pdf, new_pdf, options)
-        return replace(
-            result,
-            warnings=result.warnings + layout_warnings,
-            region_changes=region_changes,
-        )  # 新增 layout-aware 区域差异，HTML 报告优先展示。
-    except Exception as exc:
-        return replace(
-            result,
-            warnings=result.warnings + [f"layout-aware 区域对比未完成，已保留传统正文 diff。原因: {exc}"],
-        )  # layout 失败不能让用户完全拿不到报告。
+    return compare_extractions(old_extraction, new_extraction, options)
 
 
 def compare_extractions(
@@ -106,9 +92,8 @@ def compare_extractions(
     changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
     if suppressed_noise_count:
         warnings.append(
-            f"已隐藏 {suppressed_noise_count} 条全局重复页眉页脚、DRAFT、版权、行号、"
-            "封面作者/联系方式、表格 OCR 行或图形公式噪声差异。"
-        )  # 警告文案明确说明表格文字和封面信息已降噪，避免用户误以为这些内容没有被扫描。
+            f"已隐藏 {suppressed_noise_count} 条全局重复页眉页脚、DRAFT、版权或行号噪声差异。"
+        )
     if not old_sections:
         warnings.append(f"{old_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     if not new_sections:
@@ -812,7 +797,6 @@ def _canonical_review_token(token: str) -> str:
 def _report_unit(value: str) -> str:
     """Return a human-readable snippet without odd mid-sentence ellipses."""
 
-    value = remove_draft_watermark_letter_artifacts(value)  # 展示片段也去掉 DRAFT 单字母残片，避免高亮伪差异。
     readable = " ".join(_split_long_unit(value, max_chars=1200))
     if len(readable) <= 1400:
         return readable
@@ -1141,8 +1125,11 @@ def _suppress_global_noise_changes(changes: list[SectionChange]) -> tuple[list[S
         replaced = [
             pair
             for pair in change.replaced_snippets
-            if not _should_suppress_replaced_pair(pair)
-        ]  # 替换对里只要有低置信度表格 OCR/封面元数据，就不要把另一侧硬凑成差异展示。
+            if not (
+                _is_global_noise_snippet(pair.old)
+                and _is_global_noise_snippet(pair.new)
+            )
+        ]
         suppressed_count += len(change.added_snippets) - len(added)
         suppressed_count += len(change.removed_snippets) - len(removed)
         suppressed_count += len(change.replaced_snippets) - len(replaced)
@@ -1171,15 +1158,7 @@ def _is_global_noise_snippet(value: str) -> bool:
     if not candidate:
         return False
     lowered = candidate.casefold()  # 大小写不影响 DRAFT/boilerplate 判断。
-    if _is_table_review_unit(candidate):
-        return True  # 表格文字抽取准确率不足，用户报告只保留截图对照，不再展示 OCR 行差异。
     if _looks_like_margin_line_number_run(candidate):
-        return True
-    if _looks_like_cover_author_metadata_noise(candidate):
-        return True  # 封面作者、联系人、贡献编号等元数据不作为协议正文差异展示。
-    if _looks_like_chart_or_equation_noise(candidate):
-        return True
-    if _looks_like_figure_only_snippet(candidate):
         return True
     if re.fullmatch(r"[DRAFT]\.?", candidate):
         return True  # 单独成片段的 D/R/A/F/T 通常是 DRAFT 水印残字，不是协议内容。
@@ -1195,124 +1174,6 @@ def _is_global_noise_snippet(value: str) -> bool:
         r"\bimplementation\s+agreement\s+oif-cei\b",
     )  # 这些短语在用户样本中反复出现在页眉页脚或草稿水印中。
     return any(re.search(pattern, lowered) for pattern in noise_patterns)
-
-
-def _should_suppress_replaced_pair(pair: SnippetPair) -> bool:
-    """Return True when a side-by-side snippet would mostly show extractor noise."""
-
-    old_noise = _is_global_noise_snippet(pair.old)  # 旧侧是否属于全局噪声或低置信度抽取结果。
-    new_noise = _is_global_noise_snippet(pair.new)  # 新侧使用同一规则，避免一边噪声一边正文时错配。
-    if old_noise and new_noise:
-        return True  # 两侧都是噪声时整对替换隐藏。
-    if _is_low_confidence_extraction_snippet(pair.old) or _is_low_confidence_extraction_snippet(pair.new):
-        return True  # 表格 OCR、封面联系人或图形公式只要参与替换，就不应当展示成确定差异。
-    return False
-
-
-def _is_low_confidence_extraction_snippet(value: str) -> bool:
-    """Identify snippets that should never be forced into replacement display."""
-
-    candidate = compact_inline(value)  # 统一空白后再判断具体低置信度来源。
-    return (
-        _is_table_review_unit(candidate)
-        or _looks_like_cover_author_metadata_noise(candidate)
-        or _looks_like_chart_or_equation_noise(candidate)
-        or _looks_like_figure_only_snippet(candidate)
-    )  # 这些内容改由截图或源 PDF 复核，不进入正文替换卡片。
-
-
-def _looks_like_cover_author_metadata_noise(value: str) -> bool:
-    """Return True for cover-page author/contact metadata, not protocol clauses."""
-
-    candidate = compact_inline(value)  # 封面信息经常被抽成一整行，需要先压缩换行。
-    lowered = candidate.casefold()  # 关键词判断不区分大小写。
-    metadata_prefix = r"(?i)^(?:contribution\s+number|title|date|contributors?|authors?|editors?|contacts?)\s*:"
-    if re.match(metadata_prefix, candidate):
-        return True  # 独立的封面字段不属于协议正文条款。
-    has_contact = bool(
-        re.search(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", candidate)
-        or re.search(r"\(\d{3}\)\s*\d{3}\s*-\s*\d{4}", candidate)
-        or re.search(r"\+\d(?:[\d.\s-]){7,}\d", candidate)
-    )  # 邮箱、电话是封面作者/联系人信息的强信号。
-    has_cover_word = bool(
-        re.search(
-            r"(?i)\b(?:contributors?|authors?|editors?|contacts?|contribution\s+number|"
-            r"notice:\s+this\s+technical\s+document|abstract:)\b",
-            candidate,
-        )
-    )  # 联系方式旁边出现这些字段时，整段按封面元数据处理。
-    if has_contact and has_cover_word:
-        return True
-    return "contributors:" in lowered and (" date:" in lowered or " abstract:" in lowered)
-
-
-def _looks_like_chart_or_equation_noise(value: str) -> bool:
-    """Return True for long chart captures that are not readable prose."""
-
-    if _looks_like_axis_fragment_noise(value):
-        return True  # 坐标轴和曲线标签抽取块不需要作为正文差异展示。
-    if len(value) < 90:
-        return False  # 短句里的 Figure/Table 引用通常是有意义正文。
-    if not re.search(r"(?i)\bfigure\s+\d", value):
-        return False  # 只处理明确来自 Figure 的长图形抽取文本。
-    number_count = len(_NUMBER_TOKEN_RE.findall(value))  # 曲线图和公式截图通常包含大量坐标和数值。
-    if number_count < 4:
-        return False
-    chart_words = len(
-        set(re.findall(r"[A-Za-z]+", value.casefold()))
-        & {"frequency", "loss", "limit", "return", "insertion", "equation", "figure", "mask", "jitter"}
-    )  # 图表类关键词和大量数字同时出现时才隐藏。
-    return chart_words >= 2
-
-
-def _looks_like_axis_fragment_noise(value: str) -> bool:
-    """Return True for chart-axis labels extracted as prose."""
-
-    candidate = compact_inline(value)  # 坐标轴碎片通常是一串短标签和数值。
-    if len(candidate) < 60:
-        return False
-    lowered = candidate.casefold()  # 关键词判断不区分大小写。
-    x_count = len(re.findall(r"(?<![A-Za-z0-9_])x(?![A-Za-z0-9_])", lowered))  # X 轴碎片会反复出现独立 X。
-    if x_count < 3:
-        return False
-    axis_words = {"jitter", "mask", "sinusoidal", "amplitude", "frequency", "tolerance"}  # 这些词组合说明是图形坐标。
-    if len(set(re.findall(r"[A-Za-z]+", lowered)) & axis_words) < 2:
-        return False
-    return True
-
-
-def _looks_like_figure_only_snippet(value: str) -> bool:
-    """Return True for standalone figure captions or extracted figure fragments."""
-
-    candidate = compact_inline(value)  # 图题经常被抽成独立短行，先压缩空白再判断。
-    if not re.match(r"(?i)^(?:fig\.?|figure)\s+\d+(?:[-–]\d+)?\b", candidate):
-        return False  # 正文里的 “see Figure ...” 不在行首，因此不会被隐藏。
-    prose_words = {
-        "shall",
-        "should",
-        "must",
-        "may",
-        "specified",
-        "defined",
-        "computed",
-        "measured",
-        "meet",
-        "comply",
-        "required",
-        "requirement",
-        "shows",
-        "show",
-        "illustrates",
-        "depicts",
-        "describes",
-        "contains",
-        "lists",
-        "compares",
-    }  # 如果图号行里包含规范性动词，宁可保留给用户复核。
-    words = set(re.findall(r"[A-Za-z]+", candidate.casefold()))  # 提取英文词，判断是否像正文。
-    if words & prose_words:
-        return False
-    return True  # 以 Figure/Fig 开头且没有规范性正文信号的片段按图题噪声处理。
 
 
 def _looks_like_margin_line_number_run(value: str) -> bool:

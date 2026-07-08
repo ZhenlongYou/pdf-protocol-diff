@@ -16,7 +16,6 @@ from pathlib import Path
 
 from .models import ExtractionResult, PageText, TableVisual
 from .text_utils import (
-    compact_inline,  # 表题过滤需要压缩空白后判断 Figure、X/Y 等误识别候选。
     normalize_line,  # 复用统一空白规整逻辑，保证提取层和比较层口径一致。
     remove_draft_watermark_letter_artifacts,  # 清理混入正文单词的 DRAFT 水印字母残片。
 )
@@ -449,17 +448,13 @@ def _extract_table_lines_and_visuals(
         except Exception as exc:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格行抽取失败: {exc}")
             rows = []
-        table_lines = _table_lines_from_rows(rows, table_number)  # 每个物理表格先转成候选结构化行，后面会过滤误识别图形。
-        visual, visual_warning, preserve_table_lines = _build_table_visual(page, table, table_lines, page_number, table_number)
+        table_lines = _table_lines_from_rows(rows, table_number)  # 每个物理表格都转成稳定文本行。
+        lines.extend(table_lines)  # 表格行继续进入主文本 diff。
+        visual, visual_warning = _build_table_visual(page, table, table_lines, page_number, table_number)
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
-            lines.extend(table_lines)  # 真实表格即使截图失败，仍保留结构化文本供正文 diff 使用。
-            continue
         if visual is not None:
-            lines.extend(table_lines)  # 只有通过视觉候选质量门槛的表格行才进入正文 diff，避免曲线图污染报告。
             visuals.append(visual)
-        elif preserve_table_lines:
-            lines.extend(table_lines)  # 一行无 caption 的弱视觉候选仍可能是真表，文本差异不能被静默丢弃。
     return lines, visuals, warnings
 
 
@@ -469,18 +464,16 @@ def _build_table_visual(
     table_lines: list[str],
     page_number: int,
     table_number: int,
-) -> tuple[TableVisual | None, str, bool]:
+) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
     bbox = tuple(float(value) for value in getattr(table, "bbox", ()) or ())  # pdfplumber Table 提供表格边界框。
     if len(bbox) != 4:
-        return None, "未取得可靠表格边界", bool(table_lines)
-    title = _table_title_above_bbox(page, bbox)  # 先提取表题，便于在截图前过滤曲线图和坐标轴碎片。
-    if _looks_like_false_table_candidate(title, table_lines, bbox):
-        return None, "", _should_preserve_filtered_table_lines(title, table_lines)  # 图形不展示；真实弱表格仍保留文本。
+        return None, "未取得可靠表格边界"
     image, padded_bbox, image_status = _table_screenshot_image(page, bbox)  # 生成带橙色边框的表格截图。
     if image is None:
-        return None, image_status or "截图为空", bool(table_lines)
+        return None, image_status or "截图为空"
+    title = _table_title_above_bbox(page, bbox)  # 尽量从表格上方提取 Table 题名。
     image_data_uri = _image_to_data_uri(image)  # 把截图内嵌到 HTML，便于手机直接查看。
     grid_summary = _opencv_grid_summary(image)  # 用 OpenCV 检测截图内网格线，说明视觉表格证据强弱。
     ocr_text, ocr_status = _ocr_table_image(image)  # 有 tesseract 引擎时做 OCR，否则明确说明跳过。
@@ -500,63 +493,7 @@ def _build_table_visual(
             is_continuation=not bool(title),
         ),
         "",
-        False,
     )
-
-
-def _looks_like_false_table_candidate(
-    title: str,
-    table_lines: list[str],
-    bbox: tuple[float, float, float, float],
-) -> bool:
-    """Return True when pdfplumber has detected a chart or axis fragment."""
-
-    compact_title = compact_inline(title).casefold()  # 表题归一化后用于识别 Figure、X/Y 轴等非表格标题。
-    if re.match(r"^figure\s+\d", compact_title):
-        return True  # 曲线图网格经常被误识别成表格，但它不应进入表格行 diff。
-    if compact_title in {"f", "a", "r", "il min", "il max"} and _looks_like_chart_legend_table_lines(table_lines):
-        return True  # 曲线图图例字母被当成 caption 时，也要过滤。
-    if compact_title in {"x", "y"} and not table_lines:
-        return True  # 坐标轴标签附近的小网格块不是协议表格。
-    if not compact_title and _looks_like_chart_legend_table_lines(table_lines):
-        return True  # 曲线图图例会被抽成 F/A/R/IL min 等短行，不能当表格。
-    width = max(0.0, bbox[2] - bbox[0])  # 计算候选宽度，过窄对象通常是图形边缘或坐标轴。
-    height = max(0.0, bbox[3] - bbox[1])  # 计算候选高度，和宽度一起判断异常长条。
-    if not table_lines and (width < 90.0 or height < 90.0):
-        return True  # 没有结构化行且尺寸很小的候选没有用户复核价值。
-    if len(table_lines) <= 1 and not re.search(r"(?i)\btable\s+\d|表\s*\d|\btable\b", compact_title):
-        return True  # 没有表题、行数又很少的对象更可能是图或版面线框。
-    return False  # 其余候选保留，避免漏掉没有编号但有多行内容的真实表格。
-
-
-def _should_preserve_filtered_table_lines(title: str, table_lines: list[str]) -> bool:
-    """Return True when filtered visual rows should still enter text diff."""
-
-    if not table_lines:
-        return False  # 没有结构化行时，过滤视觉候选不会丢失可比文字。
-    compact_title = compact_inline(title).casefold()  # 使用和视觉过滤一致的标题口径。
-    if re.match(r"^figure\s+\d", compact_title):
-        return False  # Figure 图形内容不进入正文 diff，符合用户“fig 不用对比”的范围。
-    if compact_title in {"x", "y", "f", "a", "r", "il min", "il max"}:
-        return False  # 坐标轴/图例碎片不是协议表格行。
-    if _looks_like_chart_legend_table_lines(table_lines):
-        return False  # 只有 F/A/R/IL min 这类图例短行时不保留。
-    return True  # 其它弱视觉候选保留表格文本，避免一行真实表被静默吞掉。
-
-
-def _looks_like_chart_legend_table_lines(table_lines: list[str]) -> bool:
-    """Return True when rows look like a chart legend rather than table data."""
-
-    if not table_lines or len(table_lines) > 4:
-        return False  # 真实小表可以有四行以上，图例误识别通常很短。
-    payload = " ".join(line.removeprefix(_TABLE_ROW_PREFIX).strip() for line in table_lines)  # 去掉内部前缀后判断可见内容。
-    if "=" in payload:
-        return False  # Header=Value 结构说明这是 pdfplumber 识别到的真实表格行。
-    tokens = re.findall(r"[A-Za-z]+(?:\s+[A-Za-z]+)?", payload)  # 提取图例词，例如 IL min、IL max。
-    if not tokens:
-        return True
-    short_or_legend = all(len(token.replace(" ", "")) <= 5 for token in tokens)  # 只有很短标签时才按图例处理。
-    return short_or_legend and bool(re.search(r"(?i)\b(?:il\s*min|il\s*max|[far])\b", payload))
 
 
 def _table_screenshot_image(
@@ -598,7 +535,7 @@ def _padded_bbox(
     page_bbox = tuple(float(value) for value in (getattr(page, "bbox", None) or (0.0, 0.0, width, height)))  # 裁剪页可能有非零父坐标。
     page_left, page_top, page_right, page_bottom = page_bbox  # 使用父页面坐标限制截图范围，避免 crop 越界。
     left = max(page_left, bbox[0] - padding)  # 左侧外扩但不越过当前页面视图。
-    top = max(page_top, bbox[1] - max(padding * 2.5, 70.0))  # 顶部留足表题空间，避免截图只露出半截 Table 编号。
+    top = max(page_top, bbox[1] - padding * 2.5)  # 顶部多留一点空间，尽量包含表题。
     right = min(page_right, bbox[2] + padding) if page_right else bbox[2] + padding
     bottom = min(page_bottom, bbox[3] + padding) if page_bottom else bbox[3] + padding
     return left, top, right, bottom
@@ -681,81 +618,17 @@ def _ocr_table_image(image: object) -> tuple[str, str]:
 def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float]) -> str:
     """Extract a likely table caption immediately above a table bbox."""
 
-    top = max(0.0, bbox[1] - 90.0)  # 表题可能被页眉和空白挤到更高位置，扩大搜索窗口。
-    page_width = float(getattr(page, "width", 0) or bbox[2])  # 用整页宽度找表题，避免 caption 超出表格 bbox 横向范围。
+    top = max(0.0, bbox[1] - 54.0)  # 表题通常在表格上方一到三行内。
     try:
-        caption_page = page.crop((0.0, top, page_width, bbox[1]))  # 表题常居中或跨列，不能只裁表格横向范围。
+        caption_page = page.crop((bbox[0], top, bbox[2], bbox[1]))
         caption_text = caption_page.extract_text(x_tolerance=1, y_tolerance=3) or ""
     except Exception:
         return ""
-    candidates = [
-        line
-        for raw_line in caption_text.splitlines()
-        if (line := normalize_line(line_without_page_furniture(raw_line)))
-    ]  # 去掉页眉页脚式文本后再挑表题，避免 running header 盖过真正 caption。
-    candidates.extend(_table_title_candidates_from_words(page, bbox, top))  # extract_text 漏掉 caption 时用词坐标重建行。
-    for candidate in reversed(candidates):
-        if re.match(r"(?i)^table\s+\d+(?:[-–]\d+)?\b|^表\s*\d+", candidate):
-            return _clean_table_caption(candidate)  # 优先使用以 Table 开头的真正 caption，并去掉页边行号。
-    for candidate in reversed(candidates):
-        if re.match(r"(?i)^\d+\s+table\s+\d+(?:[-–]\d+)?\b", candidate):
-            return _clean_table_caption(candidate)  # 有些 PDF 会把左侧行号并到 caption 前面。
+    candidates = [normalize_line(line) for line in caption_text.splitlines() if normalize_line(line)]
     for candidate in reversed(candidates):
         if re.search(r"(?i)\btable\s+\d+(?:[-–]\d+)?\b|表\s*\d+", candidate):
-            return _clean_table_caption(candidate)
+            return candidate
     return candidates[-1] if candidates else ""
-
-
-def _clean_table_caption(candidate: str) -> str:
-    """Remove margin line numbers accidentally merged into a table caption."""
-
-    caption = normalize_line(candidate)  # 统一空白，便于正则处理。
-    caption = re.sub(r"(?i)^\d+\s+(?=table\s+\d)", "", caption)  # 删除 caption 前的页边行号，如 “1 Table 32-1”。
-    caption = re.sub(r"(?i)(?<=\D)\s+\d+$", "", caption)  # 删除 caption 后的页边行号，如 “Values 1”。
-    return caption
-
-
-def _table_title_candidates_from_words(
-    page: object,
-    bbox: tuple[float, float, float, float],
-    top: float,
-) -> list[str]:
-    """Rebuild possible caption lines from word coordinates above a table."""
-
-    try:
-        words = page.extract_words(x_tolerance=1, y_tolerance=3) or []  # word 坐标比 extract_text 更容易保留居中 caption。
-    except Exception:
-        return []
-    selected: list[tuple[float, float, str]] = []  # 保存表格上方窗口里的词。
-    for word in words:
-        word_top = float(word.get("top", 0.0) or 0.0)  # pdfplumber word top 使用页面坐标。
-        if top <= word_top <= bbox[1] + 5.0:
-            selected.append((word_top, float(word.get("x0", 0.0) or 0.0), str(word.get("text", ""))))  # 只保留 caption 搜索窗口。
-    lines: list[list[tuple[float, str]]] = []  # 按 y 坐标聚合同一视觉行。
-    for word_top, word_x, text in sorted(selected):
-        if not text:
-            continue
-        if not lines or abs(lines[-1][0][0] - word_top) > 4.0:
-            lines.append([])  # y 差超过 4 point 视为新行。
-        lines[-1].append((word_x, text))
-    candidates: list[str] = []  # 输出重建后的候选 caption。
-    for line_words in lines:
-        line = normalize_line(" ".join(text for _x, text in sorted(line_words)))  # 同一行按 x 坐标恢复阅读顺序。
-        cleaned = line_without_page_furniture(line)  # 过滤页眉页脚。
-        if cleaned:
-            candidates.append(cleaned)
-    return candidates
-
-
-def line_without_page_furniture(raw_line: str) -> str:
-    """Return an empty string for obvious caption-search furniture."""
-
-    line = normalize_line(raw_line)  # 搜索表题时先使用和正文一致的单行清洗。
-    if re.search(r"(?i)^implementation\s+agreement\s+oif-cei", line):
-        return ""  # 页眉不是表题，不能覆盖 Table 32-x caption。
-    if re.search(r"(?i)^optical\s+internetworking\s+forum\b", line):
-        return ""  # OIF running header 不是表格标题。
-    return line  # 其它行交给表题选择逻辑处理。
 
 
 def _page_may_contain_table(page: object, text: str) -> bool:
@@ -1102,56 +975,15 @@ def _format_table_row(row: list[str], header: list[str], table_number: int) -> s
     if header:
         labels = _header_labels_for_row(header, len(cells))  # 表头长度可能短于数据行，需要补默认列名。
         parts = [
-            f"{label}={cleaned_cell}"
+            f"{label}={cell}"
             for label, cell in zip(labels, cells, strict=False)
-            if (cleaned_cell := _clean_table_field_draft_artifacts(label, cell))
+            if cell
         ]  # 用 Header=Value 形式保留列含义，特别适合表格差异审阅。
     else:
-        parts = [
-            cleaned_cell
-            for index, cell in enumerate(cells)
-            if (cleaned_cell := _clean_table_field_draft_artifacts(f"列{index + 1}", cell))
-        ]  # 没有表头时仍做字段级水印残片清洗。
+        parts = [cell for cell in cells if cell]  # 没有表头时保留原始列顺序。
     if not parts:  # 所有单元格都为空时跳过。
         return ""
     return f"{_TABLE_ROW_PREFIX} T{table_number} | " + " | ".join(parts)
-
-
-def _clean_table_field_draft_artifacts(label: str, value: str) -> str:
-    """Remove obvious DRAFT letters from one structured table field."""
-
-    cleaned = remove_draft_watermark_letter_artifacts(value)  # 词内水印污染在单元格里也可以安全修正。
-    cleaned = normalize_line(cleaned)  # 字段清洗后重新压缩空白，避免留下多余分隔符。
-    if not cleaned:
-        return ""
-    normalized_label = normalize_line(label).casefold().rstrip(".")  # 列名决定单字母是否可能是合法协议值。
-    cleaned = re.sub(r"(?i)(?<=\d)×x(?=10)", "×", cleaned)  # 3.2×x10-13 是水印 x 混入科学计数法。
-    cleaned = re.sub(r"^[DRAFT](?=(?:Max|Min|Typ|NOTES?|See|Section)\b)", "", cleaned)  # AMax、R/NOTES 类前缀残字。
-    if "value" in normalized_label:
-        cleaned = re.sub(r"^[DRFT](?=\d)", "", cleaned)  # T4 -> 4，保留合法 Value=A/B/C。
-        cleaned = re.sub(r"(?i)^[DRFT](?=(?:No|Yes|True|False)\b)", "", cleaned)  # FNo -> No。
-        if "values" in normalized_label and cleaned in {"D", "R", "F", "T"}:
-            return ""  # Test 1 values=R 这类孤立值是水印残片。
-    if normalized_label in {"min", "minimum", "typ", "typical", "max", "maximum"}:
-        if cleaned in {"D", "R", "F", "T"}:
-            return ""  # 限值列里的单独 D/R/F/T 是水印残字；Value=A/B/C 等合法等级值仍保留。
-    if _is_symbol_header(label):
-        if len(cleaned) > 2:
-            cleaned = re.sub(r"^[DRAFT](?=[a-zα-ωΑ-Ωρμτγδβ\uf072])", "", cleaned)  # Afmin/Fρx/Fx 这类前缀残字不属于符号本身。
-    else:
-        cleaned = re.sub(r"^(?:[DRAFT]\s*/\s*)+(?=\S)", "", cleaned)  # A / See Note、R / NOTES 里的首字母是水印残片。
-        cleaned = re.sub(r"(?<=\s/)\s*[DRFT]\s*(?=/\s|\s|$)", " ", cleaned)  # 说明单元格内部的 D/R/F/T 孤立片段可删除。
-        cleaned = re.sub(r"(?<![A-Za-z0-9_])[DRFT](?![A-Za-z0-9_])", " ", cleaned) if _table_text_field_has_context(cleaned) else cleaned
-    cleaned = re.sub(r"\s*/\s*/\s*", " / ", cleaned)  # 删除残字后可能留下重复斜杠，需要收紧。
-    cleaned = re.sub(r"[ \t\u00a0]+", " ", cleaned).strip(" /")  # 去掉边缘空白和残留分隔符。
-    return cleaned
-
-
-def _table_text_field_has_context(value: str) -> bool:
-    """Return True when a table text field has enough words to drop isolated letters."""
-
-    words = re.findall(r"[A-Za-z]{2,}", value)  # 长说明字段里的孤立残字通常来自 DRAFT 水印。
-    return len(words) >= 3
 
 
 def _header_labels_for_row(header: list[str], cell_count: int) -> list[str]:
