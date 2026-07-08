@@ -89,6 +89,14 @@ class _InlineToken:
     key: str
 
 
+@dataclass(frozen=True)
+class _TableVisualGroup:
+    """One old/new logical table group, possibly spanning multiple PDF pages."""
+
+    old_tables: tuple[TableVisual, ...]  # 旧版同一逻辑表格的一个或多个截图区域。
+    new_tables: tuple[TableVisual, ...]  # 新版同一逻辑表格的一个或多个截图区域。
+
+
 def write_reports(
     result: DiffResult,
     output_dir: str | Path,
@@ -539,6 +547,19 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
       height: auto;
       background: #fff;
     }}
+    .table-shot-page {{
+      border-bottom: 1px solid var(--line);
+    }}
+    .table-shot-page:last-child {{
+      border-bottom: 0;
+    }}
+    .table-shot-page-label {{
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      background: #f7f9fc;
+      border-bottom: 1px solid var(--line);
+    }}
     .table-status {{
       color: var(--muted);
       font-size: 12px;
@@ -557,6 +578,20 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
       text-align: left;
     }}
     .table-row-summary th {{ background: #edf1f6; color: var(--muted); }}
+    .table-row-summary td:nth-child(2) {{ background: #fffafa; }}
+    .table-row-summary td:nth-child(3) {{ background: #fbfffb; }}
+    .table-kind {{
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      white-space: nowrap;
+      border: 1px solid var(--line);
+    }}
+    .table-kind-change {{ color: #b42318; background: #fff1f0; border-color: #ffccc7; }}
+    .table-kind-same {{ color: #146c43; background: #eaf7ef; border-color: #b7e4c7; }}
+    .table-kind-add {{ color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }}
+    .table-kind-del {{ color: #7a4b00; background: #fff7db; border-color: #f5d889; }}
     @media (max-width: 860px) {{
       .layout {{ grid-template-columns: 1fr; }}
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
@@ -650,10 +685,10 @@ def _render_table_visuals_html(result: DiffResult) -> str:
 
     if not result.old_table_visuals and not result.new_table_visuals:
         return ""
-    pairs = _paired_table_visuals(result.old_table_visuals, result.new_table_visuals)
+    groups = _paired_table_visuals(result.old_table_visuals, result.new_table_visuals)
     cards = "\n".join(
-        _render_table_visual_pair(index, old_table, new_table)
-        for index, (old_table, new_table) in enumerate(pairs, start=1)
+        _render_table_visual_group(index, group)
+        for index, group in enumerate(groups, start=1)
     )
     return f"""
       <section class="table-visuals">
@@ -667,15 +702,20 @@ def _render_table_visuals_html(result: DiffResult) -> str:
 def _paired_table_visuals(
     old_tables: list[TableVisual],
     new_tables: list[TableVisual],
-) -> list[tuple[TableVisual | None, TableVisual | None]]:
-    """Pair table visuals by title/row identity without forcing weak matches."""
+) -> list[_TableVisualGroup]:
+    """Pair table visuals by logical table group without forcing weak matches."""
 
     old_unused = set(range(len(old_tables)))  # 未匹配旧表索引。
     new_unused = set(range(len(new_tables)))  # 未匹配新表索引。
-    pairs: list[tuple[TableVisual | None, TableVisual | None]] = []  # 输出旧/新表格视觉配对。
+    groups: list[_TableVisualGroup] = []  # 输出旧/新逻辑表格组。
+    _pair_same_caption_table_groups(old_tables, new_tables, old_unused, new_unused, groups)
     scored: list[tuple[float, int, int]] = []  # 保存所有足够可信的候选配对。
     for old_index, old_table in enumerate(old_tables):
+        if old_index not in old_unused:
+            continue
         for new_index, new_table in enumerate(new_tables):
+            if new_index not in new_unused:
+                continue
             score = _table_visual_similarity(old_table, new_table)
             if score >= 0.65:
                 scored.append((score, old_index, new_index))
@@ -684,12 +724,70 @@ def _paired_table_visuals(
             continue
         old_unused.remove(old_index)
         new_unused.remove(new_index)
-        pairs.append((old_tables[old_index], new_tables[new_index]))
+        groups.append(_TableVisualGroup((old_tables[old_index],), (new_tables[new_index],)))
     for old_index in sorted(old_unused):
-        pairs.append((old_tables[old_index], None))
+        groups.append(_TableVisualGroup((old_tables[old_index],), ()))
     for new_index in sorted(new_unused):
-        pairs.append((None, new_tables[new_index]))
-    return pairs
+        groups.append(_TableVisualGroup((), (new_tables[new_index],)))
+    return groups
+
+
+def _pair_same_caption_table_groups(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+) -> None:
+    """Pair exact same captions as whole cross-page table groups."""
+
+    old_by_key = _table_visual_indexes_by_caption_key(old_tables)  # 旧版按表题分组，特别处理跨页同名表。
+    new_by_key = _table_visual_indexes_by_caption_key(new_tables)  # 新版同样按表题分组，方便顺序配对。
+    for key in sorted(old_by_key.keys() & new_by_key.keys()):
+        old_indexes = [index for index in old_by_key[key] if index in old_unused]  # 过滤掉前面已匹配的旧表。
+        new_indexes = [index for index in new_by_key[key] if index in new_unused]  # 过滤掉前面已匹配的新表。
+        if not old_indexes and not new_indexes:
+            continue
+        for old_index in old_indexes:
+            old_unused.remove(old_index)  # 同名旧表页全部归入一个逻辑表格组。
+        for new_index in new_indexes:
+            new_unused.remove(new_index)  # 同名新表页全部归入一个逻辑表格组。
+        groups.append(
+            _TableVisualGroup(
+                tuple(old_tables[index] for index in old_indexes),
+                tuple(new_tables[index] for index in new_indexes),
+            )
+        )  # Table 32-1 这种跨页表按整组展示，不再按页误报移动行。
+
+
+def _table_visual_indexes_by_caption_key(tables: list[TableVisual]) -> dict[str, list[int]]:
+    """Group table visuals by a strong exact caption key."""
+
+    grouped: dict[str, list[int]] = {}  # key -> 按文档顺序出现的表格索引。
+    current_key = ""  # 真实跨页表常只有首页带表题，续页需要继承最近的表题。
+    current_page = -1  # 记录最近归组页码，避免跨很远页面误挂续页。
+    for index, table in enumerate(tables):
+        key = _table_visual_caption_key(table)  # 只有明确同名 Table 才走强配对。
+        if key:
+            current_key = key
+            current_page = table.page_number
+        elif table.is_continuation and current_key and table.page_number <= current_page + 1:
+            key = current_key  # 无标题续页跟随前一张有标题表，避免跨页表被拆成多张卡片。
+            current_page = table.page_number
+        else:
+            current_key = ""  # 遇到非续页无标题表时中断继承，避免误合并无关表格。
+        if key:
+            grouped.setdefault(key, []).append(index)
+    return grouped
+
+
+def _table_visual_caption_key(table: TableVisual) -> str:
+    """Return an exact pairing key for repeated pages of the same named table."""
+
+    title = compact_inline(table.title).casefold()  # 表题是跨页表格最稳定的人工可读身份。
+    if not re.search(r"\btable\s+\d+(?:[-–]\d+)?\b|表\s*\d+", title):
+        return ""  # 无编号表或续页缺表题时继续交给后面的保守 fuzzy 配对。
+    return re.sub(r"\s+", " ", title).strip()
 
 
 def _table_visual_similarity(old_table: TableVisual, new_table: TableVisual) -> float:
@@ -710,17 +808,16 @@ def _table_visual_identity(table: TableVisual) -> str:
     return compact_inline(f"{title} {rows}").casefold()
 
 
-def _render_table_visual_pair(
+def _render_table_visual_group(
     index: int,
-    old_table: TableVisual | None,
-    new_table: TableVisual | None,
+    group: _TableVisualGroup,
 ) -> str:
-    """Render one old/new table screenshot pair."""
+    """Render one old/new logical table group."""
 
-    title = _table_pair_title(index, old_table, new_table)
-    old_shot = _render_one_table_shot("旧版截图", old_table)
-    new_shot = _render_one_table_shot("新版截图", new_table)
-    rows_html = _render_table_row_summary(old_table, new_table)
+    title = _table_group_title(index, group)
+    old_shot = _render_table_shot_group("旧版截图", group.old_tables)
+    new_shot = _render_table_shot_group("新版截图", group.new_tables)
+    rows_html = _render_table_row_summary(group.old_tables, group.new_tables)
     return f"""
         <div class="table-visual-card">
           <h3>{_escape(title)}</h3>
@@ -730,31 +827,55 @@ def _render_table_visual_pair(
     """
 
 
-def _table_pair_title(
+def _table_group_title(
     index: int,
-    old_table: TableVisual | None,
-    new_table: TableVisual | None,
+    group: _TableVisualGroup,
 ) -> str:
-    """Build a readable title for one visual table pair."""
+    """Build a readable title for one visual table group."""
 
-    table = new_table or old_table
+    table = _first_table_in_group(group)
     if table is None:
         return f"表格 {index}"
     title = table.title or ("跨页表格续段" if table.is_continuation else "")
+    suffix = _table_group_page_suffix(group)
     if title:
-        return f"{index}. {title}"
-    return f"{index}. 第 {table.page_number} 页表格 {table.table_number}"
+        return f"{index}. {title}{suffix}"
+    return f"{index}. 第 {table.page_number} 页表格 {table.table_number}{suffix}"
 
 
-def _render_one_table_shot(label: str, table: TableVisual | None) -> str:
-    """Render one side of a table screenshot pair."""
+def _first_table_in_group(group: _TableVisualGroup) -> TableVisual | None:
+    """Return the first available table from a visual group."""
 
-    if table is None:
+    return next(iter(group.new_tables or group.old_tables), None)
+
+
+def _table_group_page_suffix(group: _TableVisualGroup) -> str:
+    """Return a compact page-count suffix for multipage visual groups."""
+
+    old_count = len(group.old_tables)  # 旧版截图页数用于说明跨页表格。
+    new_count = len(group.new_tables)  # 新版截图页数用于说明跨页表格。
+    if old_count <= 1 and new_count <= 1:
+        return ""
+    return f"（旧 {old_count} 页 / 新 {new_count} 页）"
+
+
+def _render_table_shot_group(label: str, tables: tuple[TableVisual, ...]) -> str:
+    """Render one side of a table screenshot group."""
+
+    if not tables:
         return f'<div class="table-shot"><h4>{_escape(label)}</h4><div class="snippet">无对应表格截图</div></div>'
-    caption = f"{label} · 页 {table.page_number} · 表格 {table.table_number}"
+    heading = f"{label} · {len(tables)} 页" if len(tables) > 1 else f"{label} · 页 {tables[0].page_number} · 表格 {tables[0].table_number}"
+    pages = "".join(_render_one_table_shot_page(table) for table in tables)
+    return f'<div class="table-shot"><h4>{_escape(heading)}</h4>{pages}</div>'
+
+
+def _render_one_table_shot_page(table: TableVisual) -> str:
+    """Render one table screenshot page inside a screenshot group."""
+
+    caption = f"页 {table.page_number} · 表格 {table.table_number}"
     grid_summary = _display_table_grid_summary(table.grid_summary)
     return (
-        f'<div class="table-shot"><h4>{_escape(caption)}</h4>'
+        f'<div class="table-shot-page"><div class="table-shot-page-label">{_escape(caption)}</div>'
         f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
         f'<div class="snippet">{_escape(grid_summary)}</div></div>'
     )
@@ -772,19 +893,25 @@ def _display_table_grid_summary(summary: str) -> str:
 
 
 def _render_table_row_summary(
-    old_table: TableVisual | None,
-    new_table: TableVisual | None,
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
 ) -> str:
-    """Render a compact row-level summary from structured table rows."""
+    """Render a compact structured summary from table rows."""
 
-    old_rows = old_table.row_texts if old_table else []
-    new_rows = new_table.row_texts if new_table else []
+    old_rows = _table_group_rows(old_tables)  # 旧版同一逻辑表格的所有页按顺序合并。
+    new_rows = _table_group_rows(new_tables)  # 新版同一逻辑表格的所有页按顺序合并。
     old_keys = [_table_row_display_key(row) for row in old_rows]
     new_keys = [_table_row_display_key(row) for row in new_rows]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
     body_rows: list[str] = []  # 保存 HTML 表格行。
+    include_equal_rows = max(len(old_rows), len(new_rows)) <= 8  # 小表格可显示未变化行，像人工审查表一样直观。
+    diff_count = 0  # 用于判断是否需要补充小表格里的无变化行。
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal" and not include_equal_rows:
+            continue
         if tag == "equal":
+            for old_value, new_value in zip(old_rows[old_start:old_end], new_rows[new_start:new_end], strict=False):
+                body_rows.append(_render_structured_table_summary_row(old_value, new_value, "无变化"))
             continue
         old_block = old_rows[old_start:old_end]
         new_block = new_rows[new_start:new_end]
@@ -792,30 +919,197 @@ def _render_table_row_summary(
         for offset in range(block_count):
             old_value = old_block[offset] if offset < len(old_block) else ""
             new_value = new_block[offset] if offset < len(new_block) else ""
-            body_rows.append(
-                "<tr>"
-                f"<td>{_escape(_table_diff_kind(old_value, new_value))}</td>"
-                f"<td>{_escape(old_value)}</td>"
-                f"<td>{_escape(new_value)}</td>"
-                "</tr>"
-            )
-    if not body_rows:
-        body_rows.append('<tr><td>未检测到行级变化</td><td></td><td></td></tr>')
+            kind = _table_structured_diff_kind(old_value, new_value)
+            body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
+            diff_count += 1
+    if not body_rows or diff_count == 0:
+        body_rows = ['<tr><td>未检测到行级变化</td><td></td><td></td><td></td></tr>']
     visible_rows = body_rows[:12]  # 表格摘要保持可读，超出的行数必须显式提示。
     omitted_count = max(0, len(body_rows) - len(visible_rows))  # 统计被折叠的表格行变化。
     omitted_note = (
-        f'<div class="omitted-note">另有 {omitted_count} 行表格变化未展示；完整表格行已参与正文差异比较。</div>'
+        f'<div class="omitted-note">另有 {omitted_count} 行表格变化未展示；可结合上方截图复核完整表格。</div>'
         if omitted_count
         else ""
     )
     return (
         '<table class="table-row-summary"><thead><tr>'
-        '<th>类型</th><th>旧版表格行</th><th>新版表格行</th>'
+        '<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>'
         '</tr></thead><tbody>'
         + "\n".join(visible_rows)
         + "</tbody></table>"
         + omitted_note
     )
+
+
+def _table_group_rows(tables: tuple[TableVisual, ...]) -> list[str]:
+    """Return all structured rows from a table visual group."""
+
+    rows: list[str] = []  # 保持 PDF 页顺序，跨页表格才能按整组比较。
+    for table in tables:
+        rows.extend(table.row_texts)
+    return rows
+
+
+def _render_structured_table_summary_row(old_row: str, new_row: str, kind: str) -> str:
+    """Render one user-readable table-summary row."""
+
+    item = _table_summary_item(old_row, new_row)
+    old_display = _table_row_value_display(old_row)
+    new_display = _table_row_value_display(new_row)
+    class_name = _table_kind_class(kind)
+    return (
+        "<tr>"
+        f"<td>{_escape(item)}</td>"
+        f"<td>{_escape(old_display)}</td>"
+        f"<td>{_escape(new_display)}</td>"
+        f'<td><span class="table-kind {class_name}">{_escape(kind)}</span></td>'
+        "</tr>"
+    )
+
+
+def _table_summary_item(old_row: str, new_row: str) -> str:
+    """Return the left-column label for one structured table summary row."""
+
+    fields = _table_row_fields(new_row) or _table_row_fields(old_row)  # 优先用新版字段名，旧版删除行则回退旧字段。
+    label = _first_table_field(fields, ("parameter", "characteristic", "description", "label", "name"))  # 参数/特性名最适合给用户定位。
+    if not label:
+        label = _first_nonempty_table_cell(new_row or old_row)  # 无 Header=Value 时回退第一格文本。
+    if _table_symbol_changed(old_row, new_row) and label and not re.search(r"(?i)\bsymbol\b", label):
+        return f"{label} symbol"
+    return label or "表格行"
+
+
+def _table_row_value_display(row: str) -> str:
+    """Return the old/new value cell shown in the structured summary."""
+
+    if not row:
+        return ""
+    fields = _table_row_fields(row)
+    if not fields:
+        return " | ".join(_table_row_cells_for_display(row))
+    parts: list[str] = []  # 用户更关心符号和值/单位，描述字段已放到项目列。
+    symbol = fields.get("symbol")
+    if symbol:
+        parts.append(symbol)
+    value_parts = [
+        value
+        for key in ("value", "values", "min", "minimum", "typ", "typical", "max", "maximum")
+        if (value := fields.get(key))
+    ]  # 数值列保留多个上下限，避免只显示 Symbol。
+    unit = _first_table_field(fields, ("unit", "units"))
+    if value_parts:
+        value_text = " / ".join(value_parts)
+        parts.append(f"{value_text} {unit}".strip() if unit else value_text)
+    elif unit and not parts:
+        parts.append(unit)
+    if not parts:
+        parts.extend(_non_identity_table_field_values(fields))
+    return " | ".join(part for part in parts if part)
+
+
+def _table_structured_diff_kind(old_row: str, new_row: str) -> str:
+    """Classify one table summary row with a short review label."""
+
+    if old_row and new_row and _table_row_display_key(old_row) == _table_row_display_key(new_row):
+        return "无变化"
+    if old_row and not new_row:
+        return "旧表删除行"
+    if new_row and not old_row:
+        return "新表新增行"
+    if _table_symbol_changed(old_row, new_row):
+        return "实质/符号变化"
+    if _table_numeric_value_changed(old_row, new_row):
+        return "实质变化"
+    return "替换/修改"
+
+
+def _table_kind_class(kind: str) -> str:
+    """Return a CSS class for a structured table summary kind."""
+
+    if kind == "无变化":
+        return "table-kind-same"
+    if "删除" in kind:
+        return "table-kind-del"
+    if "新增" in kind:
+        return "table-kind-add"
+    return "table-kind-change"
+
+
+def _table_row_fields(row: str) -> dict[str, str]:
+    """Parse ``Header=Value`` cells from one structured table row."""
+
+    fields: dict[str, str] = {}  # 小写字段名映射到原始显示值。
+    for cell in _table_row_cells_for_display(row):
+        if "=" not in cell:
+            continue
+        key, value = cell.split("=", 1)
+        normalized_key = compact_inline(key).casefold()
+        normalized_value = compact_inline(value)
+        if normalized_key and normalized_value:
+            fields[normalized_key] = normalized_value
+    return fields
+
+
+def _table_row_cells_for_display(row: str) -> list[str]:
+    """Split a structured table row into display cells without the T-number prefix."""
+
+    text = compact_inline(row)  # 表格行由抽取层统一使用管道分隔。
+    if text.startswith("表格行:"):
+        text = text[len("表格行:") :].strip()
+    cells = [cell.strip() for cell in text.split("|") if cell.strip()]
+    if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
+        return cells[1:]
+    return cells
+
+
+def _first_table_field(fields: dict[str, str], names: tuple[str, ...]) -> str:
+    """Return the first populated field from a list of normalized names."""
+
+    return next((fields[name] for name in names if fields.get(name)), "")
+
+
+def _first_nonempty_table_cell(row: str) -> str:
+    """Return the first useful cell from a structured table row."""
+
+    for cell in _table_row_cells_for_display(row):
+        if "=" in cell:
+            _key, value = cell.split("=", 1)
+            if value.strip():
+                return compact_inline(value)
+        elif cell:
+            return compact_inline(cell)
+    return ""
+
+
+def _table_symbol_changed(old_row: str, new_row: str) -> bool:
+    """Return True when the symbol column changed for the same table row."""
+
+    if not old_row or not new_row:
+        return False
+    old_symbol = _table_row_fields(old_row).get("symbol", "")
+    new_symbol = _table_row_fields(new_row).get("symbol", "")
+    return bool(old_symbol and new_symbol and _table_row_display_key(old_symbol) != _table_row_display_key(new_symbol))
+
+
+def _table_numeric_value_changed(old_row: str, new_row: str) -> bool:
+    """Return True when value/min/max-style fields changed."""
+
+    old_fields = _table_row_fields(old_row)  # 旧版字段用于提取数值列。
+    new_fields = _table_row_fields(new_row)  # 新版字段用于提取数值列。
+    value_keys = ("value", "values", "min", "minimum", "typ", "typical", "max", "maximum")  # 常见数值列名。
+    for key in value_keys:
+        old_value = old_fields.get(key, "")
+        new_value = new_fields.get(key, "")
+        if old_value and new_value and _table_row_display_key(old_value) != _table_row_display_key(new_value):
+            return True
+    return False
+
+
+def _non_identity_table_field_values(fields: dict[str, str]) -> list[str]:
+    """Return fallback values after removing identity/description fields."""
+
+    skipped = {"parameter", "characteristic", "description", "label", "name"}  # 这些字段已经用于项目列。
+    return [value for key, value in fields.items() if key not in skipped and value]
 
 
 def _table_row_display_key(row: str) -> str:
@@ -900,7 +1194,7 @@ def _empty_change_message(change: SectionChange) -> str:
     if change.change_type == "unchanged":
         return "该章节未发现正文或标题变化。"
     if change.old_section and change.new_section:
-        return "该章节发生变化，但当前每章展示片段数未展开具体文本；可调大 --max-snippets 后复跑。"
+        return "该章节发生变化，但当前报告只展示了有限数量的片段；可在工具设置中提高每章展示数量后重新生成。"
     return "该章节没有可展示的正文片段，请回到源 PDF 对应页复核。"
 
 
@@ -985,7 +1279,7 @@ def _render_omitted_html(omitted_count: int) -> str:
 def _omitted_snippet_message(omitted_count: int) -> str:
     """Explain that more substantive differences exist than are displayed."""
 
-    return f"另有 {omitted_count} 条差异片段未展示；完整章节已比较，可调大 --max-snippets 展开更多报告片段。"
+    return f"另有 {omitted_count} 条差异片段未展示；完整章节已比较，可在工具设置中提高每章展示数量后重新生成。"
 
 
 def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:

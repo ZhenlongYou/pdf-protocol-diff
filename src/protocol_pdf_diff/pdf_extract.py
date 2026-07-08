@@ -34,6 +34,8 @@ _WATERMARK_TEXT_CHARS = frozenset("draftDRAFT")  # 只把明确来自 DRAFT 水�
 _LINE_NUMBER_MIN_COUNT = 12  # 行号边栏通常有几十个连续数字；少于该数量时不裁边，避免误删正文编号。
 _LINE_NUMBER_MIN_RUN = 10  # 需要存在较长连续数字段，才把窄边栏判定为行号栏。
 _TABLE_ROW_PREFIX = "表格行:"  # 报告里的表格行标记，方便比较器把表格行当作独立审阅单元。
+_TABLE_CAPTION_RE = re.compile(r"(?i)\btable\s+\d+(?:[-–]\d+)?\b|表\s*\d+")  # 识别真正表题，避免把图题当表格。
+_FIGURE_CAPTION_RE = re.compile(r"(?i)\b(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b|图\s*\d+")  # 识别图题/图片块，按用户要求不做图片对比。
 _TABLE_HEADER_SCAN_ROWS = 12  # pdfplumber 有时把标题/注释放在表格开头，需要在前十余行内寻找表头。
 _TABLE_SCREENSHOT_RESOLUTION = 144  # 表格截图使用 2x PDF 点阵，兼顾清晰度和 HTML 体积。
 _TABLE_SCREENSHOT_PADDING = 10.0  # 截图在表格 bbox 外保留少量边距，方便看见表题和边框。
@@ -198,6 +200,8 @@ def _clean_extracted_page_text(text: str) -> str:
             continue
         if _looks_like_extraction_boilerplate(line):
             continue
+        if _looks_like_figure_or_image_text_block(line):
+            continue
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines)
 
@@ -279,6 +283,154 @@ def _looks_like_extraction_boilerplate(line: str) -> bool:
         r"(?i)^optical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
     )
     return any(re.search(pattern, candidate) for pattern in boilerplate_patterns)
+
+
+def _looks_like_figure_or_image_text_block(line: str) -> bool:
+    """Return True for standalone figure captions, plot text, or image OCR blocks."""
+
+    candidate = normalize_line(line)  # 使用清洗后的单行文本，避免 PDF 抽取空格干扰规则。
+    if not candidate:
+        return False
+    if _starts_with_figure_sentence_prose(candidate):
+        return False  # `Figure 32-2 shows ...` 是正文句子，即使提到插损/频率也必须保留。
+    if _looks_like_numeric_axis_tick_line(candidate):
+        return True  # 纯坐标轴刻度行不是协议正文。
+    if _looks_like_axis_only_visual_block(candidate):
+        return True  # 没有 Figure 标题但只有坐标轴/曲线标签的视觉碎片也不参与比较。
+    if _looks_like_plot_or_formula_block(candidate):
+        return True  # 密集坐标轴/公式块即使没有 Figure 标题，也属于图片/图形抽取残片。
+    if _looks_like_figure_caption(candidate):
+        return True  # 以 Figure/Fig./图 开头的块属于图片证据，用户要求不比较。
+    if not _FIGURE_CAPTION_RE.search(candidate):
+        return False  # 没有图题引用时，不能按图片块删除普通正文。
+    if len(candidate) < 120:
+        return False  # 短句里提到 Figure 可能是正文引用，必须保留。
+    return _looks_like_plot_or_formula_block(candidate)  # 长图块需同时具备坐标轴/公式形态才删除。
+
+
+def _looks_like_axis_only_visual_block(value: str) -> bool:
+    """Return True for short plot-axis fragments with no sentence content."""
+
+    candidate = normalize_line(value)  # 统一空白后检查坐标轴碎片形态。
+    if re.search(r"(?i)\b(?:shall|should|specified|measured|computed|requirements?)\b", candidate):
+        return False  # 含规范动词的句子可能是真正文段，不能只因有图轴词删除。
+    if _looks_like_short_plot_label(candidate):
+        return True  # IL min / Frequency (GHz) 等短轴标签不是正文。
+    if re.fullmatch(r"(?i)(?:amplitude|frequency|loss|jitter)(?:\s+[A-Z]){1,4}", candidate):
+        return True  # `Amplitude X` 这类短标签是图轴文字，不是协议正文。
+    x_count = len(re.findall(r"\bX\b", candidate))  # 曲线图抽取常把坐标交叉或标记输出为多个 X。
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))  # 坐标轴碎片通常也含多个刻度数字。
+    axis_words = len(re.findall(r"(?i)\b(?:amplitude|frequency|loss|jitter|ui|ghz|db|pp)\b", candidate))
+    return x_count >= 2 and number_count >= 3 and axis_words >= 2
+
+
+def _looks_like_numeric_axis_tick_line(value: str) -> bool:
+    """Return True for long chart-axis tick sequences such as ``0 5 10 ...``."""
+
+    tokens = normalize_line(value).split()  # 坐标轴刻度通常被抽成一串空格分隔数字。
+    if len(tokens) < 8:
+        return False
+    return all(re.fullmatch(r"[+-]?\d+(?:\.\d+)?", token) for token in tokens)
+
+
+def _looks_like_short_plot_label(value: str) -> bool:
+    """Return True for compact chart labels that are not standalone prose."""
+
+    candidate = normalize_line(value)  # 短标签需要严格匹配，避免误删正文句子。
+    if re.fullmatch(r"(?i)(?:frequency|amplitude|loss|jitter)\s*\([^)]+\)", candidate):
+        return True  # `Frequency (GHz)` 这类裸坐标轴标题不能变成章节标题。
+    if re.fullmatch(r"(?i)(?:min|max|typ)", candidate):
+        return True  # 图形/公式拆行后常留下单独的 min/max/typ，不是正文句子。
+    if re.fullmatch(r"(?i)il\s+(?:min|max)(?:\s*/\s*il\s+(?:min|max))?(?:\s+f\s*[×x*]\s*\d+){0,2}", candidate):
+        return True
+    if re.match(r"(?i)^frequency\s*\([^)]+\)(?:\s+\(\d+(?:[-–]\d+)?\))?(?:\s+\)bd\(|\s+ssoL)", candidate):
+        return True
+    return False
+
+
+def _looks_like_plot_or_formula_block(value: str) -> bool:
+    """Return True for dense chart/formula extraction around a figure."""
+
+    lowered = value.casefold()  # 图形判断只需要大小写无关的英文锚点。
+    if _looks_like_il_limit_formula_fragment(value):
+        return True  # 图中的 IL min/IL max 分段公式不是正文段落，不参与差异比较。
+    if _looks_like_symbolic_formula_fragment(value):
+        return True  # 只有符号、公式字形和少量 token 的行通常是图片公式残片。
+    if re.search(r"(?i)\b(?:shows?|illustrates?|depicts?|shall|should|specified|measured|computed|requirements?)\b", value):
+        if not re.search(r"(?i)\b(?:il\s*min|il\s*max|frequency\s*\(|\)bd\(|ssol|insertion\s+loss)\b", value):
+            return False  # 普通句首 Figure 正文不能只因有数值而被当作图片块。
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", value))  # 图形坐标轴和公式块通常数字密度很高。
+    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", value))  # PDF 公式字符是图片/公式块强信号。
+    axis_words = len(
+        re.findall(
+            r"\b(?:frequency|loss|db|ghz|axis|il\s*min|il\s*max|return\s+loss|insertion\s+loss)\b",
+            lowered,
+        )
+    )  # 坐标轴和曲线标签能区分图形块与普通正文。
+    return number_count >= 8 and (formula_mark_count >= 2 or axis_words >= 2)
+
+
+def _looks_like_symbolic_formula_fragment(value: str) -> bool:
+    """Return True for standalone equation glyph fragments with little prose."""
+
+    candidate = normalize_line(value)  # 公式残片常被拆成短行，先规整空白。
+    if re.search(r"(?i)\b(?:parameter|characteristic|symbol|condition|value|values|units?|min|max|typ)=", candidate):
+        return False  # 结构化表格字段使用等号，但不是图片公式残片。
+    word_tokens = re.findall(r"[A-Za-z]{2,}", candidate)  # 正常正文通常有多个英文单词。
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))
+    if re.search(r"=", candidate) and number_count >= 2 and len(word_tokens) <= 6:
+        return True  # `SNDR = ...`、`N - 1 ... = 0` 这类拆行公式没有正文语义。
+    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", candidate))
+    if formula_mark_count < 2:
+        return False
+    if number_count >= 2 and len(word_tokens) <= 5:
+        return True
+    return len(candidate) <= 90 and len(word_tokens) <= 3
+
+
+def _looks_like_il_limit_formula_fragment(value: str) -> bool:
+    """Return True for split IL-limit equations emitted from chart/figure text."""
+
+    candidate = normalize_line(value)  # 公式残片在不同 PDF 字体里空格差异很大，先统一成单行。
+    if re.search(r"(?i)\bil\s*(?:min|max)\s*=", candidate):
+        return True  # `IL min = ...` 是图形/公式抽取残片的强信号。
+    has_frequency_math = bool(re.search(r"(?i)\bf\b|\bGHz\b", candidate))  # f/GHz 锚定频率公式上下文。
+    has_formula_symbol = bool(re.search(r"[≤≥<>]|--+", candidate))  # 私有字体符号和分数线锚定公式残片。
+    return len(candidate) <= 90 and has_frequency_math and has_formula_symbol
+
+
+def _starts_with_figure_sentence_prose(value: str) -> bool:
+    """Return True for real prose sentences that begin with a Figure reference."""
+
+    candidate = _strip_caption_line_noise(value)  # 复用图题前置行号清理逻辑。
+    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
+    return bool(match and _figure_caption_tail_starts_prose(match.group("tail")))
+
+
+def _looks_like_figure_caption(value: str) -> bool:
+    """Return True when a line is a standalone figure/image caption."""
+
+    candidate = _strip_caption_line_noise(value)  # 先去掉页边行号，避免 `1 Figure 32-2` 漏检。
+    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
+    if match:
+        return not _figure_caption_tail_starts_prose(match.group("tail"))
+    chinese_match = re.match(r"^图\s*\d+(?P<tail>.*)$", candidate)
+    if chinese_match:
+        return not re.match(r"^\s*(?:显示|说明|描述|定义)", chinese_match.group("tail"))
+    return False
+
+
+def _figure_caption_tail_starts_prose(tail: str) -> bool:
+    """Return True when text after ``Figure N`` is normal sentence prose."""
+
+    cleaned_tail = tail.lstrip(" .:-–—").strip()  # 去掉图题常用分隔符后看第一个词。
+    return bool(
+        re.match(
+            r"(?i)^(?:shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|lists?|is|are|shall|should|must|may|can)\b",
+            cleaned_tail,
+        )
+    )
+
 
 
 def _looks_like_margin_line_number_only(line: str) -> bool:
@@ -443,19 +595,73 @@ def _extract_table_lines_and_visuals(
     visuals: list[TableVisual] = []  # 汇总该页所有表格截图和视觉识别摘要。
     warnings: list[str] = []  # 单页表格截图和 OCR 相关的非致命问题。
     for table_number, table in enumerate(table_objects, start=1):
+        bbox = _table_bbox(table)  # 先取边界框，用表题和位置判断它是不是真表格。
         try:
             rows = table.extract() or []
         except Exception as exc:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格行抽取失败: {exc}")
             rows = []
         table_lines = _table_lines_from_rows(rows, table_number)  # 每个物理表格都转成稳定文本行。
-        lines.extend(table_lines)  # 表格行继续进入主文本 diff。
-        visual, visual_warning = _build_table_visual(page, table, table_lines, page_number, table_number)
+        title = _table_title_above_bbox(page, bbox) if bbox else ""  # 表题用于过滤图形误检和生成截图标题。
+        if _should_skip_detected_table(title, table_lines):
+            continue  # Figure/plot 或空伪表格不进入正文 diff，也不进入表格截图区。
+        lines.extend(table_lines)  # 表格行保留在抽取文本中，后续有截图表格区时正文 diff 会自动去重隐藏。
+        visual, visual_warning = _build_table_visual(
+            page,
+            table,
+            table_lines,
+            page_number,
+            table_number,
+            title=title,
+        )  # 只为通过过滤的表格生成截图证据。
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
         if visual is not None:
             visuals.append(visual)
     return lines, visuals, warnings
+
+
+def _table_bbox(table: object) -> tuple[float, float, float, float] | None:
+    """Return a normalized table bbox, or None when pdfplumber did not provide one."""
+
+    bbox = tuple(float(value) for value in getattr(table, "bbox", ()) or ())  # pdfplumber 的 bbox 是表格定位的主证据。
+    return bbox if len(bbox) == 4 else None  # 无四元组坐标时不能安全裁剪或按表题过滤。
+
+
+def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
+    """Return True when a pdfplumber table object is actually a figure/noise region."""
+
+    cleaned_title = normalize_line(title)  # 统一空白后判断标题类型，避免行号残留影响规则。
+    if table_lines and _table_lines_are_visual_only(table_lines):
+        return True  # 即使没有 bbox，纯坐标轴/公式碎片也不能进入正文 diff 或表格截图区。
+    if _looks_like_figure_caption(cleaned_title):
+        return True  # 用户明确不需要图片/图形对比，Figure 误检必须整块跳过。
+    if _looks_like_non_table_caption(cleaned_title) and not table_lines:
+        return True  # 页眉、单字母坐标轴等空候选没有表格证据，直接丢弃。
+    if not table_lines and not _looks_like_table_caption(cleaned_title) and not _looks_like_table_context_caption(cleaned_title):
+        return True  # 没有结构化行也没有表格语义时，通常是 OpenCV/pdfplumber 误检。
+    return False  # 其余候选保守保留，确保真实表格截图不会被误删。
+
+
+def _table_lines_are_visual_only(table_lines: list[str]) -> bool:
+    """Return True when every extracted table row is actually figure/axis text."""
+
+    payloads = [
+        payload
+        for line in table_lines
+        if (payload := _table_line_visual_payload(line))
+    ]  # 去掉内部表格前缀后，只检查有内容的行。
+    return bool(payloads) and all(_looks_like_figure_or_image_text_block(payload) for payload in payloads)
+
+
+def _table_line_visual_payload(line: str) -> str:
+    """Strip the internal table prefix so visual-noise rules see the real row text."""
+
+    text = normalize_line(line)  # 表格行来自 pdfplumber，先统一空白再剥离内部前缀。
+    if text.startswith(_TABLE_ROW_PREFIX):
+        text = text[len(_TABLE_ROW_PREFIX) :].strip()  # 删除“表格行:”标记，避免影响图轴规则。
+    text = re.sub(r"^T\d+\s*\|\s*", "", text, flags=re.I)  # 删除物理表编号，只保留单元格内容。
+    return text.strip()
 
 
 def _build_table_visual(
@@ -464,16 +670,18 @@ def _build_table_visual(
     table_lines: list[str],
     page_number: int,
     table_number: int,
+    *,
+    title: str = "",
 ) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
-    bbox = tuple(float(value) for value in getattr(table, "bbox", ()) or ())  # pdfplumber Table 提供表格边界框。
-    if len(bbox) != 4:
+    bbox = _table_bbox(table)  # 复用统一 bbox 解析，避免过滤和截图路径口径不一致。
+    if bbox is None:
         return None, "未取得可靠表格边界"
     image, padded_bbox, image_status = _table_screenshot_image(page, bbox)  # 生成带橙色边框的表格截图。
     if image is None:
         return None, image_status or "截图为空"
-    title = _table_title_above_bbox(page, bbox)  # 尽量从表格上方提取 Table 题名。
+    title = title or _table_title_above_bbox(page, bbox)  # 调用方通常已抽过表题；兜底再取一次。
     image_data_uri = _image_to_data_uri(image)  # 把截图内嵌到 HTML，便于手机直接查看。
     grid_summary = _opencv_grid_summary(image)  # 用 OpenCV 检测截图内网格线，说明视觉表格证据强弱。
     ocr_text, ocr_status = _ocr_table_image(image)  # 有 tesseract 引擎时做 OCR，否则明确说明跳过。
@@ -618,17 +826,72 @@ def _ocr_table_image(image: object) -> tuple[str, str]:
 def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float]) -> str:
     """Extract a likely table caption immediately above a table bbox."""
 
-    top = max(0.0, bbox[1] - 54.0)  # 表题通常在表格上方一到三行内。
+    page_bbox = tuple(float(value) for value in (getattr(page, "bbox", None) or (0.0, 0.0, page.width, page.height)))  # 当前页面/裁剪页边界。
+    page_left, _page_top, page_right, _page_bottom = page_bbox  # 只需要水平边界扩大表题搜索范围。
+    left = max(page_left, bbox[0] - 90.0)  # 表题有时比表格本体更宽，左侧多取一点。
+    right = min(page_right, bbox[2] + 90.0) if page_right else bbox[2] + 90.0  # 右侧同样外扩，避免漏掉跨列表题。
+    top = max(0.0, bbox[1] - 90.0)  # 表题通常在表格上方；90pt 能覆盖多行题名和 line-number 残留。
     try:
-        caption_page = page.crop((bbox[0], top, bbox[2], bbox[1]))
+        caption_page = page.crop((left, top, right, bbox[1]))
         caption_text = caption_page.extract_text(x_tolerance=1, y_tolerance=3) or ""
     except Exception:
         return ""
-    candidates = [normalize_line(line) for line in caption_text.splitlines() if normalize_line(line)]
+    candidates = [
+        _strip_caption_line_noise(line)
+        for raw_line in caption_text.splitlines()
+        if (line := normalize_line(raw_line))
+    ]  # 表题候选先去掉页边行号和尾部孤立行号。
+    candidates = [candidate for candidate in candidates if candidate and not _looks_like_non_table_caption(candidate)]
     for candidate in reversed(candidates):
-        if re.search(r"(?i)\btable\s+\d+(?:[-–]\d+)?\b|表\s*\d+", candidate):
+        if _looks_like_table_caption(candidate):
             return candidate
-    return candidates[-1] if candidates else ""
+    for candidate in reversed(candidates):
+        if _looks_like_figure_caption(candidate):
+            return candidate  # 返回 Figure 题名供上游过滤掉该候选。
+    for candidate in reversed(candidates):
+        if _looks_like_table_context_caption(candidate):
+            return candidate  # Revision history 这类无编号表，用上下文表述作为标题。
+    return ""
+
+
+def _strip_caption_line_noise(value: str) -> str:
+    """Remove margin line numbers that cling to table/figure captions."""
+
+    cleaned = normalize_line(value)  # 表题清洗先做统一空白，后续正则更稳定。
+    cleaned = re.sub(r"^\d{1,3}\s+(?=(?:table|figure|fig\.|表|图)\b)", "", cleaned, flags=re.I)  # 删除 `1 Table ...` 前缀行号。
+    if _TABLE_CAPTION_RE.search(cleaned) or _FIGURE_CAPTION_RE.search(cleaned):
+        cleaned = re.sub(r"\s+\d{1,3}$", "", cleaned)  # 删除 `Table ... 1` 这类尾部行号，但保留题名主体。
+    return normalize_line(cleaned)
+
+
+def _looks_like_table_caption(value: str) -> bool:
+    """Return True when a caption explicitly names a table."""
+
+    return bool(_TABLE_CAPTION_RE.search(normalize_line(value)))  # 复用统一表题正则，覆盖英文 Table 和中文表。
+
+
+def _looks_like_table_context_caption(value: str) -> bool:
+    """Return True for unnumbered text that clearly introduces a table."""
+
+    candidate = normalize_line(value).casefold()  # 无编号表只能靠上下文词判断。
+    return bool(re.search(r"\btable\s+(?:below|following)|\bin\s+the\s+table\s+below\b|下表", candidate))
+
+
+def _looks_like_non_table_caption(value: str) -> bool:
+    """Return True for page furniture or tiny axis labels that should not title a table."""
+
+    candidate = normalize_line(value)  # 统一空白，避免页眉里的换行影响判断。
+    if not candidate:
+        return True
+    if candidate.isdigit():
+        return True
+    if re.fullmatch(r"[A-Za-z]", candidate) and candidate.upper() in _WATERMARK_TEXT_CHARS | frozenset({"X", "Y"}):
+        return True  # 单个 D/R/A/F/T 或 X/Y 更可能是水印/坐标轴，不是表题。
+    if re.search(r"(?i)^implementation\s+agreement\s+oif-cei", candidate):
+        return True  # OIF 页眉不应成为旧版 Table 32-7 的标题。
+    if _looks_like_extraction_boilerplate(candidate):
+        return True
+    return False
 
 
 def _page_may_contain_table(page: object, text: str) -> bool:
@@ -668,7 +931,136 @@ def _table_lines_from_rows(rows: list[list[object]], table_number: int) -> list[
             line = _format_table_row(expanded_row, header, table_number)
             if line:
                 lines.append(line)
-    return lines
+    return _merge_wrapped_table_row_continuations(lines)
+
+
+def _merge_wrapped_table_row_continuations(lines: list[str]) -> list[str]:
+    """Merge pdfplumber rows that are really wrapped text inside one table row."""
+
+    merged: list[str] = []  # 保存合并后的结构化表格行。
+    for line in lines:
+        if merged and _is_wrapped_table_row_continuation(merged[-1], line):
+            merged[-1] = _merge_table_row_continuation(merged[-1], line)  # 例如 T_J + 4.3u03 合成 T_J4.3u03。
+            continue
+        merged.append(line)  # 非续行保持原顺序。
+    return merged
+
+
+def _is_wrapped_table_row_continuation(previous_line: str, current_line: str) -> bool:
+    """Return True when ``current_line`` is a continuation of ``previous_line``."""
+
+    previous_fields = _table_line_field_map(previous_line)  # 上一行字段用于判断是否已有完整数值。
+    current_fields = _table_line_field_map(current_line)  # 当前行字段用于判断是否只是续写描述/符号。
+    description_key = _wrapped_table_description_key(previous_fields, current_fields)
+    if not description_key:
+        return False  # 两行没有共同描述列时不能合并。
+    if not _looks_like_wrapped_description_tail(current_fields[description_key]):
+        return False  # 当前描述不像上一行的括号/百分比分布说明续行时不合并。
+    if any(current_fields.get(key) for key in _table_value_or_context_keys()):
+        return False  # 当前行自己有数值/单位/条件时更可能是真实独立行。
+    previous_symbol = previous_fields.get("symbol", "")  # 符号列是合并上下标的主要证据。
+    current_symbol = current_fields.get("symbol", "")  # 当前行的短符号通常是下标/后缀。
+    if not previous_symbol or not current_symbol:
+        return False  # 没有符号续写时，合并风险太高。
+    if not _looks_like_symbol_subscript(current_symbol):
+        return False  # 长文本符号不应拼接到上一行。
+    return any(previous_fields.get(key) for key in _table_value_or_context_keys())
+
+
+def _wrapped_table_description_key(previous_fields: dict[str, str], current_fields: dict[str, str]) -> str:
+    """Return the description-like field shared by two candidate continuation rows."""
+
+    for key in ("characteristic", "parameter", "description", "label", "name"):
+        if previous_fields.get(key) and current_fields.get(key):
+            return key  # 两行共享同一类身份列，才可能是同一表格行被换行拆开。
+    return ""
+
+
+def _table_value_or_context_keys() -> tuple[str, ...]:
+    """Return table fields that indicate a row is complete on its own."""
+
+    return ("condition", "value", "values", "min", "minimum", "typ", "typical", "max", "maximum", "unit", "units")
+
+
+def _looks_like_wrapped_description_tail(value: str) -> bool:
+    """Return True for a second physical line that continues a long description."""
+
+    candidate = normalize_line(value)  # 描述续行通常以百分比、括号尾或小写连接词开头。
+    if not candidate:
+        return False
+    if re.match(r"^\d+(?:\.\d+)?%", candidate):
+        return True  # `99.9975% of ...` 是上一行括号说明的续写。
+    if candidate.startswith(")") or candidate.endswith(")"):
+        return True  # 括号闭合行通常属于上一行的长描述。
+    return bool(re.match(r"(?i)^(?:of|the|and|or|from|to)\b", candidate))
+
+
+def _merge_table_row_continuation(previous_line: str, current_line: str) -> str:
+    """Combine a wrapped continuation row into the previous structured row."""
+
+    table_token, previous_cells = _split_table_line_cells(previous_line)  # 拿到 T 编号和上一行单元格。
+    _current_token, current_cells = _split_table_line_cells(current_line)  # 当前行只提供续写字段。
+    current_fields = _table_line_field_map(current_line)  # 当前字段值用于拼接描述和符号。
+    index_by_key = _table_cell_index_by_key(previous_cells)  # 保留上一行字段顺序，只更新必要单元格。
+    description_key = _wrapped_table_description_key(_table_line_field_map(previous_line), current_fields)
+    if description_key and description_key in index_by_key:
+        index, label = index_by_key[description_key]
+        previous_value = previous_cells[index].split("=", 1)[1]
+        previous_cells[index] = f"{label}={normalize_line(previous_value + ' ' + current_fields[description_key])}"
+    if "symbol" in index_by_key and current_fields.get("symbol"):
+        index, label = index_by_key["symbol"]
+        previous_value = previous_cells[index].split("=", 1)[1]
+        previous_cells[index] = f"{label}={previous_value}{current_fields['symbol']}"
+    return _format_existing_table_cells(table_token, previous_cells)
+
+
+def _split_table_line_cells(line: str) -> tuple[str, list[str]]:
+    """Return the internal table token and display cells from one formatted row."""
+
+    text = normalize_line(line)  # 结构化行内部字段用竖线分隔。
+    if text.startswith(_TABLE_ROW_PREFIX):
+        text = text[len(_TABLE_ROW_PREFIX) :].strip()  # 去掉内部前缀，只解析 T 编号和字段。
+    cells = [cell.strip() for cell in text.split("|") if cell.strip()]  # 空字段没有合并价值。
+    if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
+        return cells[0], cells[1:]  # 标准结构化表格行带 T 编号。
+    return "", cells
+
+
+def _table_line_field_map(line: str) -> dict[str, str]:
+    """Parse one formatted table row into normalized field names."""
+
+    fields: dict[str, str] = {}  # key -> value，用于续行判断。
+    _table_token, cells = _split_table_line_cells(line)
+    for cell in cells:
+        if "=" not in cell:
+            continue
+        key, value = cell.split("=", 1)
+        normalized_key = normalize_line(key).casefold()
+        normalized_value = normalize_line(value)
+        if normalized_key and normalized_value:
+            fields[normalized_key] = normalized_value
+    return fields
+
+
+def _table_cell_index_by_key(cells: list[str]) -> dict[str, tuple[int, str]]:
+    """Return each ``Header=Value`` cell index while preserving display labels."""
+
+    index_by_key: dict[str, tuple[int, str]] = {}  # key -> (位置, 原始表头标签)。
+    for index, cell in enumerate(cells):
+        if "=" not in cell:
+            continue
+        key, _value = cell.split("=", 1)
+        normalized_key = normalize_line(key).casefold()
+        if normalized_key:
+            index_by_key[normalized_key] = (index, key)
+    return index_by_key
+
+
+def _format_existing_table_cells(table_token: str, cells: list[str]) -> str:
+    """Format already-normalized table cells back into the internal row string."""
+
+    prefix = f"{_TABLE_ROW_PREFIX} {table_token}" if table_token else _TABLE_ROW_PREFIX
+    return f"{prefix} | " + " | ".join(cells)
 
 
 def _table_cell_lines(cell: object) -> list[str]:
@@ -844,7 +1236,7 @@ def _looks_like_symbol_base(value: str) -> bool:
 def _looks_like_symbol_subscript(value: str) -> bool:
     """Return True for a short subscript/suffix line below a symbol."""
 
-    return bool(re.fullmatch(r"[A-Za-z0-9_+\-*/]+", value)) and len(value) <= 6 and " " not in value
+    return bool(re.fullmatch(r"[A-Za-z0-9_.+\-*/]+", value)) and len(value) <= 6 and " " not in value
 
 
 def _table_row_expansion_count(columns: list[list[str]]) -> int:

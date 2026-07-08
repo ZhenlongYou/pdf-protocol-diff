@@ -20,6 +20,7 @@ _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
         "compliance",
         "condition",
         "conditions",
+        "and",
         "differential",
         "frequency",
         "measured",
@@ -34,8 +35,10 @@ _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
         "return",
         "signal",
         "signals",
+        "than",
         "transmitter",
         "transmission",
+        "value",
         "voltage",
         "waveform",
     }
@@ -199,7 +202,7 @@ def _clean_embedded_draft_letter_word(match: re.Match[str]) -> str:
     """Remove one leaked DRAFT letter from a long mixed-case word."""
 
     word = match.group(0)  # 取出包含疑似水印字母的完整单词。
-    if len(word) < 8:
+    if len(word) < 4:
         return word
     for index, character in enumerate(word):
         if character not in "DRAFT":

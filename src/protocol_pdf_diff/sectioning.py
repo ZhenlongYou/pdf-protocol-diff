@@ -553,6 +553,12 @@ def _looks_like_forbidden_heading_candidate(
         return True
     if kind == "numeric" and _looks_like_unit_only_heading(normalized_title):
         return True
+    if kind == "numeric" and _looks_like_axis_label_heading(normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_sentence_fragment_heading(number, normalized_title):
+        return True
+    if kind == "numeric" and _looks_like_symbol_fragment_heading(number, normalized_title):
+        return True
     if kind == "numeric" and _looks_like_formula_or_table_value_heading(number, normalized_title):
         return True
     if kind == "numeric" and _looks_like_footnote_sentence_heading(number, normalized_title):
@@ -584,6 +590,47 @@ def _looks_like_unit_only_heading(title: str) -> bool:
         r"ohm|ω|ff|pf|ph|mm|ns/mm|1/mm|v2/ghz|gb/s|gsym/s|gt/s|%)$"
     )
     return bool(re.fullmatch(unit_pattern, title.strip()))
+
+
+def _looks_like_axis_label_heading(title: str) -> bool:
+    """Return True when a chart axis label was merged with a preceding tick value."""
+
+    if not title:
+        return False
+    return bool(re.fullmatch(r"(?i)(?:frequency|amplitude|loss|jitter)\s*\([^)]+\)", title.strip()))
+
+
+def _looks_like_symbol_fragment_heading(number: str, title: str) -> bool:
+    """Return True for symbol/value fragments misread as numeric headings."""
+
+    candidate = normalize_line(title)
+    if "." in number and re.fullmatch(r"(?i)[a-z]{1,4}\)?", candidate):
+        return True  # `802.3dj)` 是标准名残片，不是章节。
+    if not number.isdigit():
+        return False
+    if re.fullmatch(r"(?i)ui\s+x", candidate):
+        return True  # `5 UI X` 是图轴/表格值残片，不是章节标题。
+    if re.fullmatch(r"(?i)signal\s+\d+", candidate):
+        return True  # `2 Signal 0` 来自图/表值残片，不是协议章节。
+    if re.fullmatch(r"(?i)\d+[a-z]{1,4}\)?", candidate):
+        return True  # `802.3dj)` 解析后留下的 `3dj)` 也不是章节标题。
+    symbol_piece = r"\d+(?:\.\d+)?[a-z][a-z0-9]*"
+    symbol_tail = rf"{symbol_piece}(?:\s+(?:{symbol_piece}|rms\d*|drms\d*|j|\d{{1,3}})){{0,4}}"
+    return bool(re.fullmatch(symbol_tail, candidate, flags=re.I))
+
+
+def _looks_like_sentence_fragment_heading(number: str, title: str) -> bool:
+    """Return True when a long prose sentence was misread as a dotted heading."""
+
+    candidate = normalize_line(title)
+    if "." not in number:
+        return False
+    if len(candidate) < 55:
+        return False
+    return bool(
+        re.match(r"(?i)^(?:the|a|an|this|that)\b", candidate)
+        and re.search(r"(?i)\b(?:is|are|shall|should|must|will|can|be)\b", candidate)
+    )
 
 
 def _looks_like_formula_or_table_value_heading(number: str, title: str) -> bool:

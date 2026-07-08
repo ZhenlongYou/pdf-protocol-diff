@@ -22,6 +22,7 @@ from .models import (
     Section,
     SectionChange,
     SnippetPair,
+    TableVisual,
 )
 from .pdf_extract import extract_pdf_text
 from .sectioning import section_document
@@ -87,7 +88,11 @@ def compare_extractions(
 
     old_sections = section_document(old_extraction)
     new_sections = section_document(new_extraction)
-    changes = compare_sections(old_sections, new_sections, options)
+    covered_table_unit_keys = _covered_table_visual_row_keys(  # 只隐藏已经被表格截图摘要覆盖的结构化行。
+        old_extraction.table_visuals,
+        new_extraction.table_visuals,
+    )
+    changes = compare_sections(old_sections, new_sections, options, suppressed_table_unit_keys=covered_table_unit_keys)
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
     changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
     if suppressed_noise_count:
@@ -116,13 +121,28 @@ def compare_extractions(
     )
 
 
+def _covered_table_visual_row_keys(*table_groups: list[TableVisual]) -> set[str]:
+    """Return normalized structured table rows already shown in visual summaries."""
+
+    keys: set[str] = set()  # 保存可从下方截图+结构化摘要复核的表格行身份。
+    for tables in table_groups:
+        for table in tables:
+            for row_text in table.row_texts:
+                if _is_table_review_unit(row_text):
+                    keys.add(_review_unit_key(row_text))  # 使用比较层统一 key，避免空白和大小写差异导致漏匹配。
+    return keys
+
+
 def compare_sections(
     old_sections: list[Section],
     new_sections: list[Section],
     options: DiffOptions,
+    *,
+    suppressed_table_unit_keys: set[str] | None = None,
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
+    table_unit_keys = suppressed_table_unit_keys or set()  # None 表示没有视觉表格兜底，正文 diff 需要保留表格行。
     matches = _match_sections(old_sections, new_sections, options)
     changes: list[SectionChange] = []
     for old_index, new_index, similarity in matches:
@@ -153,6 +173,7 @@ def compare_sections(
                 new_section.body,
                 max_snippets=options.max_snippets_per_section,
                 leading_replacement=heading_pair,
+                suppressed_table_unit_keys=table_unit_keys,
             )
             if not added and not removed and not replaced and omitted_count == 0:
                 if options.include_unchanged_sections:
@@ -181,6 +202,7 @@ def compare_sections(
             added_snippets, omitted_count = _first_units(
                 new_section.body,
                 options.max_snippets_per_section,
+                suppressed_table_unit_keys=table_unit_keys,
             )
             changes.append(
                 SectionChange(
@@ -196,6 +218,7 @@ def compare_sections(
             removed_snippets, omitted_count = _first_units(
                 old_section.body,
                 options.max_snippets_per_section,
+                suppressed_table_unit_keys=table_unit_keys,
             )
             changes.append(
                 SectionChange(
@@ -366,11 +389,14 @@ def _summarize_text_delta(
     new_text: str,
     max_snippets: int,
     leading_replacement: SnippetPair | None = None,
+    *,
+    suppressed_table_unit_keys: set[str] | None = None,
 ) -> tuple[list[str], list[str], list[SnippetPair], int]:
     """Create compact added/removed/replaced snippets for one section."""
 
-    old_units = _split_units(old_text)
-    new_units = _split_units(new_text)
+    table_unit_keys = suppressed_table_unit_keys or set()  # 没有视觉覆盖 key 时，结构化表格行保持文字兜底。
+    old_units = _paragraph_review_units(old_text, suppressed_table_unit_keys=table_unit_keys)  # 主正文区只剔除已由视觉摘要覆盖的表格行。
+    new_units = _paragraph_review_units(new_text, suppressed_table_unit_keys=table_unit_keys)  # 未生成截图的表格行仍继续作为正文 diff。
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
@@ -448,6 +474,19 @@ def _summarize_text_delta(
     return _materialize_delta_candidates(candidates, max_snippets)
 
 
+def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) -> list[str]:
+    """Return review units for paragraph cards, optionally excluding table rows."""
+
+    units = _split_units(text)  # 先走统一切分和原始表格噪声覆盖，避免长表格块污染正文 diff。
+    if not suppressed_table_unit_keys:
+        return units  # 没有表格截图作为兜底时，结构化表格行仍作为文字 diff 输出。
+    return [
+        unit
+        for unit in units
+        if not (_is_table_review_unit(unit) and _review_unit_key(unit) in suppressed_table_unit_keys)
+    ]  # 有视觉摘要覆盖的行从正文卡片隐藏；未覆盖行继续兜底展示。
+
+
 def _split_units(text: str) -> list[str]:
     """Split text into review-sized units.
 
@@ -479,11 +518,15 @@ _RAW_TABLE_NOISE_WORDS = frozenset(
         "equalizer",
         "frequency",
         "impedance",
+        "jitter",
         "maximum",
         "minimum",
+        "notes",
         "parameter",
+        "probability",
         "receiver",
         "resistance",
+        "rms",
         "symbol",
         "termination",
         "transmitter",
@@ -511,21 +554,38 @@ def _drop_duplicate_raw_table_units(units: list[str]) -> list[str]:
 def _looks_like_duplicate_raw_table_unit(unit: str, table_tokens: set[str]) -> bool:
     """Return True for a noisy raw table block already covered by table rows."""
 
-    if len(unit) < 160:  # 短文本在 diff 层不兜底删除，短行已在抽取层处理。
-        return False
+    tokens = _raw_table_noise_tokens(unit)  # 和结构化表格行做 token 覆盖判断。
+    overlap = len(tokens & table_tokens)  # token 重叠越高，越可能是同一表格的原始抽取残片。
+    words = set(re.findall(r"[A-Za-z]+", unit.casefold()))  # 表格词数量用于区分正文长段落和参数块。
+    table_word_count = len(words & _RAW_TABLE_NOISE_WORDS)
+    if len(unit) < 160:
+        return _looks_like_short_duplicate_raw_table_unit(unit, overlap, table_word_count)
     number_count = len(_NUMBER_TOKEN_RE.findall(unit))  # 原始表格块通常含有大量数值。
     if number_count < 6:
         return False
-    words = set(re.findall(r"[A-Za-z]+", unit.casefold()))  # 表格词数量用于区分正文长段落和参数块。
-    table_word_count = len(words & _RAW_TABLE_NOISE_WORDS)
     if table_word_count < 2:
         return False
-    tokens = _raw_table_noise_tokens(unit)  # 和结构化表格行做 token 覆盖判断。
-    overlap = len(tokens & table_tokens)
     required_overlap = min(12, max(6, len(tokens) // 6))
     if overlap >= required_overlap:
         return True
     return overlap >= 4 and table_word_count >= 4 and number_count >= 10 and _has_table_block_phrase(unit)
+
+
+def _looks_like_short_duplicate_raw_table_unit(unit: str, overlap: int, table_word_count: int) -> bool:
+    """Return True for short raw table fragments already covered by structured rows."""
+
+    if overlap < 3:
+        return False  # 短片段必须和结构化表格有明显重叠才可删除。
+    if re.search(
+        r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|means|describes?|represents?|indicates?|shows?|specified|measured|computed|requirements?)\b",
+        unit,
+    ):
+        return False  # 带规范动词的短句更可能是真正文段。
+    if re.match(r"(?i)^(?:the|this|that|these|those)\b", unit):
+        return False  # 以冠词/指示词开头的自然句不按表格碎片删除。
+    if re.search(r"(?i)\bT_[A-Z0-9_]+|\bUI(?:rms|pp)?\b|NOTES?:|(?:MIN|MAX|TYP)\s*=", unit):
+        return True  # 符号、单位、NOTES、上下限列是原始表格碎片强信号。
+    return overlap >= 5 and table_word_count >= 2
 
 
 def _has_table_block_phrase(unit: str) -> bool:
@@ -678,6 +738,7 @@ _NUMBER_TOKEN_RE = re.compile(
     r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?",
     flags=re.I,
 )
+_TABLE_REVIEW_PREFIX_RE = re.compile(r"^(?:表格行|表格文字)[:：]\s*")  # 内部表格行和用户可见兜底表格文字共用识别入口。
 _REVIEW_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
     r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
@@ -797,6 +858,8 @@ def _canonical_review_token(token: str) -> str:
 def _report_unit(value: str) -> str:
     """Return a human-readable snippet without odd mid-sentence ellipses."""
 
+    if _is_table_review_unit(value):
+        return _format_fallback_table_review_unit(value)  # 未被视觉摘要覆盖的表格行用用户可读前缀展示。
     readable = " ".join(_split_long_unit(value, max_chars=1200))
     if len(readable) <= 1400:
         return readable
@@ -811,6 +874,16 @@ def _report_unit(value: str) -> str:
     if cut < 600:
         cut = 1200
     return readable[: cut + 1].strip() + " [片段过长，已截断；请见源 PDF 对应页]"
+
+
+def _format_fallback_table_review_unit(value: str) -> str:
+    """Convert an internal structured table row into a readable fallback snippet."""
+
+    cells = _table_row_cells(value)  # 复用表格行解析，兼容内部前缀和用户可见兜底前缀。
+    if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
+        cells = cells[1:]  # T1/T2 只是抽取器的页内表序号，不必暴露给用户。
+    payload = " | ".join(cells) if cells else compact_inline(value)  # 保留 Header=Value，方便搜索和人工复核。
+    return f"表格文字: {payload}"
 
 
 _MIN_UNEQUAL_REPLACE_PAIR_SCORE = 0.45
@@ -991,7 +1064,7 @@ def _table_unit_pair_score(old_unit: str, new_unit: str) -> float | None:
 def _is_table_review_unit(value: str) -> bool:
     """Return True for structured table rows emitted by the extractor."""
 
-    return normalize_line(value).startswith("表格行:")  # 前缀是内部稳定契约，不暴露新的外部 API。
+    return bool(_TABLE_REVIEW_PREFIX_RE.match(normalize_line(value)))  # 内部行和用户可见兜底表格文字都走同一判断。
 
 
 def _table_row_identity(value: str) -> str:
@@ -1034,8 +1107,7 @@ def _table_row_cells(value: str) -> list[str]:
     """Split one table row snippet into pipe-separated payload cells."""
 
     text = normalize_line(value)  # 统一空白后再切分，减少 PDF 抽取空格差异。
-    if text.startswith("表格行:"):
-        text = text[len("表格行:") :].strip()
+    text = _TABLE_REVIEW_PREFIX_RE.sub("", text).strip()  # 删除内部或可见表格前缀，只保留列内容。
     cells = [cell.strip() for cell in text.split("|") if cell.strip()]  # 表格行内部用竖线分隔列。
     if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
         return cells[1:]  # T1/T2 只是物理表编号，不参与行身份。
@@ -1125,10 +1197,7 @@ def _suppress_global_noise_changes(changes: list[SectionChange]) -> tuple[list[S
         replaced = [
             pair
             for pair in change.replaced_snippets
-            if not (
-                _is_global_noise_snippet(pair.old)
-                and _is_global_noise_snippet(pair.new)
-            )
+            if not _should_suppress_replaced_pair(pair)
         ]
         suppressed_count += len(change.added_snippets) - len(added)
         suppressed_count += len(change.removed_snippets) - len(removed)
@@ -1151,12 +1220,46 @@ def _suppress_global_noise_changes(changes: list[SectionChange]) -> tuple[list[S
     return cleaned_changes, suppressed_count
 
 
+def _should_suppress_replaced_pair(pair: SnippetPair) -> bool:
+    """Return True when a replacement pair is only layout/image noise."""
+
+    old_visual = _looks_like_visual_only_snippet(pair.old)  # 旧侧图片/图轴/公式碎片不能和正文或表格行并排展示。
+    new_visual = _looks_like_visual_only_snippet(pair.new)  # 新侧图片/图轴/公式碎片同样需要降噪。
+    old_noise = _is_global_noise_snippet(pair.old)  # 页眉页脚和水印残片也不应和视觉碎片并排展示。
+    new_noise = _is_global_noise_snippet(pair.new)  # 新侧页眉页脚同理。
+    old_corrupt_figure = _looks_like_corrupted_figure_reference_snippet(pair.old)  # Figure 引用被 cd/R 等残字污染时不可信。
+    new_corrupt_figure = _looks_like_corrupted_figure_reference_snippet(pair.new)  # 新侧损坏 Figure 引用同理。
+    old_table = _is_table_review_unit(pair.old)  # 表格行若被错误配到图片块，应交给表格截图区展示。
+    new_table = _is_table_review_unit(pair.new)  # 新表格行同理，避免正文区出现“图形 vs 表格行”的错配。
+    old_table_visual_noise = _table_review_unit_has_visual_noise(pair.old)  # 表格兜底里夹带页眉/公式时，不应和干净行并排展示。
+    new_table_visual_noise = _table_review_unit_has_visual_noise(pair.new)  # 新侧表格兜底噪声也按同一规则隐藏。
+    if old_corrupt_figure and new_corrupt_figure:
+        return True
+    if (old_table_visual_noise or new_table_visual_noise) and (old_table or new_table):
+        return True
+    if old_visual and (new_visual or new_table):
+        return True
+    if new_visual and (old_visual or old_table):
+        return True
+    if (old_visual or old_noise) and (new_visual or new_noise or new_corrupt_figure):
+        return True
+    if (new_visual or new_noise) and (old_visual or old_noise or old_corrupt_figure):
+        return True
+    return old_noise and new_noise
+
+
 def _is_global_noise_snippet(value: str) -> bool:
     """Identify DRAFT, copyright, running header, and margin line-number noise."""
 
     candidate = compact_inline(value)  # 压成单行，便于识别跨行抽取出来的页眉页脚。
     if not candidate:
         return False
+    if _table_review_unit_has_visual_noise(candidate):
+        return True  # 夹带页眉/公式的结构化表格行交给表格截图区，不放在正文 diff。
+    if _looks_like_visual_only_snippet(candidate):
+        return True
+    if _looks_like_corrupted_figure_reference_snippet(candidate):
+        return True  # 被 cd/R 等残字污染的 Figure 引用来自抽取噪声，不展示为正文差异。
     lowered = candidate.casefold()  # 大小写不影响 DRAFT/boilerplate 判断。
     if _looks_like_margin_line_number_run(candidate):
         return True
@@ -1174,6 +1277,211 @@ def _is_global_noise_snippet(value: str) -> bool:
         r"\bimplementation\s+agreement\s+oif-cei\b",
     )  # 这些短语在用户样本中反复出现在页眉页脚或草稿水印中。
     return any(re.search(pattern, lowered) for pattern in noise_patterns)
+
+
+def _looks_like_visual_only_snippet(value: str) -> bool:
+    """Return True for standalone figure/plot snippets that should not be compared."""
+
+    candidate = compact_inline(value)  # 图形判断使用单行文本，和 HTML 片段展示保持一致。
+    if _is_table_review_unit(candidate):
+        return False  # 结构化表格行是用户需要的表格对比，不能被图片规则删除。
+    if _starts_with_figure_sentence_prose(candidate):
+        return False  # `Figure 32-2 shows ...` 这类正文句子不能被图形噪声规则删除。
+    if _looks_like_numeric_axis_tick_snippet(candidate):
+        return True  # 纯数字坐标轴刻度行不参与正文差异。
+    if _looks_like_orphan_symbol_fragment_snippet(candidate):
+        return True  # `4.3u03 RMS03` 这类纯符号残片不是正文。
+    if _looks_like_axis_only_visual_snippet(candidate):
+        return True  # 无图题但只有坐标轴/曲线标签的图片碎片也应隐藏。
+    if _looks_like_plot_or_formula_snippet(candidate):
+        return True  # 密集坐标轴/公式块即使没有 Figure 标题，也属于图形抽取残片。
+    if _starts_with_figure_caption(candidate):
+        return True  # 纯图题或图形 OCR 块不属于本工具要报告的差异。
+    if not re.search(r"(?i)\b(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b|图\s*\d+", candidate):
+        return False  # 普通正文没有图题锚点时不能按视觉噪声处理。
+    if len(candidate) < 120:
+        return False  # 短正文引用 Figure 可能是真实编号变化，需要保留。
+    return _looks_like_plot_or_formula_snippet(candidate)
+
+
+def _looks_like_axis_only_visual_snippet(value: str) -> bool:
+    """Return True for plot-axis fragments that are not protocol prose."""
+
+    candidate = compact_inline(value)  # 坐标轴碎片在报告中也是单行显示。
+    if re.search(r"(?i)\b(?:shall|should|specified|measured|computed|requirements?)\b", candidate):
+        return False  # 规范句即使引用图形，也应该继续由正文 diff 报告。
+    if _looks_like_short_plot_label_snippet(candidate):
+        return True  # IL min / Frequency (GHz) 等短轴标签不是正文。
+    if re.match(r"(?i)^[A-Z]\s+\d+\s+\w+\s+where\b", candidate):
+        return True  # `F 0 peak where ...` 是公式说明断片，不是正文段落。
+    if re.search(r"(?i)\bfrequency\s+range\b", candidate) and re.search(r"(?i)\bpeak-to-peak\b|\bUI\b", candidate):
+        return True  # 抽成一行的图轴/表头范围不是正文段落。
+    if re.fullmatch(r"(?i)(?:amplitude|frequency|loss|jitter)(?:\s+[A-Z]){1,4}", candidate):
+        return True  # `Amplitude X` 这类短轴标签是图片残片，不是正文差异。
+    x_count = len(re.findall(r"\bX\b", candidate))  # 多个 X 常来自曲线/坐标标记，不是正文。
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))  # 坐标轴刻度会带来多个数字。
+    axis_words = len(re.findall(r"(?i)\b(?:amplitude|frequency|loss|jitter|ui|ghz|db|pp)\b", candidate))
+    return x_count >= 2 and number_count >= 3 and axis_words >= 2
+
+
+def _looks_like_orphan_symbol_fragment_snippet(value: str) -> bool:
+    """Return True for pure symbol/value fragments with no prose context."""
+
+    candidate = compact_inline(value)
+    if " " not in candidate:
+        return False  # 单个符号可能是合法短差异，不能直接删除。
+    symbol_piece = r"\d+(?:\.\d+)?[a-z][a-z0-9]*"
+    return bool(
+        re.fullmatch(
+            rf"(?i){symbol_piece}(?:\s+(?:{symbol_piece}|rms\d*|drms\d*|j|\d{{1,3}})){{1,4}}",
+            candidate,
+        )
+    )
+
+
+def _looks_like_numeric_axis_tick_snippet(value: str) -> bool:
+    """Return True for long chart-axis tick sequences such as ``0 5 10 ...``."""
+
+    tokens = compact_inline(value).split()  # 坐标轴刻度通常是一串空格分隔数字。
+    if len(tokens) < 8:
+        return False
+    return all(re.fullmatch(r"[+-]?\d+(?:\.\d+)?", token) for token in tokens)
+
+
+def _looks_like_short_plot_label_snippet(value: str) -> bool:
+    """Return True for compact plot labels that are not standalone prose."""
+
+    candidate = compact_inline(value)  # 短标签必须严格匹配，避免误删正文句子。
+    if re.fullmatch(r"(?i)(?:frequency|amplitude|loss|jitter)\s*\([^)]+\)", candidate):
+        return True  # `Frequency (GHz)` 这类裸坐标轴标题不是正文差异。
+    if re.fullmatch(r"(?i)(?:min|max|typ)", candidate):
+        return True  # 图形公式拆出来的单词标签不应进入报告。
+    if re.fullmatch(r"(?i)il\s+(?:min|max)(?:\s*/\s*il\s+(?:min|max))?(?:\s+f\s*[×x*]\s*\d+){0,2}", candidate):
+        return True
+    if re.match(r"(?i)^frequency\s*\([^)]+\)(?:\s+\(\d+(?:[-–]\d+)?\))?(?:\s+\)bd\(|\s+ssol)", candidate):
+        return True
+    return False
+
+
+def _starts_with_figure_caption(value: str) -> bool:
+    """Return True when a snippet begins with a figure caption."""
+
+    candidate = re.sub(r"^\d{1,3}\s+(?=(?:figure|fig\.|图)\b)", "", compact_inline(value), flags=re.I)  # 去掉前置页边行号。
+    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
+    if match:
+        return not _figure_caption_tail_starts_prose(match.group("tail"))
+    chinese_match = re.match(r"^图\s*\d+(?P<tail>.*)$", candidate)
+    if chinese_match:
+        return not re.match(r"^\s*(?:显示|说明|描述|定义)", chinese_match.group("tail"))
+    return False
+
+
+def _figure_caption_tail_starts_prose(tail: str) -> bool:
+    """Return True when text after ``Figure N`` is normal sentence prose."""
+
+    cleaned_tail = tail.lstrip(" .:-–—").strip()  # 去掉图题常用分隔符后看第一个词。
+    return bool(
+        re.match(
+            r"(?i)^(?:shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|lists?|is|are|shall|should|must|may|can)\b",
+            cleaned_tail,
+        )
+    )
+
+
+def _looks_like_plot_or_formula_snippet(value: str) -> bool:
+    """Return True for dense chart/formula text emitted from a figure region."""
+
+    lowered = value.casefold()  # 坐标轴词大小写不重要。
+    if _looks_like_il_limit_formula_snippet(value):
+        return True  # 图里的 IL min/IL max 公式残片按图片噪声处理。
+    if _looks_like_symbolic_formula_snippet(value):
+        return True  # 独立公式字形碎片不应作为正文差异展示。
+    if re.search(r"(?i)\b(?:shows?|illustrates?|depicts?|shall|should|specified|measured|computed|requirements?)\b", value):
+        if not re.search(r"(?i)\b(?:il\s*min|il\s*max|frequency\s*\(|\)bd\(|ssol|insertion\s+loss)\b", value):
+            return False  # 普通句首 Figure 正文不能只因有数值而被当作图片块。
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", value))  # 曲线坐标和公式抽取通常含大量数字。
+    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", value))  # 特殊公式字形是强视觉块信号。
+    axis_words = len(
+        re.findall(
+            r"\b(?:frequency|loss|db|ghz|axis|il\s*min|il\s*max|return\s+loss|insertion\s+loss)\b",
+            lowered,
+        )
+    )  # 图形轴/曲线标签能把视觉块和普通段落分开。
+    return number_count >= 8 and (formula_mark_count >= 2 or axis_words >= 2)
+
+
+def _looks_like_symbolic_formula_snippet(value: str) -> bool:
+    """Return True for standalone equation glyph fragments with little prose."""
+
+    candidate = compact_inline(value)  # 报告片段已经按句/行拆分，公式残片通常很短。
+    if _looks_like_formula_tail_snippet(candidate):
+        return True
+    if re.search(r"(?i)\b(?:parameter|characteristic|symbol|condition|value|values|units?|min|max|typ)=", candidate):
+        return False  # 结构化表格字段使用等号，但不是图片公式残片。
+    word_tokens = re.findall(r"[A-Za-z]{2,}", candidate)
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))
+    if re.search(r"=", candidate) and number_count >= 2 and len(word_tokens) <= 6:
+        return True  # `SNDR = ...`、`N - 1 ... = 0` 这类拆行公式没有正文语义。
+    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", candidate))
+    if formula_mark_count < 2:
+        return False
+    if number_count >= 2 and len(word_tokens) <= 5:
+        return True
+    return len(candidate) <= 180 and len(word_tokens) <= 3
+
+
+def _looks_like_formula_tail_snippet(value: str) -> bool:
+    """Return True for trailing equation labels such as ``6) (TBI).``."""
+
+    candidate = compact_inline(value)
+    if re.fullmatch(r"(?i)\d+\)\s+\([A-Z]{2,}\)\.?", candidate):
+        return True
+    if re.fullmatch(r"(?i)\d+\)\s+be\s+positive\.?", candidate):
+        return True
+    return bool(re.fullmatch(r"(?i)\d+\.\s+(?:[a-z]{1,3}\s+){1,4}.*\(\d+(?:[-–]\d+)?\).*", candidate))
+
+
+def _looks_like_il_limit_formula_snippet(value: str) -> bool:
+    """Return True for split IL-limit equations emitted from chart/figure text."""
+
+    candidate = compact_inline(value)  # 比较层拿到的是片段文本，先压成单行再检查。
+    if re.search(r"(?i)\bil\s*(?:min|max)\s*=", candidate):
+        return True  # `IL min = ...` 来自图形公式，不应作为正文变化。
+    has_frequency_math = bool(re.search(r"(?i)\bf\b|\bGHz\b", candidate))  # f/GHz 锚定频率公式上下文。
+    has_formula_symbol = bool(re.search(r"[≤≥<>]|--+", candidate))  # 私有字体符号和分数线锚定公式残片。
+    return len(candidate) <= 180 and has_frequency_math and has_formula_symbol
+
+
+def _starts_with_figure_sentence_prose(value: str) -> bool:
+    """Return True for real prose sentences that begin with a Figure reference."""
+
+    candidate = re.sub(r"^\d{1,3}\s+(?=(?:figure|fig\.)\b)", "", compact_inline(value), flags=re.I)
+    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
+    return bool(match and _figure_caption_tail_starts_prose(match.group("tail")))
+
+
+def _looks_like_corrupted_figure_reference_snippet(value: str) -> bool:
+    """Return True for Figure references visibly polluted by extraction glyphs."""
+
+    candidate = compact_inline(value)
+    if not re.search(r"(?i)\bfigure\b", candidate):
+        return False
+    return bool(
+        re.search(r"(?i)\bfigure\s+cd\s+\d|\bfigure\s+\d+\s*-\s*(?:[A-Z]\s+)?cd\b|\bfigure\b.*\bcd\b", candidate)
+    )
+
+
+def _table_review_unit_has_visual_noise(value: str) -> bool:
+    """Return True when a structured table row contains page/header or formula residue."""
+
+    candidate = compact_inline(value)
+    if not _is_table_review_unit(candidate):
+        return False
+    if re.search(r"(?i)\bimplementation\s+agreement\s+oif-cei\b", candidate):
+        return True
+    if re.search(r"(?i)\bSNDR\s*=", candidate) and re.search(r"\bSignal\s+0\b|\(\d+(?:[-–]\d+)?\)", candidate):
+        return True
+    return False
 
 
 def _looks_like_margin_line_number_run(value: str) -> bool:
@@ -1332,10 +1640,17 @@ def _next_non_space_char(value: str, start_index: int) -> str:
     return ""
 
 
-def _first_units(text: str, max_snippets: int) -> tuple[list[str], int]:
+def _first_units(
+    text: str,
+    max_snippets: int,
+    *,
+    suppressed_table_unit_keys: set[str] | None = None,
+) -> tuple[list[str], int]:
     """Return leading snippets for added or deleted whole sections."""
 
-    units = [_report_unit(unit) for unit in _split_units(text)]
+    table_unit_keys = suppressed_table_unit_keys or set()  # 整章新增/删除也只隐藏有视觉摘要覆盖的表格行。
+    review_units = _paragraph_review_units(text, suppressed_table_unit_keys=table_unit_keys)  # 未覆盖表格行继续作为文字兜底。
+    units = [_report_unit(unit) for unit in review_units]  # 报告片段只做展示格式清洗，不改变比较身份。
     if max_snippets <= 0:
         return [], len(units)
     return units[:max_snippets], max(0, len(units) - max_snippets)
