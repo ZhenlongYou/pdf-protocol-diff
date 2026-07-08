@@ -12,7 +12,7 @@ import unicodedata
 
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
-_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(r"\b[A-Za-z]*[a-z][DRAFT][a-z][A-Za-z]*\b")
+_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(r"\b[A-Za-z]*[a-z][DRAFT](?:[a-z][A-Za-z]*|)\b")
 _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
     {
         "characteristic",
@@ -34,10 +34,19 @@ _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
         "return",
         "signal",
         "signals",
+        "specification",
+        "specifications",
         "transmitter",
         "transmission",
+        "value",
+        "values",
         "voltage",
         "waveform",
+        "and",
+        "can",
+        "than",
+        "the",
+        "with",
     }
 )  # 只有删除残字后命中这些常见协议词，才认为是 DRAFT 水印污染。
 _NUMBER_WORD_UNITS = {
@@ -188,6 +197,8 @@ def remove_draft_watermark_letter_artifacts(text: str) -> str:
     if "表格行:" in text:  # 结构化表格行可能合法包含单字母符号，不能按水印残片清理。
         return text
     cleaned = _EMBEDDED_DRAFT_LETTER_WORD_RE.sub(_clean_embedded_draft_letter_word, text)  # 先处理 RequirRements 这类词内污染。
+    cleaned = re.sub(r"(?i)\b(notes?:)\s+[DRFT]\b", r"\1", cleaned)  # NOTES: D 这类短片段也是页内水印残字。
+    cleaned = re.sub(r"(?i)\b(section)\s+[DRFT]\s+(?=\d)", r"\1 ", cleaned)  # Section T 11.3 应还原成 Section 11.3。
     word_count = len(re.findall(r"[A-Za-z]{3,}", cleaned))  # 只有长正文句子才启用独立残片删除，降低误删符号的风险。
     if word_count < 4:
         return cleaned
@@ -199,16 +210,16 @@ def _clean_embedded_draft_letter_word(match: re.Match[str]) -> str:
     """Remove one leaked DRAFT letter from a long mixed-case word."""
 
     word = match.group(0)  # 取出包含疑似水印字母的完整单词。
-    if len(word) < 8:
-        return word
     for index, character in enumerate(word):
         if character not in "DRAFT":
             continue
         previous_character = word[index - 1] if index > 0 else ""
         next_character = word[index + 1] if index + 1 < len(word) else ""
-        if not previous_character.islower() or not next_character.islower():
+        if not previous_character.islower():
             continue
         candidate = word[:index] + word[index + 1 :]
+        if next_character and not next_character.islower():
+            continue
         if candidate.casefold() in _DRAFT_FRAGMENT_CORRECTION_WORDS:
             return candidate  # 例如 trRansmitter -> transmitter，但 laneTraining 不会被改写。
     return word

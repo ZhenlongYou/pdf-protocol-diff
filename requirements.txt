@@ -1,6 +1,7 @@
 pypdf>=4.2.0
 pdfplumber>=0.11.10
 pypdfium2>=5.11.0
+PyMuPDF>=1.24.0
 Pillow>=12.0.0
 opencv-python-headless>=5.0.0
 pytesseract>=0.3.13

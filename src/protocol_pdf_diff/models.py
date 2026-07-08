@@ -65,6 +65,51 @@ class TableVisual:
 
 
 @dataclass(frozen=True)
+class LayoutLine:
+    """One reconstructed visual text line from PDF spans."""
+
+    page_number: int  # 源 PDF 页码，使用 1-based 编号，便于报告定位。
+    text: str  # 该行所有 span 按 x 坐标合并后的可读文本。
+    bbox: tuple[float, float, float, float]  # 行在页面坐标系中的边界框。
+    font: str  # 该行主要字体名，用于段落合并和标题判断。
+    size: float  # 该行加权平均字号，用于段落合并和标题判断。
+    span_count: int = 1  # 该行包含的 span 数量，多列/表格行通常更高。
+    baseline_spread: float = 0.0  # span y 坐标离散度，高离散度常见于公式上下标。
+    page_width: float = 0.0  # 页面宽度，供居中公式和页眉页脚判断使用。
+    page_height: float = 0.0  # 页面高度，供页眉页脚判断使用。
+
+
+@dataclass(frozen=True)
+class LayoutRegion:
+    """A typed page region used by the layout-aware hybrid diff."""
+
+    region_id: str  # 稳定区域 ID，包含页码、类型和顺序号，便于 HTML 锚点跳转。
+    region_type: str  # paragraph、heading、table、formula、figure 或 header_footer。
+    page_number: int  # 源 PDF 页码。
+    bbox: tuple[float, float, float, float]  # 区域边界框，使用 PDF 页面坐标。
+    text: str = ""  # 文本区域的段落内容；视觉区域只存少量 caption/context。
+    section_context: str = ""  # 最近标题或上下文，用于跨页偏移时辅助匹配。
+    order_index: int = 0  # 文档内顺序号，用于同分匹配时保持阅读顺序。
+    image_hash: str = ""  # 视觉区域截图的平均哈希，用于表格/公式/图片匹配。
+    page_width: float = 0.0  # 页面宽度，报告和 bbox 归一化需要。
+    page_height: float = 0.0  # 页面高度，报告和 bbox 归一化需要。
+
+
+@dataclass(frozen=True)
+class RegionChange:
+    """One layout-aware region difference for the HTML report."""
+
+    change_type: str  # added、removed 或 modified。
+    region_type: str  # paragraph、heading、table、formula、figure。
+    old_region: LayoutRegion | None  # 旧版区域；新增时为空。
+    new_region: LayoutRegion | None  # 新版区域；删除时为空。
+    similarity: float  # 文本或图像综合相似度。
+    old_image_data_uri: str = ""  # 视觉区域旧截图；文本区域通常为空。
+    new_image_data_uri: str = ""  # 视觉区域新截图；文本区域通常为空。
+    diff_image_data_uri: str = ""  # 视觉差异热图；新增/删除或文本区域可为空。
+
+
+@dataclass(frozen=True)
 class HeadingInfo:
     """A heading detected from a protocol line.
 
@@ -205,6 +250,7 @@ class DiffResult:
     new_selected_end_page: int | None = None
     old_table_visuals: list[TableVisual] = field(default_factory=list)  # 旧 PDF 的表格截图识别结果。
     new_table_visuals: list[TableVisual] = field(default_factory=list)  # 新 PDF 的表格截图识别结果。
+    region_changes: list[RegionChange] = field(default_factory=list)  # layout-aware 区域差异，HTML 报告优先使用。
 
 
 def _normalize_key(value: str) -> str:

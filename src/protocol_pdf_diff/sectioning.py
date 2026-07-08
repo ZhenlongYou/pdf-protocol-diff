@@ -661,6 +661,8 @@ def _looks_like_year_or_decimal_value(number: str, title: str) -> bool:
         or re.match(r"(?i)^(ps|ns|us|ms|ui|mv|v|db|mhz|ghz|gt/s|hz)\b", title)
     ):
         return True
+    if number.isdigit() and re.match(r"(?i)^(?:ui|uipp|uirms|mv|v|db|mhz|ghz|gt/s|hz|ohm|ω)\b", title):
+        return True  # 例如 “5 UI X” 是图表坐标/表格残片，不是第 5 章。
     if number.count(".") == 1 and _looks_like_decimal_table_value_title(title):
         return True
     if number.isdigit() and int(number) > 99 and title[:1].islower():
@@ -682,10 +684,18 @@ def _looks_like_numeric_fragment_title(title: str) -> bool:
     candidate = normalize_line(title)  # 数字开头可能是 400G Interfaces，也可能是 93x10-4。
     if not candidate or not candidate[:1].isdigit():
         return False
+    if re.fullmatch(r"(?i)\d+[a-z]{1,6}\)?", candidate):
+        return True  # 802.3dj) 这类 IEEE 章节引用尾巴不是“802 / 3dj)”章节标题。
+    if re.fullmatch(r"(?i)\d+(?:\.\d+)?[a-z]{1,6}\)?(?:\s+\d+(?:\.\d+)?[a-z]{1,6}\)?){1,5}(?:\s+\d{1,3})?", candidate):
+        return True  # 4.3d 4.3d 这类公式变量残片不是 “4 / 3d 4.3d” 章节标题。
     if re.match(r"^\d+\s*[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]+)+", candidate):
         return False  # 100G Ethernet / 400G Interfaces 是合法章节标题，不是小数尾巴。
     if re.match(r"(?i)^\d+(?:\.\d+)?\s*(?:x|×|e[+-]?\d|-|\+|/)", candidate):
         return True  # 93x10-4、2/3、2-4 这类更像数值碎片。
+    if re.fullmatch(r"(?i)\d+[a-z]{1,4}", candidate):
+        return True  # 4.3u、4.3d 这类 jitter/变量尾巴不应被拆成章节标题。
+    if re.fullmatch(r"(?i)\d+[a-z]{1,4}\d*(?:\s+[a-z0-9_]{1,8}){1,3}", candidate):
+        return True  # 4.3u J、4.3u DRMS 03 这类公式/符号残片不应变成“4 / 3u J”章节。
     if re.match(r"(?i)^\d+(?:\.\d+)?\s*(?:ps|ns|us|ms|ui|mv|v|db|mhz|ghz|gt/s|hz|ohm|mm|ff|pf|ph)\b", candidate):
         return True  # 数字后直接跟单位，通常是表格值而不是标题。
     return _looks_like_decimal_table_value_title(candidate)

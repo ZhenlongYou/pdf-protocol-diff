@@ -39,14 +39,18 @@ from protocol_pdf_diff.desktop_gui import (
 )
 import protocol_pdf_diff.pdf_extract as pdf_extract_module
 from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText, TableVisual
+from protocol_pdf_diff.models import DiffResult, LayoutLine, LayoutRegion, RegionChange
 from protocol_pdf_diff.pdf_extract import (
     MissingDependencyError,  # 验证缺少 pdfplumber 时直接失败，而不是静默退回 pypdf。
     _clean_extracted_page_text,  # 验证抽取层先过滤页边行号、DRAFT 和版权页脚。
     _combine_text_and_table_lines,  # 验证结构化表格行覆盖原始长表格文本后的降噪行为。
+    _extract_table_lines,  # 验证弱视觉候选被过滤时仍保留真实表格文本。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
     extract_pdf_text,
 )
+from protocol_pdf_diff.layout_extractor import extract_layout_regions
+from protocol_pdf_diff.paragraph_builder import build_paragraph_regions
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_demo_pdfs, write_multipage_text_pdf
 from protocol_pdf_diff.sectioning import detect_heading, section_document
@@ -195,10 +199,15 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIsNone(detect_heading("(408)309-9299"))  # 电话/脚注形态不是章节。
         self.assertIsNone(detect_heading("39221 Paseo Padre Pkwy, Suit J"))  # 邮寄地址不是章节。
         self.assertIsNone(detect_heading("15 R"))  # 数字加单字母符号不是章节。
+        self.assertIsNone(detect_heading("802.3dj)"))  # IEEE 802.3dj 引用尾巴不是协议章节标题。
+        self.assertIsNone(detect_heading("4.3d 4.3d"))  # 公式变量残片不能变成“4 / 3d 4.3d”章节。
         self.assertIsNone(detect_heading("1. Measured as described in Section 32.3.1.7."))  # 表格脚注不是章节。
         self.assertIsNone(detect_heading("03 NOTES:"))  # 表格 NOTES 标记不是章节。
         self.assertIsNone(detect_heading("5. T_RLM is defined in Appendix 16.C.4.3."))  # 符号定义脚注不是章节。
         self.assertIsNone(detect_heading("1 2 3 4 5 6 7 8 9 10 11 12"))  # 页边行号串不是章节。
+        self.assertIsNone(detect_heading("4.3u J"))  # 抽取错序的 jitter 符号残片不能变成“4 / 3u J”章节。
+        self.assertIsNone(detect_heading("4.3u DRMS 03"))  # 公式/符号残片不能污染正文差异导航。
+        self.assertIsNone(detect_heading("4.3u03 RMS03"))  # 带数字尾巴的 RMS 符号残片同样不是章节。
         self.assertIsNotNone(detect_heading("2 400G Interfaces"))  # 合法协议章节仍应识别。
         self.assertIsNotNone(
             detect_heading("2.13.2 Overview of Calibration Steps at 16.0 GT/s")
@@ -207,6 +216,38 @@ class ProtocolDiffTests(unittest.TestCase):
         cleaned_heading = detect_heading("32.1 RequirRements")  # 标题里的 DRAFT 字母残片应在分节前清理。
         self.assertIsNotNone(cleaned_heading)  # 清理后的标题仍应保留为合法章节。
         self.assertEqual("32.1 Requirements", cleaned_heading.raw)  # 报告位置不应显示 RequirRements。
+
+    def test_ieee_reference_fragments_do_not_pollute_section_path(self) -> None:
+        """OIF note and formula fragments should remain body text."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("oif_fragment.pdf"),  # 构造最小 OIF 页眉/正文残片场景。
+            pages=[
+                PageText(
+                    page_number=1,  # 第一页包含父章节。
+                    text=(
+                        "32 CEI-224G-MR-PAM4 Medium Reach Interface\n"
+                        "32.2.4.2 Channel Operating Margin\n"
+                        "(Note1: Device package models Class A and B are the same as those adopted by\n"
+                        "802.3dj)\n"
+                        "32.2.4.3 Informative Channel Insertion Loss\n"
+                        "The insertion loss limit shall be reviewed.\n"
+                        "4.3d 4.3d\n"
+                        "probability density function.\n"
+                        "32.3.2.5 Receiver Jitter Tolerance\n"
+                        "Receiver jitter tolerance shall meet the table limits."
+                    ),
+                )
+            ],
+            total_pages=1,  # 单页足以复现章节栈污染。
+        )
+
+        sections = section_document(extraction)  # 运行真实分节逻辑。
+        locations = [section.location for section in sections]  # 收集报告位置。
+
+        self.assertTrue(any("32.2.4.3 Informative Channel Insertion Loss" in location for location in locations))  # 子章节仍应识别。
+        self.assertFalse(any("802.3dj)" in location for location in locations))  # IEEE 引用残片不能成为父级路径。
+        self.assertFalse(any("4.3d 4.3d" in location for location in locations))  # 公式残片同样不能成为父级路径。
 
     def test_symbol_normalization_suppresses_multiply_and_exponent_noise(self) -> None:
         """Equivalent x/×/* and exponent renderings should not create diffs."""
@@ -298,6 +339,34 @@ class ProtocolDiffTests(unittest.TestCase):
         identifier_result = compare_extractions(old_identifier, new_identifier, DiffOptions())
         self.assertEqual(1, len(identifier_result.changes))  # 真实标识符变化不能被水印清理隐藏。
 
+    def test_short_draft_fragments_after_labels_do_not_create_text_diffs(self) -> None:
+        """Short label-adjacent DRAFT letters should be normalized away."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧是干净标签和章节引用。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nNOTES:\nCompute the response per Section 11.3.1.6.2 using Np = 60.",
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧只有 DRAFT 单字母残片。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nNOTES: D\nCompute the response per Section T 11.3.1.6.2 using Np = 60.",
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 比较时应清掉标签旁残片。
+
+        self.assertEqual([], result.changes)  # NOTES: D 和 Section T 不应成为用户可见差异。
+
     def test_oif_contact_notice_boilerplate_is_suppressed(self) -> None:
         """OIF front-matter contact notice should not become a user-facing diff."""
 
@@ -327,6 +396,35 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 执行完整比较和噪声 suppress。
 
         self.assertEqual([], result.changes)  # 前言联系信息不应成为报告卡片。
+
+    def test_cover_author_contact_metadata_is_suppressed(self) -> None:
+        """Cover-page authors, emails, and contributors should not be diffs."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧只有后续协议正文。
+            pages=[PageText(page_number=1, text="1 Scope\nCore requirement remains.")],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧混入封面作者和贡献者信息，模拟真实 OIF 封面抽取结果。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Core requirement remains.\n"
+                        "peng.li2@amd.com david.stauffer@amphenol-tcs.com "
+                        "(408)309-9299 Contributors: Mike Peng Li, AMD "
+                        "Date: Jun 30th, 2026 Abstract: CEI-224G-MR-PAM4 specifies an interface."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 运行全局噪声过滤。
+
+        self.assertEqual([], result.changes)  # 作者、邮箱、电话和 Contributors 不应出现在用户差异报告。
 
     def test_table_visual_section_keeps_long_text_diffs(self) -> None:
         """Table screenshots should supplement, not replace, paragraph diffs."""
@@ -390,9 +488,11 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("operating windows", html)  # 大段正文句子必须仍在报告里。
         self.assertIn('class="del">10</mark>', html)  # 旧正文数值必须被保留并高亮。
         self.assertIn('class="ins">12</mark>', html)  # 新正文数值必须被保留并高亮。
-        self.assertIn("表格截图识别", html)  # 表格截图区也必须存在。
-        self.assertIn("旧版表格行", html)  # 表格行级摘要应使用用户可读标题。
-        self.assertIn("新版表格行", html)  # 新表行级摘要应使用用户可读标题。
+        self.assertIn("表格图像对比", html)  # 表格图像对比区也必须存在。
+        self.assertIn("自动表格文字识别不作为差异结论", html)  # 表格区只给截图证据，不再输出低置信度 OCR 行结论。
+        self.assertNotIn("旧版表格行", html)  # 表格 OCR 行不应在截图下方重复列出。
+        self.assertNotIn("新版表格行", html)  # 新版 OCR 行同样不应进入用户报告。
+        self.assertNotIn("table-row-summary", html)  # 旧版行级摘要 DOM 不应被重新引入。
         self.assertNotIn("OpenCV", html)  # 用户报告不显示内部图像库名称。
         self.assertNotIn("pdfplumber", html)  # 用户报告不显示内部文本库名称。
         self.assertNotIn("OCR 未启用", html)  # 缺少 OCR 引擎不应作为表格比较正文展示。
@@ -479,9 +579,357 @@ class ProtocolDiffTests(unittest.TestCase):
             paths = write_reports(result, temp_dir, DiffOptions())
             html = paths["html"].read_text(encoding="utf-8")
 
-        self.assertIn("另有 8 行表格变化未展示", html)  # 20 行变化只展示 12 行时必须说明遗漏数量。
+        self.assertIn("自动表格文字识别不作为差异结论", html)  # 表格 OCR 文字不再作为确定差异展示。
+        self.assertNotIn("另有 8 行表格变化未展示", html)  # 不再展示行级表格摘要，也就不存在行级折叠提示。
         self.assertGreaterEqual(html.count("无对应表格截图"), 2)  # 不相似的新旧表不能按顺序硬凑成一组。
-        self.assertIn("未检测到行级变化", html)  # fb*n 与 fb×n 是同一数学表达，不应报表格变化。
+        self.assertNotIn("未检测到行级变化", html)  # 报告不再给 OCR 行级结论，避免误导用户。
+        self.assertNotIn("table-row-summary", html)  # 表格截图卡片下方不应再有文字差异表。
+
+    def test_table_visual_report_filters_chart_and_axis_fragments(self) -> None:
+        """Chart grids and axis fragments should not appear as table image pairs."""
+
+        real_table = TableVisual(
+            page_number=2,  # 真实表格页码。
+            table_number=1,  # 真实表格序号。
+            title="Table 9-1 Receiver limits",  # 明确表题应进入报告。
+            bbox=(0.0, 0.0, 300.0, 160.0),  # 测试只关注报告过滤，不需要真实坐标。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=["表格行: T1 | Parameter=Limit | Value=1.0 UI"],  # 有结构化行，是真实表格。
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 4 条",  # 网格摘要会被转成用户文案。
+        )
+        chart_grid = TableVisual(
+            page_number=3,  # 曲线图所在页。
+            table_number=1,  # pdfplumber 误判出的序号。
+            title="Figure 9-1 Return loss limit",  # Figure 标题必须从表格图像区过滤。
+            bbox=(0.0, 0.0, 300.0, 160.0),  # 坐标无关。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=["Figure 9-1 Return loss 0 10 20 30 40"],  # 曲线图文字不是表格行。
+            grid_summary="OpenCV 网格检测: 横线 10 条，竖线 10 条",  # 曲线图也可能有网格线。
+        )
+        axis_fragment = TableVisual(
+            page_number=4,  # 坐标轴碎片所在页。
+            table_number=2,  # 误判序号。
+            title="X",  # X 轴标签不能出现在表格图像区。
+            bbox=(0.0, 0.0, 50.0, 180.0),  # 细长碎片形状。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=[],  # 没有结构化行，证明不是表格。
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",  # 弱网格不应展示。
+        )
+        extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧包含真实表格和两个误识别视觉对象。
+            pages=[PageText(page_number=1, text="1 Scope\nStable text.")],  # 正文稳定，不干扰断言。
+            total_pages=4,
+            table_visuals=[real_table, chart_grid, axis_fragment],
+        )
+        result = compare_extractions(extraction, extraction, DiffOptions())  # 同一抽取结果对比，只验证报告过滤。
+
+        with tempfile.TemporaryDirectory() as temp_dir:  # 临时输出目录隔离报告。
+            paths = write_reports(result, temp_dir, DiffOptions())  # 生成用户最终看的 HTML。
+            html = paths["html"].read_text(encoding="utf-8")  # 读取 HTML 断言视觉对象。
+
+        self.assertIn("Table 9-1 Receiver limits", html)  # 真实表格仍展示。
+        self.assertNotIn("Figure 9-1 Return loss limit", html)  # 曲线图不作为表格展示。
+        self.assertNotIn(">X<", html)  # 坐标轴碎片不作为表格标题展示。
+
+    def test_captionless_one_row_table_text_is_preserved_when_visual_filtered(self) -> None:
+        """A weak one-row table candidate should not disappear from text diff."""
+
+        class FakeTable:
+            """Minimal pdfplumber-like table for testing weak visual candidates."""
+
+            bbox = (10.0, 10.0, 80.0, 60.0)  # 小尺寸且无标题，会触发视觉候选过滤。
+
+            def extract(self) -> list[list[str]]:
+                return [["Parameter", "Value"], ["Receiver limit", "1 UI"]]  # 真实一行表格仍有结构化内容。
+
+        class FakeCaptionCrop:
+            """Minimal cropped page that returns no caption text."""
+
+            def extract_text(self, **_kwargs: object) -> str:
+                return ""  # 无 caption，模拟 reviewer 指出的边界。
+
+        class FakePage:
+            """Minimal page object exposing only methods used before screenshoting."""
+
+            width = 100.0  # 标题搜索需要页面宽度。
+
+            def find_tables(self) -> list[FakeTable]:
+                return [FakeTable()]  # 返回一个弱视觉候选。
+
+            def crop(self, _bbox: tuple[float, float, float, float]) -> FakeCaptionCrop:
+                return FakeCaptionCrop()  # 标题搜索窗口为空。
+
+            def extract_words(self, **_kwargs: object) -> list[dict[str, object]]:
+                return []  # word 级标题重建同样为空。
+
+        table_lines, warnings = _extract_table_lines(FakePage(), "fake.pdf", 1)  # 走真实抽取函数。
+
+        self.assertEqual([], warnings)  # 过滤弱视觉候选不应伪装成截图错误。
+        self.assertIn(
+            "表格行: T1 | Parameter=Receiver limit | Value=1 UI",
+            table_lines,
+        )  # 一行真实表格必须继续进入正文 diff。
+
+    def test_same_title_table_visuals_pair_by_document_order(self) -> None:
+        """Repeated table segments should pair by order, not strongest local similarity."""
+
+        old_tables = [
+            TableVisual(
+                page_number=page,  # 旧版跨页表格片段页码。
+                table_number=1,  # 每页第一张表。
+                title="Table 32-1. COM Parameter Values" if page == 5 else "",  # 模拟真实 PDF 只有中间页抽到 caption。
+                bbox=(0.0, 0.0, 300.0, 160.0),  # 坐标无关。
+                image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 图片占位。
+                row_texts=[
+                    f"表格行: T1 | Parameter=Old segment {page} | Value={page}",  # 第一行给出片段身份。
+                    f"表格行: T1 | Parameter=Old segment {page} tail | Value={page}",  # 第二行避免无题续页被当成图形碎片。
+                ],
+                grid_summary="OpenCV 网格检测: 横线 4 条，竖线 4 条",  # 稳定网格。
+                is_continuation=page != 5,  # 无 caption 页按跨页续段处理。
+            )
+            for page in (4, 5, 6)
+        ]  # 旧版 Table 32-1 三个片段。
+        new_tables = [
+            TableVisual(
+                page_number=page,  # 新版跨页表格片段页码。
+                table_number=1,  # 每页第一张表。
+                title="Table 32-1. COM Parameter Values" if page in (6, 8) else "",  # 新版中间续页缺 caption，末尾多一页。
+                bbox=(0.0, 0.0, 300.0, 160.0),  # 坐标无关。
+                image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 图片占位。
+                row_texts=[
+                    f"表格行: T1 | Parameter=New segment {page} | Value={page}",  # 第一行给出片段身份。
+                    f"表格行: T1 | Parameter=New segment {page} tail | Value={page}",  # 第二行模拟真实跨页表有多行内容。
+                ],
+                grid_summary="OpenCV 网格检测: 横线 4 条，竖线 4 条",  # 稳定网格。
+                is_continuation=page not in (6, 8),  # 无 caption 页按跨页续段处理。
+            )
+            for page in (6, 7, 8, 9)
+        ]  # 新版 Table 32-1 四个片段。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old.pdf"),  # 旧 PDF。
+                pages=[PageText(page_number=1, text="1 Scope\nStable text.")],  # 正文稳定。
+                total_pages=9,
+                table_visuals=old_tables,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new.pdf"),  # 新 PDF。
+                pages=[PageText(page_number=1, text="1 Scope\nStable text.")],  # 正文稳定。
+                total_pages=9,
+                table_visuals=new_tables,
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:  # 临时报告目录。
+            paths = write_reports(result, temp_dir, DiffOptions())  # 生成 HTML。
+            html = paths["html"].read_text(encoding="utf-8")  # 读取 HTML。
+
+        self.assertIn("旧 p4 / 新 p6", html)  # 第一段按出现顺序配对。
+        self.assertIn("旧 p5 / 新 p7", html)  # 第二段按出现顺序配对。
+        self.assertIn("旧 p6 / 新 p8", html)  # 第三段按出现顺序配对。
+        self.assertIn("旧无 / 新 p9", html)  # 新版额外跨页尾段明确显示旧侧为空。
+
+    def test_embedded_draft_letters_do_not_create_text_diffs(self) -> None:
+        """DRAFT letters embedded inside words should be treated as extraction noise."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧是干净正文。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "A forward channel and associated values can be reviewed "
+                        "with the signal specifications rather than chart noise."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧模拟 DRAFT 字母插进单词。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "A forward channel anRd associated vaTlues canA be reviewed "
+                        "with the SignaDl specifDications rather thFan chart noise."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 比较时应归一化这些水印污染。
+
+        self.assertEqual([], result.changes)  # 这些字母污染不应生成正文差异。
+
+    def test_table_rows_remove_draft_letter_residue(self) -> None:
+        """Structured table rows should remove obvious DRAFT watermark letters."""
+
+        rows = [
+            ["Parameter", "Symbol", "MIN", "MAX", "Condition"],  # 表头让抽取器输出 Header=Value。
+            ["Maximum start frequency", "Afmin", "F", "0.05", "A / See Note1"],  # A/F 是水印残片。
+            ["Output AC Common Mode Voltage", "T_VcmACFB", "", "80", "R / NOTES: Signals are specified"],  # R 是残片。
+            ["Incremental available signal loss factor", "Fρx", "0", "", ""],  # F 前缀残字不属于希腊符号。
+            ["Private font rho", "F\uf072x", "0", "", ""],  # PDF 私有字体 rho 前的 F 也应去掉。
+        ]
+
+        table_lines = _table_lines_from_rows(rows, table_number=1)  # 走真实表格行格式化逻辑。
+        joined = "\n".join(table_lines)  # 汇总断言，避免重复索引。
+
+        self.assertIn("Symbol=fmin", joined)  # Afmin 应清为 fmin。
+        self.assertIn("Symbol=ρx", joined)  # Fρx 应清为 ρx。
+        self.assertNotIn("MIN=F", joined)  # 数值列里的单独 F 是水印残片。
+        self.assertIn("Condition=See Note1", joined)  # A / See Note1 应去掉开头 A。
+        self.assertIn("Condition=NOTES: Signals are specified", joined)  # R / NOTES 应去掉开头 R。
+        self.assertIn("Symbol=T_VcmACFB", joined)  # 真正以 T 开头的协议符号不能被误删。
+        self.assertNotIn("Symbol=F\uf072x", joined)  # 私有字体 rho 的前缀 F 也不应出现在报告里。
+
+        value_rows = [
+            ["Parameter", "Symbol", "Value", "Units"],  # Value 列用于测试 T4/FNo 和合法 A。
+            ["Number of signal levels", "L", "T4", "-"],  # T4 应清成 4。
+            ["Include MLSD", "MLSD", "FNo", "-"],  # FNo 应清成 No。
+            ["Preset mode", "P2", "A", "UI"],  # 合法单字母值 A 必须保留。
+        ]
+        value_joined = "\n".join(_table_lines_from_rows(value_rows, table_number=1))  # 走同一抽取路径。
+        self.assertIn("Value=4", value_joined)  # T4 的 T 是水印残字。
+        self.assertIn("Value=No", value_joined)  # FNo 的 F 是水印残字。
+        self.assertIn("Value=A", value_joined)  # 合法单字母值不能被误删。
+
+        generic_rows = [
+            ["Parameter", "Test 1 values", "", "Test 2 values", "Units"],  # 空表头列会被命名为 列3。
+            ["Header row", "Min", "AMax", "Min", "dB"],  # AMax 应清成 Max。
+            ["Insertion loss", "R", "17.5", "", "dB"],  # Test 1 values=R 是孤立水印残片。
+        ]
+        generic_joined = "\n".join(_table_lines_from_rows(generic_rows, table_number=2))  # 覆盖泛化列名和 values 列。
+        self.assertIn("列3=Max", generic_joined)  # 泛化列里的 AMax 应去掉 A。
+        self.assertNotIn("Test 1 values=R", generic_joined)  # 孤立 R 不应作为测试值展示。
+
+    def test_figure_captions_do_not_create_text_diffs(self) -> None:
+        """Standalone figure captions should be suppressed because figures are out of scope."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧只包含稳定正文和旧图题。
+            pages=[
+                PageText(
+                    page_number=1,  # 图题和正文在同一页。
+                    text="1 Scope\nStable text.\nFigure 9-1 Return loss limit.",  # 旧版图题不应作为正文差异。
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧只改变图题文字。
+            pages=[
+                PageText(
+                    page_number=1,  # 页码保持相同，避免页码变化干扰。
+                    text="1 Scope\nStable text.\nFigure 9-1 Return loss mask.",  # 新版图题同样应被隐藏。
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 比较时应按用户要求忽略 figure 图题。
+
+        self.assertEqual([], result.changes)  # 只有图题变化时，正文报告不应出现差异卡片。
+
+    def test_normative_figure_sentences_are_not_suppressed(self) -> None:
+        """Real prose that starts with Figure should still be available for review."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧包含规范性正文句子。
+            pages=[
+                PageText(
+                    page_number=1,  # 单页样本足够覆盖过滤分支。
+                    text="1 Scope\nFigure 9-1 shall apply to all receivers.",  # shall 表明这是正文，不是单纯图题。
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧改变正文里的适用对象。
+            pages=[
+                PageText(
+                    page_number=1,  # 页码保持相同。
+                    text="1 Scope\nFigure 9-1 shall apply to compliant receivers.",  # 这类差异必须保留。
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 运行正文比较和全局噪声过滤。
+
+        self.assertEqual(1, len(result.changes))  # 带规范性动词的句子不能被当成 figure 噪声删掉。
+        rendered = result.changes[0].replaced_snippets[0].new  # 取新版片段，确认变化仍在报告数据中。
+        self.assertIn("compliant receivers", rendered)  # 用户仍能复核真正的 figure 相关正文变化。
+
+    def test_explanatory_figure_sentences_are_not_suppressed(self) -> None:
+        """Figure-leading explanatory prose should not be mistaken for a caption."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧是解释性正文，不是图题。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nFigure 9-1 shows the receiver mask used by this test.",  # shows 表明是正文句子。
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧改变解释性正文的对象。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nFigure 9-1 shows the transmitter mask used by this test.",  # 这类变化应保留。
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 运行正文比较。
+
+        self.assertEqual(1, len(result.changes))  # 解释性 Figure 句子不能被噪声过滤吞掉。
+        self.assertIn("transmitter mask", result.changes[0].replaced_snippets[0].new)  # 新内容应可见。
+
+    def test_mixed_figure_formula_and_axis_fragments_do_not_create_text_diffs(self) -> None:
+        """Extracted figure formulas and axis labels should be hidden from text diff."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old.pdf"),  # 旧侧包含真实报告中出现的图形公式和坐标轴噪声。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "RL(f) >= RL min(f) = (32-8) 0.05 <= f <= 0.5fb Figure 32-5.Receiver differential return loss limit.\n"
+                        "Receiver Jitter Tolerance Mask 5 UI X pp X Sinusoidal X Jitter Amplitude X 0.05 UI X X X pp fb/2656000 fb/26560 10f CRU"
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new.pdf"),  # 新侧只有图形数字和轴标签发生变化。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "RL(f) >= RL min(f) = (32-8) 0.05 <= f <= 0.5fb Figure 32-5.Receiver common-mode return loss limit.\n"
+                        "Receiver Jitter Tolerance Mask 6 UI X pp X Sinusoidal F X Jitter Amplitude X 0.05 UI X X X pp fb/2656000 fb/26560 10f CRU R"
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 用户要求 fig 不用对比。
+
+        self.assertEqual([], result.changes)  # 图形公式和坐标轴碎片不应生成正文差异。
 
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
@@ -744,42 +1192,24 @@ class ProtocolDiffTests(unittest.TestCase):
         OIF_OLD_SAMPLE.exists() and OIF_NEW_SAMPLE.exists(),
         "OIF regression PDFs are local user samples",
     )
-    def test_oif_table_changes_are_reported_as_concise_table_rows(self) -> None:
-        """The OIF COM table should expose row-level value changes."""
+    def test_oif_table_ocr_rows_are_hidden_from_text_diffs(self) -> None:
+        """The OIF report should use screenshots instead of row-level table OCR."""
 
         result = run_diff(  # 运行完整 PDF 比较链路，复现用户反馈的真实表格场景。
             OIF_OLD_SAMPLE,
             OIF_NEW_SAMPLE,
             DiffOptions(max_snippets_per_section=80),
         )
-        snippet_text = "\n".join(  # 汇总所有报告片段，便于断言是否出现结构化表格行。
+        snippet_text = "\n".join(  # 汇总所有报告片段，确认最终报告不再暴露结构化表格 OCR 行。
             "\n".join(change.added_snippets + change.removed_snippets)
             + "\n".join(f"{pair.old}\n{pair.new}" for pair in change.replaced_snippets)
             for change in result.changes
         )
-        replaced_pairs = [  # 单独收集替换对，确保旧值和新值属于同一个参数行。
-            (pair.old, pair.new)
-            for change in result.changes
-            for pair in change.replaced_snippets
-        ]
-        reference_pairs = [  # 只检查用户反馈的 Single-ended reference resistance 行。
-            (old, new)
-            for old, new in replaced_pairs
-            if "Single-ended reference resistance" in old and "Single-ended reference resistance" in new
-        ]
 
-        self.assertIn("表格行:", snippet_text)  # 表格差异应以独立行出现，而不是埋在整页长文本里。
-        self.assertIn("Single-ended reference resistance", snippet_text)  # 用户关心的参数名必须可直接搜索定位。
-        self.assertTrue(
-            any(
-                "Parameter=Single-ended reference resistance" in old
-                and "Parameter=Single-ended reference resistance" in new
-                and "Value=50" in old
-                and "Value=46.25" in new
-                for old, new in reference_pairs
-            ),
-            reference_pairs,
-        )  # 旧值和新值必须在同一个参数替换对里，避免测试靠全局文本偶然命中。
+        self.assertNotIn("表格行:", snippet_text)  # 低置信度表格 OCR 行不应进入正文差异。
+        self.assertNotIn("Single-ended reference resistance", snippet_text)  # COM 表行差异改由截图复核。
+        self.assertGreater(len(result.old_table_visuals), 0)  # 表格截图仍保留，供报告视觉对照使用。
+        self.assertGreater(len(result.new_table_visuals), 0)  # 新版表格截图同样必须保留。
 
     def test_table_rows_scan_headers_and_expand_continuation_cells(self) -> None:
         """Table extraction should recover headers and split multi-row cells."""
@@ -873,8 +1303,8 @@ class ProtocolDiffTests(unittest.TestCase):
             lines_with_stray_value,
         )  # DRAFT 水印残片不能让整张表退化成一条巨大聚合行。
 
-    def test_single_letter_table_values_are_preserved(self) -> None:
-        """A/B/C style table values should not be treated as extraction noise."""
+    def test_single_letter_table_values_are_preserved_but_not_reported_as_text(self) -> None:
+        """A/B/C style table values should stay in extraction but not text diff."""
 
         old_lines = _table_lines_from_rows(
             [
@@ -899,7 +1329,7 @@ class ProtocolDiffTests(unittest.TestCase):
             pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(new_lines))],
         )  # 新版同一参数同一符号只改 Value。
 
-        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 diff，防止 A/B 被清洗成相同。
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 diff，验证表格 OCR 行不进入报告。
         snippets = "\n".join(
             pair.old + "\n" + pair.new
             for change in result.changes
@@ -907,11 +1337,13 @@ class ProtocolDiffTests(unittest.TestCase):
         )  # 收集替换片段。
 
         self.assertIn("Symbol=P2", "\n".join(old_lines + new_lines))  # P1/P2/P3 不应被误合并为 P1P2。
-        self.assertIn("Value=A", snippets)  # 旧合法单字母值必须进入报告。
-        self.assertIn("Value=B", snippets)  # 新合法单字母值必须进入报告。
+        self.assertIn("Value=A", "\n".join(old_lines))  # 抽取层仍保留旧合法单字母值。
+        self.assertIn("Value=B", "\n".join(new_lines))  # 抽取层仍保留新合法单字母值。
+        self.assertNotIn("Value=A", snippets)  # 用户正文报告不再展示低置信度表格 OCR 行。
+        self.assertNotIn("Value=B", snippets)  # 新值也应改由表格截图复核。
 
-    def test_extra_single_letter_table_values_are_not_silently_dropped(self) -> None:
-        """A/B value changes should survive even when the value column has an extra item."""
+    def test_extra_single_letter_table_values_are_extracted_but_hidden_from_text_diff(self) -> None:
+        """A/B value changes should stay extractable but not become text snippets."""
 
         old_lines = _table_lines_from_rows(
             [
@@ -936,15 +1368,17 @@ class ProtocolDiffTests(unittest.TestCase):
             pages=[PageText(page_number=1, text="1 Scope\n" + "\n".join(new_lines))],
         )  # 新版结构化行。
 
-        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整比较，验证不会 false negative。
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整比较，验证最终报告隐藏表格 OCR。
         snippets = "\n".join(
             pair.old + "\n" + pair.new
             for change in result.changes
             for pair in change.replaced_snippets
         )  # 收集替换片段。
 
-        self.assertIn("Value=A", snippets)  # 旧值 A 必须保留。
-        self.assertIn("Value=B", snippets)  # 新值 B 必须保留。
+        self.assertIn("Value=A", "\n".join(old_lines))  # 抽取结果不能丢掉旧值 A。
+        self.assertIn("Value=B", "\n".join(new_lines))  # 抽取结果不能丢掉新值 B。
+        self.assertNotIn("Value=A", snippets)  # 最终正文 diff 不展示表格 OCR 行。
+        self.assertNotIn("Value=B", snippets)  # 新侧表格 OCR 行同样不展示。
 
     def test_structured_table_lines_suppress_duplicate_raw_table_text(self) -> None:
         """Raw long table text should disappear when structured rows cover it."""
@@ -1010,11 +1444,11 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("旧/新页数", report_html)
             self.assertIn("4 / 5", report_html)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_html)
-            self.assertIn("主要比较 PDF 中可抽取文字", report_html)
+            self.assertIn("主要比较 PDF 中可抽取的正文文字", report_html)
             self.assertIn("协议 PDF 差异报告", report_text)
             self.assertIn("- 旧/新页数: 4 / 5", report_text)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_text)
-            self.assertIn("表格会额外提供截图辅助复核", report_text)
+            self.assertIn("表格仅提供截图辅助复核", report_text)
             self.assertIn("Delivery", report_text)
             self.assertIn("3.0 V", report_text)
             self.assertIn("2.8 V", report_text)
@@ -1036,6 +1470,116 @@ class ProtocolDiffTests(unittest.TestCase):
                     for pair in change["replaced_snippets"]
                 )
             )
+            self.assertIn("region_changes", payload)  # JSON 应包含 layout-aware 区域差异审计数据。
+
+    def test_paragraph_builder_merges_wrapped_lines_and_hyphen_breaks(self) -> None:
+        """Span/line text should be rebuilt into natural paragraphs."""
+
+        lines = [
+            LayoutLine(1, "1 Scope", (50, 40, 130, 58), "Helvetica-Bold", 16, page_width=400, page_height=600),
+            LayoutLine(1, "The trans-", (50, 80, 130, 92), "Helvetica", 10, page_width=400, page_height=600),
+            LayoutLine(1, "mitter shall remain stable", (50, 94, 210, 106), "Helvetica", 10, page_width=400, page_height=600),
+            LayoutLine(1, "The next paragraph starts here.", (50, 132, 230, 144), "Helvetica", 10, page_width=400, page_height=600),
+        ]  # 模拟 PyMuPDF 按行抽出的标题、断词换行和下一段。
+
+        regions = build_paragraph_regions(lines, [])  # 不提供 occupied bbox，所有正文行都参与段落合并。
+        paragraphs = [region for region in regions if region.region_type == "paragraph"]  # 只检查段落 region。
+
+        self.assertEqual("The transmitter shall remain stable", paragraphs[0].text)  # trans-\nmitter 应修复为 transmitter。
+        self.assertEqual("The next paragraph starts here.", paragraphs[1].text)  # 大行距后的文本应独立成段。
+
+    def test_html_report_renders_layout_region_filters_and_visual_diff(self) -> None:
+        """HTML should expose region type filters and visual diff cards."""
+
+        tiny_png = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lw9L0wAAAABJRU5ErkJggg=="
+        )  # 1x1 PNG 占位图，避免测试依赖真实 PDF 裁剪。
+        old_region = LayoutRegion(
+            region_id="old-table",
+            region_type="table",
+            page_number=2,
+            bbox=(10.0, 20.0, 200.0, 120.0),
+            text="Table 1",
+            section_context="Table 1",
+            order_index=1,
+            page_width=400.0,
+            page_height=600.0,
+        )  # 旧表格 region 元数据。
+        new_region = LayoutRegion(
+            region_id="new-table",
+            region_type="table",
+            page_number=3,
+            bbox=(12.0, 22.0, 202.0, 122.0),
+            text="Table 1",
+            section_context="Table 1",
+            order_index=1,
+            page_width=400.0,
+            page_height=600.0,
+        )  # 新表格 region 元数据。
+        result = DiffResult(
+            old_pdf=Path("old.pdf"),
+            new_pdf=Path("new.pdf"),
+            old_sections=[],
+            new_sections=[],
+            changes=[],
+            warnings=[],
+            region_changes=[
+                RegionChange(
+                    "modified",
+                    "table",
+                    old_region,
+                    new_region,
+                    0.7,
+                    old_image_data_uri=tiny_png,
+                    new_image_data_uri=tiny_png,
+                    diff_image_data_uri=tiny_png,
+                )
+            ],
+        )  # 手工构造 layout-aware 报告结果。
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())  # 生成完整 HTML。
+            html = outputs["html"].read_text(encoding="utf-8")  # 读取 HTML 检查 region 卡片。
+
+        self.assertIn("Layout-aware 区域差异", html)  # 新报告区必须出现。
+        self.assertIn('data-filter="table"', html)  # 表格过滤按钮必须存在。
+        self.assertIn('data-region-type="table"', html)  # 表格卡片必须带类型属性。
+        self.assertIn("visual-grid", html)  # 视觉三图布局必须存在。
+        self.assertIn("similarity 0.700", html)  # 相似度应对用户可见。
+
+    def test_layout_extractor_detects_table_formula_and_paragraph_regions(self) -> None:
+        """PyMuPDF layout extraction should classify table and formula regions."""
+
+        import fitz  # PyMuPDF 用于创建最小可验证 PDF。
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "layout_sample.pdf"  # 临时 PDF 只用于本测试。
+            document = fitz.open()  # 新建空 PDF。
+            page = document.new_page(width=420, height=620)  # 固定页面尺寸便于 bbox 判断。
+            page.insert_text((50, 48), "1 Scope", fontsize=16, fontname="helv")  # 标题 region。
+            page.insert_text((50, 82), "The transmitter shall remain stable across operating windows.", fontsize=10)  # 正文段落。
+            for y in (150, 175, 200, 225):
+                page.draw_line((50, y), (360, y), width=0.8)  # 表格横线。
+            for x in (50, 160, 235, 300, 360):
+                page.draw_line((x, 150), (x, 225), width=0.8)  # 表格竖线。
+            for y, cells in (
+                (166, ("Parameter", "Symbol", "Value", "Units")),
+                (191, ("Rate", "fb", "72.0-116.0", "Gsym/s")),
+                (216, ("Voltage", "V", "800", "mV")),
+            ):
+                for x, cell in zip((56, 166, 241, 306), cells, strict=True):
+                    page.insert_text((x, y), cell, fontsize=9)  # 多列文本辅助无边框表格启发式。
+            page.insert_text((95, 285), "RL(f) >= RLmin(f) = 0.05 <= f <= 0.5fb (32-8)", fontsize=10)  # 公式 region。
+            document.save(pdf_path)  # 写出临时 PDF。
+            document.close()  # 关闭句柄，确保 PyMuPDF 可重新打开。
+
+            layout = extract_layout_regions(pdf_path)  # 运行新 layout-aware 提取器。
+
+        region_types = {region.region_type for region in layout.regions}  # 汇总识别出的 region 类型。
+        self.assertIn("paragraph", region_types)  # 普通正文应存在。
+        self.assertIn("table", region_types)  # 表格区域应以 table region 存在。
+        self.assertIn("formula", region_types)  # 公式区域应以 formula region 存在。
 
     def test_multipage_pdfs_match_sections_not_page_numbers(self) -> None:
         """A realistic page shift should not turn matching sections into page diffs."""
@@ -1359,8 +1903,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("800 mV", snippets)
         self.assertIn("760 mV", snippets)
 
-    def test_table_rows_pair_by_parameter_identity_inside_insertions(self) -> None:
-        """Inserted table rows should not misalign a changed parameter row."""
+    def test_table_rows_are_suppressed_from_user_visible_diffs(self) -> None:
+        """Structured table rows should support extraction but not final text diffs."""
 
         old_extraction = ExtractionResult(  # 构造旧版表格片段，第一行是后续要比较的参数。
             pdf_path=Path("old_table_identity.pdf"),
@@ -1391,34 +1935,10 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走完整 section+diff 流程，不直接调私有配对函数。
-        replaced_pairs = [  # 收集替换对，确认同一参数行被配在一起。
-            (pair.old, pair.new)
-            for change in result.changes
-            for pair in change.replaced_snippets
-        ]
-        added_snippets = [  # 收集新增片段，确认插入的新参数没有被错配成替换。
-            snippet
-            for change in result.changes
-            for snippet in change.added_snippets
-        ]
+        self.assertEqual([], result.changes)  # 表格 OCR 行不再输出为用户可见正文差异，避免错配误报。
 
-        self.assertTrue(
-            any(
-                "Parameter=Reference resistance" in old
-                and "Value=50" in old
-                and "Parameter=Reference resistance" in new
-                and "Value=46.25" in new
-                for old, new in replaced_pairs
-            ),
-            replaced_pairs,
-        )  # 表格行身份一致时，应输出清晰的旧值/新值替换对。
-        self.assertTrue(
-            any("Parameter=New impedance" in snippet for snippet in added_snippets),
-            added_snippets,
-        )  # 新插入的表格行应保持为新增，而不是和 Reference resistance 错配。
-
-    def test_raw_table_blocks_are_suppressed_when_structured_rows_exist(self) -> None:
-        """Diff snippets should prefer structured table rows over raw table blocks."""
+    def test_raw_table_blocks_and_structured_rows_are_suppressed(self) -> None:
+        """Raw table text and structured rows should stay out of text diffs."""
 
         old_raw_block = (  # 模拟 section body 中残留的旧版原始表格块。
             "COM Parameter Values Device package model Class B Transmission line parameter a2 "
@@ -1460,21 +1980,8 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 走真实比较路径，验证片段输出。
-        snippets = "\n".join(  # 汇总所有可见 diff 片段。
-            snippet
-            for change in result.changes
-            for snippet in (
-                change.added_snippets
-                + change.removed_snippets
-                + [pair.old for pair in change.replaced_snippets]
-                + [pair.new for pair in change.replaced_snippets]
-            )
-        )
 
-        self.assertNotIn("COM Parameter Values Device package model", snippets)  # 原始大块表格文本不应污染报告。
-        self.assertIn("Parameter=Single-ended reference resistance", snippets)  # 结构化表格行仍应作为主要差异出现。
-        self.assertIn("Value=50", snippets)  # 旧值必须保留。
-        self.assertIn("Value=46.25", snippets)  # 新值必须保留。
+        self.assertEqual([], result.changes)  # 原始大块表格文本和结构化表格行都不应污染正文报告。
 
     def test_table_noise_suppression_keeps_nonduplicate_prose(self) -> None:
         """Table-like prose must not be dropped without structured-row overlap."""
