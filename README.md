@@ -176,13 +176,15 @@ dist\ProtocolPdfDiff.exe
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
-python build_desktop.py --clean
+python build_desktop.py --clean --onefile
 ```
 
 生成后的 app/exe 已包含 Python、Tkinter、pdfplumber、表格截图依赖和本项目代码，普通用户不需要
 单独安装 Python。macOS 未签名 app 第一次打开时可能需要在 Finder 中右键选择
 “打开”；Windows 未签名 exe 可能会触发 SmartScreen，需要按公司内部软件分发流程处理。
 
-如果项目放在 GitHub 仓库根目录，也可以在 Actions 里手动触发
-`Build desktop apps` 工作流，让 GitHub 的 Windows runner 生成 `.exe`，
-macOS runner 生成 `.app`。这适合没有 Windows 开发机但需要 Windows 产物的场景。
+如果没有 Windows 开发机，可以在 GitHub Actions 里手动触发
+`Build ProtocolPdfDiff Windows exe` 工作流。该工作流会用 GitHub 的
+Windows runner 运行 PyInstaller，并上传名为 `ProtocolPdfDiff-windows-exe`
+的 artifact；下载后里面就是 `ProtocolPdfDiff.exe`。这适合在 Mac 上发起构建、
+但仍然需要 Windows 原生 `.exe` 产物的场景。

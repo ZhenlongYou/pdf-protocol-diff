@@ -564,11 +564,11 @@ def run_smoke_test() -> None:
     for label, entry in app.page_entry_widgets.items():
         assert entry.winfo_class() == "Entry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
         assert entry.winfo_manager() == "grid", f"{label} 未加入布局"  # 防止控件创建了但没有显示。
+        assert str(entry.cget("state")) != "disabled", f"{label} 被禁用"  # 防止输入框看得见但用户不能编辑。
         entry.focus_force()  # 强制聚焦输入框，模拟用户点击后准备输入。
         entry.delete(0, tk.END)  # 清空输入框，模拟用户准备输入页码。
-        entry.event_generate("<KeyPress-2>")  # 通过键盘事件输入数字，覆盖“只能程序写值”的假通过。
-        entry.event_generate("<KeyRelease-2>")  # 释放按键事件让 Tk 完成输入状态更新。
-        root.update()  # 处理键盘事件，确认输入框值已经变化。
+        entry.insert(0, "2")  # 用 Tk 的文本插入接口验证控件可写，避免 Windows runner 不派发按键字符。
+        root.update_idletasks()  # 处理布局和控件状态更新，确认输入框值已经变化。
         assert entry.get() == "2", f"{label} 无法输入页码"  # 如果 Entry 被错误禁用，这里会暴露。
     root.destroy()
 
