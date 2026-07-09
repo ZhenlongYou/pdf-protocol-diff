@@ -874,9 +874,14 @@ def _render_one_table_shot_page(table: TableVisual) -> str:
 
     caption = f"页 {table.page_number} · 表格 {table.table_number}"
     grid_summary = _display_table_grid_summary(table.grid_summary)
+    image_html = (
+        f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
+        if table.image_data_uri
+        else '<div class="snippet">无截图：仅使用结构化表格行摘要</div>'
+    )  # 文字表格兜底没有截图，避免渲染空图片。
     return (
         f'<div class="table-shot-page"><div class="table-shot-page-label">{_escape(caption)}</div>'
-        f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
+        f"{image_html}"
         f'<div class="snippet">{_escape(grid_summary)}</div></div>'
     )
 

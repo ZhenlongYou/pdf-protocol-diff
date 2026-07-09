@@ -12,7 +12,9 @@ import unicodedata
 
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
-_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(r"\b[A-Za-z]*[a-z][DRAFT][a-z][A-Za-z]*\b")
+_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(
+    r"\b(?:[DRAFT][a-z][A-Za-z]*|[A-Za-z]*[a-z][DRAFT][a-z][A-Za-z]*)\b"
+)  # 同时捕获 Fpackage 这类开头水印残字，以及 trRansmitter 这类词内残字。
 _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
     {
         "characteristic",
@@ -25,6 +27,8 @@ _DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
         "frequency",
         "measured",
         "measurement",
+        "package",
+        "packages",
         "parameter",
         "parameters",
         "receiver",
@@ -209,8 +213,11 @@ def _clean_embedded_draft_letter_word(match: re.Match[str]) -> str:
             continue
         previous_character = word[index - 1] if index > 0 else ""
         next_character = word[index + 1] if index + 1 < len(word) else ""
-        if not previous_character.islower() or not next_character.islower():
-            continue
+        if index == 0:
+            if not next_character.islower():
+                continue  # 只有 `Fpackage` 这种首字母水印残留才尝试删除。
+        elif not previous_character.islower() or not next_character.islower():
+            continue  # 词内残字必须被小写字母夹住，避免误动普通大写词。
         candidate = word[:index] + word[index + 1 :]
         if candidate.casefold() in _DRAFT_FRAGMENT_CORRECTION_WORDS:
             return candidate  # 例如 trRansmitter -> transmitter，但 laneTraining 不会被改写。

@@ -88,9 +88,11 @@ def compare_extractions(
 
     old_sections = section_document(old_extraction)
     new_sections = section_document(new_extraction)
-    covered_table_unit_keys = _covered_table_visual_row_keys(  # 只隐藏已经被表格截图摘要覆盖的结构化行。
-        old_extraction.table_visuals,
-        new_extraction.table_visuals,
+    old_table_visuals = _table_visuals_with_text_fallbacks(old_extraction.table_visuals, old_extraction.pages)
+    new_table_visuals = _table_visuals_with_text_fallbacks(new_extraction.table_visuals, new_extraction.pages)
+    covered_table_unit_keys = _covered_table_visual_row_keys(  # 只隐藏已经被表格截图/结构化摘要覆盖的表格行。
+        old_table_visuals,
+        new_table_visuals,
     )
     changes = compare_sections(old_sections, new_sections, options, suppressed_table_unit_keys=covered_table_unit_keys)
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
@@ -116,8 +118,8 @@ def compare_extractions(
         old_selected_end_page=_selected_end_page(old_extraction),
         new_selected_start_page=_selected_start_page(new_extraction),
         new_selected_end_page=_selected_end_page(new_extraction),
-        old_table_visuals=list(old_extraction.table_visuals),
-        new_table_visuals=list(new_extraction.table_visuals),
+        old_table_visuals=old_table_visuals,
+        new_table_visuals=new_table_visuals,
     )
 
 
@@ -133,6 +135,36 @@ def _covered_table_visual_row_keys(*table_groups: list[TableVisual]) -> set[str]
     return keys
 
 
+def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: list[PageText]) -> list[TableVisual]:
+    """Add no-image structured summaries for table rows not covered by screenshots."""
+
+    visuals = list(table_visuals)  # 保留真实截图表格，新增兜底只补未覆盖行。
+    covered_keys = _covered_table_visual_row_keys(visuals)  # 已经在截图摘要里的行不重复生成兜底。
+    next_table_number = max((table.table_number for table in visuals), default=0) + 1  # 兜底表号接在真实表之后。
+    for page in pages:
+        rows = [
+            compact_inline(line)
+            for line in page.text.splitlines()
+            if _is_table_review_unit(line) and _review_unit_key(line) not in covered_keys
+        ]  # 只收集结构化表格行，普通正文不会进入兜底摘要。
+        if not rows:
+            continue
+        visuals.append(
+            TableVisual(
+                page_number=page.page_number,
+                table_number=next_table_number,
+                title="结构化表格文字摘要",
+                bbox=(0.0, 0.0, 0.0, 0.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="未生成截图：使用结构化表格行摘要。",
+            )
+        )  # 没有截图时仍进入报告的表格摘要区，而不是正文差异卡片。
+        covered_keys.update(_review_unit_key(row) for row in rows)
+        next_table_number += 1
+    return visuals
+
+
 def compare_sections(
     old_sections: list[Section],
     new_sections: list[Section],
@@ -142,7 +174,7 @@ def compare_sections(
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
-    table_unit_keys = suppressed_table_unit_keys or set()  # None 表示没有视觉表格兜底，正文 diff 需要保留表格行。
+    table_unit_keys = suppressed_table_unit_keys or set()  # 表格行统一由表格摘要区承载，正文 diff 不再展示内部表格行。
     matches = _match_sections(old_sections, new_sections, options)
     changes: list[SectionChange] = []
     for old_index, new_index, similarity in matches:
@@ -312,6 +344,12 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
 
 
 _SECTION_MATCH_SAMPLE_CHARS = 1200  # 长章节匹配采样代表性文本，避免反复对整章做昂贵相似度计算。
+_LEADING_TABLE_HEADER_FRAGMENT_RE = re.compile(
+    r"(?i)^(?:unit\s+)?baud\s+rate\s+r[_\s]*baud\s+\d+(?:\s+\d+)?\s+gsym/s\s+see\s+section\s+"
+)  # PDF 有时把表头和正文粘在一起，先清掉无上下文表头前缀。
+_EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE = re.compile(
+    r"(?i)\bfx\s+bx\s+ffe[_-]?post\s+(?=table\b)"
+)  # `fx bx FFE_post Table 32-1` 是表格残片粘入正文引用，不是协议正文变化。
 
 
 def _section_similarity(left: str, right: str) -> float:
@@ -394,9 +432,9 @@ def _summarize_text_delta(
 ) -> tuple[list[str], list[str], list[SnippetPair], int]:
     """Create compact added/removed/replaced snippets for one section."""
 
-    table_unit_keys = suppressed_table_unit_keys or set()  # 没有视觉覆盖 key 时，结构化表格行保持文字兜底。
-    old_units = _paragraph_review_units(old_text, suppressed_table_unit_keys=table_unit_keys)  # 主正文区只剔除已由视觉摘要覆盖的表格行。
-    new_units = _paragraph_review_units(new_text, suppressed_table_unit_keys=table_unit_keys)  # 未生成截图的表格行仍继续作为正文 diff。
+    table_unit_keys = suppressed_table_unit_keys or set()  # 兼容旧调用方；正文区现在会隐藏全部结构化表格行。
+    old_units = _paragraph_review_units(old_text, suppressed_table_unit_keys=table_unit_keys)  # 主正文区只保留段落/句子级文字。
+    new_units = _paragraph_review_units(new_text, suppressed_table_unit_keys=table_unit_keys)  # 表格行交给表格摘要和截图区承载。
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
@@ -478,13 +516,11 @@ def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) 
     """Return review units for paragraph cards, optionally excluding table rows."""
 
     units = _split_units(text)  # 先走统一切分和原始表格噪声覆盖，避免长表格块污染正文 diff。
-    if not suppressed_table_unit_keys:
-        return units  # 没有表格截图作为兜底时，结构化表格行仍作为文字 diff 输出。
     return [
         unit
         for unit in units
-        if not (_is_table_review_unit(unit) and _review_unit_key(unit) in suppressed_table_unit_keys)
-    ]  # 有视觉摘要覆盖的行从正文卡片隐藏；未覆盖行继续兜底展示。
+        if not _is_table_review_unit(unit)
+    ]  # 结构化表格行不进正文卡片，避免和下方视觉/结构化表格摘要重复。
 
 
 def _split_units(text: str) -> list[str]:
@@ -505,7 +541,32 @@ def _split_units(text: str) -> list[str]:
             units.append(unit)
             continue
         units.extend(_split_long_unit(unit))
-    return _drop_duplicate_raw_table_units(units)
+    return _drop_orphan_review_fragments(_drop_duplicate_raw_table_units(units))
+
+
+def _drop_orphan_review_fragments(units: list[str]) -> list[str]:
+    """Remove single-character PDF extraction fragments before diff pairing."""
+
+    return [
+        unit
+        for unit in units
+        if not _looks_like_orphan_review_fragment(unit)
+    ]  # `p`、`F`、`A` 等孤立残字不应和完整句子形成左右对比。
+
+
+def _looks_like_orphan_review_fragment(value: str) -> bool:
+    """Return True for standalone OCR/PDF residue with no readable context."""
+
+    candidate = compact_inline(value)  # 压成单行后判断，避免换行空白影响短残片识别。
+    if not candidate:
+        return True  # 空片段没有审阅价值。
+    if _is_table_review_unit(candidate):
+        return False  # 结构化表格行即使包含单字母值，也要交给表格逻辑保留。
+    if re.fullmatch(r"(?i)[a-z]", candidate):
+        return True  # 单个字母多来自公式/页边残片，不能单独参与正文对比。
+    if re.fullmatch(r"(?i)[a-z]\.", candidate):
+        return False  # `a.` 这类列表标记已有专门合并逻辑，保守不在这里删除。
+    return bool(re.fullmatch(r"(?i)(?:[a-z]\s+){1,3}[a-z]", candidate) and len(candidate) <= 7)
 
 
 _RAW_TABLE_NOISE_WORDS = frozenset(
@@ -628,6 +689,8 @@ def _merge_wrapped_lines(text: str) -> list[str]:
         line = normalize_line(raw_line)
         if not line:
             continue
+        if _looks_like_orphan_review_fragment(line):
+            continue  # 先丢掉独立 `p`/`F` 等残片，避免换行合并时塞进完整句。
         if _starts_new_review_block(line):
             if current:
                 blocks.append(current)
@@ -790,12 +853,15 @@ def _review_unit_key(value: str) -> str:
     """
 
     value = remove_draft_watermark_letter_artifacts(value)  # 先去掉 DRAFT 水印字母残片，再生成比较 key。
+    value = _strip_leading_table_header_fragment(value)  # 去掉 UNIT/Baud Rate 等表头前缀，避免污染正文句。
+    value = _strip_embedded_table_identifier_residue(value)  # 去掉句中插入的短表格标识符残片。
     normalized = normalize_for_similarity(value)
     normalized = canonicalize_chinese_number_expressions(normalized)
     normalized = normalized.replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("&", " and ")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
     normalized = _normalize_math_symbol_artifacts(normalized)
+    normalized = _normalize_embedded_number_list_spacing(normalized)
     normalized = re.sub(r"-\s*[<>]\s*", " ", normalized)
     normalized = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", normalized)
     normalized = re.sub(r"\b10\s+([0-9])\b", r"10\1", normalized)
@@ -809,6 +875,21 @@ def _review_unit_key(value: str) -> str:
             protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
         )
     )
+
+
+def _normalize_embedded_number_list_spacing(value: str) -> str:
+    """Repair OCR text such as ``Tests1,2`` before token comparison."""
+
+    normalized = re.sub(
+        r"(?i)\b(tests?|notes?)\s*(\d)(?=\s*[,.)])",
+        r"\1 \2",
+        value,
+    )  # `Tests1,2,3` 和 `Tests 1, 2, 3` 表达相同列表，不应触发正文差异。
+    return re.sub(
+        r"(?i)\b(equation|figure|table|section)\s*(\d)",
+        r"\1 \2",
+        normalized,
+    )  # 常见引用词后缺空格时只修正格式，不改变编号含义。
 
 
 def _normalize_math_symbol_artifacts(value: str) -> str:
@@ -860,6 +941,8 @@ def _report_unit(value: str) -> str:
 
     if _is_table_review_unit(value):
         return _format_fallback_table_review_unit(value)  # 未被视觉摘要覆盖的表格行用用户可读前缀展示。
+    value = _strip_leading_table_header_fragment(value)  # 展示层同样去掉粘连的表头残片。
+    value = _strip_embedded_table_identifier_residue(value)  # 避免报告里显示 `fx bx FFE_post` 这类粘连残片。
     readable = " ".join(_split_long_unit(value, max_chars=1200))
     if len(readable) <= 1400:
         return readable
@@ -884,6 +967,20 @@ def _format_fallback_table_review_unit(value: str) -> str:
         cells = cells[1:]  # T1/T2 只是抽取器的页内表序号，不必暴露给用户。
     payload = " | ".join(cells) if cells else compact_inline(value)  # 保留 Header=Value，方便搜索和人工复核。
     return f"表格文字: {payload}"
+
+
+def _strip_leading_table_header_fragment(value: str) -> str:
+    """Drop table header residue that was glued before a normal sentence."""
+
+    stripped = _LEADING_TABLE_HEADER_FRAGMENT_RE.sub("", compact_inline(value))  # 保留后面的正文句，不影响真实内容。
+    return stripped if stripped else value  # 防止整行都是表头时被清成空字符串。
+
+
+def _strip_embedded_table_identifier_residue(value: str) -> str:
+    """Remove short table identifier residue glued into a normal sentence."""
+
+    cleaned = _EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE.sub("", compact_inline(value))  # 只删除 Table 引用前的明确残片。
+    return cleaned if cleaned else value  # 防止异常情况下返回空文本。
 
 
 _MIN_UNEQUAL_REPLACE_PAIR_SCORE = 0.45
@@ -1149,7 +1246,11 @@ def _materialize_delta_candidates(
 ) -> tuple[list[str], list[str], list[SnippetPair], int]:
     """Apply snippet limits after all meaningful differences have been scanned."""
 
-    unique_candidates = _dedupe_candidates(candidates)
+    unique_candidates = [
+        candidate
+        for candidate in _dedupe_candidates(candidates)
+        if not _candidate_is_global_noise(candidate)
+    ]  # 先过滤表格/OCR/页眉噪声，再套 max_snippets，避免噪声抢占正文名额。
     if max_snippets <= 0:
         return [], [], [], len(unique_candidates)
 
@@ -1172,6 +1273,14 @@ def _materialize_delta_candidates(
         elif candidate.kind == "replaced" and candidate.pair:
             replaced.append(candidate.pair)
     return added, removed, replaced, omitted_count
+
+
+def _candidate_is_global_noise(candidate: _DeltaCandidate) -> bool:
+    """Return True when a candidate should not count against visible snippets."""
+
+    if candidate.pair:
+        return _should_suppress_replaced_pair(candidate.pair)  # 替换对两侧都是噪声时整对隐藏。
+    return _is_global_noise_snippet(candidate.text)  # 单侧新增/删除片段直接走全局噪声规则。
 
 
 def _dedupe_candidates(candidates: list[_DeltaCandidate]) -> list[_DeltaCandidate]:
@@ -1256,6 +1365,8 @@ def _is_global_noise_snippet(value: str) -> bool:
         return False
     if _table_review_unit_has_visual_noise(candidate):
         return True  # 夹带页眉/公式的结构化表格行交给表格截图区，不放在正文 diff。
+    if _looks_like_fragmentary_table_or_equation_snippet(candidate):
+        return True  # 表格/公式目录项不是完整句子，交给表格摘要或源 PDF 复核。
     if _looks_like_visual_only_snippet(candidate):
         return True
     if _looks_like_corrupted_figure_reference_snippet(candidate):
@@ -1277,6 +1388,62 @@ def _is_global_noise_snippet(value: str) -> bool:
         r"\bimplementation\s+agreement\s+oif-cei\b",
     )  # 这些短语在用户样本中反复出现在页眉页脚或草稿水印中。
     return any(re.search(pattern, lowered) for pattern in noise_patterns)
+
+
+def _looks_like_fragmentary_table_or_equation_snippet(value: str) -> bool:
+    """Return True for short table/equation row fragments, not prose sentences."""
+
+    candidate = compact_inline(value)  # 表格碎片在报告中也是单行片段。
+    if not candidate or _is_table_review_unit(candidate):
+        return False  # 结构化表格兜底由专门逻辑控制，不能在这里全删。
+    if len(candidate) > 140:
+        return False  # 长文本更可能包含真实正文，不能按短碎片处理。
+    if _has_protocol_sentence_verb(candidate):
+        return False  # 带谓语的规范句应继续作为正文差异展示。
+    if re.fullmatch(r"(?i)(?:[+-]?\d+(?:\.\d+)?|[+-]?\d+/\d+)(?:\s+(?:[+-]?\d+(?:\.\d+)?|[+-]?\d+/\d+)){0,8}", candidate):
+        return True  # `03`、`-1 -1/3 1/3 1` 这类纯数值序列通常来自表格或公式。
+    if re.fullmatch(
+        r"(?i)(?:unit|units|min\.?|typ\.?|max\.?|symbol|condition|characteristic|parameter|value|notes?)"
+        r"(?:\s+(?:unit|units|min\.?|typ\.?|max\.?|symbol|condition|characteristic|parameter|value|notes?)){0,5}",
+        candidate,
+    ):
+        return True  # 表头词单独成片段没有正文审阅价值。
+    if re.fullmatch(r"(?i)note\s*\d+[A-Z]?", candidate):
+        return True  # `Note 2D` 多为表格/脚注编号残片。
+    if re.fullmatch(r"(?i)notes?:\s*[A-Z]?", candidate):
+        return True  # `NOTES:` / `NOTES: D` 是表格脚注表头残片。
+    if re.search(r"(?i)(?:^|\|)\s*(?:min|max|typ|unit|units|value|symbol)\s*=", candidate):
+        return True  # `| MAX=1000 | UNIT=mVppd` 是表格单元串，不是正文句。
+    if re.fullmatch(r"(?i)baud\s+rate\s+r[_\s]*baud\s+\d+(?:\s+\d+)?\s+gsym/s", candidate):
+        return True  # 独立 Baud Rate 表头/数据行交给表格摘要区。
+    if re.fullmatch(r"(?i)se?fe\s+section|see\s+section", candidate):
+        return True  # `SeFe Section` 是 `See Section` 被水印残字污染后的表头残片。
+    if re.search(r"(?i)\b[A-Z]+_[A-Z0-9_]+\b", candidate) and len(candidate.split()) <= 5:
+        return True  # `FFE_Post`、`fx bx FFE_Post` 这类短标识符组合不是完整正文句。
+    if re.fullmatch(r"(?i)[A-Z][A-Z0-9_/-]{1,32}", candidate):
+        return True  # `FFE_Post`、`UNIT` 这类孤立标识符交给表格摘要/源 PDF 复核。
+    if re.fullmatch(r"(?i)(?:conversion|equation)\s*\(?\d+(?:[-–]\d+)?\)?\.?", candidate):
+        return True  # `Conversion (32-6)` 是表格/公式项，不是完整句子。
+    if re.fullmatch(r"(?i)(?:interference|jitter)\s+tolerance\s+table\s+\d+(?:[-–]\d+)?\.?", candidate):
+        return True  # 接收端表格索引项应由表格摘要承载。
+    if re.fullmatch(r"(?i)table\s+\d+(?:[-–]\d+)?\.?", candidate):
+        return True  # 单独 `Table 32-10.` 没有句子上下文。
+    if re.search(r"(?i)\bblock\s+error\s+ratio\b", candidate) and len(_NUMBER_TOKEN_RE.findall(candidate)) >= 2:
+        return True  # BER 表格值变化应在视觉表格摘要里查看。
+    return False
+
+
+def _has_protocol_sentence_verb(value: str) -> bool:
+    """Return True when a snippet looks like a complete protocol sentence."""
+
+    return bool(
+        re.search(
+            r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|be|been|being|means|defines?|describes?|"
+            r"specifies?|specified|measured|computed|used|found|shown|meet|meets|differ|differs|provide|"
+            r"provided|use|uses|refer|requires?|contains?)\b",
+            value,
+        )
+    )  # 有谓语的片段通常是正文句子，即使很短也不按表格碎片删除。
 
 
 def _looks_like_visual_only_snippet(value: str) -> bool:
