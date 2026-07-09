@@ -40,6 +40,9 @@ _TABLE_HEADER_SCAN_ROWS = 12  # pdfplumber 有时把标题/注释放在表格开
 _TABLE_SCREENSHOT_RESOLUTION = 144  # 表格截图使用 2x PDF 点阵，兼顾清晰度和 HTML 体积。
 _TABLE_SCREENSHOT_PADDING = 10.0  # 截图在表格 bbox 外保留少量边距，方便看见表题和边框。
 _UNSTRUCTURED_TABLE_MIN_CHARS = 160  # 超过该长度且数字密集的正文行，才可能是表格被抽成的一整行。
+_PCIE_MONTH_PATTERN = (
+    r"January|February|March|April|May|June|July|August|September|October|November|December"
+)  # PCIe 规范页脚里的英文月份集合，用于限定日期噪声。
 _UNSTRUCTURED_TABLE_WORDS = frozenset(
     {
         "bandwidth",
@@ -190,8 +193,12 @@ def _clean_extracted_page_text(text: str) -> str:
 
     cleaned_lines: list[str] = []  # 按行保留正文，避免整页级正则误删正常段落。
     raw_lines = [normalize_line(raw_line) for raw_line in text.splitlines()]  # 先统一空白，便于识别竖排噪声。
-    for line in _drop_vertical_extraction_noise_lines(raw_lines):
+    lines_without_vertical_noise = _drop_vertical_extraction_noise_lines(raw_lines)  # 先删除竖排 DRAFT/页边行号。
+    pcie_furniture_indexes = _pcie_page_furniture_line_indexes(lines_without_vertical_noise)  # 只删除同一页眉簇里的 PCIe 版本/日期。
+    for index, line in enumerate(lines_without_vertical_noise):
         if not line:
+            continue
+        if index in pcie_furniture_indexes:
             continue
         line = _remove_inline_margin_line_number_run(line)  # 有些 PDF 会把 1~49 行号拼进一行。
         line = remove_draft_watermark_letter_artifacts(line)  # 清理 trRansmitter / a F transmitter 这类水印字母残片。
@@ -268,7 +275,7 @@ def _remove_inline_margin_line_number_run(line: str) -> str:
 
 
 def _looks_like_extraction_boilerplate(line: str) -> bool:
-    """Return True for DRAFT, copyright, and repeated OIF page furniture."""
+    """Return True for DRAFT, copyright, and repeated page furniture."""
 
     candidate = normalize_line(line)  # 单行噪声判断使用统一空白后的文本。
     if not candidate:
@@ -281,8 +288,28 @@ def _looks_like_extraction_boilerplate(line: str) -> bool:
         r"(?i)\bthe\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed\b",
         r"(?i)\bcopyright\s+©?\s*\d{4}\s+optical\s+internetworking\s+forum\b",
         r"(?i)^optical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
+        r"(?i)^PCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+$",
     )
     return any(re.search(pattern, candidate) for pattern in boilerplate_patterns)
+
+
+def _pcie_page_furniture_line_indexes(lines: list[str]) -> set[int]:
+    """Return indexes belonging to a PCIe running header/footer cluster."""
+
+    indexes: set[int] = set()  # 保存需要整行删除的页眉页脚行号。
+    for index, line in enumerate(lines):
+        if not re.fullmatch(r"(?i)PCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+", line):
+            continue
+        indexes.add(index)  # running header 本身一定是页眉页脚。
+        for neighbor in range(max(0, index - 2), min(len(lines), index + 4)):
+            if neighbor == index:
+                continue
+            candidate = lines[neighbor]
+            if re.fullmatch(r"(?i)Revision\s+\d+(?:\.\d+)*(?:\s*,\s*Version\s+\d+(?:\.\d+)*)?", candidate):
+                indexes.add(neighbor)  # 只有贴近 running header 的版本行才当页脚。
+            elif re.fullmatch(rf"(?i)(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}", candidate):
+                indexes.add(neighbor)  # 只有贴近 running header 的日期行才当页脚。
+    return indexes
 
 
 def _looks_like_figure_or_image_text_block(line: str) -> bool:
@@ -638,9 +665,37 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
         return True  # 用户明确不需要图片/图形对比，Figure 误检必须整块跳过。
     if _looks_like_non_table_caption(cleaned_title) and not table_lines:
         return True  # 页眉、单字母坐标轴等空候选没有表格证据，直接丢弃。
+    if _table_lines_are_single_column_note_box(table_lines) and not _looks_like_table_caption(cleaned_title):
+        return True  # 无表题的一列 Note/说明框不是结构化表格，避免把图片/文本框当表格对比。
     if not table_lines and not _looks_like_table_caption(cleaned_title) and not _looks_like_table_context_caption(cleaned_title):
         return True  # 没有结构化行也没有表格语义时，通常是 OpenCV/pdfplumber 误检。
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
+
+
+def _table_lines_are_single_column_note_box(table_lines: list[str]) -> bool:
+    """Return True for one-column note/text boxes misdetected as tables."""
+
+    payloads = [_single_value_table_payload(line) for line in table_lines]  # 提取 Value= 后的可读文本。
+    if not payloads or any(payload is None for payload in payloads):
+        return False  # 只处理全部都是单个 Value 单元格的候选，避免误删多列表格。
+    joined = " ".join(payload for payload in payloads if payload)  # 汇总整块说明文本，判断是否是 Note 框。
+    return bool(re.search(r"(?i)^\s*(?:note|notes)\s*[:.]", joined))  # 只跳过明确 Note/Notes 开头的说明框。
+
+
+def _single_value_table_payload(line: str) -> str | None:
+    """Return the payload when one table row has only a ``Value=`` cell."""
+
+    text = normalize_line(line)  # 使用抽取层统一空白规则，兼容 pdfplumber 的单元格换行。
+    if text.startswith(_TABLE_ROW_PREFIX):
+        text = text[len(_TABLE_ROW_PREFIX) :].strip()  # 去掉内部“表格行:”前缀。
+    text = re.sub(r"^T\d+\s*\|\s*", "", text, flags=re.I)  # 去掉物理表编号，避免 T1/T2 影响判断。
+    cells = [cell.strip() for cell in text.split("|") if cell.strip()]  # 单列误检只有一个有效单元。
+    if len(cells) != 1:
+        return None
+    cell = cells[0]
+    if not re.match(r"(?i)^value\s*=", cell):
+        return None
+    return normalize_line(cell.split("=", 1)[1])  # 返回说明框中的实际文本，供 Note 规则判断。
 
 
 def _table_lines_are_visual_only(table_lines: list[str]) -> bool:

@@ -350,6 +350,24 @@ _LEADING_TABLE_HEADER_FRAGMENT_RE = re.compile(
 _EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE = re.compile(
     r"(?i)\bfx\s+bx\s+ffe[_-]?post\s+(?=table\b)"
 )  # `fx bx FFE_post Table 32-1` 是表格残片粘入正文引用，不是协议正文变化。
+_PCIE_MONTH_PATTERN = (
+    r"January|February|March|April|May|June|July|August|September|October|November|December"
+)  # PCIe 规范页脚里的英文月份集合，限定日期噪声识别范围。
+_PCIE_RUNNING_HEADER_RE = re.compile(
+    r"(?i)\bPCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+\b"
+)  # PCIe PHY 测试规范每页顶部/底部都会出现的运行页眉。
+_PCIE_REVISION_LINE_RE = re.compile(
+    r"(?i)^Revision\s+\d+(?:\.\d+)*(?:\s*,\s*Version\s+\d+(?:\.\d+)*)?$"
+)  # 独立版本行属于页眉页脚，不等同于正文里的 revision 引用。
+_PCIE_DATE_LINE_RE = re.compile(
+    rf"(?i)^(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}$"
+)  # 独立发布日期行是运行页脚，不能成为协议差异。
+_PCIE_FURNITURE_CLUSTER_RE = re.compile(
+    rf"(?i)\s*[-–—>]?\s*PCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+\s*"
+    rf"(?:Revision\s+\d+(?:\.\d+)*(?:\s*,\s*Version\s+\d+(?:\.\d+)*)?\s*)?"
+    rf"(?:(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}\s*)?[>→-]?\s*"
+)  # 抽取器有时把页眉、版本和日期塞进句中；按整簇删除，避免污染正文 diff。
+_SPELLING_EQUIVALENT_TOKENS = {"adaptor": "adapter"}  # 美式/英式等价写法不应单独生成实质差异。
 
 
 def _section_similarity(left: str, right: str) -> float:
@@ -685,10 +703,13 @@ def _merge_wrapped_lines(text: str) -> list[str]:
 
     blocks: list[str] = []
     current = ""
-    for raw_line in text.splitlines():
-        line = normalize_line(raw_line)
+    normalized_lines = [normalize_line(raw_line) for raw_line in text.splitlines()]  # 先统一空白，便于识别页眉簇。
+    pcie_furniture_indexes = _pcie_page_furniture_line_indexes(normalized_lines)  # 版本/日期只有贴近 PCIe 页眉时才删除。
+    for index, line in enumerate(normalized_lines):
         if not line:
             continue
+        if index in pcie_furniture_indexes:
+            continue  # PCIe 运行页眉/页脚不能被合并进前后正文句子。
         if _looks_like_orphan_review_fragment(line):
             continue  # 先丢掉独立 `p`/`F` 等残片，避免换行合并时塞进完整句。
         if _starts_new_review_block(line):
@@ -853,6 +874,7 @@ def _review_unit_key(value: str) -> str:
     """
 
     value = remove_draft_watermark_letter_artifacts(value)  # 先去掉 DRAFT 水印字母残片，再生成比较 key。
+    value = _strip_running_page_furniture(value)  # 去掉 PCIe 页眉页脚簇，防止页码/日期驱动误报。
     value = _strip_leading_table_header_fragment(value)  # 去掉 UNIT/Baud Rate 等表头前缀，避免污染正文句。
     value = _strip_embedded_table_identifier_residue(value)  # 去掉句中插入的短表格标识符残片。
     normalized = normalize_for_similarity(value)
@@ -918,6 +940,8 @@ def _normalize_math_symbol_artifacts(value: str) -> str:
 def _canonical_review_token(token: str) -> str:
     """Canonicalize token values only where protocol meaning is preserved."""
 
+    if token in _SPELLING_EQUIVALENT_TOKENS:
+        return _SPELLING_EQUIVALENT_TOKENS[token]  # 只合并明确等价拼写，避免隐藏真正术语变化。
     if not _NUMBER_TOKEN_RE.fullmatch(token):
         return token
     sign = "-" if token.startswith("-") else ""
@@ -941,6 +965,8 @@ def _report_unit(value: str) -> str:
 
     if _is_table_review_unit(value):
         return _format_fallback_table_review_unit(value)  # 未被视觉摘要覆盖的表格行用用户可读前缀展示。
+    value = _strip_running_page_furniture(value)  # 展示层也删除夹在句子里的 PCIe 页眉/版本/日期。
+    value = _normalize_extracted_arrow_spacing(value)  # 修复 `- >` 这类 PDF 抽取箭头断裂，提升报告可读性。
     value = _strip_leading_table_header_fragment(value)  # 展示层同样去掉粘连的表头残片。
     value = _strip_embedded_table_identifier_residue(value)  # 避免报告里显示 `fx bx FFE_post` 这类粘连残片。
     readable = " ".join(_split_long_unit(value, max_chars=1200))
@@ -981,6 +1007,48 @@ def _strip_embedded_table_identifier_residue(value: str) -> str:
 
     cleaned = _EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE.sub("", compact_inline(value))  # 只删除 Table 引用前的明确残片。
     return cleaned if cleaned else value  # 防止异常情况下返回空文本。
+
+
+def _strip_running_page_furniture(value: str) -> str:
+    """Remove PCIe running page furniture that was glued into body text."""
+
+    candidate = compact_inline(value)  # 页眉页脚可能来自多行粘连，先压成单行便于整簇匹配。
+    cleaned = _PCIE_FURNITURE_CLUSTER_RE.sub(" ", candidate)  # 删除页眉、页码、版本和日期组成的噪声簇。
+    cleaned = compact_inline(cleaned)  # 清理删除噪声后留下的多余空格和箭头空白。
+    return cleaned if cleaned else value  # 若异常清空整句，保留原值交给后续噪声规则判断。
+
+
+def _normalize_extracted_arrow_spacing(value: str) -> str:
+    """Repair arrow spacing artifacts in user-facing snippets."""
+
+    repaired = re.sub(r"\s*-\s*>\s*", "->", value)  # 把 `- >`、` -> ` 统一成紧凑箭头。
+    return repaired  # 保留 PDF 原有 Unicode 箭头，只修复被拆开的 ASCII 箭头。
+
+
+def _is_pcie_running_page_furniture(value: str) -> bool:
+    """Return True for standalone PCIe running header/footer lines."""
+
+    candidate = compact_inline(value)  # 单行判断使用报告同款空白归一，减少 PDF 抽取差异。
+    if not candidate:
+        return False
+    return bool(_PCIE_RUNNING_HEADER_RE.fullmatch(candidate))  # 独立版本/日期没有上下文时可能是真正文。
+
+
+def _pcie_page_furniture_line_indexes(lines: list[str]) -> set[int]:
+    """Return indexes belonging to one PCIe running header/footer cluster."""
+
+    indexes: set[int] = set()  # 保存页眉簇内要跳过的行。
+    for index, line in enumerate(lines):
+        if not _is_pcie_running_page_furniture(line):
+            continue
+        indexes.add(index)  # running header 本身一定是页眉页脚。
+        for neighbor in range(max(0, index - 2), min(len(lines), index + 4)):
+            if neighbor == index:
+                continue
+            candidate = compact_inline(lines[neighbor])
+            if _PCIE_REVISION_LINE_RE.fullmatch(candidate) or _PCIE_DATE_LINE_RE.fullmatch(candidate):
+                indexes.add(neighbor)  # 只有贴近 running header 的版本/日期才当作页脚。
+    return indexes
 
 
 _MIN_UNEQUAL_REPLACE_PAIR_SCORE = 0.45
@@ -1227,9 +1295,14 @@ def _looks_like_table_identity_cell(value: str) -> bool:
 def _meaningful_review_words(value: str) -> set[str]:
     """Return non-boilerplate word anchors for pairing changed units."""
 
+    value = _strip_running_page_furniture(value)  # 配对锚点不应受页码、日期和版本页脚影响。
     normalized = normalize_for_similarity(value).replace("µ", "u").replace("μ", "u")
     words = set(re.findall(r"[a-z]+[a-z0-9]*(?:[-_/][a-z0-9]+)*", normalized))
-    return {word for word in words if word not in _REVIEW_STOP_WORDS}
+    return {
+        _SPELLING_EQUIVALENT_TOKENS.get(word, word)
+        for word in words
+        if word not in _REVIEW_STOP_WORDS
+    }  # 拼写等价词作为同一个锚点，减少同句错配和假替换。
 
 
 def _relative_position(index: int, length: int) -> float:
@@ -1363,6 +1436,8 @@ def _is_global_noise_snippet(value: str) -> bool:
     candidate = compact_inline(value)  # 压成单行，便于识别跨行抽取出来的页眉页脚。
     if not candidate:
         return False
+    if _is_pcie_running_page_furniture(candidate):
+        return True  # PCIe 页眉、版本行和日期行只提供页面定位，不是协议内容。
     if _table_review_unit_has_visual_noise(candidate):
         return True  # 夹带页眉/公式的结构化表格行交给表格截图区，不放在正文 diff。
     if _looks_like_fragmentary_table_or_equation_snippet(candidate):
@@ -1759,7 +1834,10 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
     for index, char in enumerate(line):
         current.append(char)
         should_split = False
-        if char in hard_endings:
+        if char in {"―", "—"} and re.match(r"\s*If\b", line[index + 1 :], flags=re.I):
+            current.pop()  # 长破折号只是把列表说明粘在同一行，拆句时不放进上一条。
+            should_split = True
+        elif char in hard_endings:
             should_split = True
         elif char == ".":
             previous_char = line[index - 1] if index > 0 else ""

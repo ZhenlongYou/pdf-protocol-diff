@@ -28,6 +28,8 @@ from main import resolve_inputs
 from protocol_pdf_diff.compare import compare_extractions
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.compare import _is_global_noise_snippet  # 直接覆盖报告层短碎片过滤规则。
+from protocol_pdf_diff.compare import _merge_wrapped_lines  # 验证 PCIe 页眉簇过滤不会吞掉正文修订历史。
+from protocol_pdf_diff.compare import _split_line_preserving_numbers  # 验证列表破折号粘连会拆成独立审阅句。
 from protocol_pdf_diff.desktop_gui import (
     ProtocolDiffDesktopApp,
     collect_widget_texts,  # 用于确认桌面界面真的渲染了关键按钮和页码标签。
@@ -49,7 +51,7 @@ from protocol_pdf_diff.pdf_extract import (
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
     extract_pdf_text,
 )
-from protocol_pdf_diff.reporting import _paired_table_visuals, write_reports
+from protocol_pdf_diff.reporting import _inline_diff_html, _paired_table_visuals, write_reports
 from protocol_pdf_diff.sample_data import write_demo_pdfs, write_multipage_text_pdf
 from protocol_pdf_diff.sectioning import detect_heading, section_document
 from protocol_pdf_diff.text_utils import remove_draft_watermark_letter_artifacts
@@ -572,14 +574,28 @@ class ProtocolDiffTests(unittest.TestCase):
 
         figure_rows = ["表格行: T1 | IL min / IL max"]  # 模拟 Figure 32-2 曲线被误检成一行表格。
         real_rows = ["表格行: T1 | Parameter=R0 | Value=46.25 | Units=Ω"]  # 模拟真实参数表结构化行。
+        note_box_rows = [
+            "表格行: T1 | Value=Note: Adapters such as DC blocks are part of the generator",
+            "表格行: T1 | Value=and are not included in the VNA measurement.",
+        ]  # 模拟 PCIe Note 文本框被 pdfplumber 误检成无表题单列表格。
+        titled_note_box_rows = [
+            "表格行: T1 | Value=Note: If most waveforms are outliers, check the generator.",
+        ]  # 带上下文标题的 Note 框也不应进入表格比较。
+        single_column_real_rows = [
+            "表格行: T1 | Value=Calibration method A",
+            "表格行: T1 | Value=Adapter type SMP",
+        ]  # 没有明确 Note 前缀的单列表格仍可能是真实表格，不能按关键词删除。
 
         self.assertTrue(
             _should_skip_detected_table("Figure 32-2.Channel Insertion Loss Limit for 112 Gsym/s", figure_rows)
         )  # 图题候选必须整块跳过，不能进入正文或截图。
         self.assertTrue(_should_skip_detected_table("", figure_rows))  # 无 bbox/无图题时，图轴表格行也必须跳过。
         self.assertTrue(_should_skip_detected_table("X", []))  # 坐标轴单字母空候选必须跳过。
+        self.assertTrue(_should_skip_detected_table("", note_box_rows))  # 无表题单列 Note 框不应进入表格对比。
+        self.assertTrue(_should_skip_detected_table("Calibration note", titled_note_box_rows))  # 非 Table 标题的 Note 框也应跳过。
         self.assertFalse(_should_skip_detected_table("Table 32-1. COM Parameter Values", []))  # 有明确表题时保留截图。
         self.assertFalse(_should_skip_detected_table("", real_rows))  # 缺表题但有结构化表格行时保守保留。
+        self.assertFalse(_should_skip_detected_table("", single_column_real_rows))  # 单列真实表不能被关键词粗暴删除。
 
     def test_table_visual_summary_matches_human_readable_symbol_change_style(self) -> None:
         """Small table summaries should show item/old/new/type like the visual reference."""
@@ -656,6 +672,111 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Even-Odd Jitter", html)  # 小表格有变化时，相关未变化行也应显示。
         self.assertIn("无变化", html)  # 未变化行应有绿色状态标签。
         self.assertGreaterEqual(html.count("实质/符号变化"), 2)  # 两个符号变化都应被明确标记。
+
+    def test_table_visual_summary_ignores_display_only_row_noise(self) -> None:
+        """Table summaries should ignore row ids, checkboxes, punctuation, and case."""
+
+        old_table = TableVisual(
+            page_number=1,  # 旧表页码只用于报告定位。
+            table_number=1,  # 旧表内部序号不应进入行级比较 key。
+            title="Table 1 Calibration notes",  # 同名表会被报告层配对。
+            bbox=(0.0, 0.0, 100.0, 100.0),  # 测试不依赖真实截图尺寸。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=[
+                "表格行: T1 | Value=❑ Sj – 5 to 10 ps PP @ TP1",  # 旧侧带复选框、大小写和长横线。
+                "表格行: T1 | Value=Note: Adapters such as DC blocks, pickoff T’s, etc. that are connected",  # 旧侧带逗号。
+            ],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",  # 报告层会把内部摘要转为用户可读文案。
+        )
+        new_table = TableVisual(
+            page_number=1,  # 新表页码与旧表一致，聚焦行文本差异。
+            table_number=2,  # 新侧 T2 行号不同，但只是抽取器内部序号。
+            title="Table 1 Calibration notes",  # 同名表应与旧表配对。
+            bbox=(0.0, 0.0, 100.0, 100.0),  # 测试不依赖真实截图尺寸。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=[
+                "表格行: T2 | Value=SJ - 5 to 10 ps PP @ TP1",  # 新侧缺复选框且大小写不同，但内容相同。
+                "表格行: T2 | Value=Note: Adapters such as DC blocks, pickoff T’s etc. that are connected",  # 新侧少一个逗号。
+            ],
+            grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",  # 报告层会隐藏 OpenCV 内部名称。
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_table_noise.pdf"),  # 旧版正文不变，测试只关注表格摘要。
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_table_noise.pdf"),  # 新版正文不变，测试只关注表格摘要。
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )  # 完整结果能覆盖表格配对和 HTML 摘要渲染链路。
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())  # 输出 HTML，验证用户实际看到的状态标签。
+            html = paths["html"].read_text(encoding="utf-8")  # 读取完整 HTML，避免只测内部 key。
+
+        self.assertIn("未检测到行级变化", html)  # 这些展示差异不应被标成实质变化。
+        self.assertNotIn("实质变化", html)  # 没有数值/符号变化时不应出现红色实质变化标签。
+        self.assertNotIn("替换/修改", html)  # 标点和大小写差异也不应显示成替换。
+
+    def test_table_visual_summary_pairs_rows_by_identity_after_insertions(self) -> None:
+        """Inserted table rows should not offset-pair unrelated changed parameters."""
+
+        old_table = TableVisual(
+            page_number=1,  # 旧表页码只用于报告定位。
+            table_number=1,  # 单页第一张表。
+            title="Table 1 Electrical values",  # 同名表应配成一组。
+            bbox=(0.0, 0.0, 100.0, 100.0),  # 测试不依赖真实截图尺寸。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=[
+                "表格行: T1 | Parameter=Reference resistance | Symbol=R0 | Value=50 | Units=Ω",
+                "表格行: T1 | Parameter=Eye height | Symbol=EH | Min=< 15 | Units=mV",
+            ],  # 旧表包含一个普通数值和一个单独 `<` 限值。
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 4 条",  # 报告层会隐藏内部库名。
+        )
+        new_table = TableVisual(
+            page_number=1,  # 新表页码只用于报告定位。
+            table_number=1,  # 单页第一张表。
+            title="Table 1 Electrical values",  # 同名表应配成一组。
+            bbox=(0.0, 0.0, 100.0, 100.0),  # 测试不依赖真实截图尺寸。
+            image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",  # 极小图片占位。
+            row_texts=[
+                "表格行: T1 | Parameter=New impedance | Symbol=Zp | Value=40 | Units=Ω",
+                "表格行: T1 | Parameter=Reference resistance | Symbol=R0 | Value=46.25 | Units=Ω",
+                "表格行: T1 | Parameter=Eye height | Symbol=EH | Min=> 15 | Units=mV",
+            ],  # 新表在前面插入一行，同一参数仍应按身份配对。
+            grid_summary="OpenCV 网格检测: 横线 4 条，竖线 4 条",  # 报告层会隐藏内部库名。
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_table_insert.pdf"),  # 旧版正文不变，测试只关注表格摘要。
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_table_insert.pdf"),  # 新版正文不变，测试只关注表格摘要。
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )  # 完整结果覆盖表格配组、摘要配对和 HTML 渲染。
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())  # 输出 HTML，验证用户最终看到的表格行摘要。
+            html = paths["html"].read_text(encoding="utf-8")  # 读取完整 HTML 做断言。
+
+        self.assertIn("New impedance", html)  # 插入行应显示为新增行，而不是和旧行错配。
+        self.assertIn("新表新增行", html)  # 插入行类型应明确。
+        self.assertIn("Reference resistance", html)  # 原有参数仍应被配到同一行。
+        self.assertIn("50 Ω", html)  # 旧值保留。
+        self.assertIn("46.25 Ω", html)  # 新值保留。
+        self.assertIn("Eye height", html)  # `<` 到 `>` 的限值符号变化不能被吞掉。
+        self.assertIn("&lt; 15 mV", html)  # 旧侧单独小于号必须进入显示值。
+        self.assertIn("&gt; 15 mV", html)  # 新侧单独大于号必须进入显示值。
+        self.assertGreaterEqual(html.count("实质变化"), 2)  # 数值变化和限值方向变化都应判为实质变化。
 
     def test_wrapped_table_row_continuations_merge_symbol_suffixes(self) -> None:
         """Wrapped table rows should not split one symbol change across two summary rows."""
@@ -3492,6 +3613,194 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(_is_global_noise_snippet("NOTES: D"))  # 表格脚注表头残片应隐藏。
         self.assertIn("The receiver shall use BERadded=1e-4", snippets)  # 真正文句仍保留。
         self.assertIn("The receiver shall use BER =1e-4", snippets)  # 新正文句也必须完整可见。
+
+    def test_pcie_running_page_furniture_is_suppressed_from_text_cards(self) -> None:
+        """PCIe running headers, revision lines, and dates should not be reported."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_pcie_headers.pdf"),  # 旧侧模拟 PCIe 页眉页脚混入正文抽取结果。
+            pages=[
+                PageText(
+                    page_number=36,
+                    text=(
+                        "1 Scope\n"
+                        "PCI Express Architecture PHY Test Specification | 36\n"
+                        "Revision 4.0, Version 1.2\n"
+                        "August 18, 2021\n"
+                        "The transmitter shall repeat steps 16 and 17 using the computed Sj value."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_pcie_headers.pdf"),  # 新侧页码、版本和日期都不同，但不是正文变化。
+            pages=[
+                PageText(
+                    page_number=78,
+                    text=(
+                        "1 Scope\n"
+                        "PCI Express Architecture PHY Test Specification | 78\n"
+                        "Revision 6.0\n"
+                        "April 22, 2026\n"
+                        "The transmitter shall repeat steps 19 and 20 using the computed SJ value."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 运行完整片段生成和全局噪声过滤。
+        snippets = "\n".join(
+            snippet
+            for change in result.changes
+            for snippet in (
+                change.added_snippets
+                + change.removed_snippets
+                + [pair.old for pair in change.replaced_snippets]
+                + [pair.new for pair in change.replaced_snippets]
+            )
+        )  # 汇总用户最终会在正文差异卡中看到的文字。
+
+        self.assertNotIn("PCI Express Architecture PHY Test Specification", snippets)  # 页眉不应抢占差异列表。
+        self.assertNotIn("Revision 4.0, Version 1.2", snippets)  # 旧版页脚版本行不应显示为删除。
+        self.assertNotIn("Revision 6.0", snippets)  # 新版页脚版本行不应显示为新增。
+        self.assertNotIn("August 18, 2021", snippets)  # 旧版发布日期页脚不应显示为删除。
+        self.assertNotIn("April 22, 2026", snippets)  # 新版发布日期页脚不应显示为新增。
+        self.assertIn("steps 16 and 17", snippets)  # 真正的步骤号变化仍要保留。
+        self.assertIn("steps 19 and 20", snippets)  # 新侧步骤号变化同样保留。
+        self.assertTrue(_is_global_noise_snippet("PCI Express Architecture PHY Test Specification | 78"))  # 单独 PCIe 页眉是全局噪声。
+        self.assertFalse(_is_global_noise_snippet("Revision 6.0"))  # 没有 running header 语境时可能是正文修订历史。
+        self.assertFalse(_is_global_noise_snippet("April 22, 2026"))  # 没有 running header 语境时可能是正文日期。
+        self.assertFalse(
+            _is_global_noise_snippet("The 16 GT/s CLB does not support revision 4.0 of the Add-in Card test.")
+        )  # 正文里的 revision 引用不能被误删。
+
+    def test_standalone_revision_and_date_lines_can_remain_body_diffs(self) -> None:
+        """Revision/date lines should only be suppressed when tied to PCIe headers."""
+
+        body_units = _merge_wrapped_lines("Revision 6.0\nApril 22, 2026")  # 没有页眉语境时按正文保留。
+        footer_units = _merge_wrapped_lines(
+            "PCI Express Architecture PHY Test Specification | 78\nRevision 6.0\nApril 22, 2026"
+        )  # 与 PCIe running header 相邻时按页脚删除。
+        cleaned_body = _clean_extracted_page_text("Revision 6.0\nApril 22, 2026")  # 抽取层也不能单独删正文修订历史。
+        cleaned_footer = _clean_extracted_page_text(
+            "PCI Express Architecture PHY Test Specification | 78\nRevision 6.0\nApril 22, 2026"
+        )  # 抽取层应删除完整页眉簇。
+        old_revision = ExtractionResult(
+            pdf_path=Path("old_revision_history.pdf"),  # 旧侧模拟正文修订历史行。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCurrent revision details follow.\nRevision 5.0\nMarch 1, 2025",
+                )
+            ],
+        )
+        new_revision = ExtractionResult(
+            pdf_path=Path("new_revision_history.pdf"),  # 新侧模拟正文修订历史行更新。
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCurrent revision details follow.\nRevision 6.0\nApril 22, 2026",
+                )
+            ],
+        )
+        result = compare_extractions(old_revision, new_revision, DiffOptions())  # 覆盖 section_document 到 compare 的最终路径。
+        snippets = "\n".join(
+            snippet
+            for change in result.changes
+            for snippet in (
+                change.added_snippets
+                + change.removed_snippets
+                + [pair.old for pair in change.replaced_snippets]
+                + [pair.new for pair in change.replaced_snippets]
+            )
+        )  # 汇总报告最终可见片段，确认 sectioning 没有提前删除。
+
+        self.assertIn("Revision 6.0", "\n".join(body_units))  # 比较层保留独立修订正文。
+        self.assertIn("April 22, 2026", "\n".join(body_units))  # 比较层保留独立日期正文。
+        self.assertEqual([], footer_units)  # 页眉簇不会进入正文 diff。
+        self.assertIn("Revision 6.0", cleaned_body)  # 抽取层保留独立修订正文。
+        self.assertIn("April 22, 2026", cleaned_body)  # 抽取层保留独立日期正文。
+        self.assertEqual("", cleaned_footer)  # 抽取层删除完整 PCIe 页眉/页脚簇。
+        self.assertIn("Revision 5.0", snippets)  # 最终报告路径保留旧修订正文。
+        self.assertIn("Revision 6.0", snippets)  # 最终报告路径保留新修订正文。
+        self.assertIn("March 1, 2025", snippets)  # 最终报告路径保留旧日期正文。
+        self.assertIn("April 22, 2026", snippets)  # 最终报告路径保留新日期正文。
+
+    def test_embedded_pcie_running_page_furniture_is_stripped_from_replacements(self) -> None:
+        """PCIe header/footer text glued inside a sentence should be removed."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_embedded_pcie_header.pdf"),  # 旧侧是没有页脚污染的干净步骤句。
+            pages=[
+                PageText(
+                    page_number=37,
+                    text=(
+                        "1 Scope\n"
+                        "Use Generator -> SMP Cable -> Variable ISI channel -> Oscilloscope "
+                        "and follow Appendix C for calibration."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_embedded_pcie_header.pdf"),  # 新侧模拟页眉页脚被插进同一行中间。
+            pages=[
+                PageText(
+                    page_number=80,
+                    text=(
+                        "1 Scope\n"
+                        "Use Generator -> SMP Cable- PCI Express Architecture PHY Test Specification | 80 "
+                        "Revision 6.0 April 22, 2026 >Variable ISI channel -> Oscilloscope "
+                        "and follow Appendix A for calibration."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())  # 嵌入噪声应在报告片段前被剔除。
+        snippets = "\n".join(
+            snippet
+            for change in result.changes
+            for pair in change.replaced_snippets
+            for snippet in (pair.old, pair.new)
+        )  # 只汇总替换片段，验证句中页眉清理不会影响真实 Appendix 差异。
+
+        self.assertNotIn("PCI Express Architecture PHY Test Specification", snippets)  # 句中页眉不应残留。
+        self.assertNotIn("Revision 6.0", snippets)  # 句中版本页脚不应残留。
+        self.assertNotIn("April 22, 2026", snippets)  # 句中日期页脚不应残留。
+        self.assertIn("Appendix C", snippets)  # 旧侧真实附录引用仍保留。
+        self.assertIn("Appendix A", snippets)  # 新侧真实附录引用仍保留。
+
+    def test_inline_highlight_ignores_case_and_display_only_variants(self) -> None:
+        """Inline highlights should ignore case, arrows, spacing, and spelling variants."""
+
+        old_html, new_html = _inline_diff_html(
+            "computed Sj through Generator→SMP Adaptor at 30dB before step 16 and P5 at E-12.",
+            "computed SJ through Generator->SMP Adapter at 30 dB before step 19 and Preset 5 at 1e-12.",
+        )  # 只有步骤号是实质变化；其他都是抽取或显示格式差异。
+        amp_old_html, amp_new_html = _inline_diff_html(
+            "Eye Width & Extrapolated Eye Height",
+            "Eye Width and Extrapolated Eye Height",
+        )  # & 与 and 是同义连接符，不应在报告里制造高亮。
+
+        self.assertNotIn("<mark", old_html.split("before")[0])  # 旧侧步骤号前的大小写/箭头/拼写/空格不应高亮。
+        self.assertNotIn("<mark", new_html.split("before")[0])  # 新侧步骤号前的等价显示差异同样不应高亮。
+        self.assertNotIn("<mark", old_html.split("and P5")[1])  # P5/E-12 不应作为格式噪声高亮。
+        self.assertNotIn("<mark", new_html.split("and Preset 5")[1])  # Preset 5/1e-12 同样不应高亮。
+        self.assertNotIn("<mark", amp_old_html)  # 旧侧 & 不应被标成删除。
+        self.assertNotIn("<mark", amp_new_html)  # 新侧 and 不应被标成新增。
+        self.assertIn('<mark class="del">16</mark>', old_html)  # 旧侧真实步骤号变化仍需标红。
+        self.assertIn('<mark class="ins">19</mark>', new_html)  # 新侧真实步骤号变化仍需标绿。
+
+    def test_dash_joined_list_clauses_split_into_review_units(self) -> None:
+        """A dash-glued list sentence should split before the next If clause."""
+
+        units = _split_line_preserving_numbers(
+            "a) All waveform outliers are removed from the average ― If the Eye Width is less than 1.0 ps."
+        )  # PCIe 列表有时把 a) 说明和后续 If 子句粘在一行。
+
+        self.assertEqual("a) All waveform outliers are removed from the average", units[0])  # 第一条列表说明独立成句。
+        self.assertEqual("If the Eye Width is less than 1.0 ps.", units[1])  # 后续 If 子句可与新版 b. 正确配对。
 
     def test_leading_table_header_prefix_does_not_create_paragraph_diff(self) -> None:
         """Table header text glued before prose should compare as extraction noise."""

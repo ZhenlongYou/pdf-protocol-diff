@@ -24,6 +24,18 @@ from .text_utils import (
 )
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
+_PCIE_MONTH_PATTERN = (
+    r"January|February|March|April|May|June|July|August|September|October|November|December"
+)  # PCIe 页脚日期使用英文月份；只有和 running header 成簇时才按页脚删除。
+_PCIE_RUNNING_HEADER_RE = re.compile(
+    r"(?i)^PCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+$"
+)  # PCIe PHY 测试规范的运行页眉/页脚。
+_PCIE_REVISION_LINE_RE = re.compile(
+    r"(?i)^Revision\s+\d+(?:\.\d+)*(?:,\s*Version\s+\d+(?:\.\d+)*)?$"
+)  # PCIe 页脚版本行；独立出现时可能是正文修订历史。
+_PCIE_DATE_LINE_RE = re.compile(
+    rf"(?i)^(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}$"
+)  # PCIe 页脚日期行；独立出现时可能是正文日期。
 
 _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
@@ -217,15 +229,17 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
     cleaned: list[PageText] = []
     for page in pages:
         line_zones = _page_line_zones(page.text)
+        pcie_furniture_indexes = _pcie_page_furniture_line_indexes(page.text.splitlines())  # 版本/日期只在 running header 邻近时删。
         kept_lines = [
             line
             for index, line in enumerate(page.text.splitlines())
-            if not _is_removed_page_furniture(
-                line,
-                line_zones.get(index, frozenset()),
-                repeated_edges,
-                repeated_dynamic,
-                repeated_static,
+            if index not in pcie_furniture_indexes
+            and not _is_removed_page_furniture(
+                    line,
+                    line_zones.get(index, frozenset()),
+                    repeated_edges,
+                    repeated_dynamic,
+                    repeated_static,
             )
         ]
         cleaned.append(PageText(page_number=page.page_number, text="\n".join(kept_lines)))
@@ -245,8 +259,11 @@ def _remove_single_page_furniture(pages: list[PageText]) -> list[PageText]:
     cleaned: list[PageText] = []
     for page in pages:
         line_zones = _page_line_zones(page.text)
+        pcie_furniture_indexes = _pcie_page_furniture_line_indexes(page.text.splitlines())  # 单页也只删除完整 PCIe 页眉簇。
         kept_lines = []
         for index, line in enumerate(page.text.splitlines()):
+            if index in pcie_furniture_indexes:
+                continue
             zones = line_zones.get(index, frozenset())
             normalized = normalize_line(line)
             if (
@@ -404,11 +421,27 @@ def _looks_like_static_page_furniture(line: str) -> bool:
         r"(?i)^the\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed",
         r"(?i)^optical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
         r"(?i)^implementation\s+agreement\s+oif-cei",
-        r"(?i)^revision\s+\d+(?:\.\d+)*(?:,\s*version\s+\d+(?:\.\d+)*)?$",
-        r"(?i)^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}$",
         r"(?i)^(test descriptions|revision history|table of contents)$",
     )
     return any(re.search(pattern, candidate) for pattern in static_patterns)
+
+
+def _pcie_page_furniture_line_indexes(raw_lines: list[str]) -> set[int]:
+    """Return line indexes belonging to a PCIe running header/footer cluster."""
+
+    lines = [normalize_line(line) for line in raw_lines]  # sectioning 层接收的是页面原始行，先统一空白。
+    indexes: set[int] = set()  # 保存需要删除的页眉簇行号。
+    for index, line in enumerate(lines):
+        if not _PCIE_RUNNING_HEADER_RE.fullmatch(line):
+            continue
+        indexes.add(index)  # running header 本身始终是页面家具。
+        for neighbor in range(max(0, index - 2), min(len(lines), index + 4)):
+            if neighbor == index:
+                continue
+            candidate = lines[neighbor]
+            if _PCIE_REVISION_LINE_RE.fullmatch(candidate) or _PCIE_DATE_LINE_RE.fullmatch(candidate):
+                indexes.add(neighbor)  # 只有紧邻 running header 的版本/日期才当页脚。
+    return indexes
 
 
 def _furniture_fingerprint(line: str) -> str:

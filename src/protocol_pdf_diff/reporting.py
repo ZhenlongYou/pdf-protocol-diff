@@ -31,6 +31,7 @@ _CHANGE_LABELS = {
 
 _INLINE_TOKEN_RE = re.compile(
     r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
+    r"|&"
     r"|[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*(?:x|×|\*)\s*10\s*[+-]?\d+"
     r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
     r"|[A-Za-zµμ]+[A-Za-z0-9µμ]*(?:[-_/][A-Za-z0-9µμ]+)*|[\u4e00-\u9fff]+",
@@ -40,6 +41,12 @@ _INLINE_NUMBER_RE = re.compile(
     r"[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?",
     flags=re.I,
 )
+_TABLE_ROW_TOKEN_RE = re.compile(
+    r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
+    r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
+    r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+",
+    flags=re.I,
+)  # 表格行摘要用 token key 忽略标点/复选框，同时保留数字、单位和符号。
 _CHINESE_INLINE_NUMBER_RE = re.compile(
     rf"[{CHINESE_NUMBER_CHARS}]+(?=\s*(?:{CHINESE_COUNT_UNIT_PATTERN}))",
     flags=re.I,
@@ -77,6 +84,7 @@ _PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
         "zip",
     }
 )
+_DISPLAY_EQUIVALENT_TOKEN_KEYS = {"adaptor": "adapter"}  # 报告高亮层把明确等价拼写视作同一词。
 
 
 @dataclass(frozen=True)
@@ -905,18 +913,26 @@ def _render_table_row_summary(
 
     old_rows = _table_group_rows(old_tables)  # 旧版同一逻辑表格的所有页按顺序合并。
     new_rows = _table_group_rows(new_tables)  # 新版同一逻辑表格的所有页按顺序合并。
-    old_keys = [_table_row_display_key(row) for row in old_rows]
-    new_keys = [_table_row_display_key(row) for row in new_rows]
+    old_keys = [_table_row_pairing_key(row) for row in old_rows]
+    new_keys = [_table_row_pairing_key(row) for row in new_rows]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
     body_rows: list[str] = []  # 保存 HTML 表格行。
     include_equal_rows = max(len(old_rows), len(new_rows)) <= 8  # 小表格可显示未变化行，像人工审查表一样直观。
     diff_count = 0  # 用于判断是否需要补充小表格里的无变化行。
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
         if tag == "equal" and not include_equal_rows:
+            for old_value, new_value in zip(old_rows[old_start:old_end], new_rows[new_start:new_end], strict=False):
+                kind = _table_structured_diff_kind(old_value, new_value)
+                if kind != "无变化":
+                    body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
+                    diff_count += 1
             continue
         if tag == "equal":
             for old_value, new_value in zip(old_rows[old_start:old_end], new_rows[new_start:new_end], strict=False):
-                body_rows.append(_render_structured_table_summary_row(old_value, new_value, "无变化"))
+                kind = _table_structured_diff_kind(old_value, new_value)
+                body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
+                if kind != "无变化":
+                    diff_count += 1
             continue
         old_block = old_rows[old_start:old_end]
         new_block = new_rows[new_start:new_end]
@@ -1117,13 +1133,42 @@ def _non_identity_table_field_values(fields: dict[str, str]) -> list[str]:
     return [value for key, value in fields.items() if key not in skipped and value]
 
 
+def _table_row_pairing_key(row: str) -> str:
+    """Build a row identity key that ignores value changes for alignment."""
+
+    fields = _table_row_fields(row)  # Header=Value 行优先按参数名/特性名配对，避免插入行造成错位。
+    label = _first_table_field(fields, ("parameter", "characteristic", "description", "label", "name"))
+    if label:
+        return f"label:{_table_row_display_key(label)}"
+    symbol = fields.get("symbol", "")
+    if symbol:
+        return f"symbol:{_table_row_display_key(symbol)}"  # 缺少描述列时才用 symbol 作为退路身份。
+    cells = _table_row_cells_for_display(row)
+    if cells:
+        return f"cell:{_table_row_display_key(cells[0])}"  # 无字段名的旧表格用第一列做人工可见身份。
+    return _table_row_display_key(row)
+
+
 def _table_row_display_key(row: str) -> str:
     """Normalize one visual table row for row-level summary matching."""
 
-    normalized = compact_inline(row).casefold()
+    cells = _table_row_cells_for_display(row)  # 先去掉内部 T1/T2 行号，避免行号变化制造伪差异。
+    normalized = compact_inline(" | ".join(cells) if cells else row).casefold()
     normalized = normalized.replace("µ", "u").replace("μ", "u")
     normalized = _normalize_table_row_math_text(normalized)
-    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"[❑☐□■▪•●]", " ", normalized)
+    tokens = [_table_row_token_key(token) for token in _TABLE_ROW_TOKEN_RE.findall(normalized)]
+    return " ".join(token for token in tokens if token)
+
+
+def _table_row_token_key(token: str) -> str:
+    """Return a punctuation-insensitive key for one table-summary token."""
+
+    normalized = token.casefold().replace("µ", "u").replace("μ", "u")
+    normalized = normalized.replace("≤", "<=").replace("≥", ">=")
+    normalized = _DISPLAY_EQUIVALENT_TOKEN_KEYS.get(normalized, normalized)  # 表格摘要同样忽略明确等价拼写。
+    if _INLINE_NUMBER_RE.fullmatch(normalized):
+        return _canonical_inline_number(normalized)  # 0.30 和 .30 在表格摘要中等价。
     return normalized
 
 
@@ -1334,6 +1379,11 @@ def _inline_tokens(text: str) -> list[_InlineToken]:
     index = 0
     while index < len(raw_tokens):
         raw, start, end = raw_tokens[index]
+        preset_phrase = _inline_preset_phrase_token(text, raw_tokens, raw_words, index)
+        if preset_phrase:
+            tokens.append(preset_phrase)
+            index += 2
+            continue
         parsed = parse_number_word_phrase(raw_words, index)
         if parsed:
             number_key, consumed = parsed
@@ -1405,16 +1455,41 @@ def _inline_token_key(token: str, source_text: str, start: int, end: int) -> str
     """Normalize one token for display highlighting, not comparison semantics."""
 
     normalized = _inline_context_word(token).replace("µ", "u").replace("μ", "u")
+    normalized = normalized.replace("&", "and")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
     normalized = _normalize_inline_math_token(normalized, source_text, start)
     normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
     normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
+    normalized = _DISPLAY_EQUIVALENT_TOKEN_KEYS.get(normalized, normalized)  # 不因 Adaptor/Adapter 这种等价拼写加高亮。
+    if re.fullmatch(r"e[+-]?\d+", normalized):
+        return _canonical_inline_number(f"1{normalized}")  # 裸 `E-12` 与 `1e-12` 都表示同一指数值。
     chinese_number = _contextual_chinese_number_key(normalized, source_text, start, end)
     if chinese_number is not None:
         return chinese_number
     if _INLINE_NUMBER_RE.fullmatch(normalized):
         return _canonical_inline_number(normalized)
     return normalized
+
+
+def _inline_preset_phrase_token(
+    source_text: str,
+    raw_tokens: list[tuple[str, int, int]],
+    raw_words: list[str],
+    index: int,
+) -> _InlineToken | None:
+    """Combine ``Preset 5`` into the same highlight key as ``P5``."""
+
+    if raw_words[index] != "preset" or index + 1 >= len(raw_tokens):
+        return None
+    next_word = raw_words[index + 1]
+    if not _INLINE_NUMBER_RE.fullmatch(next_word):
+        return None
+    number_key = _canonical_inline_number(next_word)
+    if not re.fullmatch(r"\d+", number_key):
+        return None
+    start = raw_tokens[index][1]
+    end = raw_tokens[index + 1][2]
+    return _InlineToken(text=source_text[start:end], start=start, end=end, key=f"p{number_key}")
 
 
 def _normalize_inline_math_token(token: str, source_text: str, start: int) -> str:
