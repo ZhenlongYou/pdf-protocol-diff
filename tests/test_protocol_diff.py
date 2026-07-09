@@ -1404,7 +1404,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("旧协议终止页", widget_texts)  # 旧 PDF 终止页输入标签必须存在。
         self.assertIn("新协议起始页", widget_texts)  # 新 PDF 起始页输入标签必须存在。
         self.assertIn("新协议终止页", widget_texts)  # 新 PDF 终止页输入标签必须存在。
-        self.assertIn("开始比较 / 生成报告", widget_texts)  # 主运行按钮必须存在。
+        self.assertIn("开始比较", widget_texts)  # 主运行按钮必须存在且文案保持简洁。
         self.assertIn("填入 Demo 文件", widget_texts)  # Demo 按钮只填路径，不再自动开跑导致卡顿。
         self.assertEqual(4, len(page_entry_facts))  # 四个页码输入框必须真实创建。
         self.assertEqual(3, len(browse_button_facts))  # 旧 PDF、新 PDF、输出目录三行都必须有“选择”按钮。

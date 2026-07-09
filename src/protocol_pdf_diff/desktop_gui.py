@@ -204,7 +204,7 @@ class ProtocolDiffDesktopApp:
         action_frame.columnconfigure(4, weight=1)  # 右侧留出弹性空间，避免按钮挤压。
         self.run_button = ttk.Button(
             action_frame,  # 按钮放在“开始生成报告”区域内。
-            text="开始比较 / 生成报告",  # 文案同时说明点击后会生成报告。
+            text="开始比较",  # 按钮只保留核心动作，避免重复说明“生成报告”。
             style="Primary.TButton",  # 使用主按钮样式突出最常用操作。
             command=self.run_comparison,  # 点击后进入输入校验和后台比较流程。
         )
@@ -548,7 +548,7 @@ def run_smoke_test() -> None:
     assert root.title() == "协议 PDF 差异对比工具"
     assert app.output_dir_var.get()
     root.update_idletasks()  # 先让 Tk 完成布局，后续才能检查控件是否真正挂到 grid 上。
-    assert app.run_button.cget("text") == "开始比较 / 生成报告"  # 确认主按钮不是旧文案或旧界面。
+    assert app.run_button.cget("text") == "开始比较"  # 确认主按钮不是旧文案或旧界面。
     assert app.run_button.cget("command")  # 确认主按钮绑定了回调，而不是只有静态文字。
     widget_texts = collect_widget_texts(root)  # 收集所有可见控件文案，检查关键输入是否存在。
     required_labels = {
@@ -556,7 +556,7 @@ def run_smoke_test() -> None:
         "旧协议终止页",  # 旧 PDF 范围终点输入框必须可见。
         "新协议起始页",  # 新 PDF 范围起点输入框必须可见。
         "新协议终止页",  # 新 PDF 范围终点输入框必须可见。
-        "开始比较 / 生成报告",  # 主运行按钮必须可见。
+        "开始比较",  # 主运行按钮必须可见。
     }
     missing_labels = sorted(required_labels - widget_texts)  # 找出缺失控件，方便构建失败时定位。
     assert not missing_labels, f"桌面界面缺少关键控件: {', '.join(missing_labels)}"  # 缺控件时直接失败。
