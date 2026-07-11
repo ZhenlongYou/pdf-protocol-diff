@@ -592,8 +592,25 @@ def _keep_non_watermark_object(obj: dict[str, object]) -> bool:
         return True
     size = float(obj.get("size", 0) or 0)  # 字体大小是区分正文和巨大水印的稳定信号。
     text = str(obj.get("text", ""))  # 单字符内容用于确认它确实属于 DRAFT 水印，而不是大号章节标题。
-    upright = bool(obj.get("upright", True))  # DRAFT 水印通常是旋转字符；普通大标题一般 upright=True。
-    return size < _WATERMARK_MIN_FONT_SIZE or text not in _WATERMARK_TEXT_CHARS or upright
+    return not (
+        size >= _WATERMARK_MIN_FONT_SIZE
+        and text in _WATERMARK_TEXT_CHARS
+        and _is_rotated_text_object(obj)
+    )  # pdfplumber 的 upright 标志不能代表视觉旋转；真实 OIF 水印需以变换矩阵判断。
+
+
+def _is_rotated_text_object(obj: dict[str, object]) -> bool:
+    """Return True when a PDF text object's transform has material rotation."""
+
+    matrix = tuple(obj.get("matrix", ()) or ())  # PDF 文本矩阵前四项包含缩放、倾斜和旋转信息。
+    if len(matrix) >= 4:
+        try:
+            a, b, c, d = (float(value) for value in matrix[:4])
+        except (TypeError, ValueError):
+            return not bool(obj.get("upright", True))  # 异常矩阵退回旧标志，保持兼容性。
+        axis_scale = max(abs(a), abs(d), 1.0)  # 正常横排文字的 b/c 接近 0，a/d 表示主轴缩放。
+        return max(abs(b), abs(c)) >= axis_scale * 0.15  # 15% 足以覆盖 OIF 约 45° 水印并保留正常大标题。
+    return not bool(obj.get("upright", True))  # 旧测试/手工对象没有矩阵时沿用 upright 语义。
 
 
 def _extract_table_lines(page: object, pdf_name: str, page_number: int) -> tuple[list[str], list[str]]:
@@ -1143,8 +1160,14 @@ def _clean_table_cell_lines(lines: list[str]) -> str:
     if not lines:  # 清洗后没有内容的单元格保持为空。
         return ""
     if _looks_like_symbol_fragments(lines):  # 符号列常被抽成 R / 0 或 f / b，需要合并成 R0、fb。
-        return "".join(lines)
-    return " / ".join(lines)  # 普通多行说明用斜杠分隔，保留每个子项的可读边界。
+        value = "".join(lines)
+    else:
+        value = " / ".join(lines)  # 普通多行说明用斜杠分隔，保留每个子项的可读边界。
+    return re.sub(
+        r"(?i)([×x*])\s*[×x*]\s*(?=10(?:\D|$))",
+        r"\1",
+        value,
+    )  # PDF 字形映射偶尔把一个乘号抽成 ×x；指数记法里只保留一个乘号。
 
 
 def _find_table_header_row(rows: list[list[list[str]]]) -> int | None:
@@ -1372,7 +1395,10 @@ def _looks_like_group_label(value: str) -> bool:
     words = re.findall(r"[A-Za-z]+", normalized)
     if ":" in normalized and re.search(r"(?i)\b(?:class|device|model|note|package)\b", normalized):
         return True  # 例如 Device package model: Class B (Note 1) 是组标题，不是参数行。
-    if len(words) >= 3 and re.search(r"(?i)\b(?:parameters?|characteristics?|requirements?|interface)\b", normalized):
+    if len(words) >= 3 and re.search(
+        r"(?i)\b(?:model|parameters?|characteristics?|requirements?|interface)\b",
+        normalized,
+    ):
         return True
     return normalized.endswith(":")
 
@@ -1485,24 +1511,36 @@ def _table_line_key(line: str) -> str:
     return re.sub(r"\s+", " ", line).casefold().strip()
 
 
-def _table_duplicate_token_index(table_lines: list[str]) -> set[str]:
-    """Build a token index from structured table rows on the same page."""
+def _table_duplicate_token_index(
+    table_lines: list[str],
+) -> tuple[set[str], tuple[frozenset[str], ...]]:
+    """Build page-wide and per-row token indexes from structured table rows."""
 
     tokens: set[str] = set()  # 聚合所有结构化表格 token，用于识别重复的原始表格长行。
+    row_token_sets: list[frozenset[str]] = []  # 单行 token 用于确认短句确实完整复制了某一表格行。
     for table_line in table_lines:
-        tokens.update(_unstructured_table_tokens(table_line))  # 每条表格行贡献参数名、符号和值等 token。
-    return tokens
+        row_tokens = frozenset(_structured_table_value_tokens(table_line))
+        if row_tokens:
+            row_token_sets.append(row_tokens)
+            tokens.update(row_tokens)  # 表头字段名不参与，避免全局 token 被 Parameter/Value 等常见词抬高。
+    return tokens, tuple(row_token_sets)
 
 
-def _looks_like_duplicate_unstructured_table_line(line: str, table_tokens: set[str]) -> bool:
+def _looks_like_duplicate_unstructured_table_line(
+    line: str,
+    table_index: tuple[set[str], tuple[frozenset[str], ...]],
+) -> bool:
     """Return True when raw extracted text duplicates structured table rows."""
 
+    table_tokens, row_token_sets = table_index
     if not table_tokens:  # 没有结构化表格时，不能删除正文长行。
         return False
     words = set(re.findall(r"[A-Za-z]+", line.casefold()))  # 只用英文技术词判断，避免误伤中文段落。
     line_tokens = _unstructured_table_tokens(line)  # 计算该长行与结构化表格行的 token 重叠。
     if not line_tokens:
         return False
+    if any(len(row_tokens) >= 4 and row_tokens <= line_tokens for row_tokens in row_token_sets):
+        return True  # 原始行完整覆盖一条结构化记录时即为重复，修订历史短句即使以句点结尾也适用。
     overlap = len(line_tokens & table_tokens)  # 重叠越高，越说明这行只是同一张表的原始抽取文本。
     if _looks_like_duplicate_short_table_row(line, line_tokens, overlap, words):
         return True
@@ -1534,6 +1572,25 @@ def _looks_like_duplicate_short_table_row(
     )  # 同时出现数字和单位/破折号，才更像表格值行。
     has_table_word = bool(words & _UNSTRUCTURED_TABLE_WORDS)  # 参数类词给短行提供额外语义证据。
     return overlap_ratio >= 0.8 and has_value_shape and has_table_word
+
+
+def _structured_table_value_tokens(table_line: str) -> set[str]:
+    """Tokenize only visible cell values from one ``Header=Value`` table row."""
+
+    text = normalize_line(table_line)
+    if text.startswith(_TABLE_ROW_PREFIX):
+        text = text[len(_TABLE_ROW_PREFIX) :].strip()
+    values: list[str] = []
+    for cell in (part.strip() for part in text.split("|") if part.strip()):
+        if re.fullmatch(r"T\d+", cell, flags=re.I):
+            continue
+        if "=" in cell:
+            _key, value = cell.split("=", 1)
+            if value.strip():
+                values.append(value.strip())
+        else:
+            values.append(cell)
+    return _unstructured_table_tokens(" ".join(values))
 
 
 def _unstructured_table_tokens(value: str) -> set[str]:

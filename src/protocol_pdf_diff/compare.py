@@ -420,10 +420,58 @@ def _sections_effectively_unchanged(
     new_section: Section,
     options: DiffOptions,
 ) -> bool:
-    """Treat a matched section as unchanged only when title and body are stable."""
+    """Treat exact or safely bounded spelling-only section variants as unchanged."""
 
     body_same = _review_unit_key(old_section.body) == _review_unit_key(new_section.body)
-    return body_same and not _section_heading_changed(old_section, new_section)
+    if _section_heading_changed(old_section, new_section):
+        return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
+    if body_same:
+        return True  # 大小写、空白、标点和等价数学记法已由 review key 安全归一。
+    if _review_similarity(old_section.body, new_section.body) < options.unchanged_similarity:
+        return False  # 用户阈值只负责决定高相似度候选是否值得进入安全拼写检查。
+    return _only_minor_spelling_delta(old_section.body, new_section.body)
+
+
+def _only_minor_spelling_delta(old_text: str, new_text: str) -> bool:
+    """Return True only for one-to-one close spelling variants without numbers."""
+
+    old_tokens = _review_unit_key(old_text).split()  # review key 已经保留协议数值和标识符。
+    new_tokens = _review_unit_key(new_text).split()
+    matcher = difflib.SequenceMatcher(None, old_tokens, new_tokens, autojunk=False)
+    saw_spelling_delta = False
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        old_block = old_tokens[old_start:old_end]
+        new_block = new_tokens[new_start:new_end]
+        if tag != "replace" or len(old_block) != len(new_block):
+            return False  # 插入、删除或多对一变化可能改变条款含义，不能按拼写噪声隐藏。
+        for old_token, new_token in zip(old_block, new_block, strict=True):
+            if not _is_close_spelling_variant(old_token, new_token):
+                return False
+            saw_spelling_delta = True
+    return saw_spelling_delta
+
+
+def _is_close_spelling_variant(old_token: str, new_token: str) -> bool:
+    """Recognize only a conservative plural/third-person inflection difference."""
+
+    if not re.fullmatch(r"[a-z]{4,}", old_token) or not re.fullmatch(r"[a-z]{4,}", new_token):
+        return False  # 数字、符号、短 modal 词和技术标识符一律视为实质变化。
+    return new_token in _safe_inflection_variants(old_token) or old_token in _safe_inflection_variants(new_token)
+
+
+def _safe_inflection_variants(token: str) -> set[str]:
+    """Return base forms reachable only by removing a trailing plural marker."""
+
+    variants: set[str] = set()
+    if token.endswith("ies") and len(token) > 5:
+        variants.add(token[:-3] + "y")  # applies/apply，不允许任何前缀改写。
+    if token.endswith("es") and len(token) > 5:
+        variants.add(token[:-2])  # matches/match、classes/class。
+    if token.endswith("s") and not token.endswith("ss") and len(token) > 4:
+        variants.add(token[:-1])  # supports/support、uses/use。
+    return {variant for variant in variants if len(variant) >= 4}
 
 
 def _section_heading_changed(old_section: Section, new_section: Section) -> bool:
@@ -506,26 +554,16 @@ def _summarize_text_delta(
         elif tag == "replace":
             old_block_units = old_units[old_start:old_end]
             new_block_units = new_units[new_start:new_end]
-            if len(old_block_units) == len(new_block_units):
-                for old_unit, new_unit in zip(old_block_units, new_block_units, strict=True):
-                    if _review_unit_key(old_unit) == _review_unit_key(new_unit):
-                        continue
-                    add_candidate(
-                        "replaced",
-                        pair=SnippetPair(old=_report_unit(old_unit), new=_report_unit(new_unit)),
-                        priority_values=(old_unit, new_unit),
-                    )
-            else:
-                for candidate in _unequal_replace_delta_candidates(
-                    old_block_units,
-                    new_block_units,
-                ):
-                    add_candidate(
-                        candidate.kind,
-                        text=candidate.text,
-                        pair=candidate.pair,
-                        priority_values=candidate.priority_values,
-                    )
+            for candidate in _unequal_replace_delta_candidates(
+                old_block_units,
+                new_block_units,
+            ):
+                add_candidate(
+                    candidate.kind,
+                    text=candidate.text,
+                    pair=candidate.pair,
+                    priority_values=candidate.priority_values,
+                )  # 等长和不等长块统一经过语义锚点与最低分门槛，禁止按位置强配。
 
     return _materialize_delta_candidates(candidates, max_snippets)
 

@@ -65,6 +65,28 @@ class TableVisual:
 
 
 @dataclass(frozen=True)
+class TableRowChange:
+    """One auditable row-level finding inside a paired table."""
+
+    item: str  # 参数/特性名称，供导航、CSV 和人工复核使用。
+    old_value: str  # 旧表中与该项目对应的符号、数值和单位摘要。
+    new_value: str  # 新表中与该项目对应的符号、数值和单位摘要。
+    change_type: str  # 用户可读分类，例如“实质变化”“新表新增行”。
+
+
+@dataclass(frozen=True)
+class TableChange:
+    """One paired, added, or deleted logical table and its row findings."""
+
+    change_type: str  # modified / added / deleted。
+    old_tables: tuple[TableVisual, ...]  # 同一旧版逻辑表格可能跨多个页面。
+    new_tables: tuple[TableVisual, ...]  # 同一新版逻辑表格可能跨多个页面。
+    similarity: float  # 表题和前几行形成的配对分数；单侧表格为 0。
+    caption_changed: bool  # 表题或表号变化即使行内容相同也必须进入报告。
+    row_changes: tuple[TableRowChange, ...]  # 完整行级事实，不受 HTML 展示上限影响。
+
+
+@dataclass(frozen=True)
 class HeadingInfo:
     """A heading detected from a protocol line.
 

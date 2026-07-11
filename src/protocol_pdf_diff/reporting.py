@@ -12,7 +12,15 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 
-from .models import DiffOptions, DiffResult, Section, SectionChange, TableVisual
+from .models import (
+    DiffOptions,
+    DiffResult,
+    Section,
+    SectionChange,
+    TableChange,
+    TableRowChange,
+    TableVisual,
+)
 from .text_utils import (
     CHINESE_COUNT_UNIT_PATTERN,
     CHINESE_NUMBER_CHARS,
@@ -114,9 +122,9 @@ def write_reports(
 
     The HTML report is the most visual review surface: it groups changes by
     section, shows old/new snippets side by side, and highlights inline
-    replacements. Markdown/TXT remain useful for copy-paste workflows, CSV is
-    meant for filtering in Excel, and JSON preserves parsed section metadata for
-    troubleshooting false positives or missed headings.
+    replacements. Markdown/TXT remain useful for copy-paste workflows, separate
+    prose/table CSV files support Excel review, and JSON preserves the complete
+    section and table-change audit model.
     """
 
     base_dir = Path(output_dir).expanduser().resolve()
@@ -124,10 +132,12 @@ def write_reports(
     report_dir = base_dir / f"protocol_diff_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    markdown = _render_markdown(result, options)
-    html = _render_html(result, options)
+    table_changes = _build_table_changes(result)  # 表格配对与行变化只计算一次，所有报告格式共享同一事实源。
+    markdown = _render_markdown(result, options, table_changes)
+    html = _render_html(result, options, table_changes)
     text = _markdown_to_plain_text(markdown)
     csv_rows = _rows_for_csv(result.changes)
+    table_csv_rows = _rows_for_table_csv(table_changes)
     sections_payload = {
         "old_pdf": str(result.old_pdf),
         "new_pdf": str(result.new_pdf),
@@ -136,6 +146,7 @@ def write_reports(
         "old_selected_pages": _selected_page_payload(result, "old"),
         "new_selected_pages": _selected_page_payload(result, "new"),
         "changes": [_change_to_dict(change) for change in result.changes],
+        "table_changes": [_table_change_to_dict(change) for change in table_changes],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
         "old_table_visuals": [_table_visual_to_dict(table) for table in result.old_table_visuals],
@@ -147,6 +158,7 @@ def write_reports(
     html_path = report_dir / "protocol_diff_report.html"
     txt_path = report_dir / "protocol_diff_report.txt"
     csv_path = report_dir / "changes.csv"
+    table_csv_path = report_dir / "table_changes.csv"
     json_path = report_dir / "protocol_diff_data.json"
 
     md_path.write_text(markdown, encoding="utf-8")
@@ -172,6 +184,24 @@ def write_reports(
         )
         writer.writeheader()
         writer.writerows(csv_rows)
+    with table_csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "table_change_type",
+                "old_titles",
+                "new_titles",
+                "old_pages",
+                "new_pages",
+                "pair_similarity",
+                "item",
+                "old_value",
+                "new_value",
+                "row_change_type",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(table_csv_rows)
     json_path.write_text(json.dumps(sections_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return {
@@ -180,11 +210,16 @@ def write_reports(
         "html": html_path,
         "text": txt_path,
         "csv": csv_path,
+        "table_csv": table_csv_path,
         "json": json_path,
     }
 
 
-def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
+def _render_markdown(
+    result: DiffResult,
+    options: DiffOptions,
+    table_changes: list[TableChange],
+) -> str:
     """Render the main review report in Markdown."""
 
     counts = _change_counts(result.changes)
@@ -209,10 +244,11 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
         "",
         "| 类型 | 数量 |",
         "|---|---:|",
-        f"| 修改 | {counts.get('modified', 0)} |",
-        f"| 新增 | {counts.get('added', 0)} |",
-        f"| 删除 | {counts.get('deleted', 0)} |",
-        f"| 未变化(仅在配置开启时列出) | {counts.get('unchanged', 0)} |",
+        f"| 章节修改 | {counts.get('modified', 0)} |",
+        f"| 章节新增 | {counts.get('added', 0)} |",
+        f"| 章节删除 | {counts.get('deleted', 0)} |",
+        f"| 变化表格 | {len(table_changes)} |",
+        f"| 表格行变化 | {sum(len(change.row_changes) for change in table_changes)} |",
         "",
     ]
 
@@ -222,9 +258,27 @@ def _render_markdown(result: DiffResult, options: DiffOptions) -> str:
             lines.append(f"- {warning}")
         lines.append("")
 
+    if table_changes:
+        lines.extend(["## 表格变化", ""])
+        for index, table_change in enumerate(table_changes, start=1):
+            lines.append(f"### T{index}. {_table_change_title(table_change)}")
+            lines.append(f"- 类型: {_CHANGE_LABELS.get(table_change.change_type, table_change.change_type)}")
+            lines.append(f"- 旧表: {_table_side_description(table_change.old_tables)}")
+            lines.append(f"- 新表: {_table_side_description(table_change.new_tables)}")
+            if table_change.old_tables and table_change.new_tables:
+                lines.append(f"- 配对相似度: {table_change.similarity:.3f}")
+            if table_change.caption_changed:
+                lines.append("- 表题/表号发生变化；行内容变化另列如下。")
+            for row_change in table_change.row_changes:
+                lines.append(
+                    f"- {row_change.change_type}: {row_change.item} | "
+                    f"旧 `{row_change.old_value}` | 新 `{row_change.new_value}`"
+                )
+            lines.append("")
+
     lines.extend(
         [
-            "## 详细差异",
+            "## 正文与章节变化",
             "",
             "说明: 页码来自 PDF 抽取顺序；如果 PDF 自身页脚页码不同，请以 PDF 阅读器显示为准。",
             "",
@@ -312,10 +366,13 @@ def _markdown_to_plain_text(markdown: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_html(result: DiffResult, options: DiffOptions) -> str:
+def _render_html(
+    result: DiffResult,
+    options: DiffOptions,
+    table_changes: list[TableChange],
+) -> str:
     """Render an easy-to-scan standalone HTML review report."""
 
-    counts = _change_counts(result.changes)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     comparison_note = _comparison_method_note(result)
     scope_note = _report_scope_note(options)
@@ -332,10 +389,20 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
         </section>
         """
 
-    nav_items = "\n".join(
+    section_nav_items = "\n".join(
         _render_nav_item(index, change)
         for index, change in enumerate(result.changes, start=1)
     )
+    table_nav_items = "\n".join(
+        _render_table_nav_item(index, change)
+        for index, change in enumerate(table_changes, start=1)
+    )
+    nav_parts: list[str] = []
+    if table_nav_items:
+        nav_parts.extend(['<div class="nav-title">表格变化</div>', table_nav_items])
+    if section_nav_items:
+        nav_parts.extend(['<div class="nav-title nav-section-gap">正文与章节变化</div>', section_nav_items])
+    nav_items = "\n".join(nav_parts)
     if not nav_items:
         nav_items = f'<div class="empty-nav">{_escape(_empty_report_message(result))}</div>'
 
@@ -345,7 +412,8 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
     )
     if not change_cards:
         change_cards = f'<section class="empty-state">{_escape(_empty_report_message(result))}</section>'
-    table_visual_html = _render_table_visuals_html(result)
+    table_visual_html = _render_table_changes_html(table_changes)
+    table_row_change_count = sum(len(change.row_changes) for change in table_changes)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -423,6 +491,7 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
     .meta dt {{ color: var(--muted); }}
     .meta dd {{ margin: 0; overflow-wrap: anywhere; }}
     .nav-title {{ color: var(--muted); font-size: 13px; margin-bottom: 10px; }}
+    .nav-section-gap {{ margin-top: 18px; }}
     .nav-item {{
       display: grid;
       grid-template-columns: 28px minmax(0, 1fr);
@@ -600,6 +669,7 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
     .table-kind-same {{ color: #146c43; background: #eaf7ef; border-color: #b7e4c7; }}
     .table-kind-add {{ color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }}
     .table-kind-del {{ color: #7a4b00; background: #fff7db; border-color: #f5d889; }}
+    .section-heading {{ margin: 22px 0 12px; font-size: 21px; }}
     @media (max-width: 860px) {{
       .layout {{ grid-template-columns: 1fr; }}
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
@@ -617,15 +687,14 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
   </header>
   <div class="layout">
     <aside>
-      <div class="nav-title">差异导航</div>
       {nav_items}
     </aside>
     <main>
       <section class="summary">
-        <div class="metric"><strong>{counts.get("modified", 0)}</strong><span>修改</span></div>
-        <div class="metric"><strong>{counts.get("added", 0)}</strong><span>新增</span></div>
-        <div class="metric"><strong>{counts.get("deleted", 0)}</strong><span>删除</span></div>
-        <div class="metric"><strong>{len(result.changes)}</strong><span>总差异</span></div>
+        <div class="metric"><strong>{len(result.changes)}</strong><span>章节变化</span></div>
+        <div class="metric"><strong>{len(table_changes)}</strong><span>变化表格</span></div>
+        <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
+        <div class="metric"><strong>{len(result.changes) + len(table_changes)}</strong><span>审阅卡片</span></div>
       </section>
       <section class="meta">
         <dl>
@@ -640,8 +709,9 @@ def _render_html(result: DiffResult, options: DiffOptions) -> str:
         </dl>
       </section>
       {warning_html}
-      {change_cards}
       {table_visual_html}
+      <h2 class="section-heading" id="text-changes">正文与章节变化</h2>
+      {change_cards}
     </main>
   </div>
 </body>
@@ -688,23 +758,67 @@ def _render_change_html(index: int, change: SectionChange) -> str:
     """
 
 
-def _render_table_visuals_html(result: DiffResult) -> str:
-    """Render screenshot-backed table evidence without replacing text diffs."""
+def _render_table_changes_html(table_changes: list[TableChange]) -> str:
+    """Render only changed screenshot-backed tables from the shared fact model."""
 
-    if not result.old_table_visuals and not result.new_table_visuals:
+    if not table_changes:
         return ""
-    groups = _paired_table_visuals(result.old_table_visuals, result.new_table_visuals)
     cards = "\n".join(
-        _render_table_visual_group(index, group)
-        for index, group in enumerate(groups, start=1)
+        _render_table_change_html(index, change)
+        for index, change in enumerate(table_changes, start=1)
     )
     return f"""
-      <section class="table-visuals">
-        <h2>表格截图识别</h2>
-        <p class="change-summary">上方保留正文和章节差异；本区集中展示表格截图、网格证据和行级变化，方便直接回看表格内容。</p>
+      <section class="table-visuals" id="table-changes">
+        <h2>表格变化</h2>
+        <p class="change-summary">仅展示检测到行级变化、表题/表号变化或单侧新增/删除的表格；旧/新表题、页码、配对分数和完整行变化同时写入 JSON 与 CSV。</p>
         {cards}
       </section>
     """
+
+
+def _build_table_changes(result: DiffResult) -> list[TableChange]:
+    """Pair visual tables and materialize one reusable list of changed facts."""
+
+    changes: list[TableChange] = []
+    for group in _paired_table_visuals(result.old_table_visuals, result.new_table_visuals):
+        row_changes = tuple(_table_row_changes(group.old_tables, group.new_tables))
+        caption_changed = _table_group_caption_changed(group.old_tables, group.new_tables)
+        if group.old_tables and group.new_tables and not row_changes and not caption_changed:
+            continue  # 未变化表格不占导航和报告篇幅。
+        change_type = "modified"
+        if not group.old_tables:
+            change_type = "added"
+        elif not group.new_tables:
+            change_type = "deleted"
+        similarity = (
+            _table_visual_similarity(group.old_tables[0], group.new_tables[0])
+            if group.old_tables and group.new_tables
+            else 0.0
+        )
+        changes.append(
+            TableChange(
+                change_type=change_type,
+                old_tables=group.old_tables,
+                new_tables=group.new_tables,
+                similarity=similarity,
+                caption_changed=caption_changed,
+                row_changes=row_changes,
+            )
+        )
+    return changes
+
+
+def _table_group_caption_changed(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+) -> bool:
+    """Return True when paired tables have different visible captions."""
+
+    if not old_tables or not new_tables:
+        return False  # 单侧表格的新增/删除已由 change_type 表达，不重复标记表题变化。
+    old_titles = [compact_inline(title).casefold() for title in _unique_table_titles(old_tables)]
+    new_titles = [compact_inline(title).casefold() for title in _unique_table_titles(new_tables)]
+    return old_titles != new_titles
 
 
 def _paired_table_visuals(
@@ -816,55 +930,54 @@ def _table_visual_identity(table: TableVisual) -> str:
     return compact_inline(f"{title} {rows}").casefold()
 
 
-def _render_table_visual_group(
+def _render_table_change_html(
     index: int,
-    group: _TableVisualGroup,
+    change: TableChange,
 ) -> str:
-    """Render one old/new logical table group."""
+    """Render one changed logical table with auditable pairing metadata."""
 
-    title = _table_group_title(index, group)
-    old_shot = _render_table_shot_group("旧版截图", group.old_tables)
-    new_shot = _render_table_shot_group("新版截图", group.new_tables)
-    rows_html = _render_table_row_summary(group.old_tables, group.new_tables)
+    title = _table_change_title(change)
+    old_shot = _render_table_shot_group("旧版截图", change.old_tables)
+    new_shot = _render_table_shot_group("新版截图", change.new_tables)
+    rows_html = _render_table_row_summary(change)
+    label = _CHANGE_LABELS.get(change.change_type, change.change_type)
+    similarity = (
+        f" · 配对相似度 {change.similarity:.3f}"
+        if change.old_tables and change.new_tables
+        else ""
+    )
     return f"""
-        <div class="table-visual-card">
-          <h3>{_escape(title)}</h3>
+        <div class="table-visual-card" id="table-change-{index}">
+          <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(title)}</h3>
+          <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
+          新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
           <div class="table-shot-grid">{old_shot}{new_shot}</div>
           {rows_html}
         </div>
     """
 
 
-def _table_group_title(
-    index: int,
-    group: _TableVisualGroup,
-) -> str:
-    """Build a readable title for one visual table group."""
+def _table_change_title(change: TableChange) -> str:
+    """Build a concise title while retaining explicit old/new caption mapping."""
 
-    table = _first_table_in_group(group)
+    table = next(iter(change.new_tables or change.old_tables), None)
     if table is None:
-        return f"表格 {index}"
+        return "未命名表格"
     title = table.title or ("跨页表格续段" if table.is_continuation else "")
-    suffix = _table_group_page_suffix(group)
     if title:
-        return f"{index}. {title}{suffix}"
-    return f"{index}. 第 {table.page_number} 页表格 {table.table_number}{suffix}"
+        return title
+    return f"第 {table.page_number} 页表格 {table.table_number}"
 
 
-def _first_table_in_group(group: _TableVisualGroup) -> TableVisual | None:
-    """Return the first available table from a visual group."""
+def _table_side_description(tables: tuple[TableVisual, ...]) -> str:
+    """Return captions and source pages for one side of a table change."""
 
-    return next(iter(group.new_tables or group.old_tables), None)
-
-
-def _table_group_page_suffix(group: _TableVisualGroup) -> str:
-    """Return a compact page-count suffix for multipage visual groups."""
-
-    old_count = len(group.old_tables)  # 旧版截图页数用于说明跨页表格。
-    new_count = len(group.new_tables)  # 新版截图页数用于说明跨页表格。
-    if old_count <= 1 and new_count <= 1:
-        return ""
-    return f"（旧 {old_count} 页 / 新 {new_count} 页）"
+    if not tables:
+        return "无对应表格"
+    titles = _unique_table_titles(tables)
+    title_text = " / ".join(titles) if titles else "无表题续段"
+    pages = ", ".join(str(table.page_number) for table in tables)
+    return f"{title_text}（页 {pages}）"
 
 
 def _render_table_shot_group(label: str, tables: tuple[TableVisual, ...]) -> str:
@@ -906,45 +1019,19 @@ def _display_table_grid_summary(summary: str) -> str:
 
 
 def _render_table_row_summary(
-    old_tables: tuple[TableVisual, ...],
-    new_tables: tuple[TableVisual, ...],
+    change: TableChange,
 ) -> str:
-    """Render a compact structured summary from table rows."""
+    """Render compact HTML from precomputed row-change facts."""
 
-    old_rows = _table_group_rows(old_tables)  # 旧版同一逻辑表格的所有页按顺序合并。
-    new_rows = _table_group_rows(new_tables)  # 新版同一逻辑表格的所有页按顺序合并。
-    old_keys = [_table_row_pairing_key(row) for row in old_rows]
-    new_keys = [_table_row_pairing_key(row) for row in new_rows]
-    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
-    body_rows: list[str] = []  # 保存 HTML 表格行。
-    include_equal_rows = max(len(old_rows), len(new_rows)) <= 8  # 小表格可显示未变化行，像人工审查表一样直观。
-    diff_count = 0  # 用于判断是否需要补充小表格里的无变化行。
-    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        if tag == "equal" and not include_equal_rows:
-            for old_value, new_value in zip(old_rows[old_start:old_end], new_rows[new_start:new_end], strict=False):
-                kind = _table_structured_diff_kind(old_value, new_value)
-                if kind != "无变化":
-                    body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
-                    diff_count += 1
-            continue
-        if tag == "equal":
-            for old_value, new_value in zip(old_rows[old_start:old_end], new_rows[new_start:new_end], strict=False):
-                kind = _table_structured_diff_kind(old_value, new_value)
-                body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
-                if kind != "无变化":
-                    diff_count += 1
-            continue
-        old_block = old_rows[old_start:old_end]
-        new_block = new_rows[new_start:new_end]
-        block_count = max(len(old_block), len(new_block))
-        for offset in range(block_count):
-            old_value = old_block[offset] if offset < len(old_block) else ""
-            new_value = new_block[offset] if offset < len(new_block) else ""
-            kind = _table_structured_diff_kind(old_value, new_value)
-            body_rows.append(_render_structured_table_summary_row(old_value, new_value, kind))
-            diff_count += 1
-    if not body_rows or diff_count == 0:
-        body_rows = ['<tr><td>未检测到行级变化</td><td></td><td></td><td></td></tr>']
+    body_rows = [_render_table_row_change(row_change) for row_change in change.row_changes]
+    if not body_rows:
+        message = (
+            "表题/表号发生变化，未检测到行级内容变化"
+            if change.caption_changed
+            else "未抽取到可靠行级文字，请结合截图复核"
+        )
+        kind = "表题/表号变化" if change.caption_changed else "需截图复核"
+        body_rows = [_render_table_row_change(TableRowChange(message, "", "", kind))]
     visible_rows = body_rows[:12]  # 表格摘要保持可读，超出的行数必须显式提示。
     omitted_count = max(0, len(body_rows) - len(visible_rows))  # 统计被折叠的表格行变化。
     omitted_note = (
@@ -962,6 +1049,49 @@ def _render_table_row_summary(
     )
 
 
+def _table_row_changes(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+) -> list[TableRowChange]:
+    """Return complete row findings without position-pairing unrelated identities."""
+
+    old_rows = _table_group_rows(old_tables)
+    new_rows = _table_group_rows(new_tables)
+    old_keys = [_table_row_pairing_key(row) for row in old_rows]
+    new_keys = [_table_row_pairing_key(row) for row in new_rows]
+    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
+    changes: list[TableRowChange] = []
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            for old_row, new_row in zip(
+                old_rows[old_start:old_end],
+                new_rows[new_start:new_end],
+                strict=False,
+            ):
+                kind = _table_structured_diff_kind(old_row, new_row)
+                if kind != "无变化":
+                    changes.append(_make_table_row_change(old_row, new_row, kind))
+            continue
+        if tag in {"delete", "replace"}:
+            for old_row in old_rows[old_start:old_end]:
+                changes.append(_make_table_row_change(old_row, "", "旧表删除行"))
+        if tag in {"insert", "replace"}:
+            for new_row in new_rows[new_start:new_end]:
+                changes.append(_make_table_row_change("", new_row, "新表新增行"))
+    return changes
+
+
+def _make_table_row_change(old_row: str, new_row: str, kind: str) -> TableRowChange:
+    """Convert raw structured rows into one reusable report record."""
+
+    return TableRowChange(
+        item=_table_summary_item(old_row, new_row),
+        old_value=_table_row_value_display(old_row),
+        new_value=_table_row_value_display(new_row),
+        change_type=kind,
+    )
+
+
 def _table_group_rows(tables: tuple[TableVisual, ...]) -> list[str]:
     """Return all structured rows from a table visual group."""
 
@@ -971,19 +1101,16 @@ def _table_group_rows(tables: tuple[TableVisual, ...]) -> list[str]:
     return rows
 
 
-def _render_structured_table_summary_row(old_row: str, new_row: str, kind: str) -> str:
-    """Render one user-readable table-summary row."""
+def _render_table_row_change(row_change: TableRowChange) -> str:
+    """Render one user-readable table-change record."""
 
-    item = _table_summary_item(old_row, new_row)
-    old_display = _table_row_value_display(old_row)
-    new_display = _table_row_value_display(new_row)
-    class_name = _table_kind_class(kind)
+    class_name = _table_kind_class(row_change.change_type)
     return (
         "<tr>"
-        f"<td>{_escape(item)}</td>"
-        f"<td>{_escape(old_display)}</td>"
-        f"<td>{_escape(new_display)}</td>"
-        f'<td><span class="table-kind {class_name}">{_escape(kind)}</span></td>'
+        f"<td>{_escape(row_change.item)}</td>"
+        f"<td>{_escape(row_change.old_value)}</td>"
+        f"<td>{_escape(row_change.new_value)}</td>"
+        f'<td><span class="table-kind {class_name}">{_escape(row_change.change_type)}</span></td>'
         "</tr>"
     )
 
@@ -1001,7 +1128,7 @@ def _table_summary_item(old_row: str, new_row: str) -> str:
 
 
 def _table_row_value_display(row: str) -> str:
-    """Return the old/new value cell shown in the structured summary."""
+    """Return a compact value summary without dropping changed conditions."""
 
     if not row:
         return ""
@@ -1023,8 +1150,7 @@ def _table_row_value_display(row: str) -> str:
         parts.append(f"{value_text} {unit}".strip() if unit else value_text)
     elif unit and not parts:
         parts.append(unit)
-    if not parts:
-        parts.extend(_non_identity_table_field_values(fields))
+    parts.extend(_additional_table_field_displays(row))  # Condition/Notes/列N 等证据也必须进入 HTML、JSON 和 CSV。
     return " | ".join(part for part in parts if part)
 
 
@@ -1126,11 +1252,37 @@ def _table_numeric_value_changed(old_row: str, new_row: str) -> bool:
     return False
 
 
-def _non_identity_table_field_values(fields: dict[str, str]) -> list[str]:
-    """Return fallback values after removing identity/description fields."""
+def _additional_table_field_displays(row: str) -> list[str]:
+    """Return non-identity fields not already represented by symbol/value/unit."""
 
-    skipped = {"parameter", "characteristic", "description", "label", "name"}  # 这些字段已经用于项目列。
-    return [value for key, value in fields.items() if key not in skipped and value]
+    skipped = {
+        "parameter",
+        "characteristic",
+        "description",
+        "label",
+        "name",
+        "symbol",
+        "value",
+        "values",
+        "min",
+        "minimum",
+        "typ",
+        "typical",
+        "max",
+        "maximum",
+        "unit",
+        "units",
+    }
+    displays: list[str] = []
+    for cell in _table_row_cells_for_display(row):
+        if "=" not in cell:
+            continue
+        key, value = cell.split("=", 1)
+        normalized_key = compact_inline(key).casefold()
+        if normalized_key in skipped or not compact_inline(value):
+            continue
+        displays.append(f"{compact_inline(key)}={compact_inline(value)}")
+    return displays
 
 
 def _table_row_pairing_key(row: str) -> str:
@@ -1176,11 +1328,13 @@ def _normalize_table_row_math_text(value: str) -> str:
     """Normalize table-row math notation for visual summary matching."""
 
     normalized = value.replace("−", "-").replace("–", "-").replace("—", " - ")  # 数学负号和破折号统一。
+    normalized = re.sub(r"(?i)\b(note|test|section|table|figure)\s*(\d)", r"\1 \2", normalized)  # Note2/Note 2 等价。
+    normalized = re.sub(r"(?i)(?<=[a-z])-\s*/\s*(?=[a-z])", "-", normalized)  # peak-to- / peak 是跨行连字符。
     normalized = re.sub(
-        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*([+-]?\d+)",
+        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:[x×*]\s*)+10\s*([+-]?\d+)",
         r"\1e\2",
         normalized,
-    )  # 5x10-6、5×10-6、5*10-6 在表格摘要中等价。
+    )  # 5x10-6、5×10-6、5*10-6 及抽取残片 3.2×x10-13 在表格摘要中等价。
     normalized = re.sub(
         r"(?i)(?<=\d)\s*(?:x|×|\*)\s*(?=[a-z_])",
         " ",
@@ -1214,9 +1368,35 @@ def _render_nav_item(index: int, change: SectionChange) -> str:
         f"<span>{index}</span>"
         '<div class="nav-body">'
         f'<div class="nav-label">{_escape(label)}</div>'
-        f'<div class="nav-location">{_escape(_display_change_location(change))}</div>'
+        f'<div class="nav-location">{_escape(_short_nav_location(_display_change_location(change)))}</div>'
         "</div></a>"
     )
+
+
+def _render_table_nav_item(index: int, change: TableChange) -> str:
+    """Render a table finding in the same navigation surface as prose changes."""
+
+    label = _CHANGE_LABELS.get(change.change_type, change.change_type)
+    detail = f"{len(change.row_changes)} 行"
+    if change.caption_changed:
+        detail = f"{detail} + 表题" if change.row_changes else "表题/表号"
+    return (
+        f'<a class="nav-item nav-{change.change_type}" href="#table-change-{index}">'
+        f"<span>T{index}</span>"
+        '<div class="nav-body">'
+        f'<div class="nav-label">表格{_escape(label)} · {_escape(detail)}</div>'
+        f'<div class="nav-location">{_escape(_table_change_title(change))}</div>'
+        "</div></a>"
+    )
+
+
+def _short_nav_location(location: str) -> str:
+    """Keep the discriminating tail of a deep section path in the narrow sidebar."""
+
+    parts = [part.strip() for part in location.split(" / ") if part.strip()]
+    if len(parts) <= 2:
+        return location
+    return "… / " + " / ".join(parts[-2:])
 
 
 def _display_change_location(change: SectionChange) -> str:
@@ -1620,6 +1800,49 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
     return rows
 
 
+def _rows_for_table_csv(changes: list[TableChange]) -> list[dict[str, str]]:
+    """Flatten the shared table-change model for spreadsheet review."""
+
+    rows: list[dict[str, str]] = []
+    for change in changes:
+        fallback_kind = "表题/表号变化" if change.caption_changed else "未抽取到可靠行级文字"
+        row_changes = change.row_changes or (TableRowChange("", "", "", fallback_kind),)
+        for row_change in row_changes:
+            rows.append(
+                {
+                    "table_change_type": _CHANGE_LABELS.get(change.change_type, change.change_type),
+                    "old_titles": _table_titles(change.old_tables),
+                    "new_titles": _table_titles(change.new_tables),
+                    "old_pages": _table_pages(change.old_tables),
+                    "new_pages": _table_pages(change.new_tables),
+                    "pair_similarity": f"{change.similarity:.3f}" if change.old_tables and change.new_tables else "",
+                    "item": row_change.item,
+                    "old_value": row_change.old_value,
+                    "new_value": row_change.new_value,
+                    "row_change_type": row_change.change_type,
+                }
+            )
+    return rows
+
+
+def _table_titles(tables: tuple[TableVisual, ...]) -> str:
+    """Return unique table captions in source order."""
+
+    return " / ".join(_unique_table_titles(tables))
+
+
+def _unique_table_titles(tables: tuple[TableVisual, ...]) -> list[str]:
+    """Return de-duplicated table captions shared by HTML, JSON, and CSV."""
+
+    return list(dict.fromkeys(compact_inline(table.title) for table in tables if table.title))
+
+
+def _table_pages(tables: tuple[TableVisual, ...]) -> str:
+    """Return comma-separated source PDF pages for a logical table."""
+
+    return ",".join(str(table.page_number) for table in tables)
+
+
 def _change_counts(changes: list[SectionChange]) -> dict[str, int]:
     """Count changes by type."""
 
@@ -1761,6 +1984,35 @@ def _change_to_dict(change: SectionChange) -> dict[str, object]:
             {"old": pair.old, "new": pair.new} for pair in change.replaced_snippets
         ],
         "omitted_snippet_count": change.omitted_snippet_count,
+    }
+
+
+def _table_change_to_dict(change: TableChange) -> dict[str, object]:
+    """Serialize a paired table and every row finding for audit/reuse."""
+
+    return {
+        "change_type": change.change_type,
+        "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
+        "old_titles": _unique_table_titles(change.old_tables),
+        "new_titles": _unique_table_titles(change.new_tables),
+        "old_pages": [table.page_number for table in change.old_tables],
+        "new_pages": [table.page_number for table in change.new_tables],
+        "pair_similarity": (
+            round(change.similarity, 6)
+            if change.old_tables and change.new_tables
+            else None
+        ),
+        "caption_changed": change.caption_changed,
+        "row_change_count": len(change.row_changes),
+        "row_changes": [
+            {
+                "item": row.item,
+                "old_value": row.old_value,
+                "new_value": row.new_value,
+                "change_type": row.change_type,
+            }
+            for row in change.row_changes
+        ],
     }
 
 

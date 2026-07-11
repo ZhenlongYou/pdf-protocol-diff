@@ -122,7 +122,7 @@ def parse_args() -> argparse.Namespace:
         "--unchanged-similarity",
         type=float,
         default=UNCHANGED_SIMILARITY,
-        help="未变化判定阈值，默认来自 main.py 用户参数区",
+        help="安全词尾屈折的未变化判定阈值；否定、数值和标识符变化不会被隐藏",
     )
     parser.add_argument(
         "--max-snippets",
@@ -196,7 +196,8 @@ def main() -> int:
     print(f"- HTML:     {outputs['html']}")
     print(f"- Markdown: {outputs['markdown']}")
     print(f"- TXT:      {outputs['text']}")
-    print(f"- CSV:      {outputs['csv']}")
+    print(f"- 正文 CSV: {outputs['csv']}")
+    print(f"- 表格 CSV: {outputs['table_csv']}")
     print(f"- JSON:     {outputs['json']}")
     if result.warnings:
         print("\n注意: 报告中包含 PDF 抽取警告，请先查看。")

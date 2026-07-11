@@ -30,6 +30,7 @@ from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.compare import _is_global_noise_snippet  # 直接覆盖报告层短碎片过滤规则。
 from protocol_pdf_diff.compare import _merge_wrapped_lines  # 验证 PCIe 页眉簇过滤不会吞掉正文修订历史。
 from protocol_pdf_diff.compare import _split_line_preserving_numbers  # 验证列表破折号粘连会拆成独立审阅句。
+from protocol_pdf_diff.compare import _unit_pair_score  # 真实报告不得输出低于安全门槛的错误替换对。
 from protocol_pdf_diff.desktop_gui import (
     ProtocolDiffDesktopApp,
     collect_widget_texts,  # 用于确认桌面界面真的渲染了关键按钮和页码标签。
@@ -45,6 +46,7 @@ from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText, Ta
 from protocol_pdf_diff.pdf_extract import (
     MissingDependencyError,  # 验证缺少 pdfplumber 时直接失败，而不是静默退回 pypdf。
     _clean_extracted_page_text,  # 验证抽取层先过滤页边行号、DRAFT 和版权页脚。
+    _clean_table_cell,  # 验证表格数学符号残片在进入结构化事实前被修正。
     _combine_text_and_table_lines,  # 验证结构化表格行覆盖原始长表格文本后的降噪行为。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
     _should_skip_detected_table,  # 验证 Figure/空伪表格不会进入表格截图和正文 diff。
@@ -408,7 +410,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("operating windows", html)  # 大段正文句子必须仍在报告里。
         self.assertIn('class="del">10</mark>', html)  # 旧正文数值必须被保留并高亮。
         self.assertIn('class="ins">12</mark>', html)  # 新正文数值必须被保留并高亮。
-        self.assertIn("表格截图识别", html)  # 表格截图区也必须存在。
+        self.assertIn("表格变化", html)  # 表格截图和结构化变化区也必须存在。
         self.assertIn("<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>", html)  # 表格摘要应像人工审查表。
         self.assertIn("Input jitter", html)  # 项目列应显示参数名，而不是内部“表格行”。
         self.assertIn("0.30 UI", html)  # 旧版列保留旧值。
@@ -669,8 +671,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Uncorrelated jitter RMS symbol", html)  # 第二个符号变化也应有独立项目。
         self.assertIn("T_JRMS03 | 0.023 UIrms", html)  # 旧版 RMS 值应可直接对照。
         self.assertIn("T_JHRMS | 0.023 UIrms", html)  # 新版 RMS 值应可直接对照。
-        self.assertIn("Even-Odd Jitter", html)  # 小表格有变化时，相关未变化行也应显示。
-        self.assertIn("无变化", html)  # 未变化行应有绿色状态标签。
+        self.assertNotIn("Even-Odd Jitter", html)  # 未变化行不再占用变化报告篇幅。
+        self.assertNotIn("无变化", html)  # 表格卡只承载需要复核的行。
         self.assertGreaterEqual(html.count("实质/符号变化"), 2)  # 两个符号变化都应被明确标记。
 
     def test_table_visual_summary_ignores_display_only_row_noise(self) -> None:
@@ -685,6 +687,8 @@ class ProtocolDiffTests(unittest.TestCase):
             row_texts=[
                 "表格行: T1 | Value=❑ Sj – 5 to 10 ps PP @ TP1",  # 旧侧带复选框、大小写和长横线。
                 "表格行: T1 | Value=Note: Adapters such as DC blocks, pickoff T’s, etc. that are connected",  # 旧侧带逗号。
+                "表格行: T1 | Characteristic=Peak-to-peak jitter | Condition=See Note 2 | MAX=80",
+                "表格行: T1 | Parameter=Block Error Ratio | Value=3.2e-13",
             ],
             grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",  # 报告层会把内部摘要转为用户可读文案。
         )
@@ -697,6 +701,8 @@ class ProtocolDiffTests(unittest.TestCase):
             row_texts=[
                 "表格行: T2 | Value=SJ - 5 to 10 ps PP @ TP1",  # 新侧缺复选框且大小写不同，但内容相同。
                 "表格行: T2 | Value=Note: Adapters such as DC blocks, pickoff T’s etc. that are connected",  # 新侧少一个逗号。
+                "表格行: T2 | Characteristic=Peak-to- / peak jitter | Condition=See Note2 | MAX=80",
+                "表格行: T2 | Parameter=Block Error Ratio | Value=3.2×x10–13",
             ],
             grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",  # 报告层会隐藏 OpenCV 内部名称。
         )
@@ -718,7 +724,8 @@ class ProtocolDiffTests(unittest.TestCase):
             paths = write_reports(result, temp_dir, DiffOptions())  # 输出 HTML，验证用户实际看到的状态标签。
             html = paths["html"].read_text(encoding="utf-8")  # 读取完整 HTML，避免只测内部 key。
 
-        self.assertIn("未检测到行级变化", html)  # 这些展示差异不应被标成实质变化。
+        self.assertNotIn('id="table-changes"', html)  # 纯展示差异的表格整组不进入变化报告。
+        self.assertNotIn("Table 1 Calibration notes", html)
         self.assertNotIn("实质变化", html)  # 没有数值/符号变化时不应出现红色实质变化标签。
         self.assertNotIn("替换/修改", html)  # 标点和大小写差异也不应显示成替换。
 
@@ -777,6 +784,112 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("&lt; 15 mV", html)  # 旧侧单独小于号必须进入显示值。
         self.assertIn("&gt; 15 mV", html)  # 新侧单独大于号必须进入显示值。
         self.assertGreaterEqual(html.count("实质变化"), 2)  # 数值变化和限值方向变化都应判为实质变化。
+
+    def test_table_changes_share_html_json_csv_and_navigation(self) -> None:
+        """Every report format should consume the same materialized table facts."""
+
+        old_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 1 Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=[
+                "表格行: T1 | Parameter=Reference resistance | Condition=See Note 1 | Value=50 | Units=Ω"
+            ],
+            grid_summary="",
+        )
+        new_table = TableVisual(
+            page_number=2,
+            table_number=1,
+            title="Table 2 Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=[
+                "表格行: T1 | Parameter=Reference resistance | Condition=See Note 2 | Value=46.25 | Units=Ω"
+            ],
+            grid_summary="",
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_table_facts.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                total_pages=1,
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_table_facts.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                total_pages=2,
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            table_csv = paths["table_csv"].read_text(encoding="utf-8-sig")
+
+        self.assertIn('href="#table-change-1"', html)
+        self.assertIn("表格行变化", html)
+        self.assertLess(html.index('id="table-changes"'), html.index('id="text-changes"'))
+        self.assertIn("Table 1 Receiver limits", html)
+        self.assertIn("Table 2 Receiver limits", html)
+        self.assertIn("表格变化", markdown)
+        self.assertIn("46.25 Ω", payload["table_changes"][0]["row_changes"][0]["new_value"])
+        self.assertIn("46.25 Ω", table_csv)
+        self.assertIn("Condition=See Note 1", payload["table_changes"][0]["row_changes"][0]["old_value"])
+        self.assertIn("Condition=See Note 2", payload["table_changes"][0]["row_changes"][0]["new_value"])
+
+    def test_table_caption_only_change_is_reported(self) -> None:
+        """Renumbering a table must remain visible when every row is unchanged."""
+
+        old_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 1 Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=["表格行: T1 | Parameter=Reference resistance | Value=50 | Units=Ω"],
+            grid_summary="",
+        )
+        new_table = TableVisual(
+            page_number=2,
+            table_number=1,
+            title="Table 2 Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=["表格行: T1 | Parameter=Reference resistance | Value=50 | Units=Ω"],
+            grid_summary="",
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_title.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_title.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        self.assertIn("Table 1 Receiver limits", html)
+        self.assertIn("Table 2 Receiver limits", html)
+        self.assertEqual(1, len(payload["table_changes"]))
+        self.assertTrue(payload["table_changes"][0]["caption_changed"])
+        self.assertEqual(0, payload["table_changes"][0]["row_change_count"])
 
     def test_wrapped_table_row_continuations_merge_symbol_suffixes(self) -> None:
         """Wrapped table rows should not split one symbol change across two summary rows."""
@@ -1319,10 +1432,18 @@ class ProtocolDiffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = write_reports(result, temp_dir, DiffOptions())
             html = paths["html"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
 
         self.assertIn("另有 8 行表格变化未展示", html)  # 20 行变化只展示 12 行时必须说明遗漏数量。
         self.assertGreaterEqual(html.count("无对应表格截图"), 2)  # 不相似的新旧表不能按顺序硬凑成一组。
-        self.assertIn("未检测到行级变化", html)  # fb*n 与 fb×n 是同一数学表达，不应报表格变化。
+        self.assertNotIn("Table math notation", html)  # fb*n 与 fb×n 等价，整张未变化表不进入报告。
+        self.assertTrue(
+            all(
+                change["pair_similarity"] is None
+                for change in payload["table_changes"]
+                if not change["old_pages"] or not change["new_pages"]
+            )
+        )  # 单侧表格的配对分数不适用，JSON 应和 HTML/CSV 一样留空。
 
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
@@ -1601,13 +1722,52 @@ class ProtocolDiffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:  # 报告写到临时目录，验证最终 HTML 展示而非内部对象。
             paths = write_reports(result, temp_dir, DiffOptions(max_snippets_per_section=80))  # 生成完整报告，覆盖视觉表格区。
             html = paths["html"].read_text(encoding="utf-8")  # 读取 HTML 断言用户实际看到的内容。
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))  # JSON 必须保留和 HTML 同一批表格变化。
+            table_csv = paths["table_csv"].read_text(encoding="utf-8-sig")  # CSV 用于确认表格事实没有只存在于 HTML。
 
         self.assertNotIn("表格行:", snippet_text)  # 正文卡片不应再重复内部结构化表格行。
         self.assertNotIn("表格行:", html)  # HTML 报告不应暴露内部表格行格式。
-        self.assertIn("表格截图识别", html)  # 表格变化应转移到下方视觉表格区。
+        self.assertIn("表格变化", html)  # 表格变化应进入统一导航和视觉证据区。
         self.assertIn("Single-ended reference resistance", html)  # 用户关心的参数名仍必须可搜索定位。
         self.assertIn("46.25", html)  # 新版值必须在表格摘要或截图区可见。
         self.assertIn("50", html)  # 旧版值必须在表格摘要或截图区可见。
+        self.assertIn("Np = 53", snippet_text)  # 已知真实正文数值变化必须继续保留。
+        self.assertIn("Np = 60", snippet_text)
+        combined_report = html + json.dumps(payload["table_changes"], ensure_ascii=False) + table_csv
+        for false_positive in (
+            "foAr",
+            "vaTlues",
+            "specifDications",
+            "canA",
+            "Afmin",
+            "| T mVppd",
+            "3.2×x10",
+        ):
+            self.assertNotIn(false_positive, combined_report)  # 真实 DRAFT 水印和列错位残片不得再次进入报告。
+        self.assertNotIn("OIF 2024.058.13 30th June 2026", snippet_text)
+        self.assertNotIn("Updated based on comment resolution spreadsheet oif2026.245.01.", snippet_text)
+        self.assertIn("OIF 2024.058.13", table_csv)  # 修订历史只由表格事实系统承载一次。
+        self.assertEqual(
+            len(payload["table_changes"]),
+            html.count('href="#table-change-'),
+        )  # HTML 导航和 JSON 使用相同的变化表集合。
+        self.assertTrue(
+            all(
+                len(change["old_titles"]) == len(set(change["old_titles"]))
+                and len(change["new_titles"]) == len(set(change["new_titles"]))
+                for change in payload["table_changes"]
+            )
+        )  # 跨页表格的重复表题不能让 JSON 和 HTML/CSV 口径分裂。
+        replacement_pairs = [
+            pair
+            for change in result.changes
+            for pair in change.replaced_snippets
+        ]
+        self.assertTrue(replacement_pairs)
+        self.assertTrue(
+            all(_unit_pair_score(pair.old, pair.new) >= 0.45 for pair in replacement_pairs),
+            replacement_pairs,
+        )  # 低分页眉/公式错配不能出现在真实报告。
 
     def test_table_rows_scan_headers_and_expand_continuation_cells(self) -> None:
         """Table extraction should recover headers and split multi-row cells."""
@@ -1700,6 +1860,32 @@ class ProtocolDiffTests(unittest.TestCase):
             any("Parameter=D / Device package model" in line for line in lines_with_stray_value),
             lines_with_stray_value,
         )  # DRAFT 水印残片不能让整张表退化成一条巨大聚合行。
+
+    def test_device_die_model_group_label_does_not_shift_expanded_rows(self) -> None:
+        """A bare device-model group label must not consume the first parameter value."""
+
+        rows = [
+            [
+                "Device die model\n"
+                "Single-ended device capacitance1\n"
+                "Single-device series inductance1",
+                "C\nd1\nL\ns1",
+                "40\n130",
+                "fF\npH",
+            ]
+        ]  # 真实 OIF 表把组标题和两条参数放在同一个物理单元格中。
+
+        lines = _table_lines_from_rows(rows, table_number=1)
+
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-ended device capacitance1 | Symbol=Cd1 | Value=40 | Units=fF",
+            lines,
+        )  # 组标题必须跳过，第一条参数应继续对齐 Cd1 / 40 fF。
+        self.assertIn(
+            "表格行: T1 | Parameter=Single-device series inductance1 | Symbol=Ls1 | Value=130 | Units=pH",
+            lines,
+        )  # 第二条参数也不能因为组标题发生列漂移。
+        self.assertFalse(any("Parameter=Device die model" in line for line in lines), lines)
 
     def test_single_letter_table_values_are_preserved(self) -> None:
         """A/B/C style table values should not be treated as extraction noise."""
@@ -1810,6 +1996,43 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn(raw_table_line, combined)  # 已被结构化表格覆盖的超长原始表格行应被删除。
         self.assertIn("Parameter=Single-ended reference resistance", combined)  # 结构化表格行必须保留用于后续 diff。
 
+    def test_structured_revision_rows_suppress_duplicate_prose_lines(self) -> None:
+        """Revision-history cells should not be counted again as prose changes."""
+
+        raw_first_row = (
+            "The history of this document is detailed in the table below: Revision Date Description "
+            "OIF 2024.058.12 30th March 2026 Updated based on comment resolution spreadsheet oif2026107.01."
+        )
+        raw_second_row = (
+            "OIF 2024.058.13 30th June 2026 "
+            "Updated based on comment resolution spreadsheet oif2026.245.01."
+        )
+        table_lines = [
+            (
+                "表格行: T1 | Revision=OIF 2024.058.12 | Date=30th March 2026 | "
+                "Description=Updated based on comment resolution spreadsheet oif2026107.01."
+            ),
+            (
+                "表格行: T1 | Revision=OIF 2024.058.13 | Date=30th June 2026 | "
+                "Description=Updated based on comment resolution spreadsheet oif2026.245.01."
+            ),
+        ]
+
+        combined = _combine_text_and_table_lines(
+            "\n".join(["1 Scope", "The technical requirement remains visible.", raw_first_row, raw_second_row]),
+            table_lines,
+        )
+
+        self.assertIn("The technical requirement remains visible.", combined)
+        self.assertNotIn(raw_first_row, combined)
+        self.assertNotIn(raw_second_row, combined)
+        self.assertEqual(2, combined.count("表格行:"))
+
+    def test_table_cell_collapses_duplicate_multiplication_glyphs(self) -> None:
+        """A duplicated ×x glyph before 10^n is one extraction artifact."""
+
+        self.assertEqual("3.2×10–13", _clean_table_cell("3.2×x10–13"))
+
     def test_large_non_draft_text_is_not_filtered_as_watermark(self) -> None:
         """Watermark filtering should not delete legitimate large headings."""
 
@@ -1823,6 +2046,19 @@ class ProtocolDiffTests(unittest.TestCase):
             _keep_non_watermark_object({"object_type": "line", "size": 72, "text": "D"})
         )  # 非字符对象必须保留，表格线条需要参与 pdfplumber 表格识别。
 
+    def test_large_rotated_draft_text_is_filtered_when_upright_flag_is_true(self) -> None:
+        """pdfplumber may mark a visibly rotated DRAFT glyph as upright."""
+
+        watermark = {
+            "object_type": "char",
+            "size": 175.34,
+            "text": "D",
+            "upright": True,
+            "matrix": (101.82, 101.82, -101.82, 101.82, 171.53, 186.69),
+        }  # 来自 oif2024.058.13.pdf 的实际字符属性，矩阵表明字符旋转约 45°。
+
+        self.assertFalse(_keep_non_watermark_object(watermark))
+
     def test_reports_are_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1830,7 +2066,7 @@ class ProtocolDiffTests(unittest.TestCase):
             result = run_diff(old_pdf, new_pdf, DiffOptions())
             outputs = write_reports(result, temp_path / "reports", DiffOptions())
 
-            for key in ("markdown", "html", "text", "csv", "json"):
+            for key in ("markdown", "html", "text", "csv", "table_csv", "json"):
                 self.assertTrue(outputs[key].exists(), key)
             report_html = outputs["html"].read_text(encoding="utf-8")
             report_text = outputs["text"].read_text(encoding="utf-8")
@@ -3438,6 +3674,154 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertFalse(
             any("preset mode" in pair.old and "jitter limit" in pair.new for pair in swapped_pairs)
         )
+
+    def test_equal_length_replace_block_does_not_pair_unrelated_units(self) -> None:
+        """Equal-size blocks need the same semantic pairing gate as unequal blocks."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_equal_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Alpha receivers shall retain the original calibration policy.\n"
+                        "Beta transmitters shall report the original measurement."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_equal_block.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Gamma encoders must use a completely separate framing rule.\n"
+                        "Delta decoders must publish a different training sequence."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+        change = result.changes[0]
+
+        self.assertFalse(change.replaced_snippets)  # 没有共同语义锚点的句子不能伪装成左右替换。
+        self.assertEqual(2, len(change.removed_snippets))
+        self.assertEqual(2, len(change.added_snippets))
+
+    def test_unchanged_threshold_suppresses_only_high_similarity_spelling_noise(self) -> None:
+        """The public unchanged threshold should affect safe spelling-only deltas."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_spelling.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The receiver supports calibration and measurement reporting for every compliant implementation."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_spelling.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "The receiver support calibration and measurement reporting for every compliant implementation."
+                    ),
+                )
+            ],
+            total_pages=1,
+        )
+
+        relaxed = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(unchanged_similarity=0.95),
+        )
+        strict = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(unchanged_similarity=0.9999),
+        )
+
+        self.assertEqual([], relaxed.changes)
+        self.assertEqual(1, len(strict.changes))
+
+    def test_unchanged_threshold_never_hides_numeric_change(self) -> None:
+        """Even a relaxed unchanged threshold must preserve protocol values."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_numeric.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nUse Np = 53 samples for the calculation.")],
+            total_pages=1,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_numeric.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nUse Np = 60 samples for the calculation.")],
+            total_pages=1,
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(unchanged_similarity=0.5),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertIn("53", result.changes[0].replaced_snippets[0].old)
+        self.assertIn("60", result.changes[0].replaced_snippets[0].new)
+
+    def test_unchanged_threshold_never_hides_negation_prefixes(self) -> None:
+        """Character-similar words with a negating prefix are semantic changes."""
+
+        for old_word, new_word in (
+            ("supported", "unsupported"),
+            ("available", "unavailable"),
+            ("allowed", "disallowed"),
+            ("capable", "incapable"),
+        ):
+            with self.subTest(old_word=old_word, new_word=new_word):
+                old_extraction = ExtractionResult(
+                    pdf_path=Path(f"old_{old_word}.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"The receiver is {old_word} in every operating mode described by this implementation."
+                            ),
+                        )
+                    ],
+                    total_pages=1,
+                )
+                new_extraction = ExtractionResult(
+                    pdf_path=Path(f"new_{new_word}.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"The receiver is {new_word} in every operating mode described by this implementation."
+                            ),
+                        )
+                    ],
+                    total_pages=1,
+                )
+
+                result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+                self.assertEqual(1, len(result.changes), (old_word, new_word))
 
     def test_heading_change_counts_against_snippet_limit(self) -> None:
         """A title snippet should not silently hide a body change."""
