@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
-import hashlib
 import os
 from pathlib import Path
 import re
@@ -631,7 +630,7 @@ def _has_extreme_line_fragmentation(text: str) -> bool:
 
 
 def _input_provenance(extraction: ExtractionResult) -> InputProvenance:
-    """Build one source record; absent synthetic paths intentionally hash to null."""
+    """Build one source record from the immutable digest captured during parsing."""
 
     start_page = extraction.selected_start_page
     end_page = extraction.selected_end_page
@@ -640,22 +639,7 @@ def _input_provenance(extraction: ExtractionResult) -> InputProvenance:
         end_page = end_page if end_page is not None else max(page.page_number for page in extraction.pages)
     return InputProvenance(
         path=extraction.pdf_path,
-        sha256=_sha256_if_file(extraction.pdf_path),
+        sha256=extraction.source_sha256,
         selected_start_page=start_page,
         selected_end_page=end_page,
     )
-
-
-def _sha256_if_file(path: Path) -> str | None:
-    """Hash an existing regular file using bounded reads; synthetic paths return null."""
-
-    try:
-        if not path.is_file():
-            return None
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None

@@ -807,6 +807,65 @@ class CorpusRunnerTests(unittest.TestCase):
                 ),
             )
 
+    def test_must_find_cannot_be_satisfied_by_unchanged_locations_or_titles(self) -> None:
+        """A positive oracle must occur in the changed fact, not its container metadata."""
+
+        section_anchor = "KNOWN-DELTA-LOST"
+        table_anchor = "TABLE-TITLE-UNCHANGED"
+        payload = {
+            "changes": [
+                {
+                    "role": "technical",
+                    "change_type": "modified",
+                    "report_location": section_anchor,
+                    "old_location": section_anchor,
+                    "new_location": section_anchor,
+                    "added_snippets": ["Voltage is 2 V"],
+                    "removed_snippets": ["Voltage is 1 V"],
+                    "replaced_snippets": [
+                        {"old": "Voltage is 1 V", "new": "Voltage is 2 V"}
+                    ],
+                }
+            ],
+            "table_changes": [
+                {
+                    "role": "technical",
+                    "change_type": "modified",
+                    "caption_changed": False,
+                    "old_titles": [table_anchor],
+                    "new_titles": [table_anchor],
+                    "row_changes": [
+                        {
+                            "item": "Voltage",
+                            "old_value": "1 V",
+                            "new_value": "2 V",
+                            "change_type": "实质变化",
+                        }
+                    ],
+                }
+            ],
+        }
+        material_searchable = _material_report_text(payload)
+        common = {
+            "metrics": {
+                "state": "degraded",
+                "technical_section_changes": 1,
+                "technical_table_changes": 1,
+            },
+            "searchable": json.dumps(payload, ensure_ascii=False),
+            "material_searchable": material_searchable,
+            "reviewable": _review_report_text(payload),
+            "source_texts": {"old": "", "new": ""},
+            "location_text": "",
+        }
+
+        for anchor in (section_anchor, table_anchor):
+            self.assertEqual(
+                [f"must_find anchor absent: {anchor!r}"],
+                _expectation_failures({"must_find": [anchor]}, **common),
+            )
+        self.assertIn("Voltage is 2 V".casefold(), material_searchable)
+
     def test_source_and_location_anchors_reject_missing_or_fake_structure(self) -> None:
         """认证清单应同时发现抽取漏词和伪章节位置。"""
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import re
 import tempfile
@@ -2311,6 +2312,159 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             )
         )
 
+    def test_coordinate_table_dedup_accepts_one_proven_cross_pair_prose_tail(self) -> None:
+        """A sentence shifted behind a table tail must not recreate the raw table wall."""
+
+        table_body = (
+            "Parameter Symbol Value Units Conditions Index Transition Threshold Level Label "
+            "Description Reference First Last "
+            + " ".join(str(value) for value in range(1, 101))
+        )
+        moved_table_tail = (
+            "Transition Threshold Level Symbol Reference "
+            + " ".join(str(value) for value in range(101, 141))
+        )
+        prose = (
+            "It is acceptable to meet the receiver requirement with either supported "
+            "test pattern."
+        )
+        old_first = f"{table_body} {moved_table_tail}"
+        new_first = table_body
+        old_second = prose
+        new_second = f"{moved_table_tail} {prose}"
+        old_section = Section(
+            "old-cross-pair-tail",
+            "9 Coordinate Tail",
+            "Coordinate Tail",
+            1,
+            ("9 Coordinate Tail",),
+            ("9",),
+            10,
+            10,
+            f"{old_first} {old_second}",
+        )
+        new_section = Section(
+            "new-cross-pair-tail",
+            "9 Coordinate Tail",
+            "Coordinate Tail",
+            1,
+            ("9 Coordinate Tail",),
+            ("9",),
+            11,
+            11,
+            f"{new_first} {new_second}",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            replaced_snippets=[
+                SnippetPair(old_first, new_first),
+                SnippetPair(old_second, new_second),
+            ],
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. Coordinate-backed values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [f"{table_body} {moved_table_tail} {prose}"],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=False,
+        )
+        new_table = TableVisual(
+            **{
+                **old_table.__dict__,
+                "page_number": 11,
+                "row_texts": [f"{table_body} {moved_table_tail} {prose}"],
+            }
+        )
+        evidence = TableChange(
+            "review",
+            (old_table,),
+            (new_table,),
+            1.0,
+            False,
+            (
+                TableRowChange(
+                    "表格行归属",
+                    "多行单元格归属未验证",
+                    "多行单元格归属未验证",
+                    "需人工复核",
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            old_second,
+            _reader_visible_prose_tail(new_second),
+        )
+        self.assertTrue(
+            _reader_change_is_coordinate_proven_table_body_duplicate(
+                change,
+                [evidence],
+            )
+        )
+        changed = replace(
+            change,
+            replaced_snippets=[
+                SnippetPair(old_first, new_first),
+                SnippetPair(old_second, new_second.replace("acceptable", "required")),
+            ],
+        )
+        self.assertFalse(
+            _reader_change_is_coordinate_proven_table_body_duplicate(
+                changed,
+                [evidence],
+            )
+        )
+        reordered = replace(
+            change,
+            replaced_snippets=[
+                SnippetPair(old_first, new_first),
+                SnippetPair(
+                    old_second,
+                    new_second.replace("either supported", "supported either"),
+                ),
+            ],
+        )
+        self.assertEqual(
+            reporting_module._reader_nonspace_character_counts(
+                " ".join(pair.old for pair in reordered.replaced_snippets)
+            ),
+            reporting_module._reader_nonspace_character_counts(
+                " ".join(pair.new for pair in reordered.replaced_snippets)
+            ),
+        )
+        self.assertFalse(
+            _reader_change_is_coordinate_proven_table_body_duplicate(
+                reordered,
+                [evidence],
+            )
+        )
+        uncovered_old_table = replace(
+            old_table,
+            row_texts=[f"{table_body} {prose}"],
+        )
+        uncovered_new_table = replace(
+            new_table,
+            row_texts=[f"{table_body} {prose}"],
+        )
+        uncovered_evidence = replace(
+            evidence,
+            old_tables=(uncovered_old_table,),
+            new_tables=(uncovered_new_table,),
+        )
+        self.assertFalse(
+            _reader_change_is_coordinate_proven_table_body_duplicate(
+                change,
+                [uncovered_evidence],
+            )
+        )
+
     def test_coordinate_table_dedup_preserves_unrecognized_and_short_residual_edits(self) -> None:
         """Residual prose and limits survive even when they are too short for tail heuristics."""
 
@@ -3071,8 +3225,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertTrue(content_lossless)
         self.assertTrue(alignment_reliable)
 
-    def test_group_label_trailing_sparse_unit_with_script_words_expands_last_blank(self) -> None:
-        """A continuous geometry-proven unit prefix may leave only the final row blank."""
+    def test_group_label_trailing_sparse_unit_with_script_words_stays_review_only(self) -> None:
+        """An ordered sparse prefix stays readable without certifying the blank slot."""
 
         def word(
             text: str,
@@ -3168,15 +3322,224 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIn("Units=", trailing_lines[2])
         self.assertNotIn("Units=UI", trailing_lines[2])
         self.assertTrue(trailing_lossless)
-        self.assertTrue(trailing_alignment)
+        self.assertFalse(trailing_alignment)
 
         self.assertEqual(1, len(middle_gap_lines))
         self.assertIn(r"Units=UI\nUI", middle_gap_lines[0])
         self.assertTrue(middle_gap_lossless)
         self.assertFalse(middle_gap_alignment)
 
+    def test_group_label_sparse_unit_rejects_nonuniform_middle_gap_as_reliable(self) -> None:
+        """A boundary-positioned Unit cannot be certified as a continuous prefix."""
+
+        def word(text: str, top: float) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": 0.0,
+                "x1": 10.0,
+                "top": top,
+                "bottom": top + 10.0,
+                "size": 10.0,
+            }
+
+        rows = [
+            ["Parameter", "Symbol", "Value", "Units"],
+            [
+                "Device group: modes\nFirst\nSecond\nThird",
+                "A\nB\nC",
+                "1\n2\n3",
+                "UI\nUI",
+            ],
+        ]
+        record_tops = (100.0, 120.0, 131.0)
+        words = [
+            [[], [], [], []],
+            [
+                [
+                    word("Device group: modes", 80.0),
+                    *[
+                        word(text, top)
+                        for text, top in zip(
+                            ("First", "Second", "Third"),
+                            record_tops,
+                            strict=True,
+                        )
+                    ],
+                ],
+                [
+                    word(text, top)
+                    for text, top in zip(("A", "B", "C"), record_tops, strict=True)
+                ],
+                [
+                    word(text, top)
+                    for text, top in zip(("1", "2", "3"), record_tops, strict=True)
+                ],
+                [word("UI", 100.0), word("UI", 126.0)],
+            ],
+        ]
+
+        lines, content_lossless, alignment_reliable = (
+            pdf_extract_module._table_lines_from_rows_with_evidence(
+                rows,
+                1,
+                cell_word_rows=words,
+            )
+        )
+
+        self.assertEqual(3, len(lines))
+        self.assertTrue(content_lossless)
+        self.assertFalse(alignment_reliable)
+
+    def test_singleton_condition_uses_unique_row_geometry_instead_of_broadcast(self) -> None:
+        """Moving one Condition between rows must change its structured association."""
+
+        def word(text: str, top: float) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": 0.0,
+                "x1": 10.0,
+                "top": top,
+                "bottom": top + 10.0,
+                "size": 10.0,
+            }
+
+        rows = [
+            ["Parameter", "Symbol", "Value", "Units", "Conditions"],
+            [
+                "P1\nP2\nP3",
+                "A\nB\nC",
+                "1\n2\n3",
+                "V\nV\nV",
+                "At low frequency",
+            ],
+        ]
+        record_tops = (100.0, 120.0, 140.0)
+
+        def evidence(condition_top: float) -> list[list[list[dict[str, object]]]]:
+            return [
+                [[], [], [], [], []],
+                [
+                    [word(text, top) for text, top in zip(("P1", "P2", "P3"), record_tops, strict=True)],
+                    [word(text, top) for text, top in zip(("A", "B", "C"), record_tops, strict=True)],
+                    [word(text, top) for text, top in zip(("1", "2", "3"), record_tops, strict=True)],
+                    [word("V", top) for top in record_tops],
+                    [word("At low frequency", condition_top)],
+                ],
+            ]
+
+        first_lines, first_lossless, first_alignment = (
+            pdf_extract_module._table_lines_from_rows_with_evidence(
+                rows,
+                1,
+                cell_word_rows=evidence(100.0),
+            )
+        )
+        last_lines, last_lossless, last_alignment = (
+            pdf_extract_module._table_lines_from_rows_with_evidence(
+                rows,
+                1,
+                cell_word_rows=evidence(140.0),
+            )
+        )
+
+        self.assertIn("Conditions=At low frequency", first_lines[0])
+        self.assertNotIn("Conditions=At low frequency", first_lines[1])
+        self.assertNotIn("Conditions=At low frequency", first_lines[2])
+        self.assertNotIn("Conditions=At low frequency", last_lines[0])
+        self.assertNotIn("Conditions=At low frequency", last_lines[1])
+        self.assertIn("Conditions=At low frequency", last_lines[2])
+        self.assertNotEqual(first_lines, last_lines)
+        self.assertTrue(first_lossless)
+        self.assertTrue(last_lossless)
+        self.assertFalse(first_alignment)
+        self.assertFalse(last_alignment)
+
+        old_table = TableVisual(
+            1,
+            1,
+            "Table 1. Conditions",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            first_lines,
+            "rows",
+            content_fully_represented=True,
+            row_alignment_reliable=first_alignment,
+        )
+        new_table = TableVisual(
+            1,
+            1,
+            "Table 1. Conditions",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            last_lines,
+            "rows",
+            content_fully_represented=True,
+            row_alignment_reliable=last_alignment,
+        )
+        table_changes = reporting_module._build_table_changes(
+            DiffResult(
+                Path("old.pdf"),
+                Path("new.pdf"),
+                [],
+                [],
+                [],
+                [],
+                old_table_visuals=[old_table],
+                new_table_visuals=[new_table],
+            )
+        )
+        self.assertTrue(table_changes)
+        self.assertTrue(
+            all(
+                row.change_type == "需人工复核"
+                for change in table_changes
+                for row in change.row_changes
+            )
+        )
+
+    def test_boundary_singleton_condition_fails_closed(self) -> None:
+        """A Condition between two row baselines must not certify repeated ownership."""
+
+        def word(text: str, top: float) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": 0.0,
+                "x1": 10.0,
+                "top": top,
+                "bottom": top + 10.0,
+                "size": 10.0,
+            }
+
+        tops = (100.0, 120.0, 131.0)
+        rows = [
+            ["Parameter", "Symbol", "Value", "Units", "Conditions"],
+            ["P1\nP2\nP3", "A\nB\nC", "1\n2\n3", "V\nV\nV", "At low frequency"],
+        ]
+        words = [
+            [[], [], [], [], []],
+            [
+                [word(text, top) for text, top in zip(("P1", "P2", "P3"), tops, strict=True)],
+                [word(text, top) for text, top in zip(("A", "B", "C"), tops, strict=True)],
+                [word(text, top) for text, top in zip(("1", "2", "3"), tops, strict=True)],
+                [word("V", top) for top in tops],
+                [word("At low frequency", 126.0)],
+            ],
+        ]
+
+        lines, content_lossless, alignment_reliable = (
+            pdf_extract_module._table_lines_from_rows_with_evidence(
+                rows,
+                1,
+                cell_word_rows=words,
+            )
+        )
+
+        self.assertEqual(3, len(lines))
+        self.assertTrue(content_lossless)
+        self.assertFalse(alignment_reliable)
+
     def test_single_middle_unit_uses_geometry_without_broadcast(self) -> None:
-        """One observed unit belongs only to its y-aligned row without rowspan proof."""
+        """One Unit may be localized for display but stays review-only without rowspan proof."""
 
         def word(text: str, top: float) -> dict[str, object]:
             return {
@@ -3242,9 +3605,52 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual(lines[1], new_lines[1])
         self.assertNotEqual(lines[2], new_lines[2])
         self.assertTrue(content_lossless)
-        self.assertTrue(alignment_reliable)
+        self.assertFalse(alignment_reliable)
         self.assertTrue(new_content_lossless)
         self.assertTrue(new_alignment_reliable)
+
+        old_table = TableVisual(
+            1,
+            1,
+            "Table 1. Units",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            lines,
+            "rows",
+            content_fully_represented=True,
+            row_alignment_reliable=alignment_reliable,
+        )
+        new_table = TableVisual(
+            1,
+            1,
+            "Table 1. Units",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            new_lines,
+            "rows",
+            content_fully_represented=True,
+            row_alignment_reliable=new_alignment_reliable,
+        )
+        table_changes = reporting_module._build_table_changes(
+            DiffResult(
+                Path("old.pdf"),
+                Path("new.pdf"),
+                [],
+                [],
+                [],
+                [],
+                old_table_visuals=[old_table],
+                new_table_visuals=[new_table],
+            )
+        )
+        self.assertTrue(table_changes)
+        self.assertTrue(
+            all(
+                row.change_type == "需人工复核"
+                for change in table_changes
+                for row in change.row_changes
+            )
+        )
 
     def test_single_unit_without_geometry_stays_aggregated(self) -> None:
         """One unit cannot be broadcast across records without row or rowspan evidence."""

@@ -524,12 +524,29 @@ def _review_report_text(json_payload: dict[str, Any]) -> str:
 def _material_report_text(json_payload: dict[str, Any]) -> str:
     """Return only confirmed material findings for positive corpus oracles."""
 
-    material_sections = [
-        change
-        for change in json_payload.get("changes", [])
-        if change.get("change_type") not in {"review", "unchanged"}
-        and change.get("role", "technical") == "technical"
-    ]
+    material_sections: list[dict[str, Any]] = []
+    for change in json_payload.get("changes", []):
+        change_type = change.get("change_type")
+        if (
+            change_type in {"review", "unchanged"}
+            or change.get("role", "technical") != "technical"
+        ):
+            continue
+        projected: dict[str, Any] = {
+            "change_type": change_type,
+            "added_snippets": change.get("added_snippets", []),
+            "removed_snippets": change.get("removed_snippets", []),
+            "replaced_snippets": change.get("replaced_snippets", []),
+        }
+        if change_type in {"added", "deleted"}:
+            projected.update(
+                {
+                    "report_location": change.get("report_location"),
+                    "old_location": change.get("old_location"),
+                    "new_location": change.get("new_location"),
+                }
+            )  # 单侧章节的标题/位置本身就是新增或删除事实；普通修改的未变容器元数据不是 oracle。
+        material_sections.append(projected)
     material_tables: list[dict[str, Any]] = []
     for change in json_payload.get("table_changes", []):
         if change.get("role", "technical") != "technical":
@@ -546,15 +563,19 @@ def _material_report_text(json_payload: dict[str, Any]) -> str:
         )
         if not material_rows and not caption_material:
             continue
-        material_tables.append(
-            {
-                "change_type": table_change_type,
-                "caption_changed": bool(change.get("caption_changed")),
-                "old_titles": change.get("old_titles", []),
-                "new_titles": change.get("new_titles", []),
-                "row_changes": material_rows,
-            }
-        )
+        projected_table: dict[str, Any] = {
+            "change_type": table_change_type,
+            "caption_changed": bool(change.get("caption_changed")),
+            "row_changes": material_rows,
+        }
+        if caption_material:
+            projected_table.update(
+                {
+                    "old_titles": change.get("old_titles", []),
+                    "new_titles": change.get("new_titles", []),
+                }
+            )  # 未改表题只负责定位，不能代替已知行差异通过 must_find。
+        material_tables.append(projected_table)
     return json.dumps(
         {"changes": material_sections, "table_changes": material_tables},
         ensure_ascii=False,

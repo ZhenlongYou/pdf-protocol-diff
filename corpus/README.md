@@ -115,7 +115,7 @@ manifest 中只写相对于 corpus root 的 PDF 路径，禁止绝对路径和 `
 - `state` 对 `reliable`、`degraded`、`indeterminate` 做精确匹配。可选 OCR 引擎会改变扫描件是 `degraded` 还是 `indeterminate` 时，可改用互斥字段 `states: ["degraded", "indeterminate"]`；它仍能明确禁止误升为 `reliable`。
 - `max_technical_section_changes` 和 `max_technical_table_changes` 只统计 `role=technical`；被标为 `document_metadata` 的封面、声明和修订历史不会占用技术变化预算。
 - 两个数量上限都是可选的 false-positive 门禁，不是变化召回率 oracle。对已明确为 `degraded` 的复杂版本对，应用手工复核后的宽松有限上限阻断突发的 false-positive 洪泛，并用状态与高价值 `must_find` 守住至少一个已知差异；不要设置会迫使实现删除未知内容的低变化上限。self-diff 仍应把两项上限设为 0。
-- `must_find` 与 `must_ignore` 不区分大小写，并组合检查 JSON 的 `changes` / `table_changes`、HTML/Markdown 的变化正文、正文 CSV、表格 CSV。锚点和搜索面都会先折叠换行、制表符与连续空格，避免 PDF 视觉换行造成假失败；标点和文字仍按 literal 匹配。报告头、文件名、provenance 和 JSON 中仅用于审计的完整旧/新章节不会让 must-find 假通过。每条失败都会在对应 case 的 `failures` 数组中单独列出。
+- `must_find` 不区分大小写，只检查 JSON 中已确认的实质正文片段与表格变化字段；复核项、未变化表题/定位、报告头、文件名、provenance，以及仅供审计的完整旧/新章节都不能让正向 oracle 假通过。`must_ignore` 用于防止读者报告出现已知噪声，会组合检查 JSON 的变化事实、HTML/Markdown 变化正文、正文 CSV 与表格 CSV，因此也覆盖复核项。两种搜索面都会先折叠换行、制表符与连续空格，避免 PDF 视觉换行造成假失败；标点和文字仍按 literal 匹配。每条失败都会在对应 case 的 `failures` 数组中单独列出。
 - `must_extract_old` 与 `must_extract_new` 分别检查对应版本的完整章节标题和正文，不使用截断预览、变化报告或文件名替抽取成功作证；适合守住公式、数值、单位及被边栏误删的正文。
 - `must_ignore_locations` 只检查旧/新两侧的章节位置，可阻止跨行引用、表格行、脚注或整数要求列表被误判成章节，同时不会因普通正文合法引用同一文本而误报。
 

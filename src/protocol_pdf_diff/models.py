@@ -147,6 +147,7 @@ class ExtractionResult:
     selected_start_page: int | None = None
     selected_end_page: int | None = None
     table_visuals: list["TableVisual"] = field(default_factory=list)  # 保存表格截图和识别摘要，供 HTML 报告展示视觉证据。
+    source_sha256: str | None = None  # 解析入口对实际快照字节计算；禁止报告层事后重读路径伪装成同一输入。
 
 
 def snapshot_page_extraction_audit(

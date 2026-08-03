@@ -2116,9 +2116,27 @@ def _table_visual_indexes_by_caption_key(
                             tables[current_index],
                             table,
                         )
-                        or _table_geometry_supports_page_boundary_continuation(
-                            tables[current_index],
-                            table,
+                        or (
+                            _table_geometry_supports_page_boundary_continuation(
+                                tables[current_index],
+                                table,
+                            )
+                            and (
+                                _table_rows_support_sequential_identity_continuation(
+                                    tables[current_index],
+                                    table,
+                                )
+                                or _table_rows_support_repeated_header_continuation(
+                                    tables[current_index],
+                                    table,
+                                )
+                                or _table_rows_support_reliable_schema_boundary_continuation(
+                                    tables[current_index],
+                                    table,
+                                    previous_context=current_context,
+                                    current_context=context_key,
+                                )
+                            )
                         )
                     )
                 )
@@ -2129,9 +2147,21 @@ def _table_visual_indexes_by_caption_key(
                             tables[current_index],
                             table,
                         )
-                        or _table_geometry_supports_page_boundary_continuation(
-                            tables[current_index],
-                            table,
+                        or (
+                            _table_geometry_supports_page_boundary_continuation(
+                                tables[current_index],
+                                table,
+                            )
+                            and (
+                                _table_rows_support_sequential_identity_continuation(
+                                    tables[current_index],
+                                    table,
+                                )
+                                or _table_rows_support_repeated_header_continuation(
+                                    tables[current_index],
+                                    table,
+                                )
+                            )
                         )
                     )
                 )
@@ -2202,6 +2232,174 @@ def _table_rows_support_adjacent_continuation(
     return bool(
         previous_boundary and previous_boundary == current_boundary
     )  # 跨页重复边界行是内容连续证据；单独的 continuation 标志不再足够。
+
+
+def _table_rows_support_sequential_identity_continuation(
+    previous_table: TableVisual,
+    current_table: TableVisual,
+) -> bool:
+    """Require a schema-sized, consecutive primary key across a page boundary."""
+
+    if not previous_table.row_texts or not current_table.row_texts:
+        return False
+    previous_row = previous_table.row_texts[-1]
+    current_row = current_table.row_texts[0]
+    previous_fields = _table_row_fields(previous_row)
+    current_fields = _table_row_fields(current_row)
+    if not _table_row_schemas_support_headerless_continuation(previous_row, current_row):
+        return False  # 纯几何和相同列数都不能越过不同字段语义。
+
+    def primary_value(fields: dict[str, str]) -> str:
+        value = _first_table_field(
+            fields,
+            ("parameter", "characteristic", "description", "label", "name", "symbol"),
+        )
+        return compact_inline(value or fields.get("column 1", ""))
+
+    previous_match = re.fullmatch(r"(.+?)(\d+)", primary_value(previous_fields))
+    current_match = re.fullmatch(r"(.+?)(\d+)", primary_value(current_fields))
+    if previous_match is None or current_match is None:
+        return False
+    previous_prefix, previous_number = previous_match.groups()
+    current_prefix, current_number = current_match.groups()
+    return bool(
+        re.search(r"[A-Za-z\u3400-\u4dbf\u4e00-\u9fff]", previous_prefix)
+        and compact_inline(previous_prefix).casefold()
+        == compact_inline(current_prefix).casefold()
+        and int(current_number) == int(previous_number) + 1
+    )  # P2→P3 之类连续记录可佐证续页；普通独立表名不会仅靠页边位置被吸收。
+
+
+def _table_rows_support_repeated_header_continuation(
+    previous_table: TableVisual,
+    current_table: TableVisual,
+) -> bool:
+    """Recognize a headerless page whose first generic row repeats the prior schema."""
+
+    if not previous_table.row_texts or not current_table.row_texts:
+        return False
+    previous_entries = _table_row_field_entries(previous_table.row_texts[-1])
+    current_entries = _table_row_field_entries(current_table.row_texts[0])
+    if len(previous_entries) < 3 or len(previous_entries) != len(current_entries):
+        return False
+    current_labels = tuple(entry[2] for entry in current_entries)
+    if current_labels != tuple(
+        f"column {index}" for index in range(1, len(current_entries) + 1)
+    ):
+        return False
+    aliases = {
+        "units": "unit",
+        "conditions": "condition",
+        "notes": "note",
+        "remarks": "remark",
+        "descriptions": "description",
+    }
+    previous_schema = [
+        aliases.get(entry[2], entry[2])
+        for entry in previous_entries
+    ]
+    repeated_schema: list[str] = []
+    for entry in current_entries:
+        repeated_label = compact_inline(
+            entry[3].replace("↵", " ").replace("\\n", " ")
+        ).casefold()
+        repeated_schema.append(aliases.get(repeated_label, repeated_label))
+    # 表格 codec 用 ↵ 保留单元格内换行；表头身份比较只把它当空白，不删除数字等未知残片。
+    matches = sum(
+        old_label == repeated_label
+        for old_label, repeated_label in zip(
+            previous_schema,
+            repeated_schema,
+            strict=True,
+        )
+    )
+    return bool(
+        previous_schema[0] == repeated_schema[0]
+        and matches >= 3
+        and matches / len(previous_schema) >= 0.75
+    )  # 页边几何之外还须重复身份列和至少四分之三 schema；孤立无标题表不能靠位置冒充续表。
+
+
+def _table_rows_support_reliable_schema_boundary_continuation(
+    previous_table: TableVisual,
+    current_table: TableVisual,
+    *,
+    previous_context: str,
+    current_context: str,
+) -> bool:
+    """Accept an exact explicit schema only across a proven heading boundary.
+
+    A heading printed below a continued table can make the two physical pieces
+    inherit adjacent subsection contexts.  Same-context tables remain rejected:
+    otherwise page-edge geometry plus a common two-column schema could absorb an
+    independent untitled table.
+    """
+
+    if not (
+        previous_context
+        and current_context
+        and previous_context != current_context
+        and previous_table.content_fully_represented
+        and current_table.content_fully_represented
+        and previous_table.row_alignment_reliable
+        and current_table.row_alignment_reliable
+        and previous_table.row_texts
+        and current_table.row_texts
+    ):
+        return False
+    previous_labels = tuple(
+        entry[2]
+        for entry in _table_row_field_entries(previous_table.row_texts[-1])
+    )
+    current_labels = tuple(
+        entry[2]
+        for entry in _table_row_field_entries(current_table.row_texts[0])
+    )
+    if len(previous_labels) < 3 or previous_labels != current_labels:
+        return False
+    generic_schema = tuple(
+        f"column {index}" for index in range(1, len(previous_labels) + 1)
+    )
+    # 显式同 schema、逐字符守恒、可靠行归属、跨小节页边四项缺一不可。
+    return previous_labels != generic_schema
+
+
+def _table_row_schemas_support_headerless_continuation(
+    previous_row: str,
+    current_row: str,
+) -> bool:
+    """Require equal field semantics or one complete positional Column-N schema."""
+
+    aliases = {
+        "units": "unit",
+        "conditions": "condition",
+        "notes": "note",
+        "remarks": "remark",
+        "descriptions": "description",
+    }
+
+    def labels(row: str) -> tuple[str, ...]:
+        return tuple(
+            aliases.get(normalized_label, normalized_label)
+            for _index, _display, normalized_label, _value in _table_row_field_entries(row)
+        )
+
+    def is_complete_generic(candidate: tuple[str, ...]) -> bool:
+        return bool(
+            len(candidate) >= 2
+            and candidate
+            == tuple(f"column {index}" for index in range(1, len(candidate) + 1))
+        )
+
+    previous_labels = labels(previous_row)
+    current_labels = labels(current_row)
+    if len(previous_labels) < 2 or len(previous_labels) != len(current_labels):
+        return False
+    return bool(
+        previous_labels == current_labels
+        or is_complete_generic(previous_labels)
+        or is_complete_generic(current_labels)
+    )  # headerless continuation may expose only Column N；两个显式但不同的 schema 绝不等价。
 
 
 def _table_geometry_supports_page_boundary_continuation(
@@ -6165,10 +6363,10 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
 
     This is deliberately a reader-layer decision.  It requires complete bbox
     character coverage on both versions, exact paired captions, section/page
-    containment, and bidirectional token coverage. Logical row alignment stays
-    separately auditable and is not needed to prove that the same raw table text
-    is already preserved by its table visual. The unfiltered SectionChange stays
-    in JSON/CSV for audit.
+    containment, and either bidirectional token coverage or an exact aggregate
+    character proof. Logical row alignment stays separately auditable and is
+    not needed to prove that the same raw table text is already preserved by its
+    table visual. The unfiltered SectionChange stays in JSON/CSV for audit.
     """
 
     if not (
@@ -6179,18 +6377,25 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
         and not change.added_snippets
         and not change.removed_snippets
         and change.omitted_snippet_count == 0
-        and all(
-            _reader_snippet_collapse_kind(pair.old) == "layout"
-            and _reader_snippet_collapse_kind(pair.new) == "layout"
-            and compact_inline(_reader_visible_prose_tail(pair.old))
-            == compact_inline(_reader_visible_prose_tail(pair.new))
-            for pair in change.replaced_snippets
-        )
     ):
+        return False
+    pairwise_layout_proven = all(
+        _reader_snippet_collapse_kind(pair.old) == "layout"
+        and _reader_snippet_collapse_kind(pair.new) == "layout"
+        and compact_inline(_reader_visible_prose_tail(pair.old))
+        == compact_inline(_reader_visible_prose_tail(pair.new))
+        for pair in change.replaced_snippets
+    )
+    cross_pair_table_fragment = _reader_single_cross_pair_table_fragment(
+        change.replaced_snippets,
+    )
+    if not pairwise_layout_proven and cross_pair_table_fragment is None:
         return False
     old_snippet_text = " ".join(pair.old for pair in change.replaced_snippets)
     new_snippet_text = " ".join(pair.new for pair in change.replaced_snippets)
-    eligible_evidence: list[tuple[str, str]] = []
+    eligible_evidence: list[
+        tuple[TableChange | _TableVisualGroup, str, str]
+    ] = []
     for table_change in table_evidence:
         if not _reader_table_change_proves_section_duplicate(
             change,
@@ -6199,9 +6404,10 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
             continue
         old_table_text = _reader_table_group_audit_text(table_change.old_tables)
         new_table_text = _reader_table_group_audit_text(table_change.new_tables)
-        eligible_evidence.append((old_table_text, new_table_text))
+        eligible_evidence.append((table_change, old_table_text, new_table_text))
         if (
-            _reader_table_token_coverage_proves_duplicate(
+            pairwise_layout_proven
+            and _reader_table_token_coverage_proves_duplicate(
                 old_snippet_text,
                 old_table_text,
             )
@@ -6221,7 +6427,7 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
             return True
     relevant_evidence = [
         (old_table_text, new_table_text)
-        for old_table_text, new_table_text in eligible_evidence
+        for _table_change, old_table_text, new_table_text in eligible_evidence
         if _reader_table_text_contributes_to_snippet(old_snippet_text, old_table_text)
         and _reader_table_text_contributes_to_snippet(new_snippet_text, new_table_text)
     ]
@@ -6238,10 +6444,25 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
                 new_snippet_text,
                 new_table_text,
             )
-            for old_table_text, new_table_text in eligible_evidence
+            and (
+                pairwise_layout_proven
+                or (
+                    cross_pair_table_fragment is not None
+                    and isinstance(table_change, TableChange)
+                    and bool(_table_review_rows(table_change))
+                    and _reader_table_text_covers_cross_pair_fragment(
+                        cross_pair_table_fragment,
+                        old_table_text=old_table_text,
+                        new_table_text=new_table_text,
+                    )
+                )
+            )
+            for table_change, old_table_text, new_table_text in eligible_evidence
         )
     ):
         return True  # 精确保留大小写、数字形态、PUA、希腊字母与运算符；只忽略版面空白和字符顺序。
+    if not pairwise_layout_proven:
+        return False  # 跨 pair 可读句迁移只开放上面的精确字符守恒路径，不能进入较宽松 token 合并。
     if len(relevant_evidence) < 2:
         return False
     combined_old_text = " ".join(old_text for old_text, _new_text in relevant_evidence)
@@ -6264,6 +6485,84 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
             combined_new_text,
         )
     )
+
+
+def _reader_single_cross_pair_table_fragment(
+    pairs: list[SnippetPair],
+) -> tuple[str, str] | None:
+    """Return one side-specific table fragment moved across replacement pairs.
+
+    The shorter unit must survive byte-for-byte (after whitespace compaction) as
+    a complete prefix or suffix of the longer unit.  Only the extra fragment is
+    returned; coordinate table evidence validates it separately.
+    """
+
+    transferred: tuple[str, str] | None = None
+    for pair in pairs:
+        old_kind = _reader_snippet_collapse_kind(pair.old)
+        new_kind = _reader_snippet_collapse_kind(pair.new)
+        old_tail = compact_inline(_reader_visible_prose_tail(pair.old))
+        new_tail = compact_inline(_reader_visible_prose_tail(pair.new))
+        if (
+            old_kind == "layout"
+            and new_kind == "layout"
+            and old_tail == new_tail
+        ):
+            continue
+        if transferred is not None:
+            return None
+        old_text = compact_inline(pair.old)
+        new_text = compact_inline(pair.new)
+        if not old_text or not new_text:
+            return None
+        if len(new_text) >= len(old_text) + 80 and (
+            new_text.startswith(old_text) or new_text.endswith(old_text)
+        ):
+            extra = (
+                new_text[len(old_text) :]
+                if new_text.startswith(old_text)
+                else new_text[: -len(old_text)]
+            ).strip()
+            transferred = ("", extra)
+        elif len(old_text) >= len(new_text) + 80 and (
+            old_text.startswith(new_text) or old_text.endswith(new_text)
+        ):
+            extra = (
+                old_text[len(new_text) :]
+                if old_text.startswith(new_text)
+                else old_text[: -len(new_text)]
+            ).strip()
+            transferred = (extra, "")
+        else:
+            return None
+        old_extra, new_extra = transferred
+        extra = old_extra or new_extra
+        if not extra or _READER_PROSE_VERB_RE.search(extra):
+            return None
+    # 普通 prose 字序修改、含规范动词的附加段、短前缀和多处迁移均保留。
+    return transferred
+
+
+def _reader_table_text_covers_cross_pair_fragment(
+    fragment: tuple[str, str],
+    *,
+    old_table_text: str,
+    new_table_text: str,
+) -> bool:
+    """Require every nonspace fragment character in its same-side table audit."""
+
+    old_fragment, new_fragment = fragment
+    for value, table_text in (
+        (old_fragment, old_table_text),
+        (new_fragment, new_table_text),
+    ):
+        if not value:
+            continue
+        value_counts = _reader_nonspace_character_counts(value)
+        table_counts = _reader_nonspace_character_counts(table_text)
+        if not value_counts or value_counts - table_counts:
+            return False
+    return True
 
 
 def _reader_nonspace_character_counts(value: str) -> Counter[str]:

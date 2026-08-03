@@ -1145,6 +1145,255 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             all(len(change["old_pages"]) + len(change["new_pages"]) == 1 for change in payload["table_changes"])
         )
 
+    def test_page_edge_geometry_alone_cannot_hide_an_independent_table_move(self) -> None:
+        """Aligned page-edge boxes are hints, not proof that two tables are one run."""
+
+        caption = "Table 1. Receiver limits"
+        row_a = "表格行: T1 | Parameter=Receiver | Value=1"
+        row_b = "表格行: T1 | Parameter=Unrelated diagnostics | Value=2"
+        page_bbox = (0.0, 0.0, 612.0, 1000.0)
+        old_head = TableVisual(
+            1,
+            1,
+            caption,
+            (60.0, 800.0, 560.0, 995.0),
+            "",
+            [row_a],
+            "rows",
+            page_bbox=page_bbox,
+        )
+        old_independent = TableVisual(
+            2,
+            1,
+            "",
+            (60.0, 5.0, 560.0, 200.0),
+            "",
+            [row_b],
+            "rows",
+            is_continuation=True,
+            page_bbox=page_bbox,
+        )
+        new_combined = TableVisual(
+            1,
+            1,
+            caption,
+            (60.0, 800.0, 560.0, 995.0),
+            "",
+            [row_a, row_b],
+            "rows",
+            page_bbox=page_bbox,
+        )
+        old_section = Section(
+            "O1",
+            "1 Receiver",
+            "Receiver",
+            1,
+            ("1 Receiver",),
+            ("1",),
+            1,
+            2,
+            "body",
+        )
+        new_section = replace(old_section, section_id="N1", end_page=1)
+
+        groups = reporting_module._paired_table_visuals(
+            [old_head, old_independent],
+            [new_combined],
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+        result = DiffResult(
+            Path("old.pdf"),
+            Path("new.pdf"),
+            [old_section],
+            [new_section],
+            [],
+            [],
+            old_table_visuals=[old_head, old_independent],
+            new_table_visuals=[new_combined],
+        )
+
+        self.assertEqual(2, len(groups))
+        self.assertTrue(
+            any(group.old_tables == (old_independent,) and not group.new_tables for group in groups)
+        )
+        self.assertTrue(reporting_module._build_table_changes(result))
+
+    def test_sequential_identity_cannot_bridge_different_explicit_table_schemas(self) -> None:
+        """Equal field counts and P2→P3 do not make Parameter/Value equal Symbol/Units."""
+
+        page_bbox = (0.0, 0.0, 612.0, 1000.0)
+        previous = TableVisual(
+            1,
+            1,
+            "Table 1. Receiver limits",
+            (60.0, 800.0, 560.0, 995.0),
+            "",
+            ["表格行: T1 | Parameter=P2 | Value=2"],
+            "rows",
+            page_bbox=page_bbox,
+        )
+        current = TableVisual(
+            2,
+            1,
+            "",
+            (60.0, 5.0, 560.0, 200.0),
+            "",
+            ["表格行: T1 | Symbol=P3 | Units=V"],
+            "rows",
+            is_continuation=True,
+            page_bbox=page_bbox,
+        )
+        section = Section(
+            "S1",
+            "1 Receiver",
+            "Receiver",
+            1,
+            ("1 Receiver",),
+            ("1",),
+            1,
+            2,
+            "body",
+        )
+
+        self.assertFalse(
+            reporting_module._table_rows_support_sequential_identity_continuation(
+                previous,
+                current,
+            )
+        )
+        grouped = reporting_module._table_visual_indexes_by_caption_key(
+            [previous, current],
+            [section],
+        )
+        self.assertEqual(1, len(grouped))
+        self.assertEqual([0], next(iter(grouped.values())))
+
+    def test_page_edge_continuation_accepts_a_repeated_generic_header_schema(self) -> None:
+        """A repeated Column-N header plus page geometry can prove a true continuation."""
+
+        page_bbox = (0.0, 0.0, 612.0, 1000.0)
+        previous = TableVisual(
+            1,
+            1,
+            "Table 1. Receiver limits",
+            (60.0, 800.0, 560.0, 995.0),
+            "",
+            [
+                "表格行: T1 | Parameter=Test pattern | Host Test=QPRBS31 | "
+                "Module Test 1\\n(low loss)\\nNote1=QPRBS31 | "
+                "Module Test 2\\n(high loss)=QPRBS31 | Units="
+            ],
+            "rows",
+            page_bbox=page_bbox,
+        )
+        continuation = TableVisual(
+            2,
+            1,
+            "",
+            (60.0, 5.0, 560.0, 200.0),
+            "",
+            [
+                "表格行: T1 | Column 1=Parameter | Column 2=Host Test | "
+                "Column 3=Module Test 1\\n(low loss)\\nNote1 | "
+                "Column 4=Module Test 2\\n(high loss) | Column 5=1\\nUnits2\\n3"
+            ],
+            "rows",
+            is_continuation=True,
+            page_bbox=page_bbox,
+        )
+        section = Section(
+            "S1",
+            "1 Receiver",
+            "Receiver",
+            1,
+            ("1 Receiver",),
+            ("1",),
+            1,
+            2,
+            "body",
+        )
+
+        self.assertTrue(
+            reporting_module._table_rows_support_repeated_header_continuation(
+                previous,
+                continuation,
+            )
+        )
+        grouped = reporting_module._table_visual_indexes_by_caption_key(
+            [previous, continuation],
+            [section],
+        )
+        self.assertEqual([0, 1], next(iter(grouped.values())))
+
+    def test_page_edge_continuation_accepts_reliable_schema_across_section_boundary(self) -> None:
+        """A page-edge split may cross the heading that follows the continued table."""
+
+        page_bbox = (0.0, 0.0, 612.0, 1000.0)
+        previous = TableVisual(
+            1,
+            1,
+            "Table 1. Receiver limits",
+            (60.0, 800.0, 560.0, 995.0),
+            "",
+            [
+                "表格行: T1 | Parameter=Test pattern | Host Test=QPRBS31 | "
+                "Module Test 1=QPRBS31 | Module Test 2=QPRBS31 | Units="
+            ],
+            "rows",
+            page_bbox=page_bbox,
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        continuation = TableVisual(
+            2,
+            1,
+            "",
+            (60.0, 5.0, 560.0, 200.0),
+            "",
+            [
+                "表格行: T1 | Parameter=Pre-FEC BER | Host Test=< 5e-6 | "
+                "Module Test 1= | Module Test 2= | Units="
+            ],
+            "rows",
+            is_continuation=True,
+            page_bbox=page_bbox,
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        sections = [
+            Section(
+                "S1",
+                "31.3.13 Receiver measurements",
+                "Receiver measurements",
+                3,
+                ("31.3.13 Receiver measurements",),
+                ("31.3.13",),
+                1,
+                1,
+                "body",
+            ),
+            Section(
+                "S2",
+                "31.3.17.1 Test procedure",
+                "Test procedure",
+                4,
+                ("31.3.17.1 Test procedure",),
+                ("31.3.17.1",),
+                2,
+                2,
+                "body",
+            ),
+        ]
+
+        grouped = reporting_module._table_visual_indexes_by_caption_key(
+            [previous, continuation],
+            sections,
+        )
+
+        self.assertEqual(1, len(grouped))
+        self.assertEqual([0, 1], next(iter(grouped.values())))
+
     def test_renumbered_table_with_same_descriptive_caption_pairs_across_ambiguous_context(self) -> None:
         """A stable descriptive caption may override a page-level context mismatch."""
 

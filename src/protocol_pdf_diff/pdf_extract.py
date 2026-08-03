@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import re  # 使用正则识别行号边栏、表头和表格值模式。
 import base64  # 把表格截图编码成 data URI，HTML 报告可以离线打开。
+import hashlib  # 对实际交给解析器的 PDF 快照计算摘要，避免报告期重读路径造成 provenance 漂移。
 import io  # 在内存中保存 JPEG 截图，避免生成临时图片文件。
 import math  # 用页面对角线和字符间距确认完整水印簇，避免误删孤立旋转字母。
 import shutil  # 检测 tesseract 可执行文件是否存在，决定是否启用 OCR。
+import tempfile  # 大 PDF 快照超过内存阈值时自动落到临时文件，仍保持解析字节与摘要一致。
 from collections import Counter  # 比较表格 bbox、原始单元格与结构化行的字符覆盖，只有全覆盖才替换比较面。
 from pathlib import Path
 from statistics import median
@@ -184,9 +186,17 @@ def _extract_pdf_text_with_pdfplumber(
         raise
 
     warnings: list[str] = []  # 收集非致命抽取问题，最终写进报告。
-    try:  # pdfplumber 负责解析页面坐标、文本和表格。
-        pdf = pdfplumber.open(str(path))
-    except Exception as exc:  # PDF 解析失败时给出包含文件名的错误。
+    source_snapshot = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024, mode="w+b")
+    source_digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source_handle:
+            for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
+                source_digest.update(chunk)
+                source_snapshot.write(chunk)
+        source_snapshot.seek(0)
+        pdf = pdfplumber.open(source_snapshot)
+    except Exception as exc:  # 快照或 PDF 解析失败时给出包含文件名的错误。
+        source_snapshot.close()
         raise PdfReadError(f"无法读取 PDF: {path}\n原因: {exc}") from exc
 
     try:  # 使用上下文式关闭底层文件句柄，避免长批处理时占用文件。
@@ -275,6 +285,7 @@ def _extract_pdf_text_with_pdfplumber(
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
     finally:
         pdf.close()  # 明确关闭 pdfplumber 打开的文件资源。
+        source_snapshot.close()  # 解析器始终读取这份快照；摘要与实际解析字节严格绑定。
 
     return _finalize_extraction_result(
         path=path,
@@ -284,6 +295,7 @@ def _extract_pdf_text_with_pdfplumber(
         selected_start=selected_start,
         selected_end=selected_end,
         table_visuals=table_visuals,
+        source_sha256=source_digest.hexdigest(),
     )  # 统一追加空页和低字符数警告。
 
 
@@ -3015,13 +3027,14 @@ def _table_row_replacement_flags(
             if cell_word_rows is not None and original_index < len(cell_word_rows)
             else None
         )
-        expanded_rows = _expand_table_row(
+        expanded_rows, expansion_alignment_reliable = _expand_table_row_with_evidence(
             row,
             header,
             cell_word_row=cell_word_row,
         )
         flags[original_index] = (
             _expanded_rows_preserve_source_cells(row, expanded_rows)
+            and expansion_alignment_reliable
             and _expanded_rows_preserve_source_alignment(
                 row,
                 expanded_rows,
@@ -3567,7 +3580,7 @@ def _table_lines_from_rows_with_evidence(
     alignment_reliable = True
     lines: list[str] = []  # 输出给比较器的结构化表格行。
     for row, cell_word_row in zip(data_rows, data_word_rows, strict=True):
-        expanded_rows = _expand_table_row(
+        expanded_rows, expansion_alignment_reliable = _expand_table_row_with_evidence(
             row,
             header,
             cell_word_row=cell_word_row,
@@ -3577,6 +3590,7 @@ def _table_lines_from_rows_with_evidence(
         alignment_reliable = (
             alignment_reliable
             and row_content_lossless
+            and expansion_alignment_reliable
             and _expanded_rows_preserve_source_alignment(
                 row,
                 expanded_rows,
@@ -4555,10 +4569,26 @@ def _expand_table_row(
     *,
     cell_word_row: list[list[dict[str, object]]] | None = None,
 ) -> list[list[str]]:
-    """Split a physical table row into logical rows when columns contain lists."""
+    """Split a physical row while keeping the historical rows-only helper API."""
+
+    expanded_rows, _alignment_reliable = _expand_table_row_with_evidence(
+        row,
+        header,
+        cell_word_row=cell_word_row,
+    )
+    return expanded_rows
+
+
+def _expand_table_row_with_evidence(
+    row: list[list[str]],
+    header: list[str],
+    *,
+    cell_word_row: list[list[dict[str, object]]] | None = None,
+) -> tuple[list[list[str]], bool]:
+    """Split one physical row and report whether every cross-row assignment is proven."""
 
     if not header:  # 没有列含义时不做列表展开，避免错拆普通多行说明。
-        return [[_clean_table_cell_lines(cell_lines) for cell_lines in row]]
+        return [[_clean_table_cell_lines(cell_lines) for cell_lines in row]], True
     labels = _header_labels_for_row(header, len(row))  # 用当前行宽对齐表头，后续按列类型处理。
     column_values = [
         _logical_cell_values(cell_lines, labels[index])
@@ -4583,23 +4613,38 @@ def _expand_table_row(
                 cell_word_row=cell_word_row,
             )
     if target_count <= 1:
-        return [[
-            _clean_unexpanded_table_cell_lines(cell_lines, labels[index])
-            for index, cell_lines in enumerate(row)
-        ]]  # 列内条数冲突时保留一条可审阅聚合行，不猜测删除或错位配对。
+        return (
+            [[
+                _clean_unexpanded_table_cell_lines(cell_lines, labels[index])
+                for index, cell_lines in enumerate(row)
+            ]],
+            True,
+        )  # 列内条数冲突时保留一条可审阅聚合行，不猜测删除或错位配对。
 
-    sparse_unit_columns = _geometry_aligned_sparse_unit_columns(
+    sparse_unit_result = _geometry_aligned_sparse_unit_columns(
         column_values,
         labels,
         target_count,
         cell_word_row,
     )
-    if sparse_unit_columns is None:
-        return [[
-            _clean_unexpanded_table_cell_lines(cell_lines, labels[index])
-            for index, cell_lines in enumerate(row)
-        ]]
+    if sparse_unit_result is None:
+        return (
+            [[
+                _clean_unexpanded_table_cell_lines(cell_lines, labels[index])
+                for index, cell_lines in enumerate(row)
+            ]],
+            False,
+        )
+    sparse_unit_columns, sparse_unit_alignment_reliable = sparse_unit_result
+    singleton_columns, singleton_alignment_reliable = _geometry_aligned_singleton_columns(
+        column_values,
+        target_count,
+        cell_word_row,
+        excluded_indexes=set(sparse_unit_columns),
+    )
     for column_index, aligned_values in sparse_unit_columns.items():
+        column_values[column_index] = aligned_values
+    for column_index, aligned_values in singleton_columns.items():
         column_values[column_index] = aligned_values
 
     expanded_rows: list[list[str]] = []  # 收集拆分后的逻辑表格行。
@@ -4610,7 +4655,10 @@ def _expand_table_row(
                 for index, values in enumerate(column_values)
             ]
         )  # 每个逻辑行按同一序号从各列取值，缺失单元格保持空字符串。
-    return expanded_rows
+    return (
+        expanded_rows,
+        sparse_unit_alignment_reliable and singleton_alignment_reliable,
+    )
 
 
 def _clean_unexpanded_table_cell_lines(lines: list[str], label: str) -> str:
@@ -4990,8 +5038,8 @@ def _geometry_aligned_sparse_unit_columns(
     labels: list[str],
     target_count: int,
     cell_word_row: list[list[dict[str, object]]] | None,
-) -> dict[int, list[str]] | None:
-    """Place sparse units only when y baselines prove every occupied row."""
+) -> tuple[dict[int, list[str]], bool] | None:
+    """Place sparse units and distinguish proven mapping from review-only fallback."""
 
     sparse_indexes: list[int] = []
     for index, (values, label) in enumerate(zip(columns, labels, strict=False)):
@@ -5002,7 +5050,7 @@ def _geometry_aligned_sparse_unit_columns(
         ):
             sparse_indexes.append(index)
     if not sparse_indexes:
-        return {}
+        return {}, True
     if cell_word_row is None or len(cell_word_row) != len(columns):
         return None
 
@@ -5013,14 +5061,105 @@ def _geometry_aligned_sparse_unit_columns(
         sparse_indexes,
     )
     if directly_aligned is not None:
-        return directly_aligned
-    return _group_labeled_trailing_sparse_unit_columns(
+        direct_mapping_reliable = all(
+            sum(bool(normalize_line(value)) for value in columns[index]) >= 2
+            for index in sparse_indexes
+        )
+        return directly_aligned, direct_mapping_reliable
+        # 单个 Unit 即使 y 唯一也可能是跨行共享单元格；可定位展示，但不得授权 confirmed 行差异或隐藏 bbox。
+    fallback = _group_labeled_trailing_sparse_unit_columns(
         columns,
         labels,
         target_count,
         cell_word_row,
         sparse_indexes,
     )
+    if fallback is None:
+        return None
+    return fallback, False  # 有序前缀可保留可读拆行，但不能授权隐藏原始 bbox 或宣称行归属可靠。
+
+
+def _geometry_aligned_singleton_columns(
+    columns: list[list[str]],
+    target_count: int,
+    cell_word_row: list[list[dict[str, object]]] | None,
+    *,
+    excluded_indexes: set[int],
+) -> tuple[dict[int, list[str]], bool]:
+    """Project singleton cells for readability without certifying row ownership.
+
+    A singleton Conditions/Notes/Units cell may be a true row value or a merged
+    cell spanning the whole physical group.  Repeating it across every logical
+    row without cell-span evidence hides row-association changes.  A unique
+    baseline match may localize the display to one row, while ambiguous or
+    missing geometry keeps the historical broadcast.  Neither form proves the
+    absence of a rowspan, so every expanded singleton keeps the whole physical
+    group review-only and preserves the raw table bbox.
+    """
+
+    singleton_indexes = [
+        index
+        for index, values in enumerate(columns)
+        if index not in excluded_indexes
+        and len([value for value in values if normalize_line(value)]) == 1
+    ]
+    if not singleton_indexes:
+        return {}, True
+    if cell_word_row is None or len(cell_word_row) != len(columns):
+        return {}, False
+
+    reference_observations: list[list[tuple[float, float]]] = []
+    for index, values in enumerate(columns):
+        if index in singleton_indexes or index in excluded_indexes:
+            continue
+        normalized = [normalize_line(value) for value in values if normalize_line(value)]
+        if len(normalized) != target_count:
+            continue
+        observations = _logical_value_geometry_observations(
+            normalized,
+            cell_word_row[index],
+        )
+        if observations is not None:
+            reference_observations.append(observations)
+    if len(reference_observations) < 2 or not _table_observation_columns_align(
+        reference_observations,
+        target_count,
+    ):
+        return {}, False
+
+    reference_centers = [
+        sum(observations[row_index][0] for observations in reference_observations)
+        / len(reference_observations)
+        for row_index in range(target_count)
+    ]
+    reference_heights = [
+        min(observations[row_index][1] for observations in reference_observations)
+        for row_index in range(target_count)
+    ]
+    aligned: dict[int, list[str]] = {}
+    for index in singleton_indexes:
+        values = [normalize_line(value) for value in columns[index] if normalize_line(value)]
+        observations = _logical_value_geometry_observations(
+            values,
+            cell_word_row[index],
+        )
+        if observations is None or len(observations) != 1:
+            continue
+        center, height = observations[0]
+        candidates = [
+            row_index
+            for row_index, (reference_center, reference_height) in enumerate(
+                zip(reference_centers, reference_heights, strict=True)
+            )
+            if abs(center - reference_center)
+            <= max(1.5, min(height, reference_height) * 0.45)
+        ]
+        if len(candidates) != 1:
+            continue
+        padded = [""] * target_count
+        padded[candidates[0]] = values[0]
+        aligned[index] = padded
+    return aligned, False  # word y 不能区分单行值与跨行合并单元格，禁止据此产出 confirmed 差异。
 
 
 def _directly_aligned_sparse_unit_columns(
@@ -5090,15 +5229,15 @@ def _group_labeled_trailing_sparse_unit_columns(
     cell_word_row: list[list[dict[str, object]]],
     sparse_indexes: list[int],
 ) -> dict[int, list[str]] | None:
-    """Accept only a geometry-proven continuous unit prefix with a trailing blank.
+    """Build a review-only ordered unit prefix with a trailing blank.
 
     A merged physical row can contain an explicit group label followed by N
     parameter records while its Units cell contains only the first N-1 values.
     Superscripts and subscripts make strict top-coordinate grouping unsuitable,
-    so this path first reconstructs logical visual records losslessly.  The first
-    unit must anchor to row zero and every observed unit gap must track the same
-    reference-row gap; an internal missing value therefore creates a near-double
-    gap and fails closed.
+    so this path first reconstructs logical visual records losslessly.  The
+    ordered prefix remains useful for display, but its caller always marks row
+    assignment unreliable: relative line spacing cannot prove the omitted slot
+    when baselines are non-uniform.
     """
 
     if target_count < 3:
@@ -6045,6 +6184,7 @@ def _finalize_extraction_result(
     selected_start: int,
     selected_end: int,
     table_visuals: list[TableVisual] | None = None,
+    source_sha256: str | None = None,
 ) -> ExtractionResult:
     """Add common extraction warnings and build the final result object."""
 
@@ -6071,6 +6211,7 @@ def _finalize_extraction_result(
         selected_start_page=selected_start,
         selected_end_page=selected_end,
         table_visuals=list(table_visuals or []),
+        source_sha256=source_sha256,
     )
 
 

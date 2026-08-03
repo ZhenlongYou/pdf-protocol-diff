@@ -1307,6 +1307,7 @@ class ProtocolDiffTests(unittest.TestCase):
                 total_pages=10,
                 selected_start_page=2,
                 selected_end_page=3,
+                source_sha256=hashlib.sha256(old_bytes).hexdigest(),
             )
             new_extraction = ExtractionResult(
                 pdf_path=new_path,
@@ -1317,6 +1318,7 @@ class ProtocolDiffTests(unittest.TestCase):
                 total_pages=12,
                 selected_start_page=5,
                 selected_end_page=6,
+                source_sha256=hashlib.sha256(new_bytes).hexdigest(),
             )
             with mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("PROTOCOL_PDF_DIFF_BUILD_COMMIT", None)
@@ -1378,6 +1380,28 @@ class ProtocolDiffTests(unittest.TestCase):
                 "quality_min_single_character_line_ratio"
             ],
         )
+
+    def test_provenance_hash_is_bound_to_the_pdf_snapshot_actually_parsed(self) -> None:
+        """Replacing a path after extraction must not rewrite the reported input digest."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = Path(temp_dir) / "source.pdf"
+            write_multipage_text_pdf(
+                pdf_path,
+                [["1 Scope", "The receiver shall preserve the parsed source bytes."]],
+            )
+            parsed_bytes = pdf_path.read_bytes()
+            extraction = extract_pdf_text(pdf_path)
+            parsed_digest = hashlib.sha256(parsed_bytes).hexdigest()
+            pdf_path.write_bytes(b"a different file now occupies the same path")
+
+            result = compare_extractions(extraction, extraction, DiffOptions())
+
+        self.assertEqual(parsed_digest, extraction.source_sha256)
+        self.assertIsNotNone(result.provenance)
+        assert result.provenance is not None
+        self.assertEqual(parsed_digest, result.provenance.old_input.sha256)
+        self.assertEqual(parsed_digest, result.provenance.new_input.sha256)
 
     def test_each_quality_risk_degrades_without_discarding_sections(self) -> None:
         """Low text, warnings, empty pages, and layout risk are review signals only."""
@@ -4815,6 +4839,41 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("OIF 2024.532.04", revision_added.new_value)
         self.assertFalse(
             any(row.change_type == "需人工复核" for row in revision_changes[0].row_changes)
+        )
+
+    @unittest.skipUnless(
+        Path("/Users/mac/Documents/文件对比工具/oif2024.532.05.pdf").is_file(),
+        "本地 OIF 532 新版样本不存在",
+    )
+    def test_real_532_page_window_keeps_table_31_10_continuation(self) -> None:
+        """Selecting only pages 15–16 must still retain the split table as one run."""
+
+        extraction = extract_pdf_text(
+            "/Users/mac/Documents/文件对比工具/oif2024.532.05.pdf",
+            start_page=15,
+            end_page=16,
+        )
+        result = compare_extractions(extraction, extraction, DiffOptions())
+        runs = reporting_module._table_visual_indexes_by_caption_key(
+            result.old_table_visuals,
+            result.old_sections,
+        )
+        matching_runs = [
+            indexes
+            for indexes in runs.values()
+            if any(
+                "Table 31-10." in result.old_table_visuals[index].title
+                for index in indexes
+            )
+        ]
+
+        self.assertEqual(1, len(matching_runs))
+        self.assertEqual(
+            [15, 16],
+            [
+                result.old_table_visuals[index].page_number
+                for index in matching_runs[0]
+            ],
         )
 
     @unittest.skipUnless(
