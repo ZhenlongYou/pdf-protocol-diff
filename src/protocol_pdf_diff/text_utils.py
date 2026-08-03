@@ -10,43 +10,135 @@ from __future__ import annotations
 import re
 import unicodedata
 
+TABLE_NUMBER_DASH_CLASS = r"[\-\u2010\u2011\u2012\u2013\u2014\u2212]"
+
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
-_EMBEDDED_DRAFT_LETTER_WORD_RE = re.compile(
-    r"\b(?:[DRAFT][a-z][A-Za-z]*|[A-Za-z]*[a-z][DRAFT][a-z][A-Za-z]*)\b"
-)  # 同时捕获 Fpackage 这类开头水印残字，以及 trRansmitter 这类词内残字。
-_DRAFT_FRAGMENT_CORRECTION_WORDS = frozenset(
+_INVISIBLE_EXTRACTION_CONTROL_RE = re.compile(
+    "[\u00ad\u200b\u2060\ufeff]"
+)
+_KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
     {
-        "characteristic",
-        "characteristics",
-        "compliance",
-        "condition",
-        "conditions",
-        "and",
-        "differential",
-        "frequency",
-        "measured",
-        "measurement",
-        "package",
-        "packages",
-        "parameter",
-        "parameters",
-        "receiver",
-        "reference",
-        "reflection",
-        "requirement",
-        "requirements",
-        "return",
-        "signal",
-        "signals",
-        "than",
-        "transmitter",
-        "transmission",
-        "value",
-        "voltage",
-        "waveform",
+        "\uf02c": ",",
+        "\uf03c": "<",
+        "\uf061": "α",
+        "\uf067": "γ",
+        "\uf073": "σ",
+        "\uf074": "τ",
+        "\uf0a3": "≤",
+        "\uf0a4": "⁄",
     }
-)  # 只有删除残字后命中这些常见协议词，才认为是 DRAFT 水印污染。
+)  # OIF PDFs use legacy Adobe Symbol code positions for comma, <, alpha/gamma/sigma/tau, <=, and fraction slash.
+_KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES = {
+    "A": frozenset({"fe", "ne", "v"}),
+    "C": frozenset({"p"}),
+    "N": frozenset({"b", "ts"}),
+    "R": frozenset({"d"}),
+    "RL": frozenset({"cd"}),
+    "Z": frozenset({"c", "p"}),
+    "f": frozenset({"b"}),
+    "z": frozenset({"c", "p"}),
+}
+_MEASUREMENT_CONTEXT_WORDS = frozenset(
+    {
+        "amplitude",
+        "bandwidth",
+        "capacitance",
+        "current",
+        "delay",
+        "distance",
+        "duration",
+        "energy",
+        "frequency",
+        "height",
+        "impedance",
+        "inductance",
+        "interval",
+        "length",
+        "limit",
+        "mass",
+        "maximum",
+        "minimum",
+        "noise",
+        "power",
+        "pressure",
+        "rate",
+        "resistance",
+        "temperature",
+        "time",
+        "tolerance",
+        "unit",
+        "units",
+        "voltage",
+        "weight",
+        "width",
+    }
+)
+
+
+def normalize_table_number_dashes(value: str) -> str:
+    """Normalize one supported table-number separator and its surrounding spaces."""
+
+    return re.sub(
+        rf"\s*{TABLE_NUMBER_DASH_CLASS}\s*",
+        "-",
+        value,
+    )
+_MEASUREMENT_CONTEXT_CJK = (
+    "单位",
+    "上限",
+    "下限",
+    "电压",
+    "电流",
+    "功率",
+    "频率",
+    "时间",
+    "时延",
+    "延迟",
+    "长度",
+    "距离",
+    "温度",
+    "电阻",
+    "阻抗",
+    "电容",
+    "电感",
+)
+_COMPACT_MEASUREMENT_UNITS = frozenset(
+    {
+        "a",
+        "ah",
+        "b",
+        "bps",
+        "c",
+        "db",
+        "dbc",
+        "f",
+        "g",
+        "gsym",
+        "gt",
+        "h",
+        "hz",
+        "j",
+        "k",
+        "kg",
+        "m",
+        "pa",
+        "s",
+        "sym",
+        "ui",
+        "v",
+        "va",
+        "var",
+        "w",
+        "wb",
+        "ω",
+        "ohm",
+    }
+)
+_SI_UNIT_BASES = frozenset(
+    {"a", "bps", "c", "f", "g", "h", "hz", "j", "k", "m", "pa", "s", "sym", "v", "w"}
+)
+_SI_PREFIXES = frozenset("yzafpnumcdhkMGTPEZY")
 _NUMBER_WORD_UNITS = {
     "zero": 0,
     "one": 1,
@@ -79,6 +171,58 @@ _NUMBER_WORD_TENS = {
     "eighty": 80,
     "ninety": 90,
 }
+_ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
+    {
+        "attempt",
+        "attempts",
+        "bit",
+        "bits",
+        "byte",
+        "bytes",
+        "channel",
+        "channels",
+        "cycle",
+        "cycles",
+        "day",
+        "days",
+        "document",
+        "documents",
+        "error",
+        "errors",
+        "event",
+        "events",
+        "file",
+        "files",
+        "interval",
+        "intervals",
+        "item",
+        "items",
+        "lane",
+        "lanes",
+        "packet",
+        "packets",
+        "page",
+        "pages",
+        "pin",
+        "pins",
+        "port",
+        "ports",
+        "record",
+        "records",
+        "retry",
+        "retries",
+        "sample",
+        "samples",
+        "section",
+        "sections",
+        "step",
+        "steps",
+        "time",
+        "times",
+        "waveform",
+        "waveforms",
+    }
+)
 CHINESE_NUMBER_CHARS = "零〇一二两三四五六七八九十百千万"
 CHINESE_COUNT_UNITS = (
     "数据包",
@@ -165,7 +309,8 @@ _CHINESE_UNITS = {"十": 10, "百": 100, "千": 1000}
 def normalize_line(line: str) -> str:
     """Normalize one extracted line without destroying protocol numbering."""
 
-    normalized = unicodedata.normalize("NFKC", line)
+    normalized = unicodedata.normalize("NFC", line)  # 保留 ²/₁ 等上下标语义，禁止兼容归一把它们压成普通数字。
+    normalized = _INVISIBLE_EXTRACTION_CONTROL_RE.sub("", normalized)
     normalized = _WHITESPACE_RE.sub(" ", normalized)
     return normalized.strip()
 
@@ -178,6 +323,7 @@ def normalize_for_similarity(text: str) -> str:
     """
 
     lines = [normalize_line(line) for line in text.splitlines()]
+    # 私用码位没有字体来源就没有可证明语义；相似度层也保留它，避免把自定义字体静默等同为 Unicode。
     compact = "\n".join(line for line in lines if line)
     compact = _MULTI_BLANK_RE.sub("\n\n", compact)
     return compact.casefold()
@@ -189,39 +335,158 @@ def compact_inline(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", " ".join(text.split())).strip()
 
 
-def remove_draft_watermark_letter_artifacts(text: str) -> str:
-    """Remove isolated DRAFT watermark letters that leaked into body text."""
+def readable_symbol_font_glyphs(text: str) -> str:
+    """Decode a small legacy Symbol-code whitelist for reader-facing text only.
 
-    if "表格行:" in text:  # 结构化表格行可能合法包含单字母符号，不能按水印残片清理。
-        return text
-    cleaned = _EMBEDDED_DRAFT_LETTER_WORD_RE.sub(_clean_embedded_draft_letter_word, text)  # 先处理 RequirRements 这类词内污染。
-    word_count = len(re.findall(r"[A-Za-z]{3,}", cleaned))  # 只有长正文句子才启用独立残片删除，降低误删符号的风险。
-    if word_count < 4:
-        return cleaned
-    cleaned = re.sub(r"(?<![A-Za-z0-9_])[DRFT](?![A-Za-z0-9_])", " ", cleaned)  # 删除独立 D/R/F/T，保留常见正文冠词 A。
-    return _WHITESPACE_RE.sub(" ", cleaned).strip()
+    Raw extraction remains untouched for JSON audit and character-conservation
+    checks.  This convenience mapping never authorizes semantic equality: a
+    private-use code point remains a reviewable difference until extraction
+    carries verified font provenance.
+    """
+
+    return text.translate(_KNOWN_ADOBE_SYMBOL_PUA)
 
 
-def _clean_embedded_draft_letter_word(match: re.Match[str]) -> str:
-    """Remove one leaked DRAFT letter from a long mixed-case word."""
+def reader_safe_glyphs(text: str) -> str:
+    """Render every private-use glyph intelligibly in reader-facing formats.
 
-    word = match.group(0)  # 取出包含疑似水印字母的完整单词。
-    if len(word) < 4:
-        return word
-    for index, character in enumerate(word):
-        if character not in "DRAFT":
+    The verified Adobe Symbol whitelist is decoded first. Any remaining PUA
+    code point has no trustworthy meaning without embedded-font provenance, so
+    reader formats name the observed code point instead of emitting a tofu box
+    or a misleading glyph. Audit formats still retain the untouched extraction.
+    """
+
+    decoded = readable_symbol_font_glyphs(text)
+    return re.sub(
+        r"[\ue000-\uf8ff]",
+        lambda match: f"〔未识别符号 U+{ord(match.group(0)):04X}〕",
+        decoded,
+    )
+
+
+def reader_symbol_mapping_key(text: str) -> str:
+    """Build a narrow reader-equivalence key for known Symbol-font mappings.
+
+    Only spacing adjacent to the two operators in the verified mapping table is
+    ignored.  Word spacing and all other characters stay exact so a real wording
+    change cannot be downgraded to an encoding review.
+    """
+
+    decoded = readable_symbol_font_glyphs(text)
+    return re.sub(r"\s*([<≤])\s*", r"\1", decoded)
+
+
+def is_known_engineering_symbol_letter_suffix(base: str, suffix: str) -> bool:
+    """Return whether a split letter suffix belongs to a verified symbol family."""
+
+    return suffix in _KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES.get(base, frozenset())
+
+
+def has_measurement_context(value: str) -> bool:
+    """Return True only for visible physical-quantity or unit context."""
+
+    normalized = normalize_line(value).casefold()
+    words = set(re.findall(r"[a-z]+", normalized))
+    return bool(words & _MEASUREMENT_CONTEXT_WORDS) or any(
+        marker in normalized for marker in _MEASUREMENT_CONTEXT_CJK
+    )
+
+
+def has_observable_identifier_boundary(
+    value: str,
+    boundary_index: int,
+    *,
+    context: str = "",
+) -> bool:
+    """Keep a digit/letter join unless positive evidence proves number+unit spacing."""
+
+    if boundary_index <= 0 or boundary_index >= len(value):
+        return False
+    left = value[boundary_index - 1]
+    right = value[boundary_index]
+    left_is_identifier_letter = left.isalpha() and left.lower() != left.upper()
+    right_is_identifier_letter = right.isalpha() and right.lower() != right.upper()
+    if not (
+        (left.isdigit() and right_is_identifier_letter)
+        or (left_is_identifier_letter and right.isdigit())
+    ):
+        return False
+
+    token_start = boundary_index - 1
+    while token_start > 0 and (value[token_start - 1].isalnum() or value[token_start - 1] == "_"):
+        token_start -= 1
+    token_end = boundary_index + 1
+    while token_end < len(value) and (value[token_end].isalnum() or value[token_end] == "_"):
+        token_end += 1
+    token = value[token_start:token_end]
+    if re.fullmatch(r"(?i)[+-]?\d+(?:\.\d+)?e[+-]?\d+", token):
+        return False  # Scientific notation is one numeric token, not an identifier join.
+    if re.fullmatch(r"(?i)(?:notes?|tests?|sections?|tables?|figures?)\d+", token):
+        return False  # Compact cross-reference labels and their spaced forms are display variants.
+    if re.fullmatch(r"(?i)0x[0-9a-f]+", token):
+        return True  # Hexadecimal spelling is literal and cannot be split safely.
+    if re.fullmatch(r"(?i)\d+x(?:\d|[^\W\d_])\w*", token):
+        return False  # Existing math rules treat 2xT and 5x10 as multiplication notation.
+
+    compact_measurement = re.fullmatch(
+        r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?P<unit>[^\W\d_][^\W\d_]*)",
+        token,
+        flags=re.UNICODE,
+    )
+    observed_context = f"{value[:token_start]} {context}"
+    if compact_measurement and has_measurement_context(observed_context):
+        unit = compact_measurement.group("unit").replace("µ", "u").replace("μ", "u")
+        if _looks_like_measurement_unit(unit):
+            return False
+    if compact_measurement:
+        unit = compact_measurement.group("unit").replace("µ", "u").replace("μ", "u")
+        if len(unit) > 1 and _looks_like_measurement_unit(unit):
+            return False  # Multi-letter SI/unit spellings such as ps, MHz and dB are self-evident.
+    return True
+
+
+def identifier_boundary_signatures(value: str, *, context: str = "") -> tuple[str, ...]:
+    """Return position-bound signatures for observable joined digit/letter tokens."""
+
+    signatures: list[str] = []
+    for index in range(1, len(value)):
+        if not has_observable_identifier_boundary(value, index, context=context):
             continue
-        previous_character = word[index - 1] if index > 0 else ""
-        next_character = word[index + 1] if index + 1 < len(word) else ""
-        if index == 0:
-            if not next_character.islower():
-                continue  # 只有 `Fpackage` 这种首字母水印残留才尝试删除。
-        elif not previous_character.islower() or not next_character.islower():
-            continue  # 词内残字必须被小写字母夹住，避免误动普通大写词。
-        candidate = word[:index] + word[index + 1 :]
-        if candidate.casefold() in _DRAFT_FRAGMENT_CORRECTION_WORDS:
-            return candidate  # 例如 trRansmitter -> transmitter，但 laneTraining 不会被改写。
-    return word
+        signatures.append(
+            f"{len(signatures)}:{value[index - 1].isdigit()}>{value[index].isdigit()}"
+        )
+    return tuple(signatures)
+
+
+def micro_identifier_signatures(value: str, *, context: str = "") -> tuple[str, ...]:
+    """Preserve micro/mu glyphs in identifiers while allowing proven micro-units."""
+
+    signatures: list[str] = []
+    for match in re.finditer(r"(?<!\w)(?P<token>[\w]*[µμ][\w]*)(?!\w)", value):
+        token = match.group("token")
+        suffix_match = re.fullmatch(r"(?:\d+(?:\.\d+)?)?[µμ](?P<unit>\w+)", token)
+        observed_context = f"{value[:match.start()]} {context}"
+        if suffix_match:
+            unit = "u" + suffix_match.group("unit")
+            formula_or_measurement_context = (
+                has_measurement_context(observed_context)
+                or "=" in observed_context
+            )
+            if formula_or_measurement_context and _looks_like_measurement_unit(unit):
+                continue
+        signatures.append(f"{len(signatures)}:{token.replace('µ', 'μ')}")
+    return tuple(signatures)
+
+
+def _looks_like_measurement_unit(value: str) -> bool:
+    """Recognize standard compact unit symbols without inferring document vocabulary."""
+
+    normalized = value.replace("µ", "u").replace("μ", "u")
+    if normalized.casefold() in _COMPACT_MEASUREMENT_UNITS:
+        return True
+    if len(normalized) < 2 or normalized[0] not in _SI_PREFIXES:
+        return False
+    return normalized[1:].casefold() in _SI_UNIT_BASES
 
 
 def truncate(text: str, max_chars: int = 260) -> str:
@@ -311,7 +576,11 @@ def canonicalize_number_word_tokens(
             previous_word = normalized_tokens[index - 1] if index > 0 else ""
             next_index = index + consumed
             next_word = normalized_tokens[next_index] if next_index < len(tokens) else ""
-            if previous_word in protected_previous_words or next_word in protected_next_words:
+            if (
+                previous_word in protected_previous_words
+                or next_word in protected_next_words
+                or not _has_positive_english_count_context(normalized_tokens, next_index)
+            ):
                 canonical.extend(tokens[index : index + consumed])
             else:
                 canonical.append(value)
@@ -320,6 +589,18 @@ def canonicalize_number_word_tokens(
         canonical.append(tokens[index])
         index += 1
     return canonical
+
+
+def _has_positive_english_count_context(tokens: list[str], next_index: int) -> bool:
+    """Require an observed count noun instead of guessing from a prefix blacklist."""
+
+    if next_index < len(tokens) and tokens[next_index] in _ENGLISH_COUNT_CONTEXT_NOUNS:
+        return True
+    return bool(
+        next_index + 1 < len(tokens)
+        and re.fullmatch(r"[a-z][a-z-]*", tokens[next_index])
+        and tokens[next_index + 1] in _ENGLISH_COUNT_CONTEXT_NOUNS
+    )  # `twenty one idle intervals` 允许一个可见修饰词；公式/函数/枚举不会误折叠。
 
 
 def canonicalize_chinese_number_token(token: str) -> str | None:

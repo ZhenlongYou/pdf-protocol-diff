@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "oif-draft-version-pair",
+      "kind": "pair",
+      "required": false,
+      "certification_required": true,
+      "description": "Complex draft revisions guard degraded-state, evidence retention, and a bounded false-positive budget.",
+      "old": {
+        "path": "oif2024.058.11.pdf"
+      },
+      "new": {
+        "path": "oif2024.058.13.pdf"
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 32,
+        "max_technical_table_changes": 12,
+        "must_extract_old": [
+          "32 CEI-224G-MR-PAM4 Medium Reach Interface",
+          "6. Shall support hot plug.",
+          "T_J4.3u03",
+          "T_JRMS03",
+          "T_EOJ03",
+          "bmax(1)",
+          "bmin(0)"
+        ],
+        "must_extract_new": [
+          "32 CEI-224G-MR-PAM4 Medium Reach Interface",
+          "6. Shall support hot plug.",
+          "T_JH4.3u",
+          "T_JHRMS",
+          "T_EOJ03",
+          "bmax(1)",
+          "bmin(0)"
+        ],
+        "must_find": [
+          "Np = 60",
+          "92.5 Ω"
+        ],
+        "must_review": [
+          "Single-ended reference resistance",
+          "46.25"
+        ],
+        "must_ignore": [
+          "Column 2=b (1)",
+          "Column 2=b (0)",
+          "Normalized DFE coefficient maximum limit b (1) 0.85"
+        ],
+        "must_ignore_locations": [
+          "1. Support serial baud rates",
+          "6. Shall support hot plug."
+        ]
+      }
+    },
+    {
+      "id": "oif-vsr-version-pair",
+      "kind": "pair",
+      "required": false,
+      "certification_required": true,
+      "description": "VSR draft revisions guard gutter numbers, mixed letter appendices, split references, and cross-page tables.",
+      "old": {
+        "path": "oif2024.532.04.pdf"
+      },
+      "new": {
+        "path": "oif2024.532.05.pdf"
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 62,
+        "max_technical_table_changes": 18,
+        "must_extract_old": [
+          "100 ± 10 Ω",
+          "See Notes 1, 2",
+          "JH4u",
+          "Cd(1)",
+          "Rd(t)",
+          "zp(1) / Zc(1) / zp(2) / Zc(2)",
+          "C0 / \uf0670(h) / \uf0611(h) / \uf0612(h) / \uf074(h) / Zc(h) / zp(2) / C1"
+        ],
+        "must_extract_new": [
+          "See Notes 1, 2",
+          "Normalize lower limit on feed-forward coefficient w(j)",
+          "1 ≤ j ≤ d and d + 2 ≤ j ≤ N",
+          "-0.7",
+          "JH4u",
+          "Cd(1)",
+          "Rd(t)",
+          "zp(1) / Zc(1) / zp(2) / Zc(2)",
+          "C0 / \uf0670(h) / \uf0611(h) / \uf0612(h) / \uf074(h) / Zc(h) / zp(2) / C1"
+        ],
+        "must_find": [
+          "53.125 GHz"
+        ],
+        "must_ignore": [
+          "JH - 0.118 UI 4u",
+          "EOJ - 0.025 UI 03",
+          " / ( / 1 / ) / ",
+          " / h / ) / "
+        ],
+        "must_review": [
+          "JH4u",
+          "Table 31-8. Coefficient Initial Conditions",
+          "Table 31-9. SNDR Limits",
+          "Table 31-13. Expected Reach of Different Material Classes"
+        ],
+        "must_ignore_locations": [
+          "31.1. The first recommended channel",
+          "1 z1 b",
+          "1 ≤ j ≤ d",
+          "3. f is called f_HP_PZ"
+        ]
+      }
+    },
+    {
+      "id": "oif-lr-version-pair",
+      "kind": "pair",
+      "required": false,
+      "certification_required": true,
+      "description": "LR draft revisions guard numbered requirement lists and technical wording changes.",
+      "old": {
+        "path": "oif2023.235.12.pdf"
+      },
+      "new": {
+        "path": "oif2023.235.13.pdf"
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 28,
+        "max_technical_table_changes": 12,
+        "must_extract_old": [
+          "33 CEI-224G-LR-PAM4 Long Reach Interface",
+          "6. Shall support hot plug.",
+          "bDFE_max(1)",
+          "bmin(0)",
+          "T_J3u03",
+          "T_EOJ03"
+        ],
+        "must_extract_new": [
+          "33 CEI-224G-LR-PAM4 Long Reach Interface",
+          "6. Shall support hot plug.",
+          "bDFE_max(1)",
+          "bmin(0)",
+          "T_JH3u",
+          "T_EOJ03"
+        ],
+        "must_find": [
+          "baud rate tolerance of +/-50 ppm",
+          "IEEE Std 802.3dj"
+        ],
+        "must_ignore": [
+          "Normalized DFE coefficient maximum limit b (1) 0.85",
+          "Normalized FFE main tap coefficient minimum limit b (0) 0.7"
+        ],
+        "must_ignore_locations": [
+          "1. Support serial baud rates",
+          "6. Shall support hot plug."
+        ]
+      }
+    },
+    {
+      "id": "pcie-phy-test-version-pair",
+      "kind": "pair",
+      "required": false,
+      "certification_required": false,
+      "description": "PCIe PHY test revisions used to guard procedure wording and appendix references.",
+      "old": {
+        "path": "PHY_Test_Spec_Rev4.0_Ver1.2_08182021.pdf",
+        "start_page": 36,
+        "end_page": 40
+      },
+      "new": {
+        "path": "PCIe_6_0_PHY_Test_Spec_Rev1.0_RC2.pdf",
+        "start_page": 78,
+        "end_page": 83
+      },
+      "expect": {
+        "state": "reliable",
+        "max_technical_section_changes": 3,
+        "max_technical_table_changes": 0,
+        "must_find": [
+          "Overview of Calibration Steps at 16.0 GT/s",
+          "Connect a CEM 4.0 CLB",
+          "CEM 4.0 CBB without power",
+          "Appendix A",
+          "oscilloscope"
+        ],
+        "must_ignore": []
+      }
+    },
+    {
+      "id": "jlt-native-self-diff",
+      "kind": "self_diff",
+      "required": false,
+      "description": "Multi-column JLT article self-diff.",
+      "document": {
+        "path": "JLT.2017.2650205.pdf",
+        "start_page": 1,
+        "end_page": 7
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 0,
+        "max_technical_table_changes": 0
+      }
+    },
+    {
+      "id": "form-self-diff",
+      "kind": "self_diff",
+      "required": false,
+      "description": "Form-like layout self-diff.",
+      "document": {
+        "path": "Antrag_Verlängerung.pdf",
+        "start_page": 1,
+        "end_page": 2
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 0,
+        "max_technical_table_changes": 0
+      }
+    },
+    {
+      "id": "scan-self-diff",
+      "kind": "self_diff",
+      "required": false,
+      "description": "Scanned or image-dominant PDF self-diff.",
+      "document": {
+        "path": "scanned-image-book.pdf",
+        "start_page": 1,
+        "end_page": 5
+      },
+      "expect": {
+        "states": ["degraded", "indeterminate"],
+        "max_technical_section_changes": 0,
+        "max_technical_table_changes": 0
+      }
+    },
+    {
+      "id": "slides-self-diff",
+      "kind": "self_diff",
+      "required": false,
+      "description": "Slide-deck reading-order self-diff.",
+      "document": {
+        "path": "DSP_Slides_WS_2023_24.pdf",
+        "start_page": 1,
+        "end_page": 5
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 0,
+        "max_technical_table_changes": 0
+      }
+    },
+    {
+      "id": "oif-cei-self-diff",
+      "kind": "self_diff",
+      "required": false,
+      "description": "Published OIF-CEI specification self-diff.",
+      "document": {
+        "path": "OIF-CEI-5.1.pdf",
+        "start_page": 55,
+        "end_page": 60
+      },
+      "expect": {
+        "state": "degraded",
+        "max_technical_section_changes": 0,
+        "max_technical_table_changes": 0
+      }
+    }
+  ]
+}

@@ -10,3 +10,6 @@ results/
 build/
 dist/
 *.spec
+corpus/local/
+corpus/manifest.local.json
+corpus/**/*.pdf

@@ -18,6 +18,8 @@ OLD_DEMO_PAGES = [
         "1 Scope",
         "This agreement applies to prototype devices only.",
         "Common safety clause applies to all devices.",
+        "Reviewers shall verify every requirement against the source PDF.",
+        "Scope decisions shall identify the applicable device class and revision.",
         "Confidential - Page 1 of 4",
     ],
     [
@@ -25,6 +27,7 @@ OLD_DEMO_PAGES = [
         "1.1 Delivery",
         "Supplier shall deliver samples within 20 working days.",
         "Supplier shall provide weekly status updates.",
+        "Delivery evidence shall identify the responsible owner and due date.",
         "Confidential - Page 2 of 4",
     ],
     [
@@ -32,6 +35,7 @@ OLD_DEMO_PAGES = [
         "2 Technical Requirements",
         "The operating voltage range is 3.0 V to 3.6 V.",
         "The product shall pass the basic reliability test.",
+        "Every electrical result shall retain units, limits, and test conditions.",
         "2.1 Security",
         "All debug ports may remain enabled for engineering samples.",
         "Confidential - Page 3 of 4",
@@ -41,6 +45,7 @@ OLD_DEMO_PAGES = [
         "3 Acceptance",
         "Buyer shall complete acceptance within 5 working days.",
         "Acceptance records shall be archived by both parties.",
+        "Reviewers shall record the source page for every accepted requirement.",
         "Confidential - Page 4 of 4",
     ],
 ]
@@ -51,6 +56,8 @@ NEW_DEMO_PAGES = [
         "1 Scope",
         "This agreement applies to prototype and pilot-run devices.",
         "Common safety clause applies to all devices.",
+        "Reviewers shall verify every requirement against the source PDF.",
+        "Scope decisions shall identify the applicable device class and revision.",
         "Confidential - Page 1 of 5",
     ],
     [
@@ -59,6 +66,7 @@ NEW_DEMO_PAGES = [
         "Supplier shall deliver samples within 15 working days.",
         "Supplier shall provide weekly status updates.",
         "Supplier shall provide a delivery risk notice for delays over 2 days.",
+        "Delivery evidence shall identify the responsible owner and due date.",
         "Confidential - Page 2 of 5",
     ],
     [
@@ -66,6 +74,7 @@ NEW_DEMO_PAGES = [
         "2 Technical Requirements",
         "The operating voltage range is 2.8 V to 3.6 V.",
         "The product shall pass the enhanced reliability test.",
+        "Every electrical result shall retain units, limits, and test conditions.",
         "2.1 Security",
         "All debug ports shall be disabled before shipment.",
         "Confidential - Page 3 of 5",
@@ -75,6 +84,7 @@ NEW_DEMO_PAGES = [
         "2.2 Documentation",
         "Supplier shall provide test logs before shipment.",
         "Supplier shall provide firmware version traceability.",
+        "Documentation shall identify the source clause, revision, owner, and approval status.",
         "Confidential - Page 4 of 5",
     ],
     [
@@ -82,6 +92,7 @@ NEW_DEMO_PAGES = [
         "3 Acceptance",
         "Buyer shall complete acceptance within 7 working days and issue a signed acceptance record.",
         "Acceptance records shall include firmware traceability and issue owner sign-off.",
+        "Reviewers shall record the source page for every accepted requirement.",
         "Confidential - Page 5 of 5",
     ],
 ]

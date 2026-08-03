@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "status": "pass",
+  "counts": {
+    "pass": 5,
+    "fail": 0,
+    "skip": 0
+  },
+  "cases": [
+    {
+      "case_index": 1,
+      "status": "pass",
+      "failures": [],
+      "state": "degraded",
+      "page_count": 1,
+      "ocr_pages": [],
+      "warning_count": 0,
+      "character_count": 149,
+      "elapsed_seconds": 0.09930433297995478
+    },
+    {
+      "case_index": 2,
+      "status": "pass",
+      "failures": [],
+      "state": "degraded",
+      "page_count": 1,
+      "ocr_pages": [],
+      "warning_count": 0,
+      "character_count": 120,
+      "elapsed_seconds": 0.003810665977653116
+    },
+    {
+      "case_index": 3,
+      "status": "pass",
+      "failures": [],
+      "state": "degraded",
+      "page_count": 1,
+      "ocr_pages": [],
+      "warning_count": 1,
+      "character_count": 60,
+      "elapsed_seconds": 0.0029944580164738
+    },
+    {
+      "case_index": 4,
+      "status": "pass",
+      "failures": [],
+      "state": "degraded",
+      "page_count": 1,
+      "ocr_pages": [],
+      "warning_count": 1,
+      "character_count": 78,
+      "elapsed_seconds": 0.003208707959856838
+    },
+    {
+      "case_index": 5,
+      "status": "pass",
+      "failures": [],
+      "state": "degraded",
+      "page_count": 1,
+      "ocr_pages": [
+        1
+      ],
+      "warning_count": 2,
+      "character_count": 94,
+      "elapsed_seconds": 0.8185672910185531
+    }
+  ]
+}

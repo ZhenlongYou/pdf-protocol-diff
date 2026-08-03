@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import difflib
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -19,21 +20,38 @@ from .models import (
     DiffOptions,
     DiffResult,
     ExtractionResult,
+    PageText,
     Section,
     SectionChange,
     SnippetPair,
     TableVisual,
+    snapshot_page_extraction_audit,
 )
-from .pdf_extract import extract_pdf_text
+from .pdf_extract import (
+    _looks_like_known_atomic_unit,
+    _looks_like_missing_table_value,
+    _looks_like_pure_numeric_table_entry,
+    extract_pdf_text,
+)
+from .page_ocr import normalize_ocr_language
+from .quality import assess_pair, build_provenance
 from .sectioning import section_document
+from .table_codec import decode_table_cell, encode_table_field, split_table_cells, split_table_field
 from .text_utils import (
+    TABLE_NUMBER_DASH_CLASS,
     canonicalize_chinese_number_expressions,
     canonicalize_number_word_token,
     canonicalize_number_word_tokens,
     compact_inline,
+    has_measurement_context,
+    identifier_boundary_signatures,
+    is_known_engineering_symbol_letter_suffix,
+    micro_identifier_signatures,
     normalize_for_similarity,
     normalize_line,
-    remove_draft_watermark_letter_artifacts,
+    normalize_table_number_dashes,
+    readable_symbol_font_glyphs,
+    reader_symbol_mapping_key,
 )
 
 
@@ -58,18 +76,45 @@ class _PendingDeltaCandidate:
     pair: SnippetPair | None = None
 
 
+@dataclass(frozen=True)
+class _ExactTableTextMatch:
+    """One unique, whole-review-unit table sequence found on the raw-text side."""
+
+    section_start_page: int
+    raw_unit_keys: tuple[str, ...]
+    matched_row_count: int
+    serialized_text: str
+    leading_text: str
+
+
+@dataclass(frozen=True)
+class _SourceTableCaptionEvidence:
+    """The exact source review units carrying a caption and its prose lead-in."""
+
+    unit_keys: tuple[str, ...]
+    leading_text: str
+
+
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
     """Run the complete extraction, sectioning, and comparison pipeline."""
 
+    options = replace(
+        options,
+        ocr_language=normalize_ocr_language(options.ocr_language),
+    )
     old_extraction = extract_pdf_text(
         old_pdf,
         start_page=options.old_start_page,
         end_page=options.old_end_page,
+        ocr_language=options.ocr_language,
+        layout_backend=options.layout_backend,
     )
     new_extraction = extract_pdf_text(
         new_pdf,
         start_page=options.new_start_page,
         end_page=options.new_end_page,
+        ocr_language=options.ocr_language,
+        layout_backend=options.layout_backend,
     )
     return compare_extractions(old_extraction, new_extraction, options)
 
@@ -86,15 +131,58 @@ def compare_extractions(
     matching and report generation.
     """
 
-    old_sections = section_document(old_extraction)
-    new_sections = section_document(new_extraction)
-    old_table_visuals = _table_visuals_with_text_fallbacks(old_extraction.table_visuals, old_extraction.pages)
-    new_table_visuals = _table_visuals_with_text_fallbacks(new_extraction.table_visuals, new_extraction.pages)
-    covered_table_unit_keys = _covered_table_visual_row_keys(  # 只隐藏已经被表格截图/结构化摘要覆盖的表格行。
+    old_table_visuals = _table_visuals_with_cross_page_captions(
+        old_extraction.table_visuals,
+        old_extraction.pages,
+    )
+    new_table_visuals = _table_visuals_with_cross_page_captions(
+        new_extraction.table_visuals,
+        new_extraction.pages,
+    )
+    old_reconciliation_sections = section_document(old_extraction)
+    new_reconciliation_sections = section_document(new_extraction)
+    old_sections = section_document(
+        _extraction_without_page_bound_table_captions(
+            old_extraction,
+            original_tables=old_extraction.table_visuals,
+            repaired_tables=old_table_visuals,
+        )
+    )
+    new_sections = section_document(
+        _extraction_without_page_bound_table_captions(
+            new_extraction,
+            original_tables=new_extraction.table_visuals,
+            repaired_tables=new_table_visuals,
+        )
+    )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
+    assessment = assess_pair(old_extraction, new_extraction, old_sections, new_sections)
+    provenance = build_provenance(old_extraction, new_extraction, options)
+    old_table_visuals = _table_visuals_with_text_fallbacks(old_table_visuals, old_extraction.pages)
+    new_table_visuals = _table_visuals_with_text_fallbacks(new_table_visuals, new_extraction.pages)
+    (
         old_table_visuals,
         new_table_visuals,
-    )
-    changes = compare_sections(old_sections, new_sections, options, suppressed_table_unit_keys=covered_table_unit_keys)
+        old_reconciled_table_unit_keys,
+        new_reconciled_table_unit_keys,
+    ) = _reconcile_exact_cross_side_table_text(
+        old_table_visuals,
+        new_table_visuals,
+        old_sections=old_reconciliation_sections,
+        new_sections=new_reconciliation_sections,
+        old_pages=old_extraction.pages,
+        new_pages=new_extraction.pages,
+    )  # 一侧漏检表格时，只凭对侧完整结构化序列在原始审阅单元中的唯一精确命中补齐证据。
+    old_covered_table_unit_keys = _covered_table_visual_row_keys(old_table_visuals)
+    new_covered_table_unit_keys = _covered_table_visual_row_keys(new_table_visuals)
+    old_covered_table_unit_keys.update(old_reconciled_table_unit_keys)
+    new_covered_table_unit_keys.update(new_reconciled_table_unit_keys)
+    changes = compare_sections(
+        old_sections,
+        new_sections,
+        options,
+        suppressed_old_table_unit_keys=old_covered_table_unit_keys,
+        suppressed_new_table_unit_keys=new_covered_table_unit_keys,
+    )  # 精确重建的原始单元只在其所属版本隐藏，禁止同文字符串跨侧或跨章节误抑制。
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
     changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
     if suppressed_noise_count:
@@ -120,6 +208,10 @@ def compare_extractions(
         new_selected_end_page=_selected_end_page(new_extraction),
         old_table_visuals=old_table_visuals,
         new_table_visuals=new_table_visuals,
+        assessment=assessment,
+        provenance=provenance,
+        old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
+        new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
     )
 
 
@@ -132,21 +224,407 @@ def _covered_table_visual_row_keys(*table_groups: list[TableVisual]) -> set[str]
             for row_text in table.row_texts:
                 if _is_table_review_unit(row_text):
                     keys.add(_review_unit_key(row_text))  # 使用比较层统一 key，避免空白和大小写差异导致漏匹配。
-    return keys
+    return keys  # 表题和 `Table N.` 不能按全文字符串全局隐藏；远端同文正文仍可能发生真实增删。
+
+
+def _extraction_without_page_bound_table_captions(
+    extraction: ExtractionResult,
+    *,
+    original_tables: list[TableVisual],
+    repaired_tables: list[TableVisual],
+) -> ExtractionResult:
+    """Remove only caption occurrences proven by a visual on the same source page."""
+
+    source_pages = {page.page_number: page for page in extraction.pages}
+    caption_options: dict[int, list[tuple[str, str, tuple[int, ...]]]] = {}
+    for original, repaired in zip(original_tables, repaired_tables, strict=True):
+        if not repaired.title:
+            continue
+        caption_page = repaired.page_number
+        if not original.title and repaired.is_continuation:
+            caption_page -= 1  # 跨页修复的 caption 来自上一页最后一行。
+        table_number = _table_caption_number(repaired.title)
+        source_line_indexes = (
+            _cross_page_caption_source_line_indexes(
+                source_pages.get(caption_page),
+                repaired.title,
+            )
+            if not original.title and repaired.is_continuation
+            else ()
+        )
+        caption_options.setdefault(caption_page, []).append(
+            (
+                _review_unit_key(repaired.title),
+                _review_unit_key(f"Table {table_number}.") if table_number else "",
+                source_line_indexes,
+            )
+        )
+
+    pages: list[PageText] = []
+    for page in extraction.pages:
+        source_keys = [_review_unit_key(line) for line in page.text.splitlines()]
+        available = Counter(source_keys)
+        remaining: Counter[str] = Counter()
+        consumed_line_indexes: set[int] = set()
+        for full_key, short_key, source_line_indexes in caption_options.get(page.page_number, []):
+            if source_line_indexes:
+                consumed_line_indexes.update(source_line_indexes)
+                continue
+            selected_key = full_key if available[full_key] > 0 else short_key
+            if selected_key and available[selected_key] > 0:
+                available[selected_key] -= 1
+                remaining[selected_key] += 1
+        # 完整 title 与 `Table N.` 是同一视觉表 caption 的替代表达，只能消费其中一个 occurrence。
+        kept_lines: list[str] = []
+        for line_index, line in enumerate(page.text.splitlines()):
+            if line_index in consumed_line_indexes:
+                continue
+            key = _review_unit_key(line)
+            if remaining[key] > 0:
+                remaining[key] -= 1
+                continue
+            kept_lines.append(line)
+        pages.append(replace(page, text="\n".join(kept_lines)))
+    return replace(extraction, pages=pages)
+
+
+def _cross_page_caption_source_line_indexes(
+    source_page: PageText | None,
+    title: str,
+) -> tuple[int, ...]:
+    """Locate a reconstructed caption and its proven trailing page furniture."""
+
+    if (
+        source_page is None
+        or not source_page.text
+        or _review_unit_key(_last_table_caption_line(source_page))
+        != _review_unit_key(title)
+    ):
+        return ()
+    raw_lines = source_page.text.splitlines()
+    observed = [
+        (index, compact_inline(line))
+        for index, line in enumerate(raw_lines)
+        if compact_inline(line)
+    ]
+    content_end = len(observed)
+    while (
+        content_end > max(0, len(observed) - 8)
+        and _cross_page_caption_trailing_line_is_furniture(observed[content_end - 1][1])
+    ):
+        content_end -= 1
+    if content_end <= 0:
+        return ()
+    for start in range(content_end - 1, max(-1, content_end - 3), -1):
+        first = _caption_without_embedded_line_number(
+            observed[start][1],
+            [line for _index, line in observed[start + 1 :]],
+            source_page=source_page,
+        )
+        joined = compact_inline(
+            " ".join([first, *(line for _index, line in observed[start + 1 : content_end])])
+        )
+        if _review_unit_key(joined) == _review_unit_key(title):
+            # The caption recognizer has already proved every remaining tail line
+            # to be a bare line number or running footer.  Consume that evidence
+            # from the reader comparison together with the caption so revision-
+            # dependent page numbering cannot surface as a technical change.
+            # The original extraction and JSON audit snapshot remain untouched.
+            return tuple(index for index, _line in observed[start:])
+    return ()
+
+
+def _table_visuals_with_cross_page_captions(
+    table_visuals: list[TableVisual],
+    pages: list[PageText],
+) -> list[TableVisual]:
+    """Attach a bottom-of-page caption to a proven next-page continuation table."""
+
+    page_by_number = {page.page_number: page for page in pages}
+    repaired: list[TableVisual] = []
+    for table in table_visuals:
+        if table.title or not table.is_continuation or not _table_starts_near_page_top(table):
+            repaired.append(table)
+            continue
+        previous_page = page_by_number.get(table.page_number - 1)
+        caption = _last_table_caption_line(previous_page) if previous_page else ""
+        repaired.append(replace(table, title=caption) if caption else table)
+    return repaired
+
+
+def _table_starts_near_page_top(table: TableVisual) -> bool:
+    """Require page geometry before inheriting a caption across a page break."""
+
+    if table.page_bbox is None:
+        return False
+    _left, page_top, _right, page_bottom = table.page_bbox
+    page_height = page_bottom - page_top
+    return page_height > 0 and (table.bbox[1] - page_top) / page_height <= 0.22
+
+
+def _last_table_caption_line(source: str | PageText) -> str:
+    """Return a page-bottom English table caption, never intervening prose."""
+
+    source_page = source if isinstance(source, PageText) else None
+    text = source.text if source_page is not None else source
+    lines = [compact_inline(line) for line in text.splitlines() if compact_inline(line)]
+    if not lines:
+        return ""
+    caption_pattern = re.compile(
+        rf"(?i)table\s+\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?\s*[.:]\s*.+"
+    )
+    # 先从页尾剥离至多七条形态明确的行号/运行页脚。遇到任何普通正文即停止，禁止
+    # 为了寻找更早的 Table 字样而跨越一句真实要求。
+    content_end = len(lines)
+    while (
+        content_end > max(0, len(lines) - 8)
+        and _cross_page_caption_trailing_line_is_furniture(lines[content_end - 1])
+    ):
+        content_end -= 1
+    if content_end <= 0:
+        return ""
+    last_content_index = content_end - 1
+    direct = _caption_without_embedded_line_number(
+        lines[last_content_index],
+        lines[last_content_index + 1 :],
+        source_page=source_page,
+    )
+    if caption_pattern.fullmatch(direct):
+        return direct
+
+    # 标题偶尔在最后一个 title-case 短语前换行。只拼接紧邻页尾的 1--2 条标题式
+    # continuation；普通小写句子、URL 或规范性动词都不具备该证据。
+    for start_index in range(last_content_index - 1, max(-1, last_content_index - 3), -1):
+        if start_index < 0:
+            break
+        continuation = lines[start_index + 1 : content_end]
+        prefix = _caption_without_embedded_line_number(
+            lines[start_index],
+            lines[start_index + 1 :],
+            source_page=source_page,
+        )
+        running_prefix = prefix
+        continuation_is_caption = bool(continuation)
+        for line in continuation:
+            if not _cross_page_caption_continuation_is_title_phrase(
+                line,
+                prefix=running_prefix,
+            ):
+                continuation_is_caption = False
+                break
+            running_prefix = compact_inline(f"{running_prefix} {line}")
+        if not continuation_is_caption:
+            continue
+        joined = compact_inline(" ".join((prefix, *continuation)))
+        if caption_pattern.fullmatch(joined):
+            return joined
+    return ""
+
+
+def _caption_without_embedded_line_number(
+    candidate: str,
+    following_lines: list[str],
+    *,
+    source_page: PageText | None = None,
+) -> str:
+    """Strip a glued line number only with consecutive and coordinate proof."""
+
+    embedded = re.search(r"\s+(\d{1,3})$", candidate)
+    next_number = next(
+        (int(line) for line in following_lines if re.fullmatch(r"\d{1,3}", line)),
+        None,
+    )
+    if (
+        embedded is not None
+        and next_number is not None
+        and next_number == int(embedded.group(1)) + 1
+        and _page_proves_glued_gutter_line_number(source_page, candidate)
+    ):
+        return candidate[: embedded.start()].rstrip()
+    return candidate
+
+
+def _page_proves_glued_gutter_line_number(
+    page: PageText | None,
+    candidate: str,
+) -> bool:
+    """Bind a trailing number to an aligned gutter sequence using block geometry."""
+
+    if page is None or page.page_bbox is None or not page.blocks:
+        return False
+    match = re.search(r"\s+(\d{1,3})$", compact_inline(candidate))
+    if match is None:
+        return False
+    expected_next = str(int(match.group(1)) + 1)
+    page_left, _page_top, page_right, _page_bottom = page.page_bbox
+    page_width = page_right - page_left
+    if page_width <= 0:
+        return False
+    ordered_blocks = sorted(page.blocks, key=lambda block: block.reading_order)
+    for index, block in enumerate(ordered_blocks):
+        if compact_inline(block.text) != compact_inline(candidate):
+            continue
+        for following in ordered_blocks[index + 1 : index + 5]:
+            if compact_inline(following.text) != expected_next:
+                continue
+            close_vertically = 0 <= following.bbox[1] - block.bbox[1] <= 48.0
+            right_gutter = bool(
+                "right" in page.ambiguous_line_number_sides
+                and block.bbox[2] >= page_left + page_width * 0.88
+                and following.bbox[2] >= page_left + page_width * 0.88
+                and abs(block.bbox[2] - following.bbox[2]) <= 3.0
+            )
+            left_gutter = bool(
+                "left" in page.ambiguous_line_number_sides
+                and block.bbox[0] <= page_left + page_width * 0.12
+                and following.bbox[0] <= page_left + page_width * 0.12
+                and abs(block.bbox[0] - following.bbox[0]) <= 3.0
+            )
+            if close_vertically and (right_gutter or left_gutter):
+                return True
+    return False
+
+
+def _cross_page_caption_continuation_is_title_phrase(
+    value: str,
+    *,
+    prefix: str = "",
+) -> bool:
+    """Accept only a short title-case phrase as a wrapped caption suffix."""
+
+    candidate = compact_inline(value)
+    if not candidate or len(candidate) > 120 or re.search(r"[.!?;:]$", candidate):
+        return False
+    if re.search(
+        r"(?i)\b(?:shall|must|should|is|are|was|were|has|have|does|did|"
+        r"requires?|specifies?|discusses?|continues?)\b",
+        candidate,
+    ):
+        return False
+    if re.fullmatch(r"(?i)\(?continued\)?", candidate):
+        return True
+    connectors = {
+        "a", "an", "and", "at", "by", "for", "from", "in", "of", "on",
+        "or", "the", "to", "versus", "vs", "with",
+    }
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_./+()-]*", candidate)
+    substantive = [word for word in words if word.casefold() not in connectors]
+    title_case_phrase = bool(
+        substantive
+        and all(
+            word[:1].isupper()
+            or word.isupper()
+            or bool(re.search(r"\d", word))
+            for word in substantive
+        )
+    )
+    if title_case_phrase:
+        return True
+    begins_with_connector = bool(words and words[0].casefold() in connectors)
+    prefix_ends_with_connector = bool(
+        re.search(
+            r"(?i)\b(?:and|at|by|for|from|in|of|on|or|to|versus|vs|with)\s*$",
+            compact_inline(prefix),
+        )
+    )
+    return bool(
+        substantive
+        and len(words) <= 12
+        and (begins_with_connector or prefix_ends_with_connector)
+    )
+
+
+def _cross_page_caption_trailing_line_is_furniture(value: str) -> bool:
+    """Recognize only line-number or running-footer text below a caption."""
+
+    candidate = compact_inline(value).casefold()
+    if re.fullmatch(r"\d{1,3}", candidate):
+        return True
+    if not 2 <= len(candidate) <= 220:
+        return False
+    if re.match(r"^(?:copyright\b|©|\(c\)\s*\d{4})", candidate):
+        return True
+    if re.fullmatch(r"(?:https?://|www\.)\S+", candidate):
+        return True
+    if "draft" in candidate and any(
+        marker in candidate
+        for marker in (
+            "watermark",
+            "not to be shared",
+            "not for distribution",
+            "publication",
+            "approval",
+        )
+    ):
+        return True
+    return (
+        bool(re.search(r"\b(?:clause|chapter|section|part)\s+\d", candidate))
+        and bool(re.search(r"\s[-–—|]\s", candidate))
+        and bool(re.search(r"\b(?:forum|standard|specification|interface|agreement|draft)\b", candidate))
+        and bool(re.search(r"\d{1,4}$", candidate))
+        and not re.match(r"^(?:see|refer|as\s+specified)\b", candidate)
+        and not re.search(r"\b(?:shall|must|should|required|prohibited)\b", candidate)
+    )
+
+
+def _table_caption_number(value: str) -> str:
+    """Return the normalized number from a caption that begins with `Table`."""
+
+    match = _STRICT_TABLE_REFERENCE_RE.match(compact_inline(value))
+    if match is None:
+        return ""
+    return _normalized_table_reference_number(match.group("number"))
+
+
+_STRICT_TABLE_REFERENCE_RE = re.compile(
+    rf"(?i)\btable\s+(?P<number>\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?)"
+    rf"(?!\w|\s*{TABLE_NUMBER_DASH_CLASS}|\s*/|\s*\.(?=\S))"
+)
+
+
+def _normalized_table_reference_number(value: str) -> str:
+    """Normalize one number accepted by the strict table-reference grammar."""
+
+    return normalize_table_number_dashes(compact_inline(value))
+
+
+def _table_title_anchor(value: str) -> str:
+    """Return the stable leading caption token even when the title wraps."""
+
+    title = compact_inline(value)
+    numbered = _STRICT_TABLE_REFERENCE_RE.match(title)
+    if numbered is not None:
+        punctuation = re.match(r"\s*[.:]", title[numbered.end() :])
+        if punctuation is not None:
+            return compact_inline(title[: numbered.end() + punctuation.end()])
+    title_units = _split_units(value)
+    return compact_inline(title_units[0] if title_units else value)
 
 
 def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: list[PageText]) -> list[TableVisual]:
     """Add no-image structured summaries for table rows not covered by screenshots."""
 
     visuals = list(table_visuals)  # 保留真实截图表格，新增兜底只补未覆盖行。
-    covered_keys = _covered_table_visual_row_keys(visuals)  # 已经在截图摘要里的行不重复生成兜底。
+    covered_by_page: dict[int, Counter[str]] = {}
+    for table in visuals:
+        page_counter = covered_by_page.setdefault(table.page_number, Counter())
+        page_counter.update(
+            _review_unit_key(row)
+            for row in table.row_texts
+            if _is_table_review_unit(row)
+        )  # 截图覆盖只在同一页按出现次数消费；同文行出现在别页仍须生成独立证据。
     next_table_number = max((table.table_number for table in visuals), default=0) + 1  # 兜底表号接在真实表之后。
     for page in pages:
-        rows = [
-            compact_inline(line)
-            for line in page.text.splitlines()
-            if _is_table_review_unit(line) and _review_unit_key(line) not in covered_keys
-        ]  # 只收集结构化表格行，普通正文不会进入兜底摘要。
+        page_counter = covered_by_page.get(page.page_number, Counter())
+        rows: list[str] = []
+        for line in page.text.splitlines():
+            if not _is_table_review_unit(line):
+                continue
+            key = _review_unit_key(line)
+            if page_counter[key] > 0:
+                page_counter[key] -= 1
+                continue
+            rows.append(compact_inline(line))
         if not rows:
             continue
         visuals.append(
@@ -160,9 +638,809 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
                 grid_summary="未生成截图：使用结构化表格行摘要。",
             )
         )  # 没有截图时仍进入报告的表格摘要区，而不是正文差异卡片。
-        covered_keys.update(_review_unit_key(row) for row in rows)
         next_table_number += 1
     return visuals
+
+
+def _reconcile_exact_cross_side_table_text(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    *,
+    old_sections: list[Section],
+    new_sections: list[Section],
+    old_pages: list[PageText],
+    new_pages: list[PageText],
+) -> tuple[list[TableVisual], list[TableVisual], set[str], set[str]]:
+    """Rebuild a table missed on one side only from unique exact raw text.
+
+    The structured side is treated as a serialization recipe, never as a fuzzy
+    template.  A candidate is accepted only when its title occurs on exactly
+    one visual on that side, is absent from the other visual side, and the
+    title plus a whole-row sequence equals exactly one contiguous span of raw
+    review units on the other side after whitespace compaction.
+    """
+
+    original_old_tables = list(old_tables)  # 两个方向都只看抽取器原始结果，禁止刚合成的证据反向自证。
+    original_new_tables = list(new_tables)
+    old_title_counts = Counter(
+        key
+        for table in original_old_tables
+        if (key := _reconcilable_table_title_key(table))
+    )
+    new_title_counts = Counter(
+        key
+        for table in original_new_tables
+        if (key := _reconcilable_table_title_key(table))
+    )
+    old_candidates = [
+        table
+        for table in original_old_tables
+        if (key := _reconcilable_table_title_key(table))
+        and old_title_counts[key] == 1
+        and new_title_counts.get(key, 0) == 0
+    ]
+    new_candidates = [
+        table
+        for table in original_new_tables
+        if (key := _reconcilable_table_title_key(table))
+        and new_title_counts[key] == 1
+        and old_title_counts.get(key, 0) == 0
+    ]
+
+    (
+        synthesized_old,
+        old_target_suppressed_keys,
+        new_source_suppressed_keys,
+        matched_new_source_titles,
+    ) = _synthesize_exact_text_backed_tables(
+        source_tables=new_candidates,
+        source_sections=new_sections,
+        target_tables=original_old_tables,
+        target_sections=old_sections,
+        target_pages=old_pages,
+    )
+    (
+        synthesized_new,
+        new_target_suppressed_keys,
+        old_source_suppressed_keys,
+        matched_old_source_titles,
+    ) = _synthesize_exact_text_backed_tables(
+        source_tables=old_candidates,
+        source_sections=old_sections,
+        target_tables=original_new_tables,
+        target_sections=new_sections,
+        target_pages=new_pages,
+    )
+    reconciled_old_tables = [
+        _table_with_stable_reconciled_row_identity(table)
+        if _reconcilable_table_title_key(table) in matched_old_source_titles
+        else table
+        for table in original_old_tables
+    ]
+    reconciled_new_tables = [
+        _table_with_stable_reconciled_row_identity(table)
+        if _reconcilable_table_title_key(table) in matched_new_source_titles
+        else table
+        for table in original_new_tables
+    ]
+    return (
+        [*reconciled_old_tables, *synthesized_old],
+        [*reconciled_new_tables, *synthesized_new],
+        old_target_suppressed_keys | old_source_suppressed_keys,
+        new_target_suppressed_keys | new_source_suppressed_keys,
+    )
+
+
+def _reconcilable_table_title_key(table: TableVisual) -> str:
+    """Return a conservative key for a named, structured source table."""
+
+    title = compact_inline(table.title)
+    if (
+        not title
+        or title == "结构化表格文字摘要"
+        or not table.row_texts
+        or table.is_continuation
+    ):
+        return ""
+    return title.casefold()  # 大小写只用于判断两侧是否已经都有该表；实际序列匹配仍逐字符保留大小写。
+
+
+def _synthesize_exact_text_backed_tables(
+    *,
+    source_tables: list[TableVisual],
+    source_sections: list[Section],
+    target_tables: list[TableVisual],
+    target_sections: list[Section],
+    target_pages: list[PageText],
+) -> tuple[list[TableVisual], set[str], set[str], set[str]]:
+    """Materialize uniquely matched source tables on the raw-text target side."""
+
+    synthesized: list[TableVisual] = []
+    target_suppressed_keys: set[str] = set()
+    source_suppressed_keys: set[str] = set()
+    matched_source_titles: set[str] = set()
+    for source_table in source_tables:
+        match = _longest_unique_table_text_match(source_table, target_sections)
+        if match is None:
+            continue
+        source_caption = _source_table_caption_evidence(source_table, source_sections)
+        if source_caption is None:
+            if compact_inline(match.leading_text):
+                continue  # 来源侧表题已被坐标级表格替换时，只接受目标侧从表题开始的精确序列；目标引导语仍必须留在正文。
+            source_unit_keys: tuple[str, ...] = ()
+        else:
+            if compact_inline(source_caption.leading_text) != compact_inline(
+                match.leading_text
+            ):
+                continue  # 表题与引导语共处一单元时，只有两侧引导语逐字符相同才可整单元抑制；真实 prose 修订必须保留。
+            source_unit_keys = source_caption.unit_keys
+        unique_target_keys = _unique_review_unit_keys_in_sections(
+            match.raw_unit_keys,
+            target_sections,
+        )
+        unique_source_keys = _unique_review_unit_keys_in_sections(
+            source_unit_keys,
+            source_sections,
+        )  # 完整表序列的唯一命中仍可重建；只有在本侧唯一的单元才获得正文抑制权。
+        matched_rows = source_table.row_texts[: match.matched_row_count]
+        report_rows = _rows_with_stable_reconciled_identity(matched_rows)
+        serialized = match.serialized_text
+        if not serialized:
+            continue  # 防御性检查：匹配使用的序列若不能再次序列化，绝不创建不完整证据。
+        page_number = _exact_table_text_page_number(
+            serialized,
+            target_pages,
+            fallback=match.section_start_page,
+        )
+        page = next(
+            (candidate for candidate in target_pages if candidate.page_number == page_number),
+            None,
+        )
+        existing_on_page = [
+            table.table_number
+            for table in (*target_tables, *synthesized)
+            if table.page_number == page_number
+        ]
+        synthesized.append(
+            TableVisual(
+                page_number=page_number,
+                table_number=max(existing_on_page, default=0) + 1,
+                title=source_table.title,
+                bbox=(0.0, 0.0, 0.0, 0.0),
+                image_data_uri="",
+                row_texts=report_rows,
+                grid_summary="未生成截图：由本侧原始文字与对侧结构化表格逐值精确重建。",
+                ocr_status="text_backed_exact_match",
+                page_bbox=page.page_bbox if page is not None else None,
+            )
+        )
+        target_suppressed_keys.update(unique_target_keys)  # 重复 raw 单元保留为正文，避免吞掉别处真实删除。
+        source_suppressed_keys.update(unique_source_keys)  # 重复 caption/reference 同样不做字符串级全局隐藏。
+        matched_source_titles.add(_reconcilable_table_title_key(source_table))
+    return (
+        synthesized,
+        target_suppressed_keys,
+        source_suppressed_keys,
+        matched_source_titles,
+    )
+
+
+def _unique_review_unit_keys_in_sections(
+    unit_keys: tuple[str, ...],
+    sections: list[Section],
+) -> set[str]:
+    """Return only keys that identify one review unit on one document side."""
+
+    counts = Counter(
+        key
+        for section in sections
+        for unit in _split_units(section.body)
+        if (key := _review_unit_key(unit))
+    )
+    return {key for key in unit_keys if counts[key] == 1}
+
+
+def _table_with_stable_reconciled_row_identity(table: TableVisual) -> TableVisual:
+    """Add a report-only primary identity to matched revision-history rows."""
+
+    rows = _rows_with_stable_reconciled_identity(table.row_texts)
+    return replace(table, row_texts=rows) if rows != table.row_texts else table
+
+
+def _rows_with_stable_reconciled_identity(rows: list[str]) -> list[str]:
+    """Use Revision as Parameter when metadata rows otherwise key on long prose."""
+
+    return [_row_with_stable_revision_identity(row) for row in rows]
+
+
+def _row_with_stable_revision_identity(row: str) -> str:
+    """Expose the exact revision token as row identity without dropping any field."""
+
+    fields = _parsed_table_row_fields(row)
+    if fields is None:
+        return row
+    by_label = {compact_inline(label).casefold(): value for label, value in fields}
+    if (
+        not {"revision", "date", "description"}.issubset(by_label)
+        or "parameter" in by_label
+        or not by_label["revision"]
+    ):
+        return row
+    normalized = normalize_line(row)
+    prefix_match = re.match(
+        r"^((?:表格行|表格文字)[:：]\s*(?:T\d+\s*\|\s*)?)",
+        normalized,
+        flags=re.I,
+    )
+    if prefix_match is None:
+        return row
+    remainder = normalized[prefix_match.end() :]
+    return (
+        f"{prefix_match.group(1)}"
+        f"{encode_table_field('Parameter', by_label['revision'])} | "
+        f"{encode_table_field('Details', by_label['description'])} | {remainder}"
+    )  # Revision 作为稳定身份；Details 让原 Description 在身份列改变后仍进入可见值摘要，原字段继续完整保留。
+
+
+def _longest_unique_table_text_match(
+    table: TableVisual,
+    target_sections: list[Section],
+) -> _ExactTableTextMatch | None:
+    """Return the longest whole-row prefix with one exact raw-unit occurrence."""
+
+    minimum_row_count = _minimum_table_data_prefix_length(table.row_texts)
+    if minimum_row_count > len(table.row_texts):
+        return None
+    for row_count in range(len(table.row_texts), minimum_row_count - 1, -1):
+        serializations = _table_serialization_candidates(
+            table.title,
+            table.row_texts[:row_count],
+        )
+        if not serializations:
+            return None  # 任一行存在无标签单元格时，无法证明“等号后值序列”，整表失败关闭。
+        for serialized in serializations:
+            match = _unique_exact_review_unit_span(
+                serialized,
+                target_sections,
+                title=table.title,
+            )
+            if match is not None:
+                return _ExactTableTextMatch(
+                    section_start_page=match.section_start_page,
+                    raw_unit_keys=match.raw_unit_keys,
+                    matched_row_count=row_count,
+                    serialized_text=serialized,
+                    leading_text=match.leading_text,
+                )
+    return None
+
+
+def _minimum_table_data_prefix_length(rows: list[str]) -> int:
+    """Require a prefix to contain at least one complete physical data row."""
+
+    if not rows:
+        return 1
+    first_cells = _parsed_table_row_fields(rows[0])
+    if first_cells is None:
+        return len(rows) + 1
+    labels = [compact_inline(label).casefold() for label, _value in first_cells]
+    values = [compact_inline(value).casefold() for _label, value in first_cells]
+    generic_schema = bool(labels) and all(
+        re.fullmatch(r"(?:column|col)\s*\d+", label)
+        for label in labels
+    )
+    repeated_labels = bool(labels) and all(
+        _review_unit_key(label) == _review_unit_key(value)
+        for label, value in zip(labels, values)
+    )
+    first_row_is_header = generic_schema or repeated_labels
+    if first_row_is_header:
+        return 2 if len(rows) >= 2 else len(rows) + 1
+    return 1
+
+
+def _atomic_exact_table_values(rows: list[str]) -> list[str] | None:
+    """Return values whose whitespace tokens cannot conceal a cell-boundary move."""
+
+    values: list[str] = []
+    for row in rows:
+        fields = _parsed_table_row_fields(row)
+        if fields is None:
+            return None
+        for _label, value in fields:
+            atomic_value = compact_inline(value)
+            if not atomic_value or re.search(r"\s", atomic_value):
+                return None
+            values.append(atomic_value)
+    return values or None
+
+
+def _table_serialization_candidates(title: str, rows: list[str]) -> list[str]:
+    """Return only serializations whose visible schema or record grammar is retained."""
+
+    title_text = compact_inline(title)
+    if not title_text or not rows:
+        return []
+    first_fields = _parsed_table_row_fields(rows[0])
+    if first_fields is None:
+        return []
+    labels = [label for label, _value in first_fields]
+    normalized_labels = [compact_inline(label).casefold() for label in labels]
+    semantic_labels = bool(labels) and all(labels) and not all(
+        re.fullmatch(r"(?:column|col)\s*\d+", label)
+        for label in normalized_labels
+    )
+    transposed_multiline = _serialize_transposed_multiline_table_rows(title, rows)
+    atomic_values = _atomic_exact_table_values(rows)
+    with_visible_header = (
+        compact_inline(" ".join([title_text, *labels, *atomic_values]))
+        if semantic_labels and atomic_values is not None
+        else ""
+    )
+    generated_header_numeric_records = _serialize_generated_header_numeric_records(
+        title_text,
+        rows,
+    )
+    revision_history = _serialize_revision_history_records(title_text, rows)
+    return list(
+        dict.fromkeys(
+            candidate
+            for candidate in (
+                with_visible_header,
+                transposed_multiline,
+                generated_header_numeric_records,
+                revision_history,
+            )
+            if candidate
+        )
+    )
+
+
+def _serialize_generated_header_numeric_records(title: str, rows: list[str]) -> str:
+    """Serialize a generated-column table only when its visible header and records prove shape.
+
+    Flat PDF text cannot generally prove cell boundaries.  This path is limited
+    to a visible first header row followed by at least two records whose suffix
+    columns are complete numeric facts, placeholders, or known unit tokens.
+    The free-text first column must be a categorical list or one stable numbered
+    series, which excludes arbitrary multiword cell-boundary reassignment.
+    """
+
+    parsed_rows = [_parsed_table_row_fields(row) for row in rows]
+    if len(parsed_rows) < 2 or any(fields is None for fields in parsed_rows):
+        return ""
+    concrete_rows = [fields for fields in parsed_rows if fields is not None]
+    labels = [compact_inline(label) for label, _value in concrete_rows[0]]
+    if len(labels) < 3 or not all(
+        re.fullmatch(r"(?:column|col)\s*\d+", label, flags=re.I)
+        for label in labels
+    ):
+        return ""
+    if any(
+        [compact_inline(label) for label, _value in fields] != labels
+        for fields in concrete_rows[1:]
+    ):
+        return ""
+    header_values = [compact_inline(value) for _label, value in concrete_rows[0]]
+    header_hits = sum(
+        _looks_like_embedded_table_header_value(value)
+        for value in header_values
+    )
+    descriptive_header = all(
+        bool(re.search(r"[A-Za-z]", value))
+        and not _is_complete_atomic_numeric_or_placeholder(value)
+        and not _looks_like_known_atomic_unit(value)
+        for value in header_values
+    )
+    if header_hits < 2 and not descriptive_header:
+        return ""
+    data_rows = concrete_rows[1:]
+    descriptors = [compact_inline(fields[0][1]) for fields in data_rows]
+    if not _categorical_descriptor_series_is_proven(descriptors):
+        return ""
+    suffix_columns = [
+        [compact_inline(fields[column_index][1]) for fields in data_rows]
+        for column_index in range(1, len(labels))
+    ]
+    if not suffix_columns or not all(
+        all(
+            _is_complete_atomic_numeric_or_placeholder(value)
+            or _looks_like_known_atomic_unit(value)
+            for value in column
+        )
+        for column in suffix_columns
+    ):
+        return ""
+    if not any(
+        all(
+            _is_complete_atomic_numeric_or_placeholder(value)
+            for value in column
+        )
+        for column in suffix_columns
+    ):
+        return ""  # 只有单位列仍不能证明记录边界。
+    values = [value for fields in concrete_rows for _label, value in fields]
+    return compact_inline(" ".join([title, *values]))
+
+
+def _categorical_descriptor_series_is_proven(values: list[str]) -> bool:
+    """Accept plain categories or one repeated label followed by numeric indexes."""
+
+    if not values or any(not value for value in values):
+        return False
+    if len(values) == 1:
+        return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_.()+\-/]{1,31}", values[0]))
+    if all(not re.search(r"\d", value) for value in values):
+        return True
+    numbered: list[tuple[str, int]] = []
+    unnumbered = 0
+    for value in values:
+        match = re.fullmatch(r"(.+?)[\s_-]+(\d+)", value)
+        if match is None:
+            unnumbered += 1
+            continue
+        numbered.append((compact_inline(match.group(1)).casefold(), int(match.group(2))))
+    return bool(
+        len(numbered) >= 2
+        and unnumbered <= 1
+        and len({prefix for prefix, _index in numbered}) == 1
+        and len({index for _prefix, index in numbered}) == len(numbered)
+    )
+
+
+def _serialize_revision_history_records(title: str, rows: list[str]) -> str:
+    """Serialize an explicitly headed Revision/Date/Description history table."""
+
+    parsed_rows = [_parsed_table_row_fields(row) for row in rows]
+    if not parsed_rows or any(fields is None for fields in parsed_rows):
+        return ""
+    concrete_rows = [fields for fields in parsed_rows if fields is not None]
+    labels = [compact_inline(label) for label, _value in concrete_rows[0]]
+    normalized_labels = [label.casefold() for label in labels]
+    if normalized_labels != ["revision", "date", "description"]:
+        return ""
+    if any(
+        [compact_inline(label).casefold() for label, _value in fields]
+        != normalized_labels
+        for fields in concrete_rows[1:]
+    ):
+        return ""
+    values: list[str] = []
+    for fields in concrete_rows:
+        revision, date, description = [compact_inline(value) for _label, value in fields]
+        if not (
+            re.search(r"\d+(?:\.\d+){1,}", revision)
+            and (
+                re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)
+                or re.fullmatch(
+                    r"\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]{3,9},?\s+\d{4}",
+                    date,
+                    flags=re.I,
+                )
+            )
+            and description
+        ):
+            return ""
+        values.extend((revision, date, description))
+    return compact_inline(" ".join([title, *labels, *values]))
+
+
+def _serialize_transposed_multiline_table_rows(
+    title: str,
+    rows: list[str],
+) -> str:
+    """Serialize a physical row whose cells contain aligned logical rows.
+
+    Some PDFs omit one horizontal grid line, so pdfplumber returns the header
+    and first data row inside every cell of one physical row.  The reversible
+    table codec retains those newlines.  Only equal multi-line counts across
+    *all* cells authorize a row-wise transpose; literal slashes and ragged
+    soft wraps therefore cannot enter this exact-reconciliation candidate.
+    """
+
+    parts = [compact_inline(title)]
+    saw_transposed_row = False
+    fixed_atomic_data_columns: set[int] = set()
+    for row_index, row in enumerate(rows):
+        fields = _parsed_table_row_fields_preserving_lines(row)
+        if fields is None:
+            return ""
+        line_groups = [lines for _label, lines in fields]
+        multi_counts = {len(lines) for lines in line_groups if len(lines) > 1}
+        if not multi_counts:
+            if saw_transposed_row:
+                fixed_atomic_data_columns = {
+                    column_index
+                    for column_index in fixed_atomic_data_columns
+                    if column_index < len(line_groups)
+                    and _is_complete_atomic_numeric_or_placeholder(
+                        line_groups[column_index][0]
+                    )
+                }
+                if not fixed_atomic_data_columns:
+                    return ""  # 首行证明的同一数值列必须在全部后续物理行继续成立。
+            parts.extend(lines[0] if lines else "" for lines in line_groups)
+            continue
+        if len(multi_counts) != 1:
+            return ""
+        row_count = next(iter(multi_counts))
+        if row_count <= 1 or any(len(lines) != row_count for lines in line_groups):
+            return ""  # 一列软换行或各列行数不齐时失败关闭。
+        proven_columns = _embedded_header_atomic_data_column_indexes(line_groups)
+        if saw_transposed_row or row_index != 0 or not proven_columns:
+            return ""  # 只有首个物理行能由表头形态+逐行数值证据授权转置。
+        saw_transposed_row = True
+        fixed_atomic_data_columns = proven_columns
+        for line_index in range(row_count):
+            parts.extend(lines[line_index] for lines in line_groups)
+    return compact_inline(" ".join(parts)) if saw_transposed_row else ""
+
+
+def _multiline_row_proves_embedded_header_records(
+    line_groups: list[tuple[str, ...]],
+) -> bool:
+    """Require a schema row plus one fixed atomic numeric/placeholder column."""
+
+    return bool(_embedded_header_atomic_data_column_indexes(line_groups))
+
+
+def _embedded_header_atomic_data_column_indexes(
+    line_groups: list[tuple[str, ...]],
+) -> set[int]:
+    """Return fixed columns whose complete records are numeric or placeholders."""
+
+    if len(line_groups) < 3:
+        return set()  # 两列等长 prose 软换行太容易偶然成立。
+    header_values = [lines[0] for lines in line_groups]
+    header_hits = sum(_looks_like_embedded_table_header_value(value) for value in header_values)
+    if header_hits < 2:
+        return set()
+    return {
+        column_index
+        for column_index, lines in enumerate(line_groups)
+        if all(
+            _is_complete_atomic_numeric_or_placeholder(value)
+            for value in lines[1:]
+        )
+    }  # 数字散落在不同 prose 列不构成记录；同一固定列必须逐条提供完整原子值。
+
+
+def _is_complete_atomic_numeric_or_placeholder(value: str) -> bool:
+    """Accept one complete numeric fact or standard missing-value marker."""
+
+    candidate = compact_inline(value)
+    if not candidate:
+        return False
+    return bool(
+        _looks_like_pure_numeric_table_entry(candidate)
+        or _looks_like_missing_table_value(candidate)
+    )
+
+
+def _looks_like_embedded_table_header_value(value: str) -> bool:
+    """Recognize compact schema labels without treating ordinary title words as headers."""
+
+    candidate = compact_inline(value)
+    folded = candidate.casefold().rstrip(".")
+    if folded in {
+        "parameter",
+        "parameters",
+        "characteristic",
+        "characteristics",
+        "symbol",
+        "symbols",
+        "condition",
+        "conditions",
+        "value",
+        "values",
+        "unit",
+        "units",
+        "min",
+        "minimum",
+        "typ",
+        "typical",
+        "max",
+        "maximum",
+        "revision",
+        "date",
+        "description",
+        "label",
+    }:
+        return True
+    return bool(
+        re.fullmatch(r"[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+", candidate)
+        or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*\s*\([+\-−]?(?:\d+|min|max|typ)\)", candidate, flags=re.I)
+    )
+
+
+def _parsed_table_row_fields_preserving_lines(
+    row: str,
+) -> list[tuple[str, tuple[str, ...]]] | None:
+    """Decode labeled cells while retaining codec-proven physical newlines."""
+
+    cells = _raw_table_row_cells(row)
+    if not cells:
+        return None
+    fields: list[tuple[str, tuple[str, ...]]] = []
+    for cell in cells:
+        field = split_table_field(cell)
+        if field is None:
+            return None
+        label, value = field
+        lines = tuple(
+            compact_inline(line)
+            for line in value.splitlines()
+            if compact_inline(line)
+        )
+        fields.append((compact_inline(label), lines or ("",)))
+    return fields if any(any(lines) for _label, lines in fields) else None
+
+
+def _parsed_table_row_fields(row: str) -> list[tuple[str, str]] | None:
+    """Decode one structured row only when every physical cell is labeled."""
+
+    cells = _raw_table_row_cells(row)
+    if not cells:
+        return None
+    fields: list[tuple[str, str]] = []
+    for cell in cells:
+        field = split_table_field(cell)
+        if field is None:
+            return None
+        label, value = field
+        fields.append((compact_inline(label), compact_inline(value)))
+    if not any(value for _label, value in fields):
+        return None
+    return fields
+
+
+def _unique_exact_review_unit_span(
+    serialized: str,
+    sections: list[Section],
+    *,
+    title: str,
+) -> _ExactTableTextMatch | None:
+    """Find one exact sequence ending at a raw-unit boundary.
+
+    A PDF may merge an unchanged lead-in sentence with the caption, so the
+    first raw unit may contain text before the title.  Text after the matched
+    row sequence is never allowed in the last unit; that boundary rule keeps a
+    later changed row visible instead of suppressing it with the prefix.
+    """
+
+    target = compact_inline(serialized)
+    title_anchor = _table_title_anchor(title)
+    if not target or not title_anchor:
+        return None
+    found_by_occurrence: dict[tuple[int, int], _ExactTableTextMatch] = {}
+    for section_index, section in enumerate(sections):
+        units = [unit for unit in _split_units(section.body) if compact_inline(unit)]
+        normalized_units = [compact_inline(unit) for unit in units]
+        for start_index, first_unit in enumerate(normalized_units):
+            if title_anchor not in first_unit:
+                continue
+            candidate = ""
+            for end_index in range(start_index, len(units)):
+                candidate = compact_inline(
+                    f"{candidate} {normalized_units[end_index]}"
+                )
+                if not _raw_unit_span_has_exact_table_suffix(candidate, target):
+                    continue
+                match = _ExactTableTextMatch(
+                    section_start_page=section.start_page,
+                    raw_unit_keys=tuple(
+                        _review_unit_key(unit)
+                        for unit in units[start_index : end_index + 1]
+                        if _review_unit_key(unit)
+                    ),
+                    matched_row_count=0,
+                    serialized_text=target,
+                    leading_text=compact_inline(candidate[: -len(target)]),
+                )
+                occurrence_key = (section_index, end_index)
+                previous = found_by_occurrence.get(occurrence_key)
+                if previous is None or len(match.raw_unit_keys) < len(previous.raw_unit_keys):
+                    found_by_occurrence[occurrence_key] = match  # 同一结尾的重叠起点是同一次命中，保留最短完整单元跨度。
+                break
+    if len(found_by_occurrence) != 1:
+        return None  # 不同位置出现两次即失去唯一性，禁止猜测对应哪张表。
+    return next(iter(found_by_occurrence.values()))
+
+
+def _raw_unit_span_has_exact_table_suffix(candidate: str, target: str) -> bool:
+    """Allow only an unchanged lead-in before an otherwise exact table sequence."""
+
+    if candidate == target:
+        return candidate.count(target) == 1
+    if not candidate.endswith(target):
+        return False
+    boundary_index = len(candidate) - len(target)
+    return bool(
+        candidate.count(target) == 1
+        and boundary_index > 0
+        and candidate[boundary_index - 1].isspace()
+    )
+
+
+def _source_table_caption_evidence(
+    table: TableVisual,
+    sections: list[Section],
+) -> _SourceTableCaptionEvidence | None:
+    """Locate the unique caption span immediately preceding this source table."""
+
+    title = compact_inline(table.title)
+    title_anchor = _table_title_anchor(table.title)
+    if not title or not title_anchor:
+        return None
+    adjacent_matches: dict[tuple[int, int], _SourceTableCaptionEvidence] = {}
+    all_matches: dict[tuple[int, int], _SourceTableCaptionEvidence] = {}
+    for section_index, section in enumerate(sections):
+        if not section.start_page <= table.page_number <= section.end_page:
+            continue
+        section_units = _split_units(section.body)
+        table_row_keys = {
+            _review_unit_key(row)
+            for row in table.row_texts
+            if _review_unit_key(row)
+        }
+        first_row_index = next(
+            (
+                index
+                for index, unit in enumerate(section_units)
+                if _review_unit_key(unit) in table_row_keys
+            ),
+            len(section_units),
+        )
+        normalized_units = [compact_inline(unit) for unit in section_units]
+        for start_index, first_unit in enumerate(normalized_units):
+            if title_anchor not in first_unit:
+                continue
+            candidate = ""
+            for end_index in range(start_index, len(section_units)):
+                candidate = compact_inline(f"{candidate} {normalized_units[end_index]}")
+                if not _raw_unit_span_has_exact_table_suffix(candidate, title):
+                    continue
+                unit_keys = tuple(
+                    _review_unit_key(unit)
+                    for unit in section_units[start_index : end_index + 1]
+                    if _review_unit_key(unit)
+                )
+                if not unit_keys:
+                    continue
+                evidence = _SourceTableCaptionEvidence(
+                    unit_keys=unit_keys,
+                    leading_text=compact_inline(candidate[: -len(title)]),
+                )
+                occurrence_key = (section_index, end_index)
+                previous = all_matches.get(occurrence_key)
+                if previous is None or len(unit_keys) < len(previous.unit_keys):
+                    all_matches[occurrence_key] = evidence  # 同一物理 caption 的重叠起点只保留最短整单元跨度。
+                if end_index + 1 == first_row_index:
+                    previous_adjacent = adjacent_matches.get(occurrence_key)
+                    if previous_adjacent is None or len(unit_keys) < len(previous_adjacent.unit_keys):
+                        adjacent_matches[occurrence_key] = evidence  # 紧邻第一条结构化行是最强来源证据。
+    if len(adjacent_matches) == 1:
+        return next(iter(adjacent_matches.values()))
+    if adjacent_matches or len(all_matches) != 1:
+        return None
+    return next(iter(all_matches.values()))  # 行被章节边界或另一张表隔开时，仅接受完整标题的单次末尾对齐命中。
+
+
+def _exact_table_text_page_number(
+    serialized: str,
+    pages: list[PageText],
+    *,
+    fallback: int,
+) -> int:
+    """Use a unique raw page occurrence for location, otherwise keep section start."""
+
+    target = compact_inline(serialized)
+    matching_pages = [
+        page.page_number
+        for page in pages
+        if target and target in compact_inline(page.text)
+    ]
+    return matching_pages[0] if len(matching_pages) == 1 else fallback
 
 
 def compare_sections(
@@ -171,13 +1449,21 @@ def compare_sections(
     options: DiffOptions,
     *,
     suppressed_table_unit_keys: set[str] | None = None,
+    suppressed_old_table_unit_keys: set[str] | None = None,
+    suppressed_new_table_unit_keys: set[str] | None = None,
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
-    table_unit_keys = suppressed_table_unit_keys or set()  # 表格行统一由表格摘要区承载，正文 diff 不再展示内部表格行。
+    common_table_unit_keys = suppressed_table_unit_keys or set()
+    old_table_unit_keys = common_table_unit_keys | (
+        suppressed_old_table_unit_keys or set()
+    )
+    new_table_unit_keys = common_table_unit_keys | (
+        suppressed_new_table_unit_keys or set()
+    )  # 旧兼容参数仍可双侧使用；精确重建路径必须传入侧别集合。
     matches = _match_sections(old_sections, new_sections, options)
     changes: list[SectionChange] = []
-    for old_index, new_index, similarity in matches:
+    for old_index, new_index, similarity, match_basis in matches:
         old_section = old_sections[old_index] if old_index is not None else None
         new_section = new_sections[new_index] if new_index is not None else None
         if old_section and new_section:
@@ -189,6 +1475,7 @@ def compare_sections(
                             old_section=old_section,
                             new_section=new_section,
                             similarity=similarity,
+                            match_basis=match_basis,
                         )
                     )
                 continue
@@ -200,12 +1487,21 @@ def compare_sections(
                 if _section_heading_changed(old_section, new_section)
                 else None
             )
-            added, removed, replaced, omitted_count = _summarize_text_delta(
+            (
+                added,
+                removed,
+                replaced,
+                omitted_count,
+                audit_added,
+                audit_removed,
+                audit_replaced,
+            ) = _summarize_text_delta(
                 old_section.body,
                 new_section.body,
                 max_snippets=options.max_snippets_per_section,
                 leading_replacement=heading_pair,
-                suppressed_table_unit_keys=table_unit_keys,
+                suppressed_old_table_unit_keys=old_table_unit_keys,
+                suppressed_new_table_unit_keys=new_table_unit_keys,
             )
             if not added and not removed and not replaced and omitted_count == 0:
                 if options.include_unchanged_sections:
@@ -215,26 +1511,40 @@ def compare_sections(
                             old_section=old_section,
                             new_section=new_section,
                             similarity=similarity,
+                            match_basis=match_basis,
                         )
                     )
                 continue
             changes.append(
                 SectionChange(
-                    change_type="modified",
+                    change_type=(
+                        "review"
+                        if _delta_is_unverified_pua_mapping_only(
+                            added,
+                            removed,
+                            replaced,
+                            omitted_count,
+                        )
+                        else "modified"
+                    ),
                     old_section=old_section,
                     new_section=new_section,
                     similarity=similarity,
+                    match_basis=match_basis,
                     added_snippets=added,
                     removed_snippets=removed,
                     replaced_snippets=replaced,
                     omitted_snippet_count=omitted_count,
+                    audit_added_snippets=audit_added,
+                    audit_removed_snippets=audit_removed,
+                    audit_replaced_snippets=audit_replaced,
                 )
             )
         elif new_section:
-            added_snippets, omitted_count = _first_units(
+            added_snippets, omitted_count, audit_added = _first_units(
                 new_section.body,
                 options.max_snippets_per_section,
-                suppressed_table_unit_keys=table_unit_keys,
+                suppressed_table_unit_keys=new_table_unit_keys,
             )
             changes.append(
                 SectionChange(
@@ -244,13 +1554,14 @@ def compare_sections(
                     similarity=0.0,
                     added_snippets=added_snippets,
                     omitted_snippet_count=omitted_count,
+                    audit_added_snippets=audit_added,
                 )
             )
         elif old_section:
-            removed_snippets, omitted_count = _first_units(
+            removed_snippets, omitted_count, audit_removed = _first_units(
                 old_section.body,
                 options.max_snippets_per_section,
-                suppressed_table_unit_keys=table_unit_keys,
+                suppressed_table_unit_keys=old_table_unit_keys,
             )
             changes.append(
                 SectionChange(
@@ -260,6 +1571,7 @@ def compare_sections(
                     similarity=0.0,
                     removed_snippets=removed_snippets,
                     omitted_snippet_count=omitted_count,
+                    audit_removed_snippets=audit_removed,
                 )
             )
 
@@ -270,7 +1582,7 @@ def _match_sections(
     old_sections: list[Section],
     new_sections: list[Section],
     options: DiffOptions,
-) -> list[tuple[int | None, int | None, float]]:
+) -> list[tuple[int | None, int | None, float, str]]:
     """Pair old/new sections using exact keys first, then global best scores.
 
     The second pass builds all viable fallback candidates and assigns the
@@ -282,22 +1594,44 @@ def _match_sections(
     exact_old_by_key: dict[str, list[int]] = {}
     for old_index, old_section in enumerate(old_sections):
         exact_old_by_key.setdefault(old_section.identity_key, []).append(old_index)
+    exact_new_by_key: dict[str, list[int]] = {}
+    for new_index, new_section in enumerate(new_sections):
+        exact_new_by_key.setdefault(new_section.identity_key, []).append(new_index)
 
     matched_old: set[int] = set()
     matched_new: set[int] = set()
-    matches: list[tuple[int | None, int | None, float]] = []
+    matches: list[tuple[int | None, int | None, float, str]] = []
 
-    for new_index, new_section in enumerate(new_sections):
-        exact_candidates = exact_old_by_key.get(new_section.identity_key, [])
-        exact_match = next((idx for idx in exact_candidates if idx not in matched_old), None)
-        if exact_match is not None:
-            matched_old.add(exact_match)
-            similarity = _section_similarity(
-                old_sections[exact_match].comparable_text,
-                new_section.comparable_text,
-            )
-            matches.append((exact_match, new_index, similarity))
-            matched_new.add(new_index)
+    exact_candidates: list[tuple[float, int, int]] = []
+    for identity_key, old_indexes in exact_old_by_key.items():
+        for old_index in old_indexes:
+            for new_index in exact_new_by_key.get(identity_key, []):
+                old_section = old_sections[old_index]
+                new_section = new_sections[new_index]
+                if not _exact_identity_has_body_support(
+                    old_section,
+                    new_section,
+                    options.min_section_match_similarity,
+                ):
+                    continue  # 同号同题也不能让长标题淹没两段完全无关的实际正文。
+                similarity = _section_similarity(
+                    old_section.comparable_text,
+                    new_section.comparable_text,
+                )
+                if similarity >= options.min_section_match_similarity:
+                    exact_candidates.append((similarity, old_index, new_index))
+                # 相同编号并不保证是同一条款：插入新条款会占用旧编号并整体后移。
+                # 即使标题未变，也必须由实际可比文本达到用户阈值；证据不足时保守显示新增/删除。
+
+    for similarity, old_index, new_index in sorted(
+        exact_candidates,
+        key=lambda item: (-item[0], abs(item[1] - item[2]), item[2], item[1]),
+    ):
+        if old_index in matched_old or new_index in matched_new:
+            continue
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append((old_index, new_index, similarity, "similarity_exact"))
 
     fallback_candidates: list[tuple[float, int, int]] = []
     for new_index, new_section in enumerate(new_sections):
@@ -306,8 +1640,20 @@ def _match_sections(
         for old_index, old_section in enumerate(old_sections):
             if old_index in matched_old:
                 continue
+            body_similarity = _section_similarity(
+                old_section.body,
+                new_section.body,
+            )  # fallback 必须先由正文达到用户配置门槛，标题和位置不能单独证明同一章节。
+            if body_similarity < options.min_section_match_similarity:
+                continue  # 正文证据不足时保守保留新增/删除，避免把完全重写的同名章节强配。
             score = _section_match_score(old_section, new_section)
-            if score >= options.min_section_match_similarity:
+            if score < options.min_section_match_similarity:
+                continue
+            comparable_similarity = _section_similarity(
+                old_section.comparable_text,
+                new_section.comparable_text,
+            )  # 标题/位置组合分只能排序候选，不能替代用户声明的实际可比文本门槛。
+            if comparable_similarity >= options.min_section_match_similarity:
                 fallback_candidates.append((score, old_index, new_index))
 
     for score, old_index, new_index in sorted(fallback_candidates, reverse=True):
@@ -319,16 +1665,819 @@ def _match_sections(
             old_sections[old_index].comparable_text,
             new_sections[new_index].comparable_text,
         )
-        matches.append((old_index, new_index, min(score, similarity)))
+        matches.append(
+            (old_index, new_index, min(score, similarity), "similarity_fallback")
+        )
+
+    ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
+    for old_index, new_index, match_basis in _structural_identity_rescue_pairs(
+        old_sections,
+        new_sections,
+        exact_old_by_key,
+        exact_new_by_key,
+        matched_old,
+        matched_new,
+        {
+            (old_index, new_index)
+            for old_index, new_index, _similarity_value, _match_basis in matches
+            if old_index is not None and new_index is not None
+        },
+        options.min_section_match_similarity,
+    ):
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                match_basis,
+            )
+        )  # 保留实际全文分数；结构证据只授权配对，不伪造高相似度。
+
+    for old_index, new_index, match_basis in _shifted_section_rescue_pairs(
+        old_sections,
+        new_sections,
+        ordinary_matches,
+        matched_old,
+        matched_new,
+        options.min_section_match_similarity,
+    ):
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                match_basis,
+            )
+        )  # 编号后移只改变配对授权；报告继续显示实际全文相似度。
 
     for new_index, _new_section in enumerate(new_sections):
         if new_index not in matched_new:
-            matches.append((None, new_index, 0.0))
+            matches.append((None, new_index, 0.0, "unmatched"))
 
     for old_index, _old_section in enumerate(old_sections):
         if old_index not in matched_old:
-            matches.append((old_index, None, 0.0))
+            matches.append((old_index, None, 0.0, "unmatched"))
     return matches
+
+
+def _exact_identity_has_body_support(
+    old_section: Section,
+    new_section: Section,
+    minimum_similarity: float,
+) -> bool:
+    """Require independent body evidence when both exact-key sections have body text."""
+
+    if not old_section.body.strip() or not new_section.body.strip():
+        return True  # 空容器没有相反正文证据，仍由编号、标题和整体门槛确认身份。
+    return (
+        _section_similarity(old_section.body, new_section.body) >= minimum_similarity
+    )  # 两侧都有正文时，用户配置的门槛必须在正文上独立成立。
+
+
+_SECTION_IDENTITY_ANCHOR_MIN_CHARS = 80
+_SECTION_IDENTITY_NEAR_ANCHOR_MIN_SCORE = 0.85
+_STRUCTURAL_IDENTITY_ANCHOR_SCORE = 0.90
+_STRUCTURAL_IDENTITY_BRACKET_SCORE = 0.90
+_STRUCTURAL_NUMBER_SHIFT_SCORE = 0.90
+_SECTION_SHIFT_PROSE_MIN_CHARS = 50
+_SECTION_IDENTITY_PROSE_VERB_RE = re.compile(
+    r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|be|being|been|"
+    r"accept|calculate|comply|complies|connect|define|defined|follow|include|measure|meet|"
+    r"obtain|perform|preserve|provide(?:s|d|ing)?|remain|require|specify|transmit|use)\b"
+)
+_SECTION_IDENTITY_ACRONYM_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Z]{2,}[A-Za-z0-9_-]*(?![A-Za-z0-9_])"
+)
+_SECTION_IDENTITY_TITLE_STOP_WORDS = frozenset(
+    {
+        "appendix",
+        "characteristics",
+        "clause",
+        "general",
+        "interface",
+        "requirement",
+        "requirements",
+        "section",
+        "specification",
+        "specifications",
+    }
+)
+
+
+def _structural_identity_rescue_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    old_by_key: dict[str, list[int]],
+    new_by_key: dict[str, list[int]],
+    matched_old: set[int],
+    matched_new: set[int],
+    matched_pairs: set[tuple[int, int]],
+    minimum_similarity: float,
+) -> list[tuple[int, int, str]]:
+    """Rescue unique exact clauses when independent prose anchors prove identity.
+
+    This pass runs only after ordinary exact and fallback matching. It therefore
+    cannot steal a renumbered body match, and it never relies on number/title
+    alone: prose equality after structured rows are removed, same-parent unique
+    title-linked technical sentences with a second independent prose fact, or
+    two already matched adjacent clauses must support the pair. Structural
+    support is also compared with the user's configured match floor.
+    """
+
+    if minimum_similarity >= 1.0:
+        return []  # “最低相似度=1”要求全文完全一致，结构证据不能绕过该公开配置。
+
+    old_anchor_counts = Counter(
+        (section.number_path[:-1], section.level, anchor)
+        for section in old_sections
+        for anchor in _section_identity_anchor_keys(section.body, section.title)
+    )
+    new_anchor_counts = Counter(
+        (section.number_path[:-1], section.level, anchor)
+        for section in new_sections
+        for anchor in _section_identity_anchor_keys(section.body, section.title)
+    )
+    rescued: list[tuple[int, int, str]] = []
+    for identity_key, old_indexes in old_by_key.items():
+        new_indexes = new_by_key.get(identity_key, [])
+        if len(old_indexes) != 1 or len(new_indexes) != 1:
+            continue  # 重复编号下的候选不唯一，不作结构性猜测。
+        old_index = old_indexes[0]
+        new_index = new_indexes[0]
+        if old_index in matched_old or new_index in matched_new:
+            continue
+        old_section = old_sections[old_index]
+        new_section = new_sections[new_index]
+        if not old_section.number_path or old_section.number_path != new_section.number_path:
+            continue  # 无编号页级块和仅标题候选不具备足够的结构证据。
+        if old_section.level != new_section.level:
+            continue
+        old_title_key = _review_unit_key(old_section.title)
+        new_title_key = _review_unit_key(new_section.title)
+        if not old_title_key or old_title_key != new_title_key:
+            continue  # 标题也变化时仍交给全文 fallback，避免插入章节占号。
+        prose_score, prose_basis = _structural_identity_prose_support(
+            old_section,
+            new_section,
+            old_anchor_counts,
+            new_anchor_counts,
+        )
+        bracket_supported = _matched_adjacent_brackets_support(
+            old_sections,
+            new_sections,
+            old_index,
+            new_index,
+            matched_pairs,
+        )
+        bracket_score = _STRUCTURAL_IDENTITY_BRACKET_SCORE if bracket_supported else 0.0
+        if prose_score >= bracket_score:
+            support_score, match_basis = prose_score, prose_basis
+        else:
+            support_score, match_basis = bracket_score, "structural_adjacent_brackets"
+        if match_basis and support_score >= minimum_similarity:
+            rescued.append((old_index, new_index, match_basis))
+    return sorted(rescued, key=lambda item: (item[1], item[0]))
+
+
+def _structural_identity_prose_support(
+    old_section: Section,
+    new_section: Section,
+    old_anchor_counts: Counter[tuple[tuple[str, ...], int, str]],
+    new_anchor_counts: Counter[tuple[tuple[str, ...], int, str]],
+) -> tuple[float, str]:
+    """Return structural support score and audit basis for exact prose/anchors."""
+
+    old_prose_keys = _section_identity_prose_keys(old_section.body)
+    new_prose_keys = _section_identity_prose_keys(new_section.body)
+    if old_prose_keys and old_prose_keys == new_prose_keys:
+        return 1.0, "structural_prose_identity"  # 去掉结构化表格后正文完全相同，身份证据为满分。
+
+    shared_anchors = set(
+        _section_identity_anchor_keys(old_section.body, old_section.title)
+    ) & set(
+        _section_identity_anchor_keys(new_section.body, new_section.title)
+    )
+    old_context = (old_section.number_path[:-1], old_section.level)
+    new_context = (new_section.number_path[:-1], new_section.level)
+    unique_anchors = {
+        anchor
+        for anchor in shared_anchors
+        if old_anchor_counts[(*old_context, anchor)] == 1
+        and new_anchor_counts[(*new_context, anchor)] == 1
+    }
+    if len(unique_anchors) >= 2:
+        return _STRUCTURAL_IDENTITY_ANCHOR_SCORE, "structural_unique_anchor"
+    if unique_anchors and _has_independent_near_identity_unit(
+        old_section.body,
+        new_section.body,
+        excluded_keys=unique_anchors,
+        title=old_section.title,
+    ):
+        return _STRUCTURAL_IDENTITY_ANCHOR_SCORE, "structural_unique_anchor"
+    return 0.0, ""
+
+
+def _section_identity_prose_keys(body: str) -> tuple[str, ...]:
+    """Return non-table review-unit keys used only as identity evidence."""
+
+    return tuple(
+        key
+        for unit in _paragraph_review_units(body, suppressed_table_unit_keys=set())
+        if (key := _review_unit_key(unit))
+    )
+
+
+def _section_identity_anchor_keys(body: str, title: str) -> tuple[str, ...]:
+    """Return conservative complete-sentence anchors from one section body."""
+
+    anchors: list[str] = []
+    for unit in _paragraph_review_units(body, suppressed_table_unit_keys=set()):
+        compact = compact_inline(unit)
+        if len(compact) < _SECTION_IDENTITY_ANCHOR_MIN_CHARS:
+            continue
+        if not _ends_review_sentence(compact):
+            continue
+        if not _SECTION_IDENTITY_PROSE_VERB_RE.search(compact):
+            continue
+        if not _has_section_identity_title_link(compact, title):
+            continue
+        key = _review_unit_key(compact)
+        if key:
+            anchors.append(key)
+    return tuple(anchors)
+
+
+def _has_section_identity_title_link(anchor: str, title: str) -> bool:
+    """Require a meaningful word or acronym shared with the exact section title."""
+
+    anchor_acronyms = set(_SECTION_IDENTITY_ACRONYM_RE.findall(anchor))
+    anchor_words = set(re.findall(r"[a-z]{4,}", anchor.casefold()))
+    title_words = set(re.findall(r"[a-z]{4,}", title.casefold()))
+    title_words.difference_update(_SECTION_IDENTITY_TITLE_STOP_WORDS)
+    title_acronyms = set(_SECTION_IDENTITY_ACRONYM_RE.findall(title))
+    if anchor_words & title_words or anchor_acronyms & title_acronyms:
+        return True
+    return any(
+        min(len(anchor_word), len(title_word)) >= 6
+        and (
+            anchor_word.startswith(title_word)
+            or title_word.startswith(anchor_word)
+        )
+        for anchor_word in anchor_words
+        for title_word in title_words
+    )  # transmit/transmitter 等同根技术词可建立标题关联，短词前缀仍被拒绝。
+
+
+def _has_independent_near_identity_unit(
+    old_body: str,
+    new_body: str,
+    *,
+    excluded_keys: set[str],
+    title: str,
+) -> bool:
+    """Require a mutual-unique second long prose fact tied to the same title."""
+
+    old_units = _paragraph_review_units(old_body, suppressed_table_unit_keys=set())
+    new_units = _paragraph_review_units(new_body, suppressed_table_unit_keys=set())
+    candidate_edges: list[tuple[int, int]] = []
+    for old_index, old_unit in enumerate(old_units):
+        old_key = _review_unit_key(old_unit)
+        if old_key in excluded_keys or len(compact_inline(old_unit)) < _SECTION_IDENTITY_ANCHOR_MIN_CHARS:
+            continue
+        if not _has_section_identity_title_link(old_unit, title):
+            continue
+        old_words = _meaningful_review_words(old_unit)
+        for new_index, new_unit in enumerate(new_units):
+            new_key = _review_unit_key(new_unit)
+            if new_key in excluded_keys or len(compact_inline(new_unit)) < _SECTION_IDENTITY_ANCHOR_MIN_CHARS:
+                continue
+            if not _has_section_identity_title_link(new_unit, title):
+                continue
+            shared_words = old_words & _meaningful_review_words(new_unit)
+            if len(shared_words) < 6:
+                continue
+            if _unit_pair_score(old_unit, new_unit) >= _SECTION_IDENTITY_NEAR_ANCHOR_MIN_SCORE:
+                candidate_edges.append((old_index, new_index))
+    old_degrees = Counter(old_index for old_index, _new_index in candidate_edges)
+    new_degrees = Counter(new_index for _old_index, new_index in candidate_edges)
+    return any(
+        old_degrees[old_index] == 1 and new_degrees[new_index] == 1
+        for old_index, new_index in candidate_edges
+    )
+
+
+def _shifted_section_rescue_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    ordinary_matches: tuple[tuple[int | None, int | None, float, str], ...],
+    matched_old: set[int],
+    matched_new: set[int],
+    minimum_similarity: float,
+) -> list[tuple[int, int, str]]:
+    """Pair table-heavy clauses only when an ordinary sibling run proves renumbering.
+
+    Titles and offsets are never sufficient alone.  The parent pair and shift
+    seeds come from the frozen ordinary-match pass, title uniqueness is measured
+    over every original direct child, and each rescued clause supplies its own
+    prose evidence.  This prevents an inserted same-title clause from borrowing
+    confidence from the clauses it is trying to rescue.
+    """
+
+    if minimum_similarity >= 1.0:
+        return []  # 映射父章节等结构证据也不能越过用户要求的全文完全一致。
+
+    ordinary_pairs = {
+        (old_index, new_index)
+        for old_index, new_index, _similarity_value, match_basis in ordinary_matches
+        if old_index is not None
+        and new_index is not None
+        and match_basis in {"similarity_exact", "similarity_fallback"}
+    }
+    old_parent_title_counts = Counter(
+        (section.number_path[:-1], section.level, _review_unit_key(section.title))
+        for section in old_sections
+        if section.number_path and _review_unit_key(section.title)
+    )
+    new_parent_title_counts = Counter(
+        (section.number_path[:-1], section.level, _review_unit_key(section.title))
+        for section in new_sections
+        if section.number_path and _review_unit_key(section.title)
+    )
+    trusted_parent_path_pairs: set[tuple[tuple[str, ...], tuple[str, ...]]] = {
+        ((), ())
+    }  # 根域是递归信任链的唯一无条件基点。
+    renumbered_parent_candidates: list[
+        tuple[tuple[str, ...], tuple[str, ...], int, str]
+    ] = []
+    for old_index, new_index in ordinary_pairs:
+        old_section = old_sections[old_index]
+        new_section = new_sections[new_index]
+        old_path = old_section.number_path
+        new_path = new_section.number_path
+        if not old_path or not new_path or old_section.level != new_section.level:
+            continue
+        if old_path == new_path:
+            trusted_parent_path_pairs.add((old_path, new_path))
+            continue  # 同一路径的普通配对本身可信，标题注记修订不能阻断子章编号偏移证据。
+        title_key = _review_unit_key(old_section.title)
+        if title_key != _review_unit_key(new_section.title):
+            continue
+        renumbered_parent_candidates.append(
+            (old_path, new_path, old_section.level, title_key)
+        )
+    pending = sorted(
+        renumbered_parent_candidates,
+        key=lambda item: (len(item[0]), item[0], item[1]),
+    )
+    while pending:
+        progressed = False
+        next_pending: list[tuple[tuple[str, ...], tuple[str, ...], int, str]] = []
+        for old_path, new_path, level, title_key in pending:
+            if (
+                (old_path[:-1], new_path[:-1]) in trusted_parent_path_pairs
+                and title_key
+                and old_parent_title_counts[(old_path[:-1], level, title_key)] == 1
+                and new_parent_title_counts[(new_path[:-1], level, title_key)] == 1
+            ):
+                trusted_parent_path_pairs.add((old_path, new_path))
+                progressed = True
+            else:
+                next_pending.append((old_path, new_path, level, title_key))
+        if not progressed:
+            break
+        pending = next_pending
+    # 改号父章节必须沿祖先路径逐层可信且在原始父域标题双侧唯一，重复空容器不能按顺序自证。
+    old_parent_targets: dict[tuple[str, ...], set[tuple[str, ...]]] = {}
+    new_parent_sources: dict[tuple[str, ...], set[tuple[str, ...]]] = {}
+    for old_path, new_path in trusted_parent_path_pairs:
+        old_parent_targets.setdefault(old_path, set()).add(new_path)
+        new_parent_sources.setdefault(new_path, set()).add(old_path)
+
+    old_title_counts = Counter(
+        (section.number_path[:-1], section.level, _review_unit_key(section.title))
+        for section in old_sections
+        if _direct_child_ordinal(section) is not None
+    )
+    new_title_counts = Counter(
+        (section.number_path[:-1], section.level, _review_unit_key(section.title))
+        for section in new_sections
+        if _direct_child_ordinal(section) is not None
+    )
+    old_ordinal_counts = Counter(
+        (section.number_path[:-1], section.level, ordinal)
+        for section in old_sections
+        if (ordinal := _direct_child_ordinal(section)) is not None
+    )
+    new_ordinal_counts = Counter(
+        (section.number_path[:-1], section.level, ordinal)
+        for section in new_sections
+        if (ordinal := _direct_child_ordinal(section)) is not None
+    )
+    old_prose_counts = _shift_prose_unit_counts(old_sections)
+    new_prose_counts = _shift_prose_unit_counts(new_sections)
+
+    seed_groups: dict[
+        tuple[tuple[str, ...], tuple[str, ...], int, int],
+        list[tuple[int, int, int, int]],
+    ] = {}
+    ordinary_shift_pairs_by_group: dict[
+        tuple[tuple[str, ...], tuple[str, ...], int, int],
+        set[tuple[int, int]],
+    ] = {}
+    for old_index, new_index in ordinary_pairs:
+        old_section = old_sections[old_index]
+        new_section = new_sections[new_index]
+        old_ordinal = _direct_child_ordinal(old_section)
+        new_ordinal = _direct_child_ordinal(new_section)
+        if old_ordinal is None or new_ordinal is None:
+            continue
+        if old_section.level != new_section.level:
+            continue
+        if _review_unit_key(old_section.title) != _review_unit_key(new_section.title):
+            continue
+        offset = new_ordinal - old_ordinal
+        if offset == 0:
+            continue
+        parent_pair = (old_section.number_path[:-1], new_section.number_path[:-1])
+        if parent_pair not in trusted_parent_path_pairs:
+            continue
+        key = (*parent_pair, old_section.level, offset)
+        ordinary_shift_pairs_by_group.setdefault(key, set()).add(
+            (old_index, new_index)
+        )  # 空容器可作为已配的相邻边界，但不能独自证明整个编号偏移区间。
+        if not old_section.body.strip() or not new_section.body.strip():
+            continue
+        if _section_similarity(old_section.body, new_section.body) < minimum_similarity:
+            continue
+        seed_groups.setdefault(key, []).append(
+            (old_index, new_index, old_ordinal, new_ordinal)
+        )
+
+    supported_seed_groups: dict[
+        tuple[tuple[str, ...], tuple[str, ...], int, int],
+        set[tuple[int, int]],
+    ] = {}
+    offsets_by_domain: dict[
+        tuple[tuple[str, ...], tuple[str, ...], int],
+        set[int],
+    ] = {}
+    for key, group in seed_groups.items():
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=lambda item: item[2])
+        if [item[3] for item in ordered] != sorted(item[3] for item in ordered):
+            continue  # 交叉重排不能充当统一编号后移证据。
+        domain = key[:3]
+        offsets_by_domain.setdefault(domain, set()).add(key[3])
+        supported_seed_groups[key] = {
+            (old_index, new_index)
+            for old_index, new_index, _old_ordinal, _new_ordinal in group
+        }
+    supported_seed_groups = {
+        key: pairs
+        for key, pairs in supported_seed_groups.items()
+        if len(offsets_by_domain.get(key[:3], set())) == 1
+    }  # 同一父域出现多个可竞争偏移时保持新增/删除，不作全局外推。
+
+    new_children_by_key: dict[
+        tuple[tuple[str, ...], int, str],
+        list[int],
+    ] = {}
+    for new_index, section in enumerate(new_sections):
+        if _direct_child_ordinal(section) is None:
+            continue
+        new_children_by_key.setdefault(
+            (section.number_path[:-1], section.level, _review_unit_key(section.title)),
+            [],
+        ).append(new_index)
+
+    rescued: list[tuple[int, int, str]] = []
+    local_matched_old = set(matched_old)
+    local_matched_new = set(matched_new)
+    for old_index, old_section in enumerate(old_sections):
+        if old_index in local_matched_old:
+            continue
+        old_ordinal = _direct_child_ordinal(old_section)
+        title_key = _review_unit_key(old_section.title)
+        old_parent = old_section.number_path[:-1]
+        if old_ordinal is None or not title_key or not old_parent:
+            continue
+        parent_targets = old_parent_targets.get(old_parent, set())
+        if len(parent_targets) != 1:
+            continue
+        new_parent = next(iter(parent_targets))
+        if len(new_parent_sources.get(new_parent, set())) != 1:
+            continue
+        candidate_indexes = new_children_by_key.get(
+            (new_parent, old_section.level, title_key),
+            [],
+        )
+        if len(candidate_indexes) != 1:
+            continue
+        new_index = candidate_indexes[0]
+        if new_index in local_matched_new:
+            continue
+        new_section = new_sections[new_index]
+        new_ordinal = _direct_child_ordinal(new_section)
+        if new_ordinal is None:
+            continue
+        if old_title_counts[(old_parent, old_section.level, title_key)] != 1:
+            continue
+        if new_title_counts[(new_parent, new_section.level, title_key)] != 1:
+            continue
+        if old_ordinal_counts[(old_parent, old_section.level, old_ordinal)] != 1:
+            continue
+        if new_ordinal_counts[(new_parent, new_section.level, new_ordinal)] != 1:
+            continue
+
+        match_basis = ""
+        body_similarity = _section_similarity(old_section.body, new_section.body)
+        if (
+            old_parent != new_parent
+            and old_ordinal == new_ordinal
+        ):
+            if body_similarity >= minimum_similarity:
+                match_basis = "structural_mapped_parent_body"
+            elif (
+                _STRUCTURAL_NUMBER_SHIFT_SCORE >= minimum_similarity
+                and _mapped_parent_boundary_child_has_independent_support(
+                    old_sections,
+                    new_sections,
+                    old_section,
+                    new_section,
+                    old_ordinal,
+                    new_ordinal,
+                    ordinary_pairs,
+                )
+            ):
+                match_basis = "structural_mapped_parent_boundary"
+        else:
+            offset = new_ordinal - old_ordinal
+            seed_key = (old_parent, new_parent, old_section.level, offset)
+            seed_pairs = supported_seed_groups.get(seed_key, set())
+            bracket_pairs = ordinary_shift_pairs_by_group.get(seed_key, set())
+            if (
+                offset != 0
+                and seed_pairs
+                and _STRUCTURAL_NUMBER_SHIFT_SCORE >= minimum_similarity
+            ):
+                shared_units, has_title_link = _shared_unique_shift_prose_units(
+                    old_section,
+                    new_section,
+                    old_prose_counts,
+                    new_prose_counts,
+                )
+                if has_title_link and len(shared_units) >= 2:
+                    match_basis = "structural_shift_run_body"
+                elif (
+                    has_title_link
+                    and len(shared_units) == 1
+                    and _ordinary_shift_brackets_candidate(
+                        old_sections,
+                        new_sections,
+                        old_section,
+                        new_section,
+                        old_ordinal,
+                        new_ordinal,
+                        bracket_pairs,
+                    )
+                ):
+                    match_basis = "structural_shift_bracketed_sentence"
+        if not match_basis:
+            continue
+        rescued.append((old_index, new_index, match_basis))
+        local_matched_old.add(old_index)
+        local_matched_new.add(new_index)
+    return sorted(rescued, key=lambda item: (item[1], item[0]))
+
+
+def _mapped_parent_boundary_child_has_independent_support(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    old_section: Section,
+    new_section: Section,
+    old_ordinal: int,
+    new_ordinal: int,
+    ordinary_pairs: set[tuple[int, int]],
+) -> bool:
+    """Prove a noisy first/last child using one sibling and one direct descendant."""
+
+    old_parent = old_section.number_path[:-1]
+    new_parent = new_section.number_path[:-1]
+    old_sibling_ordinals = {
+        ordinal
+        for section in old_sections
+        if section.number_path[:-1] == old_parent
+        and section.level == old_section.level
+        and (ordinal := _direct_child_ordinal(section)) is not None
+    }
+    new_sibling_ordinals = {
+        ordinal
+        for section in new_sections
+        if section.number_path[:-1] == new_parent
+        and section.level == new_section.level
+        and (ordinal := _direct_child_ordinal(section)) is not None
+    }
+    if not old_sibling_ordinals or not new_sibling_ordinals:
+        return False
+    same_boundary = (
+        old_ordinal == min(old_sibling_ordinals)
+        and new_ordinal == min(new_sibling_ordinals)
+    ) or (
+        old_ordinal == max(old_sibling_ordinals)
+        and new_ordinal == max(new_sibling_ordinals)
+    )
+    if not same_boundary:
+        return False  # 中间子章缺一侧邻居时保持未配，不能借边界规则放宽。
+
+    sibling_supported = False
+    descendant_supported = False
+    for old_index, new_index in ordinary_pairs:
+        old_candidate = old_sections[old_index]
+        new_candidate = new_sections[new_index]
+        if (
+            old_candidate.number_path[:-1] == old_parent
+            and new_candidate.number_path[:-1] == new_parent
+            and old_candidate.level == old_section.level
+            and new_candidate.level == new_section.level
+        ):
+            old_candidate_ordinal = _direct_child_ordinal(old_candidate)
+            new_candidate_ordinal = _direct_child_ordinal(new_candidate)
+            if (
+                old_candidate_ordinal is not None
+                and new_candidate_ordinal is not None
+                and abs(old_candidate_ordinal - old_ordinal) == 1
+                and new_candidate_ordinal - new_ordinal
+                == old_candidate_ordinal - old_ordinal
+                and _review_unit_key(old_candidate.title)
+                == _review_unit_key(new_candidate.title)
+            ):
+                sibling_supported = True
+        if (
+            old_candidate.number_path[:-1] == old_section.number_path
+            and new_candidate.number_path[:-1] == new_section.number_path
+            and old_candidate.level == old_section.level + 1
+            and new_candidate.level == new_section.level + 1
+            and _review_unit_key(old_candidate.title)
+            == _review_unit_key(new_candidate.title)
+        ):
+            descendant_supported = True
+        if sibling_supported and descendant_supported:
+            return True
+    return False
+
+
+def _direct_child_ordinal(section: Section) -> int | None:
+    """Return a numeric ordinal only when the leaf directly extends its parent."""
+
+    if len(section.number_path) < 2:
+        return None
+    parent_number = section.number_path[-2]
+    child_number = section.number_path[-1]
+    if not re.fullmatch(r"\d+(?:\.\d+)*", parent_number):
+        return None
+    if not re.fullmatch(r"\d+(?:\.\d+)*", child_number):
+        return None
+    parent_parts = tuple(int(part) for part in parent_number.split("."))
+    child_parts = tuple(int(part) for part in child_number.split("."))
+    if child_parts[:-1] != parent_parts:
+        return None
+    return child_parts[-1]
+
+
+def _shift_prose_units(section: Section) -> tuple[tuple[str, str], ...]:
+    """Return complete substantive prose units; captions and table rows are excluded."""
+
+    units: list[tuple[str, str]] = []
+    for unit in _paragraph_review_units(section.body, suppressed_table_unit_keys=set()):
+        compact = compact_inline(unit)
+        if len(compact) < _SECTION_SHIFT_PROSE_MIN_CHARS:
+            continue
+        if not _ends_review_sentence(compact):
+            continue
+        if not _SECTION_IDENTITY_PROSE_VERB_RE.search(compact):
+            continue
+        if len(_meaningful_review_words(compact)) < 4:
+            continue
+        key = _review_unit_key(compact)
+        if key:
+            units.append((key, compact))
+    return tuple(units)
+
+
+def _shift_prose_unit_counts(
+    sections: list[Section],
+) -> Counter[tuple[tuple[str, ...], int, str]]:
+    """Count prose anchors in the original parent domain before any rescue."""
+
+    return Counter(
+        (section.number_path[:-1], section.level, key)
+        for section in sections
+        for key, _unit in _shift_prose_units(section)
+    )
+
+
+def _shared_unique_shift_prose_units(
+    old_section: Section,
+    new_section: Section,
+    old_counts: Counter[tuple[tuple[str, ...], int, str]],
+    new_counts: Counter[tuple[tuple[str, ...], int, str]],
+) -> tuple[tuple[str, ...], bool]:
+    """Return exact substantive sentences unique within both original parents."""
+
+    old_units = dict(_shift_prose_units(old_section))
+    new_units = dict(_shift_prose_units(new_section))
+    shared: list[str] = []
+    has_title_link = False
+    for key in old_units.keys() & new_units.keys():
+        old_count_key = (old_section.number_path[:-1], old_section.level, key)
+        new_count_key = (new_section.number_path[:-1], new_section.level, key)
+        if old_counts[old_count_key] != 1 or new_counts[new_count_key] != 1:
+            continue
+        shared.append(key)
+        if _has_section_identity_title_link(old_units[key], old_section.title):
+            has_title_link = True
+    return tuple(sorted(shared)), has_title_link
+
+
+def _ordinary_shift_brackets_candidate(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    old_section: Section,
+    new_section: Section,
+    old_ordinal: int,
+    new_ordinal: int,
+    seed_pairs: set[tuple[int, int]],
+) -> bool:
+    """Require ordinary same-offset siblings immediately before and after a weak target."""
+
+    old_neighbors: dict[int, list[int]] = {}
+    new_neighbors: dict[int, list[int]] = {}
+    for index, section in enumerate(old_sections):
+        if section.number_path[:-1] == old_section.number_path[:-1] and section.level == old_section.level:
+            ordinal = _direct_child_ordinal(section)
+            if ordinal is not None:
+                old_neighbors.setdefault(ordinal, []).append(index)
+    for index, section in enumerate(new_sections):
+        if section.number_path[:-1] == new_section.number_path[:-1] and section.level == new_section.level:
+            ordinal = _direct_child_ordinal(section)
+            if ordinal is not None:
+                new_neighbors.setdefault(ordinal, []).append(index)
+    for direction in (-1, 1):
+        old_indexes = old_neighbors.get(old_ordinal + direction, [])
+        new_indexes = new_neighbors.get(new_ordinal + direction, [])
+        if len(old_indexes) != 1 or len(new_indexes) != 1:
+            return False
+        if (old_indexes[0], new_indexes[0]) not in seed_pairs:
+            return False
+    return True
+
+
+def _matched_adjacent_brackets_support(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    old_index: int,
+    new_index: int,
+    matched_pairs: set[tuple[int, int]],
+) -> bool:
+    """Require two already matched direct neighbors around one rescue candidate."""
+
+    candidate_old = old_sections[old_index]
+    candidate_new = new_sections[new_index]
+    if not candidate_old.body.strip() or not candidate_new.body.strip():
+        return False
+    for offset in (-1, 1):
+        neighbor_old_index = old_index + offset
+        neighbor_new_index = new_index + offset
+        if not (0 <= neighbor_old_index < len(old_sections)):
+            return False
+        if not (0 <= neighbor_new_index < len(new_sections)):
+            return False
+        if (neighbor_old_index, neighbor_new_index) not in matched_pairs:
+            return False  # 必须是显式相互配对，不能只凭两个索引各自已使用。
+        old_neighbor = old_sections[neighbor_old_index]
+        new_neighbor = new_sections[neighbor_new_index]
+        if not old_neighbor.number_path or old_neighbor.number_path != new_neighbor.number_path:
+            return False
+        if old_neighbor.level != new_neighbor.level:
+            return False
+        old_title_key = _review_unit_key(old_neighbor.title)
+        new_title_key = _review_unit_key(new_neighbor.title)
+        if not old_title_key or old_title_key != new_title_key:
+            return False
+        if not old_neighbor.body.strip() or not new_neighbor.body.strip():
+            return False
+    return True
 
 
 def _section_match_score(old_section: Section, new_section: Section) -> float:
@@ -344,30 +2493,6 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
 
 
 _SECTION_MATCH_SAMPLE_CHARS = 1200  # 长章节匹配采样代表性文本，避免反复对整章做昂贵相似度计算。
-_LEADING_TABLE_HEADER_FRAGMENT_RE = re.compile(
-    r"(?i)^(?:unit\s+)?baud\s+rate\s+r[_\s]*baud\s+\d+(?:\s+\d+)?\s+gsym/s\s+see\s+section\s+"
-)  # PDF 有时把表头和正文粘在一起，先清掉无上下文表头前缀。
-_EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE = re.compile(
-    r"(?i)\bfx\s+bx\s+ffe[_-]?post\s+(?=table\b)"
-)  # `fx bx FFE_post Table 32-1` 是表格残片粘入正文引用，不是协议正文变化。
-_PCIE_MONTH_PATTERN = (
-    r"January|February|March|April|May|June|July|August|September|October|November|December"
-)  # PCIe 规范页脚里的英文月份集合，限定日期噪声识别范围。
-_PCIE_RUNNING_HEADER_RE = re.compile(
-    r"(?i)\bPCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+\b"
-)  # PCIe PHY 测试规范每页顶部/底部都会出现的运行页眉。
-_PCIE_REVISION_LINE_RE = re.compile(
-    r"(?i)^Revision\s+\d+(?:\.\d+)*(?:\s*,\s*Version\s+\d+(?:\.\d+)*)?$"
-)  # 独立版本行属于页眉页脚，不等同于正文里的 revision 引用。
-_PCIE_DATE_LINE_RE = re.compile(
-    rf"(?i)^(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}$"
-)  # 独立发布日期行是运行页脚，不能成为协议差异。
-_PCIE_FURNITURE_CLUSTER_RE = re.compile(
-    rf"(?i)\s*[-–—>]?\s*PCI\s+Express\s+Architecture\s+PHY\s+Test\s+Specification\s*\|\s*\d+\s*"
-    rf"(?:Revision\s+\d+(?:\.\d+)*(?:\s*,\s*Version\s+\d+(?:\.\d+)*)?\s*)?"
-    rf"(?:(?:{_PCIE_MONTH_PATTERN})\s+\d{{1,2}},\s+\d{{4}}\s*)?[>→-]?\s*"
-)  # 抽取器有时把页眉、版本和日期塞进句中；按整簇删除，避免污染正文 diff。
-_SPELLING_EQUIVALENT_TOKENS = {"adaptor": "adapter"}  # 美式/英式等价写法不应单独生成实质差异。
 
 
 def _section_similarity(left: str, right: str) -> float:
@@ -420,58 +2545,31 @@ def _sections_effectively_unchanged(
     new_section: Section,
     options: DiffOptions,
 ) -> bool:
-    """Treat exact or safely bounded spelling-only section variants as unchanged."""
+    """Treat only conservatively normalized, exactly equal sections as unchanged."""
 
     body_same = _review_unit_key(old_section.body) == _review_unit_key(new_section.body)
     if _section_heading_changed(old_section, new_section):
         return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
-    if body_same:
-        return True  # 大小写、空白、标点和等价数学记法已由 review key 安全归一。
-    if _review_similarity(old_section.body, new_section.body) < options.unchanged_similarity:
-        return False  # 用户阈值只负责决定高相似度候选是否值得进入安全拼写检查。
-    return _only_minor_spelling_delta(old_section.body, new_section.body)
+    return body_same  # 相似度不能授权猜测复数、动词变化或其他语义等价。
 
 
-def _only_minor_spelling_delta(old_text: str, new_text: str) -> bool:
-    """Return True only for one-to-one close spelling variants without numbers."""
+def _delta_is_unverified_pua_mapping_only(
+    added: list[str],
+    removed: list[str],
+    replaced: list[SnippetPair],
+    omitted_count: int,
+) -> bool:
+    """Classify only fully visible PUA/lookalike replacements as review items."""
 
-    old_tokens = _review_unit_key(old_text).split()  # review key 已经保留协议数值和标识符。
-    new_tokens = _review_unit_key(new_text).split()
-    matcher = difflib.SequenceMatcher(None, old_tokens, new_tokens, autojunk=False)
-    saw_spelling_delta = False
-    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        old_block = old_tokens[old_start:old_end]
-        new_block = new_tokens[new_start:new_end]
-        if tag != "replace" or len(old_block) != len(new_block):
-            return False  # 插入、删除或多对一变化可能改变条款含义，不能按拼写噪声隐藏。
-        for old_token, new_token in zip(old_block, new_block, strict=True):
-            if not _is_close_spelling_variant(old_token, new_token):
-                return False
-            saw_spelling_delta = True
-    return saw_spelling_delta
-
-
-def _is_close_spelling_variant(old_token: str, new_token: str) -> bool:
-    """Recognize only a conservative plural/third-person inflection difference."""
-
-    if not re.fullmatch(r"[a-z]{4,}", old_token) or not re.fullmatch(r"[a-z]{4,}", new_token):
-        return False  # 数字、符号、短 modal 词和技术标识符一律视为实质变化。
-    return new_token in _safe_inflection_variants(old_token) or old_token in _safe_inflection_variants(new_token)
-
-
-def _safe_inflection_variants(token: str) -> set[str]:
-    """Return base forms reachable only by removing a trailing plural marker."""
-
-    variants: set[str] = set()
-    if token.endswith("ies") and len(token) > 5:
-        variants.add(token[:-3] + "y")  # applies/apply，不允许任何前缀改写。
-    if token.endswith("es") and len(token) > 5:
-        variants.add(token[:-2])  # matches/match、classes/class。
-    if token.endswith("s") and not token.endswith("ss") and len(token) > 4:
-        variants.add(token[:-1])  # supports/support、uses/use。
-    return {variant for variant in variants if len(variant) >= 4}
+    if added or removed or omitted_count or not replaced:
+        return False
+    return all(
+        pair.old != pair.new
+        and bool(re.search(r"[\ue000-\uf8ff]", pair.old + pair.new))
+        and reader_symbol_mapping_key(pair.old)
+        == reader_symbol_mapping_key(pair.new)
+        for pair in replaced
+    )  # 任一其他正文变化或被截断片段都保持 modified，避免把真实修订降级成编码复核。
 
 
 def _section_heading_changed(old_section: Section, new_section: Section) -> bool:
@@ -494,13 +2592,27 @@ def _summarize_text_delta(
     max_snippets: int,
     leading_replacement: SnippetPair | None = None,
     *,
-    suppressed_table_unit_keys: set[str] | None = None,
-) -> tuple[list[str], list[str], list[SnippetPair], int]:
+    suppressed_old_table_unit_keys: set[str] | None = None,
+    suppressed_new_table_unit_keys: set[str] | None = None,
+) -> tuple[
+    list[str],
+    list[str],
+    list[SnippetPair],
+    int,
+    list[str],
+    list[str],
+    list[SnippetPair],
+]:
     """Create compact added/removed/replaced snippets for one section."""
 
-    table_unit_keys = suppressed_table_unit_keys or set()  # 兼容旧调用方；正文区现在会隐藏全部结构化表格行。
-    old_units = _paragraph_review_units(old_text, suppressed_table_unit_keys=table_unit_keys)  # 主正文区只保留段落/句子级文字。
-    new_units = _paragraph_review_units(new_text, suppressed_table_unit_keys=table_unit_keys)  # 表格行交给表格摘要和截图区承载。
+    old_units = _paragraph_review_units(
+        old_text,
+        suppressed_table_unit_keys=suppressed_old_table_unit_keys or set(),
+    )
+    new_units = _paragraph_review_units(
+        new_text,
+        suppressed_table_unit_keys=suppressed_new_table_unit_keys or set(),
+    )  # 表格证据按版本分别承载，不能用另一侧字符串集合过滤本侧正文。
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
@@ -538,18 +2650,22 @@ def _summarize_text_delta(
         if tag == "equal":
             continue
         if tag == "insert":
-            for unit in new_units[new_start:new_end]:
+            for _index, text, source_units in _coherent_delta_unit_groups(
+                list(enumerate(new_units[new_start:new_end], start=new_start))
+            ):
                 add_candidate(
                     "added",
-                    text=_report_unit(unit),
-                    priority_values=(unit,),
+                    text=text,
+                    priority_values=source_units,
                 )
         elif tag == "delete":
-            for unit in old_units[old_start:old_end]:
+            for _index, text, source_units in _coherent_delta_unit_groups(
+                list(enumerate(old_units[old_start:old_end], start=old_start))
+            ):
                 add_candidate(
                     "removed",
-                    text=_report_unit(unit),
-                    priority_values=(unit,),
+                    text=text,
+                    priority_values=source_units,
                 )
         elif tag == "replace":
             old_block_units = old_units[old_start:old_end]
@@ -568,15 +2684,71 @@ def _summarize_text_delta(
     return _materialize_delta_candidates(candidates, max_snippets)
 
 
+def _coherent_delta_unit_groups(
+    indexed_units: list[tuple[int, str]],
+) -> list[tuple[int, str, tuple[str, ...]]]:
+    """Join prose only when source indexes prove one uninterrupted diff run."""
+
+    groups: list[tuple[int, str, tuple[str, ...]]] = []
+    prose_buffer: list[tuple[int, str]] = []
+
+    def flush_prose() -> None:
+        if not prose_buffer:
+            return
+        groups.append(
+            (
+                prose_buffer[0][0],
+                " ".join(_report_unit(unit) for _index, unit in prose_buffer),
+                tuple(unit for _index, unit in prose_buffer),
+            )
+        )
+        prose_buffer.clear()
+
+    previous_index: int | None = None
+    for index, unit in indexed_units:
+        if previous_index is not None and index != previous_index + 1:
+            flush_prose()
+        if _delta_unit_is_joinable_prose(unit):
+            prose_buffer.append((index, unit))
+        else:
+            flush_prose()
+            groups.append((index, _report_unit(unit), (unit,)))
+        previous_index = index
+    flush_prose()
+    return groups
+
+
+def _delta_unit_is_joinable_prose(value: str) -> bool:
+    """Recognize sentence prose without joining numbered procedures or captions."""
+
+    compact = compact_inline(value)
+    if re.match(r"^(?:[-•●]|[A-Za-z][.)]|\d{1,3}[.)])\s+", compact):
+        return False
+    if re.match(r"(?i)^table\s+\d", compact):
+        return False
+    if not re.search(r"[.!?。！？]$", compact):
+        return False
+    latin_words = re.findall(r"[A-Za-z][A-Za-z0-9'-]*", compact)
+    cjk_characters = re.findall(r"[\u4e00-\u9fff]", compact)
+    return len(latin_words) >= 5 or len(cjk_characters) >= 12
+
+
 def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) -> list[str]:
     """Return review units for paragraph cards, optionally excluding table rows."""
 
-    units = _split_units(text)  # 先走统一切分和原始表格噪声覆盖，避免长表格块污染正文 diff。
+    prose_text = "\n".join(
+        raw_line
+        for raw_line in text.splitlines()
+        if not _is_table_review_unit(raw_line)
+        and _review_unit_key(raw_line) not in suppressed_table_unit_keys
+    )  # 必须先按原始结构化行整体过滤；否则 NOTES 单元格内的句号会先拆掉前缀，再冒充正文。
+    units = _split_units(prose_text)  # 表格由表格证据区承载，正文卡片只切分剩余文本。
     return [
         unit
         for unit in units
         if not _is_table_review_unit(unit)
-    ]  # 结构化表格行不进正文卡片，避免和下方视觉/结构化表格摘要重复。
+        and _review_unit_key(unit) not in suppressed_table_unit_keys
+    ]  # 结构化表格行及已由跨侧精确重建覆盖的原始整单元都不再进入正文卡片。
 
 
 def _split_units(text: str) -> list[str]:
@@ -597,143 +2769,7 @@ def _split_units(text: str) -> list[str]:
             units.append(unit)
             continue
         units.extend(_split_long_unit(unit))
-    return _drop_orphan_review_fragments(_drop_duplicate_raw_table_units(units))
-
-
-def _drop_orphan_review_fragments(units: list[str]) -> list[str]:
-    """Remove single-character PDF extraction fragments before diff pairing."""
-
-    return [
-        unit
-        for unit in units
-        if not _looks_like_orphan_review_fragment(unit)
-    ]  # `p`、`F`、`A` 等孤立残字不应和完整句子形成左右对比。
-
-
-def _looks_like_orphan_review_fragment(value: str) -> bool:
-    """Return True for standalone OCR/PDF residue with no readable context."""
-
-    candidate = compact_inline(value)  # 压成单行后判断，避免换行空白影响短残片识别。
-    if not candidate:
-        return True  # 空片段没有审阅价值。
-    if _is_table_review_unit(candidate):
-        return False  # 结构化表格行即使包含单字母值，也要交给表格逻辑保留。
-    if re.fullmatch(r"(?i)[a-z]", candidate):
-        return True  # 单个字母多来自公式/页边残片，不能单独参与正文对比。
-    if re.fullmatch(r"(?i)[a-z]\.", candidate):
-        return False  # `a.` 这类列表标记已有专门合并逻辑，保守不在这里删除。
-    return bool(re.fullmatch(r"(?i)(?:[a-z]\s+){1,3}[a-z]", candidate) and len(candidate) <= 7)
-
-
-_RAW_TABLE_NOISE_WORDS = frozenset(
-    {
-        "bandwidth",
-        "capacitance",
-        "characteristic",
-        "coefficient",
-        "condition",
-        "equalizer",
-        "frequency",
-        "impedance",
-        "jitter",
-        "maximum",
-        "minimum",
-        "notes",
-        "parameter",
-        "probability",
-        "receiver",
-        "resistance",
-        "rms",
-        "symbol",
-        "termination",
-        "transmitter",
-        "units",
-        "value",
-        "voltage",
-    }
-)  # diff 层兜底使用的表格噪声词表，和抽取层保持同一语义口径。
-
-
-def _drop_duplicate_raw_table_units(units: list[str]) -> list[str]:
-    """Remove raw table-like text units when structured table rows are present."""
-
-    table_units = [unit for unit in units if _is_table_review_unit(unit)]  # 只有抽取层已给出结构化表格行时才降噪。
-    if not table_units:
-        return units
-    table_tokens = _raw_table_noise_token_index(table_units)  # 用结构化表格行建立同章节 token 覆盖范围。
-    return [
-        unit
-        for unit in units
-        if _is_table_review_unit(unit) or not _looks_like_duplicate_raw_table_unit(unit, table_tokens)
-    ]  # 保留结构化行和普通正文，删除重复的原始表格块。
-
-
-def _looks_like_duplicate_raw_table_unit(unit: str, table_tokens: set[str]) -> bool:
-    """Return True for a noisy raw table block already covered by table rows."""
-
-    tokens = _raw_table_noise_tokens(unit)  # 和结构化表格行做 token 覆盖判断。
-    overlap = len(tokens & table_tokens)  # token 重叠越高，越可能是同一表格的原始抽取残片。
-    words = set(re.findall(r"[A-Za-z]+", unit.casefold()))  # 表格词数量用于区分正文长段落和参数块。
-    table_word_count = len(words & _RAW_TABLE_NOISE_WORDS)
-    if len(unit) < 160:
-        return _looks_like_short_duplicate_raw_table_unit(unit, overlap, table_word_count)
-    number_count = len(_NUMBER_TOKEN_RE.findall(unit))  # 原始表格块通常含有大量数值。
-    if number_count < 6:
-        return False
-    if table_word_count < 2:
-        return False
-    required_overlap = min(12, max(6, len(tokens) // 6))
-    if overlap >= required_overlap:
-        return True
-    return overlap >= 4 and table_word_count >= 4 and number_count >= 10 and _has_table_block_phrase(unit)
-
-
-def _looks_like_short_duplicate_raw_table_unit(unit: str, overlap: int, table_word_count: int) -> bool:
-    """Return True for short raw table fragments already covered by structured rows."""
-
-    if overlap < 3:
-        return False  # 短片段必须和结构化表格有明显重叠才可删除。
-    if re.search(
-        r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|means|describes?|represents?|indicates?|shows?|specified|measured|computed|requirements?)\b",
-        unit,
-    ):
-        return False  # 带规范动词的短句更可能是真正文段。
-    if re.match(r"(?i)^(?:the|this|that|these|those)\b", unit):
-        return False  # 以冠词/指示词开头的自然句不按表格碎片删除。
-    if re.search(r"(?i)\bT_[A-Z0-9_]+|\bUI(?:rms|pp)?\b|NOTES?:|(?:MIN|MAX|TYP)\s*=", unit):
-        return True  # 符号、单位、NOTES、上下限列是原始表格碎片强信号。
-    return overlap >= 5 and table_word_count >= 2
-
-
-def _has_table_block_phrase(unit: str) -> bool:
-    """Return True for phrases that rarely occur outside raw parameter tables."""
-
-    return bool(
-        re.search(
-            r"(?i)\b(?:parameter values|minimum value|maximum value|step size|characteristic impedance|termination resistance)\b",
-            unit,
-        )
-    )  # 强表格短语能兜住 pdfplumber 正文路径残留的大块表格文本。
-
-
-def _raw_table_noise_token_index(table_units: list[str]) -> set[str]:
-    """Build a token index from structured table units."""
-
-    tokens: set[str] = set()  # 汇总结构化表格 token，便于判断原始块是否重复。
-    for unit in table_units:
-        tokens.update(_raw_table_noise_tokens(unit))
-    return tokens
-
-
-def _raw_table_noise_tokens(value: str) -> set[str]:
-    """Tokenize table-ish text for duplicate suppression."""
-
-    lowered = value.casefold().replace("µ", "u").replace("μ", "u")  # 单位符号归一化，减少 μ/u 差异。
-    return {
-        token
-        for token in re.findall(r"[a-z]+[a-z0-9]*|[+-]?\d+(?:\.\d+)?", lowered)
-        if len(token) > 1
-    }  # 删除单字符 token，避免 a、b、R 被过度计入重叠。
+    return units  # 原始文本和结构化表格是两份可核查证据；没有坐标级同一性证明时不猜测删除。
 
 
 def _merge_wrapped_lines(text: str) -> list[str]:
@@ -741,15 +2777,14 @@ def _merge_wrapped_lines(text: str) -> list[str]:
 
     blocks: list[str] = []
     current = ""
-    normalized_lines = [normalize_line(raw_line) for raw_line in text.splitlines()]  # 先统一空白，便于识别页眉簇。
-    pcie_furniture_indexes = _pcie_page_furniture_line_indexes(normalized_lines)  # 版本/日期只有贴近 PCIe 页眉时才删除。
-    for index, line in enumerate(normalized_lines):
+    normalized_lines = [normalize_line(raw_line) for raw_line in text.splitlines()]
+    for line in normalized_lines:
         if not line:
             continue
-        if index in pcie_furniture_indexes:
-            continue  # PCIe 运行页眉/页脚不能被合并进前后正文句子。
-        if _looks_like_orphan_review_fragment(line):
-            continue  # 先丢掉独立 `p`/`F` 等残片，避免换行合并时塞进完整句。
+        cross_reference_join = _join_wrapped_cross_reference(current, line)
+        if cross_reference_join is not None:
+            current = cross_reference_join
+            continue
         if _starts_new_review_block(line):
             if current:
                 blocks.append(current)
@@ -758,11 +2793,8 @@ def _merge_wrapped_lines(text: str) -> list[str]:
         if not current:
             current = line
         elif _ends_review_sentence(current) and not _is_standalone_list_marker(current):
-            if _looks_like_decimal_continuation(current, line):
-                current = _join_wrapped_line(current, line)
-            else:
-                blocks.append(current)
-                current = line
+            blocks.append(current)
+            current = line  # 纯文本换行不能证明 `1.\n0 V` 是小数，也可能是两句技术要求。
         elif _looks_like_new_sentence_after_linebreak(current, line):
             blocks.append(current)
             current = line
@@ -771,6 +2803,34 @@ def _merge_wrapped_lines(text: str) -> list[str]:
     if current:
         blocks.append(current)
     return blocks
+
+
+def _join_wrapped_cross_reference(left: str, right: str) -> str | None:
+    """Rejoin a numbered reference split immediately after its hyphen."""
+
+    if not left:
+        return None
+    plain_reference = re.search(
+        rf"(?i)\b(?:table|figure|equation|section)\s+\d+\s*{TABLE_NUMBER_DASH_CLASS}\s*$",
+        left,
+    )
+    parenthesized_reference = re.search(
+        rf"(?i)\b(?:equation|figure|table|section)\s+\(\d+\s*{TABLE_NUMBER_DASH_CLASS}\s*$",
+        left,
+    )
+    if parenthesized_reference is not None:
+        match = re.fullmatch(r"(\d+)\)(?:\s+(.*))?", right)
+        if match is None:
+            return None
+        joined = f"{left.rstrip()}{match.group(1)})"
+        return f"{joined} {match.group(2)}" if match.group(2) else joined
+    if plain_reference is None:
+        return None
+    match = re.fullmatch(r"(\d+)\.(?:\s+(.*))?", right)
+    if match is None:
+        return None
+    joined = f"{left.rstrip()}{match.group(1)}."
+    return f"{joined} {match.group(2)}" if match.group(2) else joined
 
 
 def _starts_new_review_block(line: str) -> bool:
@@ -788,26 +2848,9 @@ def _starts_new_review_block(line: str) -> bool:
 
 
 def _join_wrapped_line(left: str, right: str) -> str:
-    """Join one PDF-wrapped line while repairing common hyphen breaks."""
+    """Join adjacent extracted lines without guessing away visible glyphs."""
 
-    if left.endswith("-") and right and right[0].islower():
-        return left[:-1] + right
     return f"{left} {right}"
-
-
-def _looks_like_decimal_continuation(left: str, right: str) -> bool:
-    """Recognize PDF line breaks inside decimal values such as ``125. 0 μs``."""
-
-    left_tail = left.rstrip()
-    right_head = right.lstrip()
-    return bool(
-        re.search(r"\d\.$", left_tail)
-        and re.match(
-            r"^\d+\s*(?:[µμ]s|us|ps|ns|ms|ui|mv|v|db|mhz|ghz|gt/s)\b",
-            right_head,
-            flags=re.I,
-        )
-    )
 
 
 def _ends_review_sentence(value: str) -> bool:
@@ -862,26 +2905,49 @@ _NUMBER_TOKEN_RE = re.compile(
 )
 _TABLE_REVIEW_PREFIX_RE = re.compile(r"^(?:表格行|表格文字)[:：]\s*")  # 内部表格行和用户可见兜底表格文字共用识别入口。
 _REVIEW_TOKEN_RE = re.compile(
-    r"<=|>=|≤|≥|(?<!-)[<>](?!-)|="
+    r"<=>|<->|->|<-|=>|<=|>=|!=|==|≤|≥|≠"
     r"|[+-]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?"
-    r"|[a-zµμ]+[a-z0-9µμ]*(?:[-_/][a-z0-9µμ]+)*|[\u4e00-\u9fff]+",
+    r"|(?:[^\W\d_]|_)\w*(?:[-/]\w+)*"
+    r"|[^\w\s.,;:?\"“”'‘’，。；：！？、]",
     flags=re.I,
 )
+_CASE_BEARING_TOKEN_RE = re.compile(
+    r"(?<!\w)(?:[^\W\d_]|_)\w*(?:[-/]\w+)*(?!\w)"
+)
+_SEMANTIC_OPERATOR_RE = re.compile(
+    r"[\u2061-\u2064]"
+    r"|(?<=[A-Za-z0-9)\]])\s+([+\-−*/×÷])\s+(?=[A-Za-z0-9(\[])"
+    r"|(?<=[A-Za-z0-9)\]])([+*×÷−])(?=[A-Za-z0-9(\[])"
+)  # 保留明确的公式运算符；ASCII 连字符仅在两侧有空格时视作减号，避免误伤词内连字符。
+_SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾", "0123456789+-=()")
+_SUBSCRIPT_TRANSLATION = str.maketrans("₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", "0123456789+-=()")
+_SUPERSCRIPT_CHARS = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ"
+_SUBSCRIPT_CHARS = "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ"
 _PROTECTED_NUMBER_WORD_PREFIXES = frozenset(
     {
         "appendix",
+        "build",
         "clause",
+        "code",
+        "codes",
         "figure",
         "gen",
         "generation",
+        "id",
+        "identifier",
         "model",
+        "models",
         "part",
         "profile",
+        "profiles",
         "rev",
         "revision",
+        "serial",
         "section",
         "table",
         "type",
+        "version",
+        "versions",
     }
 )
 _PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
@@ -905,46 +2971,579 @@ _PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
 def _review_unit_key(value: str) -> str:
     """Normalize a unit for deciding whether a visible diff is substantive.
 
-    The key ignores case, whitespace, and sentence punctuation, but keeps
-    meaningful numeric tokens intact. That prevents false equivalence between
-    values such as ``1.0 ps`` and ``10 ps`` while still suppressing PDF wrapping
-    and comma/period noise.
+    The key ignores ordinary prose case, whitespace, and sentence punctuation,
+    but keeps meaningful numeric tokens and technical-token case intact. That
+    prevents false equivalence between values such as ``1.0 ps`` and ``10 ps``
+    or identifiers such as ``MODE_FAST`` and ``mode_fast``.
     """
 
-    value = remove_draft_watermark_letter_artifacts(value)  # 先去掉 DRAFT 水印字母残片，再生成比较 key。
-    value = _strip_running_page_furniture(value)  # 去掉 PCIe 页眉页脚簇，防止页码/日期驱动误报。
-    value = _strip_leading_table_header_fragment(value)  # 去掉 UNIT/Baud Rate 等表头前缀，避免污染正文句。
-    value = _strip_embedded_table_identifier_residue(value)  # 去掉句中插入的短表格标识符残片。
-    normalized = normalize_for_similarity(value)
+    normalized_list_value = _normalize_known_body_compact_symbol_spacing(
+        _normalize_leading_list_marker(value)
+    )  # Z c/Zc 等有上下文证明的排版空格可统一；无字体 provenance 的 PUA 必须保留差异。
+    case_signature_source = _normalize_math_symbol_artifacts(
+        _normalize_embedded_number_list_spacing(normalized_list_value)
+    )
+    case_signature_source = _normalize_directional_symbols(case_signature_source)
+    case_signature_source = re.sub(
+        r"(?<=\d)(?![eE][+-]?\d)(?=(?:[^\W\d_]|_))",
+        " ",
+        case_signature_source,
+    )  # `5V` 与 `5 V` 的单位大小写证据必须一致。
+    case_signatures = _technical_case_signatures(case_signature_source)
+    operator_signatures = _semantic_operator_signatures(case_signature_source)
+    ampersand_signatures = _semantic_ampersand_signatures(normalized_list_value)
+    modifier_signatures = _measurement_modifier_signatures(normalized_list_value)
+    punctuation_signature_source = _normalize_embedded_number_list_spacing(
+        normalized_list_value
+    )
+    punctuation_signature_source = re.sub(
+        r"(?<=\d)(?![eE][+-]?\d)(?=(?:[^\W\d_]|_))",
+        " ",
+        punctuation_signature_source,
+    )
+    punctuation_signatures = _contextual_punctuation_signatures(
+        punctuation_signature_source
+    )
+    script_signatures = _super_subscript_signatures(normalized_list_value)
+    lexical_number_signatures = _lexical_number_signatures(normalized_list_value)
+    identifier_number_signatures = _identifier_number_signatures(normalized_list_value)
+    identifier_literal_signatures = _identifier_literal_signatures(normalized_list_value)
+    dotted_identifier_signatures = _dotted_identifier_signatures(normalized_list_value)
+    path_identifier_signatures = _path_identifier_signatures(normalized_list_value)
+    joined_identifier_signatures = identifier_boundary_signatures(normalized_list_value)
+    micro_literal_signatures = micro_identifier_signatures(normalized_list_value)
+    normalized = normalize_for_similarity(normalized_list_value)
     normalized = canonicalize_chinese_number_expressions(normalized)
     normalized = normalized.replace("µ", "u").replace("μ", "u")
     normalized = normalized.replace("&", " and ")
     normalized = normalized.replace("≤", "<=").replace("≥", ">=")
     normalized = _normalize_math_symbol_artifacts(normalized)
+    normalized = _normalize_directional_symbols(normalized)
     normalized = _normalize_embedded_number_list_spacing(normalized)
-    normalized = re.sub(r"-\s*[<>]\s*", " ", normalized)
-    normalized = re.sub(r"(?<=\d)\.\s+(?=\d)", ".", normalized)
-    normalized = re.sub(r"\b10\s+([0-9])\b", r"10\1", normalized)
-    normalized = re.sub(r"(?<=[a-z])[-‐‑](?=[a-z])", "", normalized)
-    normalized = re.sub(r"\bpreset\s*([0-9]+)\b", r"p\1", normalized)
+    normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=\d)", "", normalized)
+    normalized = re.sub(r"(?<=\d)\s+(?=[\u4e00-\u9fff])", "", normalized)
     tokens = [_canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(normalized)]
+    canonical_tokens = canonicalize_number_word_tokens(
+        tokens,
+        protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,
+        protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
+    )
     return " ".join(
-        canonicalize_number_word_tokens(
-            tokens,
-            protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,
-            protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
+        [
+            *canonical_tokens,
+            *(f"case:{token}" for token in case_signatures),
+            *(f"operator:{operator}" for operator in operator_signatures),
+            *(f"operator:{operator}" for operator in ampersand_signatures),
+            *(f"modifier:{modifier}" for modifier in modifier_signatures),
+            *(f"punctuation:{punctuation}" for punctuation in punctuation_signatures),
+            *(f"script:{script}" for script in script_signatures),
+            *(f"lexical-number:{number}" for number in lexical_number_signatures),
+            *(f"identifier-number:{number}" for number in identifier_number_signatures),
+            *(f"identifier-literal:{literal}" for literal in identifier_literal_signatures),
+            *(f"dotted-identifier:{literal}" for literal in dotted_identifier_signatures),
+            *(f"path-identifier:{literal}" for literal in path_identifier_signatures),
+            *(f"identifier-boundary:{literal}" for literal in joined_identifier_signatures),
+            *(f"micro-identifier:{literal}" for literal in micro_literal_signatures),
+        ]
+    )
+
+
+def _normalize_known_body_compact_symbol_spacing(value: str) -> str:
+    """Join only verified split engineering symbols in ordinary body text."""
+
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_])([A-Za-z])\s+([a-z]+)([0-9_.+-]{0,2})(?![A-Za-z0-9_])"
+    )
+
+    def replace_match(match: re.Match[str]) -> str:
+        base, suffix, qualifier = match.groups()
+        if not is_known_engineering_symbol_letter_suffix(base, suffix):
+            return match.group(0)
+        local_prefix = re.split(
+            r"[,;:.!?\n=+*/<>≤≥]",
+            value[: match.start()],
+        )[-1][-80:]
+        local_words = re.findall(
+            r"[A-Za-z]+|[\u3400-\u4dbf\u4e00-\u9fff]+",
+            local_prefix,
+        )
+        nearest_quantity_name = local_words[-1] if local_words else ""
+        algebraic_context = re.search(
+            r"(?i)\b(?:expression|equation|denote|variables?|let)\b",
+            local_prefix,
+        )
+        local_suffix = value[match.end() : match.end() + 100]
+        separated_symbol_context = re.search(
+            r"(?i)^\s*(?:"
+            r"denotes?\s+(?:two|separate)\b|"
+            r"(?:is|are)\s+not\s+(?:one|a(?:\s+single)?)\s+symbol\b|"
+            r"(?:should\s+)?remain(?:s)?\s+(?:spaced|separated)\b|"
+            r"means?\b.*\bmultiplied\s+by\b|"
+            r"represents?\b.*\btimes\b|"
+            r"and\s+\w+\s+(?:is|are)\s+separate\s+variables?\b"
+            r")",
+            local_suffix,
+        )
+        if (
+            algebraic_context
+            or not has_measurement_context(nearest_quantity_name)
+            or separated_symbol_context
+        ):
+            return match.group(0)  # 量名必须在同一局部短语中先于符号；后文的 voltage/resistance 不能全句授权。
+        return f"{base}{suffix}{qualifier}"
+
+    return pattern.sub(replace_match, value)
+
+
+def _technical_case_signatures(value: str) -> list[str]:
+    """Preserve case only where token shape indicates technical semantics."""
+
+    signatures: list[str] = []
+    normalized_value = normalize_line(value)
+    for token_index, match in enumerate(_CASE_BEARING_TOKEN_RE.finditer(normalized_value)):
+        token = match.group(0)
+        letters = [character for character in token if character.isalpha()]
+        has_cased_letter = any(
+            character.lower() != character.upper() for character in letters
+        )
+        if not has_cased_letter:
+            continue  # 汉字等无大小写文字不应因夹带数字而被当成技术大小写。
+        has_letter_and_digit = bool(letters) and any(character.isdigit() for character in token)
+        has_internal_upper = any(character.isupper() for character in token[1:])
+        is_all_upper = len(letters) >= 2 and all(character.isupper() for character in letters)
+        is_single_letter = len(token) == 1 and len(letters) == 1
+        has_non_ascii_case = any(
+            ord(character) > 127 and character.lower() != character.upper()
+            for character in letters
+        )
+        prefix = normalized_value[: match.start()]
+        is_measurement_unit = bool(
+            re.search(r"\d(?:\.\d+)?\s*$", prefix)
+            and any(character.isupper() for character in letters)
+        )
+        is_short_mixed_case = (
+            len(letters) == 2
+            and any(character.isupper() for character in letters)
+            and any(character.islower() for character in letters)
+            and match.start() > 0
+        )
+        is_non_initial_titlecase = (
+            len(letters) >= 2
+            and token[0].isupper()
+            and all(character.islower() for character in letters[1:])
+            and not _token_starts_sentence(normalized_value, match)
+        )
+        has_explicit_technical_context = _token_has_explicit_technical_context(
+            normalized_value,
+            match,
+        )
+        if (
+            "_" in token
+            or has_letter_and_digit
+            or has_internal_upper
+            or is_all_upper
+            or is_measurement_unit
+            or is_short_mixed_case
+            or is_non_initial_titlecase
+            or has_explicit_technical_context
+            or (is_single_letter and _single_letter_case_is_technical(normalized_value, match))
+            or (has_non_ascii_case and any(character.isupper() for character in letters))
+        ):
+            signatures.append(f"{token_index}:{token}")
+    return signatures
+
+
+def _token_has_explicit_technical_context(value: str, match: re.Match[str]) -> bool:
+    """Recognize assignment operands and function names without a word allowlist."""
+
+    before = value[: match.start()].rstrip()
+    after = value[match.end() :].lstrip()
+    if before.endswith(("=", "(", "[", "{", "$", "@", "#")) or after.startswith(
+        ("=", "(", ":")
+    ):
+        return True
+    if before.endswith(("<", "</")) and after.startswith((">", "/>")):
+        return True  # XML/HTML element names are case-sensitive in several real formats.
+    if before.endswith("/") and after.startswith("/"):
+        return True  # A visibly slash-delimited token is syntax, not ordinary prose case.
+    line_before = before[before.rfind("\n") + 1 :]
+    line_after = after[: after.find("\n") if "\n" in after else len(after)]
+    if (
+        re.fullmatch(r"[^:\n]{1,80}:\s*", line_before)
+        and re.fullmatch(r"[\s.,;!?…)}\]]*", line_after)
+    ):
+        return True  # Generic short ``label: value`` records preserve the value literally.
+    if "=" in line_before or _inside_unclosed_group(line_before):
+        return True  # 赋值表达式和调用/列表内部的后续 operand 继承技术上下文。
+    return bool(
+        re.search(
+            r"(?i)\b(?:build|enum|filename|id|identifier|mode|model|option|profile|setting|state|value|variable|version)\s*$",
+            before,
         )
     )
+
+
+def _token_starts_sentence(value: str, match: re.Match[str]) -> bool:
+    """Return whether ordinary sentence capitalization can explain this token."""
+
+    before = value[: match.start()].rstrip()
+    return not before or before.endswith((".", "!", "?", "。", "！", "？"))
+
+
+def _inside_unclosed_group(value: str) -> bool:
+    """Return True when the text ends inside ``()``, ``[]``, or ``{}``."""
+
+    stack: list[str] = []
+    pairs = {")": "(", "]": "[", "}": "{"}
+    for character in value:
+        if character in "([{":
+            stack.append(character)
+        elif character in pairs and stack and stack[-1] == pairs[character]:
+            stack.pop()
+    return bool(stack)
+
+
+def _single_letter_case_is_technical(value: str, match: re.Match[str]) -> bool:
+    """Use visible local context to distinguish variables/units from prose articles."""
+
+    compact = normalize_line(value)
+    if re.fullmatch(r"[^\W\d_]", compact):
+        return True  # 独立单字母行可以是状态、枚举或变量。
+    if match.group(0).casefold() not in {"a", "i"}:
+        return True  # 英文中除冠词 A/代词 I 外，独立字母默认是变量、单位或状态。
+    before = value[: match.start()].rstrip()
+    after = value[match.end() :].lstrip()
+    if re.search(r"\d\s*$", before):
+        return True  # 数值后的 V/v 等单字母通常是单位。
+    if re.search(
+        r"(?i)\b(?:variable|state|mode|symbol|unit|enum|class|grade|level|channel|port|pin|node)\s*$",
+        before,
+    ):
+        return True
+    if before.endswith(("=", "(", "[", "{", "+", "-", "*", "/", "×", "÷")):
+        return True
+    if after.startswith(("=", ")", "]", "}", "+", "-", "*", "/", "×", "÷", "<", ">")):
+        return True
+    return False
+
+
+def _normalize_leading_list_marker(value: str) -> str:
+    """Ignore only position-proven bullet/list-marker presentation changes."""
+
+    normalized = re.sub(r"^\s*[•●⚫]\s*", "", value)
+    normalized = re.sub(r"^\s*(\d{1,3}|[A-Za-z])[.)]\s+", r"\1 ", normalized)
+    return normalized
+
+
+def _measurement_modifier_signatures(value: str) -> list[str]:
+    """Preserve ASCII prime/foot/inch glyphs when their context is technical."""
+
+    signatures: list[str] = []
+    pattern = re.compile(r"(?P<base>\w+)\s*(?P<glyph>['\"])(?!\w)", flags=re.UNICODE)
+    for match in pattern.finditer(value):
+        base = match.group("base")
+        glyph = match.group("glyph")
+        if base.isdigit():
+            kind = "foot" if glyph == "'" else "inch"
+        elif len(base) == 1 or _has_identifier_token(base):
+            kind = "prime" if glyph == "'" else "double-prime"
+        else:
+            continue  # 普通英文复数所有格等不应被猜成公式 prime。
+        position = _semantic_token_position(value, match.start())
+        signatures.append(f"{position}:{base.casefold()}:{kind}")
+    return signatures
+
+
+def _contextual_punctuation_signatures(value: str) -> list[str]:
+    """Preserve punctuation only where neighboring syntax makes it structural."""
+
+    signatures: list[str] = []
+    punctuation_run_ranges: set[int] = set()
+    for match in re.finditer(r"[.,;:?!]{2,}", value):
+        position = _semantic_token_position(value, match.start())
+        signatures.append(f"{position}:run:{match.group(0)}")
+        punctuation_run_ranges.update(range(match.start(), match.end()))
+    for index, character in enumerate(value):
+        if character not in ".:,;?":
+            continue
+        if index in punctuation_run_ranges:
+            continue
+        left_index = index - 1
+        while left_index >= 0 and value[left_index].isspace():
+            left_index -= 1
+        right_index = index + 1
+        while right_index < len(value) and value[right_index].isspace():
+            right_index += 1
+        left = value[left_index].casefold() if left_index >= 0 else ""
+        right = value[right_index].casefold() if right_index < len(value) else ""
+        tight_separator = (
+            index > 0
+            and index + 1 < len(value)
+            and not value[index - 1].isspace()
+            and not value[index + 1].isspace()
+        )
+        if character == "." and left.isdigit() and right.isdigit():
+            continue  # 小数点由数字 token 自身保真，不再绑定原始 token 位置。
+        if character == "," and any(
+            match.start() < index < match.end() and "," in match.group(0)
+            for match in _NUMBER_TOKEN_RE.finditer(value)
+        ):
+            continue  # 合法千分位逗号由完整数字 token 归一，不能误当列表分隔符。
+        if character in ".:,;" and left and right and (left.isalnum() or left == "_") and (right.isalnum() or right == "_"):
+            kind = {".": "dot", ":": "colon", ",": "comma", ";": "semicolon"}[character]
+            position = _semantic_token_position(value, index)
+            signatures.append(f"{position}:{kind}:{left}:{right}")
+        elif character == "?" and left and (left.isalnum() or left == "_"):
+            position = _semantic_token_position(value, index)
+            signatures.append(f"{position}:question:{left}")
+    stack: list[str] = []
+    matching = {")": "(", "]": "[", "}": "{"}
+    for index, character in enumerate(value):
+        if character in "([{":
+            stack.append(character)
+            continue
+        if character in matching:
+            if stack and stack[-1] == matching[character]:
+                stack.pop()
+            continue
+        if character not in ",;:" or not stack:
+            continue
+        left = value[index - 1].casefold() if index > 0 else ""
+        right = value[index + 1].casefold() if index + 1 < len(value) else ""
+        position = _semantic_token_position(value, index)
+        signatures.append(f"{position}:group-{ord(character)}:{left}:{right}")
+    for match in re.finditer(
+        r"([\"“'‘])(?P<literal>[^\"”'’\n]+)([\"”'’])",
+        value,
+        flags=re.UNICODE,
+    ):
+        position = _semantic_token_position(value, match.start())
+        signatures.append(
+            f"{position}:quoted:{normalize_line(match.group('literal'))}"
+        )
+    for match in re.finditer(r"`(?P<literal>[^`\n]+)`", value):
+        position = _semantic_token_position(value, match.start())
+        signatures.append(
+            f"{position}:backtick:{normalize_line(match.group('literal'))}"
+        )
+    return signatures
+
+
+def _super_subscript_signatures(value: str) -> list[str]:
+    """Capture compatibility glyph semantics before NFKC flattens them."""
+
+    signatures: list[tuple[int, str]] = []
+    for kind, characters, translation in (
+        ("sup", _SUPERSCRIPT_CHARS, _SUPERSCRIPT_TRANSLATION),
+        ("sub", _SUBSCRIPT_CHARS, _SUBSCRIPT_TRANSLATION),
+    ):
+        pattern = re.compile(rf"(?P<base>\w)?(?P<script>[{re.escape(characters)}]+)")
+        for match in pattern.finditer(value):
+            base = (match.group("base") or "").casefold()
+            script = match.group("script").translate(translation)
+            position = _semantic_token_position(value, match.start())
+            signatures.append((match.start(), f"{position}:{base}:{kind}:{script}"))
+    return [signature for _position, signature in sorted(signatures)]
+
+
+def _lexical_number_signatures(value: str) -> list[str]:
+    """Keep leading-zero number spelling used by models, profiles, and codes."""
+
+    signatures: list[str] = []
+    for number_index, match in enumerate(_NUMBER_TOKEN_RE.finditer(value)):
+        token = match.group(0).lstrip("+-")
+        if re.fullmatch(r"\d+", token) and len(token) > 1 and token.startswith("0"):
+            signatures.append(f"{number_index}:{token}")
+    return signatures
+
+
+def _identifier_number_signatures(value: str) -> list[str]:
+    """Preserve numeric spelling when a visible label makes it an identifier."""
+
+    labels = (
+        "build|code|codes|id|identifier|model|models|part|profile|profiles|"
+        "rev|revision|serial|version|versions"
+    )
+    number = r"[+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?(?:[eE][+\-]?\d+)?"
+    signatures: list[str] = []
+    for match in re.finditer(
+        rf"(?i)\b(?P<label>{labels})\b\s*(?:[:=#]\s*)?(?P<number>{number})(?!\w)",
+        value,
+    ):
+        raw_number = match.group("number").replace("−", "-").casefold()
+        position = _semantic_token_position(value, match.start("number"))
+        signatures.append(f"{position}:{match.group('label').casefold()}:{raw_number}")
+    return signatures
+
+
+def _identifier_literal_signatures(value: str) -> list[str]:
+    """Capture a complete labeled version/build/file literal before token splitting."""
+
+    labels = (
+        "build|code|codes|filename|id|identifier|model|models|part|profile|profiles|"
+        "rev|revision|serial|version|versions"
+    )
+    signatures: list[str] = []
+    for match in re.finditer(
+        rf"(?i)\b(?P<label>{labels})\b\s*(?:[:=#]\s*)?(?P<literal>[^\s,;]+)",
+        value,
+    ):
+        literal = match.group("literal").rstrip(".)]}。")
+        if not literal or not any(character.isdigit() for character in literal):
+            continue
+        position = _semantic_token_position(value, match.start("literal"))
+        signatures.append(f"{position}:{match.group('label').casefold()}:{literal}")
+    return signatures
+
+
+def _dotted_identifier_signatures(value: str) -> list[str]:
+    """Preserve complete dotted identifiers instead of normalizing each number."""
+
+    signatures: list[str] = []
+    for match in re.finditer(
+        r"(?<![\w.])(?P<literal>[A-Za-z0-9_+\-]+(?:\.[A-Za-z0-9_+\-]+)+)(?![\w.])",
+        value,
+    ):
+        literal = match.group("literal")
+        segments = literal.split(".")
+        has_identifier_shape = (
+            any(character.isalpha() for character in segments[0])
+            or len(segments) >= 3
+            or any(segment.isalpha() for segment in segments[1:])
+        )
+        if not has_identifier_shape:
+            continue  # 普通 `1.00`/`62.5ps` 测量值仍可按数值比较；版本号和文件名保留原貌。
+        position = _semantic_token_position(value, match.start())
+        signatures.append(f"{position}:{literal}")
+    return signatures
+
+
+def _path_identifier_signatures(value: str) -> list[str]:
+    """Preserve case and components in POSIX, URL, Windows, and registry paths."""
+
+    signatures: list[str] = []
+    pattern = re.compile(
+        r"(?<!\w)(?:[A-Za-z][A-Za-z0-9+.-]*://[^\s,;]+|/?[A-Za-z0-9_.+\-]+(?:/[A-Za-z0-9_.+\-]+)+)(?!\w)"
+    )
+    for match in pattern.finditer(value):
+        literal = match.group(0).rstrip(".)]}。")
+        position = _semantic_token_position(value, match.start())
+        signatures.append(f"{position}:{literal}")
+    windows_patterns = (
+        re.compile(
+            r"(?<!\w)[A-Za-z]:\\(?:[^\\\s,;]+\\)*[^\\\s,;]+"
+        ),
+        re.compile(
+            r"(?<!\\)\\\\[^\\\s,;]+\\[^\\\s,;]+(?:\\[^\\\s,;]+)*"
+        ),
+        re.compile(
+            r"(?i)\b(?:HKLM|HKCU|HKCR|HKU|HKCC|HKEY_LOCAL_MACHINE|"
+            r"HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKEY_USERS|"
+            r"HKEY_CURRENT_CONFIG)(?:\\[^\\\s,;]+)+"
+        ),
+    )
+    occupied_ranges = {
+        (match.start(), match.end())
+        for windows_pattern in windows_patterns
+        for match in windows_pattern.finditer(value)
+    }
+    for start, end in sorted(occupied_ranges):
+        literal = value[start:end].rstrip(".)]}。")
+        position = _semantic_token_position(value, start)
+        signatures.append(f"{position}:{literal}")
+    for match in re.finditer(
+        r"(?i)\b(?:file|path|url)\s+(?P<path>/[A-Za-z0-9_.+\-]+)(?![\w/])",
+        value,
+    ):
+        literal = match.group("path").rstrip(".)]}。")
+        position = _semantic_token_position(value, match.start("path"))
+        signatures.append(f"{position}:{literal}")
+    return signatures
+
+
+def _semantic_token_position(value: str, character_index: int) -> int:
+    """Return a whitespace-insensitive word/number occurrence position."""
+
+    return sum(1 for _ in re.finditer(r"\w+", value[:character_index], flags=re.UNICODE))
+
+
+def _normalize_directional_symbols(value: str) -> str:
+    """Canonicalize unambiguous arrow glyph variants while retaining direction."""
+
+    normalized = re.sub(r"<\s*=\s*>", " ⇔ ", value)
+    normalized = re.sub(r"<\s*-\s*>", " ↔ ", normalized)
+    normalized = re.sub(r"-\s*>", " → ", normalized)
+    normalized = re.sub(
+        r"(?<=\s)<-(?=\s+(?:[^\W\d_]|_)\w*)",
+        " ← ",
+        normalized,
+    )  # `< -5`/`<-5` 是“小于负数”的常见写法，没有充分证据时不能猜成左箭头。
+    normalized = re.sub(r"=\s*>", " ⇒ ", normalized)
+    normalized = normalized.replace("⟶", "→").replace("⟵", "←")
+    normalized = normalized.replace("⇒", "⇒").replace("⇐", "⇐")
+    return normalized
+
+
+def _semantic_operator_signatures(value: str) -> list[str]:
+    """Return canonical signatures for operators with explicit formula context."""
+
+    canonical = {
+        "+": "plus",
+        "-": "minus",
+        "−": "minus",
+        "*": "multiply",
+        "×": "multiply",
+        "/": "divide",
+        "÷": "divide",
+        "\u2061": "function-application",
+        "\u2062": "multiply",
+        "\u2063": "separator",
+        "\u2064": "plus",
+    }
+    signatures: list[str] = []
+    for match in _SEMANTIC_OPERATOR_RE.finditer(value):
+        operator = next(
+            (group for group in match.groups() if group),
+            match.group(0).strip(),
+        )
+        if (
+            operator in {"+", "-", "−"}
+            and match.start() >= 2
+            and value[match.start() - 1] in {"e", "E"}
+            and value[match.start() - 2].isdigit()
+        ):
+            continue  # 科学计数法指数符号属于数字 token，不是加减运算符。
+        if operator in canonical:
+            position = _semantic_token_position(value, match.start())
+            signatures.append(f"{position}:{canonical[operator]}")
+    return signatures
+
+
+def _semantic_ampersand_signatures(value: str) -> list[str]:
+    """Preserve ``&`` where an assignment makes operator intent explicit."""
+
+    signatures: list[str] = []
+    for match in re.finditer(r"&", value):
+        line_start = value.rfind("\n", 0, match.start()) + 1
+        prefix = value[line_start : match.start()]
+        if "=" not in prefix and not re.search(r"(?i)\b(?:expression|formula)\b", prefix):
+            continue  # 标题/自然语言里的 `A & B` 仍可与 `A and B` 视为展示等价。
+        position = _semantic_token_position(value, match.start())
+        signatures.append(f"{position}:ampersand")
+    return signatures
 
 
 def _normalize_embedded_number_list_spacing(value: str) -> str:
     """Repair OCR text such as ``Tests1,2`` before token comparison."""
 
     normalized = re.sub(
-        r"(?i)\b(tests?|notes?)\s*(\d)(?=\s*[,.)])",
-        r"\1 \2",
+        r"(?i)\b(tests?|notes?)\s*(\d(?:\s*,\s*\d)+)",
+        lambda match: (
+            f"{match.group(1)} "
+            + " ".join(re.findall(r"\d+", match.group(2)))
+        ),
         value,
-    )  # `Tests1,2,3` 和 `Tests 1, 2, 3` 表达相同列表，不应触发正文差异。
+    )  # 明确由 Tests/Notes 引入的编号串只统一抽取空格；普通 `1,2` 仍保留逗号语义。
     return re.sub(
         r"(?i)\b(equation|figure|table|section)\s*(\d)",
         r"\1 \2",
@@ -955,34 +3554,52 @@ def _normalize_embedded_number_list_spacing(value: str) -> str:
 def _normalize_math_symbol_artifacts(value: str) -> str:
     """Normalize PDF variants of multiplication, exponents, hyphens, and spaces."""
 
-    normalized = value.replace("−", "-").replace("–", "-").replace("—", " - ")  # 统一数学负号和破折号形态。
+    hexadecimal_literals: list[str] = []
+
+    def protect_hexadecimal(match: re.Match[str]) -> str:
+        hexadecimal_literals.append(match.group(0))
+        return f"\ue000{len(hexadecimal_literals) - 1}\ue001"
+
     normalized = re.sub(
-        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*([+-]?\d+)",
-        r"\1e\2",
+        r"(?i)(?<![\w.])0x[0-9a-f]+(?!\w)",
+        protect_hexadecimal,
+        value,
+    )  # 0x10/0XCAFE 是协议地址或掩码，绝不能把 x 猜成乘号。
+    normalized = normalized.replace("−", "-").replace("–", "-").replace("—", " - ")  # 统一数学负号和破折号形态。
+    normalized = re.sub(
+        r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*\^\s*([+-]?\s*\d+)",
+        lambda match: (
+            f"{match.group(1)}e"
+            f"{match.group(2).replace(' ', '').removeprefix('+')}"
+        ),
         normalized,
-    )  # 5x10-6、5×10-6、5*10-6 都归一成 5e-6。
+    )  # `5×10^6`/`5×10^-6` 有显式指数证据，可以安全归一。
+    normalized = re.sub(
+        r"(?<=\d)\s*(?:x|X|×|\*)\s*(?=\d)",
+        " × ",
+        normalized,
+    )  # 数字两侧的 x/X/×/* 明确是乘法；只统一符号，不猜测指数。
     normalized = re.sub(
         r"(?i)(?<=\d)\s*(?:x|×|\*)\s*(?=[a-z_])",
-        " ",
+        " × ",
         normalized,
     )  # 2xT_Vf 与 2×T_Vf 都变成 2 T_Vf，避免乘号格式噪声。
     normalized = re.sub(
         r"(?i)(?<=[a-z_])\s*(?:×|\*)\s*(?=[a-z0-9_])",
-        " ",
+        " × ",
         normalized,
     )  # fb×n 与 fb*n 的乘号在 token 比较中等价。
-    normalized = re.sub(r"(?<=\d)\s+(?=[+-]\d\b)", "", normalized)  # 10 -6 这类指数空格收紧。
+    for index, literal in enumerate(hexadecimal_literals):
+        normalized = normalized.replace(f"\ue000{index}\ue001", literal)
     return normalized
 
 
 def _canonical_review_token(token: str) -> str:
     """Canonicalize token values only where protocol meaning is preserved."""
 
-    if token in _SPELLING_EQUIVALENT_TOKENS:
-        return _SPELLING_EQUIVALENT_TOKENS[token]  # 只合并明确等价拼写，避免隐藏真正术语变化。
     if not _NUMBER_TOKEN_RE.fullmatch(token):
         return token
-    sign = "-" if token.startswith("-") else ""
+    sign = "-" if token.startswith("-") else "+" if token.startswith("+") else ""
     body = token.lstrip("+-").replace(",", "")
     if body.startswith("."):
         body = f"0{body}"
@@ -990,8 +3607,6 @@ def _canonical_review_token(token: str) -> str:
         value = Decimal(body)
     except InvalidOperation:
         return token
-    if value == 0:
-        sign = ""
     numeric = format(value.normalize(), "f")
     if "." in numeric:
         numeric = numeric.rstrip("0").rstrip(".")
@@ -1003,10 +3618,7 @@ def _report_unit(value: str) -> str:
 
     if _is_table_review_unit(value):
         return _format_fallback_table_review_unit(value)  # 未被视觉摘要覆盖的表格行用用户可读前缀展示。
-    value = _strip_running_page_furniture(value)  # 展示层也删除夹在句子里的 PCIe 页眉/版本/日期。
     value = _normalize_extracted_arrow_spacing(value)  # 修复 `- >` 这类 PDF 抽取箭头断裂，提升报告可读性。
-    value = _strip_leading_table_header_fragment(value)  # 展示层同样去掉粘连的表头残片。
-    value = _strip_embedded_table_identifier_residue(value)  # 避免报告里显示 `fx bx FFE_post` 这类粘连残片。
     readable = " ".join(_split_long_unit(value, max_chars=1200))
     if len(readable) <= 1400:
         return readable
@@ -1033,60 +3645,11 @@ def _format_fallback_table_review_unit(value: str) -> str:
     return f"表格文字: {payload}"
 
 
-def _strip_leading_table_header_fragment(value: str) -> str:
-    """Drop table header residue that was glued before a normal sentence."""
-
-    stripped = _LEADING_TABLE_HEADER_FRAGMENT_RE.sub("", compact_inline(value))  # 保留后面的正文句，不影响真实内容。
-    return stripped if stripped else value  # 防止整行都是表头时被清成空字符串。
-
-
-def _strip_embedded_table_identifier_residue(value: str) -> str:
-    """Remove short table identifier residue glued into a normal sentence."""
-
-    cleaned = _EMBEDDED_TABLE_IDENTIFIER_RESIDUE_RE.sub("", compact_inline(value))  # 只删除 Table 引用前的明确残片。
-    return cleaned if cleaned else value  # 防止异常情况下返回空文本。
-
-
-def _strip_running_page_furniture(value: str) -> str:
-    """Remove PCIe running page furniture that was glued into body text."""
-
-    candidate = compact_inline(value)  # 页眉页脚可能来自多行粘连，先压成单行便于整簇匹配。
-    cleaned = _PCIE_FURNITURE_CLUSTER_RE.sub(" ", candidate)  # 删除页眉、页码、版本和日期组成的噪声簇。
-    cleaned = compact_inline(cleaned)  # 清理删除噪声后留下的多余空格和箭头空白。
-    return cleaned if cleaned else value  # 若异常清空整句，保留原值交给后续噪声规则判断。
-
-
 def _normalize_extracted_arrow_spacing(value: str) -> str:
     """Repair arrow spacing artifacts in user-facing snippets."""
 
     repaired = re.sub(r"\s*-\s*>\s*", "->", value)  # 把 `- >`、` -> ` 统一成紧凑箭头。
     return repaired  # 保留 PDF 原有 Unicode 箭头，只修复被拆开的 ASCII 箭头。
-
-
-def _is_pcie_running_page_furniture(value: str) -> bool:
-    """Return True for standalone PCIe running header/footer lines."""
-
-    candidate = compact_inline(value)  # 单行判断使用报告同款空白归一，减少 PDF 抽取差异。
-    if not candidate:
-        return False
-    return bool(_PCIE_RUNNING_HEADER_RE.fullmatch(candidate))  # 独立版本/日期没有上下文时可能是真正文。
-
-
-def _pcie_page_furniture_line_indexes(lines: list[str]) -> set[int]:
-    """Return indexes belonging to one PCIe running header/footer cluster."""
-
-    indexes: set[int] = set()  # 保存页眉簇内要跳过的行。
-    for index, line in enumerate(lines):
-        if not _is_pcie_running_page_furniture(line):
-            continue
-        indexes.add(index)  # running header 本身一定是页眉页脚。
-        for neighbor in range(max(0, index - 2), min(len(lines), index + 4)):
-            if neighbor == index:
-                continue
-            candidate = compact_inline(lines[neighbor])
-            if _PCIE_REVISION_LINE_RE.fullmatch(candidate) or _PCIE_DATE_LINE_RE.fullmatch(candidate):
-                indexes.add(neighbor)  # 只有贴近 running header 的版本/日期才当作页脚。
-    return indexes
 
 
 _MIN_UNEQUAL_REPLACE_PAIR_SCORE = 0.45
@@ -1127,7 +3690,7 @@ def _unequal_replace_delta_candidates(
 
     A PDF extraction block can contain two changed sentences plus one inserted
     sentence. Pairing the shortest old and shortest new sentence independently
-    is compact but unsafe: it can align a preset change with a jitter change.
+    is compact but unsafe: it can align two unrelated technical changes.
     This routine first matches exact normalized units, then greedily pairs
     remaining old/new units only when they share enough semantic anchors. Any
     unpaired unit is reported as an addition or deletion instead of a misleading
@@ -1194,9 +3757,13 @@ def _unequal_replace_delta_candidates(
         )
         event_sequence += 1
 
-    for old_index, old_unit in enumerate(old_units):
-        if old_index in matched_old:
-            continue
+    for old_index, text, source_units in _coherent_delta_unit_groups(
+        [
+            (old_index, old_unit)
+            for old_index, old_unit in enumerate(old_units)
+            if old_index not in matched_old
+        ]
+    ):
         events.append(
             (
                 old_index,
@@ -1204,15 +3771,19 @@ def _unequal_replace_delta_candidates(
                 event_sequence,
                 _PendingDeltaCandidate(
                     kind="removed",
-                    text=_report_unit(old_unit),
-                    priority_values=(old_unit,),
+                    text=text,
+                    priority_values=source_units,
                 ),
             )
         )
         event_sequence += 1
-    for new_index, new_unit in enumerate(new_units):
-        if new_index in matched_new:
-            continue
+    for new_index, text, source_units in _coherent_delta_unit_groups(
+        [
+            (new_index, new_unit)
+            for new_index, new_unit in enumerate(new_units)
+            if new_index not in matched_new
+        ]
+    ):
         events.append(
             (
                 new_index,
@@ -1220,8 +3791,8 @@ def _unequal_replace_delta_candidates(
                 event_sequence,
                 _PendingDeltaCandidate(
                     kind="added",
-                    text=_report_unit(new_unit),
-                    priority_values=(new_unit,),
+                    text=text,
+                    priority_values=source_units,
                 ),
             )
         )
@@ -1295,10 +3866,11 @@ def _table_row_fields(value: str) -> dict[str, str]:
     """Parse Header=Value parts from a structured table row."""
 
     fields: dict[str, str] = {}  # 小写字段名映射到原始值，保留可读文本供身份归一化。
-    for cell in _table_row_cells(value):
-        if "=" not in cell:
+    for cell in _raw_table_row_cells(value):
+        field = split_table_field(cell)
+        if field is None:
             continue
-        key, raw_value = cell.split("=", 1)
+        key, raw_value = field
         normalized_key = normalize_for_similarity(key).strip()
         normalized_value = normalize_line(raw_value)
         if normalized_key and normalized_value:
@@ -1307,11 +3879,24 @@ def _table_row_fields(value: str) -> dict[str, str]:
 
 
 def _table_row_cells(value: str) -> list[str]:
-    """Split one table row snippet into pipe-separated payload cells."""
+    """Return decoded, human-readable cells from one structured row."""
+
+    cells: list[str] = []
+    for cell in _raw_table_row_cells(value):
+        field = split_table_field(cell)
+        if field is None:
+            cells.append(decode_table_cell(cell))
+        else:
+            cells.append(f"{field[0]}={field[1]}")
+    return cells
+
+
+def _raw_table_row_cells(value: str) -> list[str]:
+    """Split only structural `` | `` separators, retaining escaped contents."""
 
     text = normalize_line(value)  # 统一空白后再切分，减少 PDF 抽取空格差异。
     text = _TABLE_REVIEW_PREFIX_RE.sub("", text).strip()  # 删除内部或可见表格前缀，只保留列内容。
-    cells = [cell.strip() for cell in text.split("|") if cell.strip()]  # 表格行内部用竖线分隔列。
+    cells = [cell for cell in split_table_cells(text) if cell]
     if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
         return cells[1:]  # T1/T2 只是物理表编号，不参与行身份。
     return cells
@@ -1333,14 +3918,9 @@ def _looks_like_table_identity_cell(value: str) -> bool:
 def _meaningful_review_words(value: str) -> set[str]:
     """Return non-boilerplate word anchors for pairing changed units."""
 
-    value = _strip_running_page_furniture(value)  # 配对锚点不应受页码、日期和版本页脚影响。
     normalized = normalize_for_similarity(value).replace("µ", "u").replace("μ", "u")
     words = set(re.findall(r"[a-z]+[a-z0-9]*(?:[-_/][a-z0-9]+)*", normalized))
-    return {
-        _SPELLING_EQUIVALENT_TOKENS.get(word, word)
-        for word in words
-        if word not in _REVIEW_STOP_WORDS
-    }  # 拼写等价词作为同一个锚点，减少同句错配和假替换。
+    return {word for word in words if word not in _REVIEW_STOP_WORDS}
 
 
 def _relative_position(index: int, length: int) -> float:
@@ -1354,16 +3934,29 @@ def _relative_position(index: int, length: int) -> float:
 def _materialize_delta_candidates(
     candidates: list[_DeltaCandidate],
     max_snippets: int,
-) -> tuple[list[str], list[str], list[SnippetPair], int]:
+) -> tuple[
+    list[str],
+    list[str],
+    list[SnippetPair],
+    int,
+    list[str],
+    list[str],
+    list[SnippetPair],
+]:
     """Apply snippet limits after all meaningful differences have been scanned."""
 
-    unique_candidates = [
-        candidate
-        for candidate in _dedupe_candidates(candidates)
-        if not _candidate_is_global_noise(candidate)
-    ]  # 先过滤表格/OCR/页眉噪声，再套 max_snippets，避免噪声抢占正文名额。
+    unique_candidates = _dedupe_candidates(candidates)  # 没有布局证据时不根据文本形状删除任何差异。
+    audit_added, audit_removed, audit_replaced = _candidate_payloads(unique_candidates)
     if max_snippets <= 0:
-        return [], [], [], len(unique_candidates)
+        return (
+            [],
+            [],
+            [],
+            len(unique_candidates),
+            audit_added,
+            audit_removed,
+            audit_replaced,
+        )
 
     if len(unique_candidates) <= max_snippets:
         selected = unique_candidates
@@ -1373,176 +3966,102 @@ def _materialize_delta_candidates(
         selected = sorted(prioritized[:max_snippets], key=lambda item: item.order)
         omitted_count = len(unique_candidates) - len(selected)
 
+    added, removed, replaced = _candidate_payloads(selected)
+    return (
+        added,
+        removed,
+        replaced,
+        omitted_count,
+        audit_added,
+        audit_removed,
+        audit_replaced,
+    )
+
+
+def _candidate_payloads(
+    candidates: list[_DeltaCandidate],
+) -> tuple[list[str], list[str], list[SnippetPair]]:
+    """Split ordered candidates into the three public snippet collections."""
+
     added: list[str] = []
     removed: list[str] = []
     replaced: list[SnippetPair] = []
-    for candidate in selected:
+    for candidate in candidates:
         if candidate.kind == "added":
             added.append(candidate.text)
         elif candidate.kind == "removed":
             removed.append(candidate.text)
         elif candidate.kind == "replaced" and candidate.pair:
             replaced.append(candidate.pair)
-    return added, removed, replaced, omitted_count
-
-
-def _candidate_is_global_noise(candidate: _DeltaCandidate) -> bool:
-    """Return True when a candidate should not count against visible snippets."""
-
-    if candidate.pair:
-        return _should_suppress_replaced_pair(candidate.pair)  # 替换对两侧都是噪声时整对隐藏。
-    return _is_global_noise_snippet(candidate.text)  # 单侧新增/删除片段直接走全局噪声规则。
+    return added, removed, replaced
 
 
 def _dedupe_candidates(candidates: list[_DeltaCandidate]) -> list[_DeltaCandidate]:
-    """Remove duplicate snippets while preserving first occurrence and priority."""
+    """Preserve every source occurrence in the auditable comparison model."""
 
-    by_key: dict[tuple[str, str], _DeltaCandidate] = {}
-    for candidate in candidates:
-        key = _candidate_key(candidate)
-        existing = by_key.get(key)
-        if existing is None or candidate.priority > existing.priority:
-            by_key[key] = candidate
-    return sorted(by_key.values(), key=lambda item: item.order)
+    # Equal text at two positions is still two document changes.  Reader-only
+    # rendering may collapse redundant cards, but JSON/CSV and snippet limits
+    # must count each observed occurrence instead of silently under-reporting it.
+    return sorted(candidates, key=lambda item: item.order)
+
+
+def _standalone_table_reference_is_covered(
+    candidate: _DeltaCandidate,
+    candidates: list[_DeltaCandidate],
+) -> bool:
+    """Hide a context-free table number already explained by a full sentence pair."""
+
+    if candidate.kind != "replaced" or candidate.pair is None:
+        return False
+    old_reference = _standalone_table_reference_number(candidate.pair.old)
+    new_reference = _standalone_table_reference_number(candidate.pair.new)
+    if not old_reference or not new_reference:
+        return False
+    for other in candidates:
+        if other is candidate or other.kind != "replaced" or other.pair is None:
+            continue
+        if (
+            _text_contains_table_reference(other.pair.old, old_reference)
+            and _text_contains_table_reference(other.pair.new, new_reference)
+            and len(compact_inline(other.pair.old)) > len(compact_inline(candidate.pair.old))
+            and len(compact_inline(other.pair.new)) > len(compact_inline(candidate.pair.new))
+        ):
+            return True
+    return False
+
+
+def _standalone_table_reference_number(value: str) -> str:
+    """Return a normalized table number only when the whole unit is that reference."""
+
+    candidate = compact_inline(value)
+    match = _STRICT_TABLE_REFERENCE_RE.match(candidate)
+    if match is None:
+        return ""
+    if not re.fullmatch(r"\s*[.:]?", candidate[match.end() :]):
+        return ""
+    return _normalized_table_reference_number(match.group("number"))
+
+
+def _text_contains_table_reference(value: str, number: str) -> bool:
+    """Return True when a longer unit cites the exact table number."""
+
+    target = _normalized_table_reference_number(number)
+    references = {
+        _normalized_table_reference_number(match.group("number"))
+        for match in _STRICT_TABLE_REFERENCE_RE.finditer(compact_inline(value))
+    }
+    return target in references  # 不支持的字母、点号或更深复合编号整体失败关闭，绝不截成短号。
 
 
 def _suppress_global_noise_changes(changes: list[SectionChange]) -> tuple[list[SectionChange], int]:
-    """Remove report snippets that are clearly repeated layout or boilerplate noise."""
+    """Keep all deltas; layout noise must be removed only where layout proves it."""
 
-    suppressed_count = 0  # 统计被隐藏的噪声片段数量，最终写进报告警告。
-    cleaned_changes: list[SectionChange] = []  # 保存仍有用户可审阅内容的章节变化。
-    for change in changes:
-        added = [snippet for snippet in change.added_snippets if not _is_global_noise_snippet(snippet)]
-        removed = [snippet for snippet in change.removed_snippets if not _is_global_noise_snippet(snippet)]
-        replaced = [
-            pair
-            for pair in change.replaced_snippets
-            if not _should_suppress_replaced_pair(pair)
-        ]
-        suppressed_count += len(change.added_snippets) - len(added)
-        suppressed_count += len(change.removed_snippets) - len(removed)
-        suppressed_count += len(change.replaced_snippets) - len(replaced)
-        if not added and not removed and not replaced and change.omitted_snippet_count == 0:
-            suppressed_count += 1  # 所有可见片段都被判定为版面噪声时，整张空卡片也隐藏。
-            continue
-        cleaned_changes.append(
-            SectionChange(
-                change_type=change.change_type,
-                old_section=change.old_section,
-                new_section=change.new_section,
-                similarity=change.similarity,
-                added_snippets=added,
-                removed_snippets=removed,
-                replaced_snippets=replaced,
-                omitted_snippet_count=change.omitted_snippet_count,
-            )
-        )
-    return cleaned_changes, suppressed_count
-
-
-def _should_suppress_replaced_pair(pair: SnippetPair) -> bool:
-    """Return True when a replacement pair is only layout/image noise."""
-
-    old_visual = _looks_like_visual_only_snippet(pair.old)  # 旧侧图片/图轴/公式碎片不能和正文或表格行并排展示。
-    new_visual = _looks_like_visual_only_snippet(pair.new)  # 新侧图片/图轴/公式碎片同样需要降噪。
-    old_noise = _is_global_noise_snippet(pair.old)  # 页眉页脚和水印残片也不应和视觉碎片并排展示。
-    new_noise = _is_global_noise_snippet(pair.new)  # 新侧页眉页脚同理。
-    old_corrupt_figure = _looks_like_corrupted_figure_reference_snippet(pair.old)  # Figure 引用被 cd/R 等残字污染时不可信。
-    new_corrupt_figure = _looks_like_corrupted_figure_reference_snippet(pair.new)  # 新侧损坏 Figure 引用同理。
-    old_table = _is_table_review_unit(pair.old)  # 表格行若被错误配到图片块，应交给表格截图区展示。
-    new_table = _is_table_review_unit(pair.new)  # 新表格行同理，避免正文区出现“图形 vs 表格行”的错配。
-    old_table_visual_noise = _table_review_unit_has_visual_noise(pair.old)  # 表格兜底里夹带页眉/公式时，不应和干净行并排展示。
-    new_table_visual_noise = _table_review_unit_has_visual_noise(pair.new)  # 新侧表格兜底噪声也按同一规则隐藏。
-    if old_corrupt_figure and new_corrupt_figure:
-        return True
-    if (old_table_visual_noise or new_table_visual_noise) and (old_table or new_table):
-        return True
-    if old_visual and (new_visual or new_table):
-        return True
-    if new_visual and (old_visual or old_table):
-        return True
-    if (old_visual or old_noise) and (new_visual or new_noise or new_corrupt_figure):
-        return True
-    if (new_visual or new_noise) and (old_visual or old_noise or old_corrupt_figure):
-        return True
-    return old_noise and new_noise
+    return changes, 0
 
 
 def _is_global_noise_snippet(value: str) -> bool:
-    """Identify DRAFT, copyright, running header, and margin line-number noise."""
+    """Compatibility hook: text alone never proves that a visible fact is noise."""
 
-    candidate = compact_inline(value)  # 压成单行，便于识别跨行抽取出来的页眉页脚。
-    if not candidate:
-        return False
-    if _is_pcie_running_page_furniture(candidate):
-        return True  # PCIe 页眉、版本行和日期行只提供页面定位，不是协议内容。
-    if _table_review_unit_has_visual_noise(candidate):
-        return True  # 夹带页眉/公式的结构化表格行交给表格截图区，不放在正文 diff。
-    if _looks_like_fragmentary_table_or_equation_snippet(candidate):
-        return True  # 表格/公式目录项不是完整句子，交给表格摘要或源 PDF 复核。
-    if _looks_like_visual_only_snippet(candidate):
-        return True
-    if _looks_like_corrupted_figure_reference_snippet(candidate):
-        return True  # 被 cd/R 等残字污染的 Figure 引用来自抽取噪声，不展示为正文差异。
-    lowered = candidate.casefold()  # 大小写不影响 DRAFT/boilerplate 判断。
-    if _looks_like_margin_line_number_run(candidate):
-        return True
-    if re.fullmatch(r"[DRAFT]\.?", candidate):
-        return True  # 单独成片段的 D/R/A/F/T 通常是 DRAFT 水印残字，不是协议内容。
-    if re.fullmatch(r"(?i)(?:draft\s*){1,8}", candidate):
-        return True  # 单独出现或重复出现的 DRAFT 水印不是正文差异。
-    noise_patterns = (
-        r"\bcopyright\s+©?\s*\d{4}\s+optical\s+internetworking\s+forum\b",
-        r"\bthis\s+is\s+a\s+draft\s+and\s+not\s+to\s+be\s+shared\b",
-        r"\bthe\s+[“\"]?draft[”\"]?\s+watermark\s+is\s+not\s+to\s+be\s+removed\b",
-        r"\boptical\s+internetworking\s+forum\s+-\s+clause\s+\d+:",
-        r"\boptical\s+internetworking\s+forum\s+\(oif\)\s+\d{3,}.*\bwww\.oiforum\.com\b",
-        r"\bnotice:\s+this\s+technical\s+document\s+has\s+been\s+created\s+by\s+the\s+optical\s+internetworking\s+forum\b",
-        r"\bimplementation\s+agreement\s+oif-cei\b",
-    )  # 这些短语在用户样本中反复出现在页眉页脚或草稿水印中。
-    return any(re.search(pattern, lowered) for pattern in noise_patterns)
-
-
-def _looks_like_fragmentary_table_or_equation_snippet(value: str) -> bool:
-    """Return True for short table/equation row fragments, not prose sentences."""
-
-    candidate = compact_inline(value)  # 表格碎片在报告中也是单行片段。
-    if not candidate or _is_table_review_unit(candidate):
-        return False  # 结构化表格兜底由专门逻辑控制，不能在这里全删。
-    if len(candidate) > 140:
-        return False  # 长文本更可能包含真实正文，不能按短碎片处理。
-    if _has_protocol_sentence_verb(candidate):
-        return False  # 带谓语的规范句应继续作为正文差异展示。
-    if re.fullmatch(r"(?i)(?:[+-]?\d+(?:\.\d+)?|[+-]?\d+/\d+)(?:\s+(?:[+-]?\d+(?:\.\d+)?|[+-]?\d+/\d+)){0,8}", candidate):
-        return True  # `03`、`-1 -1/3 1/3 1` 这类纯数值序列通常来自表格或公式。
-    if re.fullmatch(
-        r"(?i)(?:unit|units|min\.?|typ\.?|max\.?|symbol|condition|characteristic|parameter|value|notes?)"
-        r"(?:\s+(?:unit|units|min\.?|typ\.?|max\.?|symbol|condition|characteristic|parameter|value|notes?)){0,5}",
-        candidate,
-    ):
-        return True  # 表头词单独成片段没有正文审阅价值。
-    if re.fullmatch(r"(?i)note\s*\d+[A-Z]?", candidate):
-        return True  # `Note 2D` 多为表格/脚注编号残片。
-    if re.fullmatch(r"(?i)notes?:\s*[A-Z]?", candidate):
-        return True  # `NOTES:` / `NOTES: D` 是表格脚注表头残片。
-    if re.search(r"(?i)(?:^|\|)\s*(?:min|max|typ|unit|units|value|symbol)\s*=", candidate):
-        return True  # `| MAX=1000 | UNIT=mVppd` 是表格单元串，不是正文句。
-    if re.fullmatch(r"(?i)baud\s+rate\s+r[_\s]*baud\s+\d+(?:\s+\d+)?\s+gsym/s", candidate):
-        return True  # 独立 Baud Rate 表头/数据行交给表格摘要区。
-    if re.fullmatch(r"(?i)se?fe\s+section|see\s+section", candidate):
-        return True  # `SeFe Section` 是 `See Section` 被水印残字污染后的表头残片。
-    if re.search(r"(?i)\b[A-Z]+_[A-Z0-9_]+\b", candidate) and len(candidate.split()) <= 5:
-        return True  # `FFE_Post`、`fx bx FFE_Post` 这类短标识符组合不是完整正文句。
-    if re.fullmatch(r"(?i)[A-Z][A-Z0-9_/-]{1,32}", candidate):
-        return True  # `FFE_Post`、`UNIT` 这类孤立标识符交给表格摘要/源 PDF 复核。
-    if re.fullmatch(r"(?i)(?:conversion|equation)\s*\(?\d+(?:[-–]\d+)?\)?\.?", candidate):
-        return True  # `Conversion (32-6)` 是表格/公式项，不是完整句子。
-    if re.fullmatch(r"(?i)(?:interference|jitter)\s+tolerance\s+table\s+\d+(?:[-–]\d+)?\.?", candidate):
-        return True  # 接收端表格索引项应由表格摘要承载。
-    if re.fullmatch(r"(?i)table\s+\d+(?:[-–]\d+)?\.?", candidate):
-        return True  # 单独 `Table 32-10.` 没有句子上下文。
-    if re.search(r"(?i)\bblock\s+error\s+ratio\b", candidate) and len(_NUMBER_TOKEN_RE.findall(candidate)) >= 2:
-        return True  # BER 表格值变化应在视觉表格摘要里查看。
     return False
 
 
@@ -1559,235 +4078,6 @@ def _has_protocol_sentence_verb(value: str) -> bool:
     )  # 有谓语的片段通常是正文句子，即使很短也不按表格碎片删除。
 
 
-def _looks_like_visual_only_snippet(value: str) -> bool:
-    """Return True for standalone figure/plot snippets that should not be compared."""
-
-    candidate = compact_inline(value)  # 图形判断使用单行文本，和 HTML 片段展示保持一致。
-    if _is_table_review_unit(candidate):
-        return False  # 结构化表格行是用户需要的表格对比，不能被图片规则删除。
-    if _starts_with_figure_sentence_prose(candidate):
-        return False  # `Figure 32-2 shows ...` 这类正文句子不能被图形噪声规则删除。
-    if _looks_like_numeric_axis_tick_snippet(candidate):
-        return True  # 纯数字坐标轴刻度行不参与正文差异。
-    if _looks_like_orphan_symbol_fragment_snippet(candidate):
-        return True  # `4.3u03 RMS03` 这类纯符号残片不是正文。
-    if _looks_like_axis_only_visual_snippet(candidate):
-        return True  # 无图题但只有坐标轴/曲线标签的图片碎片也应隐藏。
-    if _looks_like_plot_or_formula_snippet(candidate):
-        return True  # 密集坐标轴/公式块即使没有 Figure 标题，也属于图形抽取残片。
-    if _starts_with_figure_caption(candidate):
-        return True  # 纯图题或图形 OCR 块不属于本工具要报告的差异。
-    if not re.search(r"(?i)\b(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b|图\s*\d+", candidate):
-        return False  # 普通正文没有图题锚点时不能按视觉噪声处理。
-    if len(candidate) < 120:
-        return False  # 短正文引用 Figure 可能是真实编号变化，需要保留。
-    return _looks_like_plot_or_formula_snippet(candidate)
-
-
-def _looks_like_axis_only_visual_snippet(value: str) -> bool:
-    """Return True for plot-axis fragments that are not protocol prose."""
-
-    candidate = compact_inline(value)  # 坐标轴碎片在报告中也是单行显示。
-    if re.search(r"(?i)\b(?:shall|should|specified|measured|computed|requirements?)\b", candidate):
-        return False  # 规范句即使引用图形，也应该继续由正文 diff 报告。
-    if _looks_like_short_plot_label_snippet(candidate):
-        return True  # IL min / Frequency (GHz) 等短轴标签不是正文。
-    if re.match(r"(?i)^[A-Z]\s+\d+\s+\w+\s+where\b", candidate):
-        return True  # `F 0 peak where ...` 是公式说明断片，不是正文段落。
-    if re.search(r"(?i)\bfrequency\s+range\b", candidate) and re.search(r"(?i)\bpeak-to-peak\b|\bUI\b", candidate):
-        return True  # 抽成一行的图轴/表头范围不是正文段落。
-    if re.fullmatch(r"(?i)(?:amplitude|frequency|loss|jitter)(?:\s+[A-Z]){1,4}", candidate):
-        return True  # `Amplitude X` 这类短轴标签是图片残片，不是正文差异。
-    x_count = len(re.findall(r"\bX\b", candidate))  # 多个 X 常来自曲线/坐标标记，不是正文。
-    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))  # 坐标轴刻度会带来多个数字。
-    axis_words = len(re.findall(r"(?i)\b(?:amplitude|frequency|loss|jitter|ui|ghz|db|pp)\b", candidate))
-    return x_count >= 2 and number_count >= 3 and axis_words >= 2
-
-
-def _looks_like_orphan_symbol_fragment_snippet(value: str) -> bool:
-    """Return True for pure symbol/value fragments with no prose context."""
-
-    candidate = compact_inline(value)
-    if " " not in candidate:
-        return False  # 单个符号可能是合法短差异，不能直接删除。
-    symbol_piece = r"\d+(?:\.\d+)?[a-z][a-z0-9]*"
-    return bool(
-        re.fullmatch(
-            rf"(?i){symbol_piece}(?:\s+(?:{symbol_piece}|rms\d*|drms\d*|j|\d{{1,3}})){{1,4}}",
-            candidate,
-        )
-    )
-
-
-def _looks_like_numeric_axis_tick_snippet(value: str) -> bool:
-    """Return True for long chart-axis tick sequences such as ``0 5 10 ...``."""
-
-    tokens = compact_inline(value).split()  # 坐标轴刻度通常是一串空格分隔数字。
-    if len(tokens) < 8:
-        return False
-    return all(re.fullmatch(r"[+-]?\d+(?:\.\d+)?", token) for token in tokens)
-
-
-def _looks_like_short_plot_label_snippet(value: str) -> bool:
-    """Return True for compact plot labels that are not standalone prose."""
-
-    candidate = compact_inline(value)  # 短标签必须严格匹配，避免误删正文句子。
-    if re.fullmatch(r"(?i)(?:frequency|amplitude|loss|jitter)\s*\([^)]+\)", candidate):
-        return True  # `Frequency (GHz)` 这类裸坐标轴标题不是正文差异。
-    if re.fullmatch(r"(?i)(?:min|max|typ)", candidate):
-        return True  # 图形公式拆出来的单词标签不应进入报告。
-    if re.fullmatch(r"(?i)il\s+(?:min|max)(?:\s*/\s*il\s+(?:min|max))?(?:\s+f\s*[×x*]\s*\d+){0,2}", candidate):
-        return True
-    if re.match(r"(?i)^frequency\s*\([^)]+\)(?:\s+\(\d+(?:[-–]\d+)?\))?(?:\s+\)bd\(|\s+ssol)", candidate):
-        return True
-    return False
-
-
-def _starts_with_figure_caption(value: str) -> bool:
-    """Return True when a snippet begins with a figure caption."""
-
-    candidate = re.sub(r"^\d{1,3}\s+(?=(?:figure|fig\.|图)\b)", "", compact_inline(value), flags=re.I)  # 去掉前置页边行号。
-    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
-    if match:
-        return not _figure_caption_tail_starts_prose(match.group("tail"))
-    chinese_match = re.match(r"^图\s*\d+(?P<tail>.*)$", candidate)
-    if chinese_match:
-        return not re.match(r"^\s*(?:显示|说明|描述|定义)", chinese_match.group("tail"))
-    return False
-
-
-def _figure_caption_tail_starts_prose(tail: str) -> bool:
-    """Return True when text after ``Figure N`` is normal sentence prose."""
-
-    cleaned_tail = tail.lstrip(" .:-–—").strip()  # 去掉图题常用分隔符后看第一个词。
-    return bool(
-        re.match(
-            r"(?i)^(?:shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|lists?|is|are|shall|should|must|may|can)\b",
-            cleaned_tail,
-        )
-    )
-
-
-def _looks_like_plot_or_formula_snippet(value: str) -> bool:
-    """Return True for dense chart/formula text emitted from a figure region."""
-
-    lowered = value.casefold()  # 坐标轴词大小写不重要。
-    if _looks_like_il_limit_formula_snippet(value):
-        return True  # 图里的 IL min/IL max 公式残片按图片噪声处理。
-    if _looks_like_symbolic_formula_snippet(value):
-        return True  # 独立公式字形碎片不应作为正文差异展示。
-    if re.search(r"(?i)\b(?:shows?|illustrates?|depicts?|shall|should|specified|measured|computed|requirements?)\b", value):
-        if not re.search(r"(?i)\b(?:il\s*min|il\s*max|frequency\s*\(|\)bd\(|ssol|insertion\s+loss)\b", value):
-            return False  # 普通句首 Figure 正文不能只因有数值而被当作图片块。
-    number_count = len(re.findall(r"\d+(?:\.\d+)?", value))  # 曲线坐标和公式抽取通常含大量数字。
-    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", value))  # 特殊公式字形是强视觉块信号。
-    axis_words = len(
-        re.findall(
-            r"\b(?:frequency|loss|db|ghz|axis|il\s*min|il\s*max|return\s+loss|insertion\s+loss)\b",
-            lowered,
-        )
-    )  # 图形轴/曲线标签能把视觉块和普通段落分开。
-    return number_count >= 8 and (formula_mark_count >= 2 or axis_words >= 2)
-
-
-def _looks_like_symbolic_formula_snippet(value: str) -> bool:
-    """Return True for standalone equation glyph fragments with little prose."""
-
-    candidate = compact_inline(value)  # 报告片段已经按句/行拆分，公式残片通常很短。
-    if _looks_like_formula_tail_snippet(candidate):
-        return True
-    if re.search(r"(?i)\b(?:parameter|characteristic|symbol|condition|value|values|units?|min|max|typ)=", candidate):
-        return False  # 结构化表格字段使用等号，但不是图片公式残片。
-    word_tokens = re.findall(r"[A-Za-z]{2,}", candidate)
-    number_count = len(re.findall(r"\d+(?:\.\d+)?", candidate))
-    if re.search(r"=", candidate) and number_count >= 2 and len(word_tokens) <= 6:
-        return True  # `SNDR = ...`、`N - 1 ... = 0` 这类拆行公式没有正文语义。
-    formula_mark_count = len(re.findall(r"[∑σ√≤≥]|(?:--+)", candidate))
-    if formula_mark_count < 2:
-        return False
-    if number_count >= 2 and len(word_tokens) <= 5:
-        return True
-    return len(candidate) <= 180 and len(word_tokens) <= 3
-
-
-def _looks_like_formula_tail_snippet(value: str) -> bool:
-    """Return True for trailing equation labels such as ``6) (TBI).``."""
-
-    candidate = compact_inline(value)
-    if re.fullmatch(r"(?i)\d+\)\s+\([A-Z]{2,}\)\.?", candidate):
-        return True
-    if re.fullmatch(r"(?i)\d+\)\s+be\s+positive\.?", candidate):
-        return True
-    return bool(re.fullmatch(r"(?i)\d+\.\s+(?:[a-z]{1,3}\s+){1,4}.*\(\d+(?:[-–]\d+)?\).*", candidate))
-
-
-def _looks_like_il_limit_formula_snippet(value: str) -> bool:
-    """Return True for split IL-limit equations emitted from chart/figure text."""
-
-    candidate = compact_inline(value)  # 比较层拿到的是片段文本，先压成单行再检查。
-    if re.search(r"(?i)\bil\s*(?:min|max)\s*=", candidate):
-        return True  # `IL min = ...` 来自图形公式，不应作为正文变化。
-    has_frequency_math = bool(re.search(r"(?i)\bf\b|\bGHz\b", candidate))  # f/GHz 锚定频率公式上下文。
-    has_formula_symbol = bool(re.search(r"[≤≥<>]|--+", candidate))  # 私有字体符号和分数线锚定公式残片。
-    return len(candidate) <= 180 and has_frequency_math and has_formula_symbol
-
-
-def _starts_with_figure_sentence_prose(value: str) -> bool:
-    """Return True for real prose sentences that begin with a Figure reference."""
-
-    candidate = re.sub(r"^\d{1,3}\s+(?=(?:figure|fig\.)\b)", "", compact_inline(value), flags=re.I)
-    match = re.match(r"(?i)^(?:figure|fig\.)\s+\d+(?:[-–.]\d+)?\b(?P<tail>.*)$", candidate)
-    return bool(match and _figure_caption_tail_starts_prose(match.group("tail")))
-
-
-def _looks_like_corrupted_figure_reference_snippet(value: str) -> bool:
-    """Return True for Figure references visibly polluted by extraction glyphs."""
-
-    candidate = compact_inline(value)
-    if not re.search(r"(?i)\bfigure\b", candidate):
-        return False
-    return bool(
-        re.search(r"(?i)\bfigure\s+cd\s+\d|\bfigure\s+\d+\s*-\s*(?:[A-Z]\s+)?cd\b|\bfigure\b.*\bcd\b", candidate)
-    )
-
-
-def _table_review_unit_has_visual_noise(value: str) -> bool:
-    """Return True when a structured table row contains page/header or formula residue."""
-
-    candidate = compact_inline(value)
-    if not _is_table_review_unit(candidate):
-        return False
-    if re.search(r"(?i)\bimplementation\s+agreement\s+oif-cei\b", candidate):
-        return True
-    if re.search(r"(?i)\bSNDR\s*=", candidate) and re.search(r"\bSignal\s+0\b|\(\d+(?:[-–]\d+)?\)", candidate):
-        return True
-    return False
-
-
-def _looks_like_margin_line_number_run(value: str) -> bool:
-    """Return True for extracted margin runs such as ``1 2 3 ... 49``."""
-
-    tokens = re.findall(r"\d+", value)  # 页边行号抽取后通常是一串纯数字 token。
-    if len(tokens) < 12:
-        return False
-    numbers = [int(token) for token in tokens if token.isdigit()]  # 转成数字后可以检查 1~49 连续段。
-    if not numbers or min(numbers) < 1 or max(numbers) > 49:
-        return False
-    non_number_text = re.sub(r"[\d\s]+", "", value)  # 除数字和空白外仍有大量文本时不能按行号删除。
-    if len(non_number_text) > 24:
-        return False
-    unique_numbers = sorted(set(numbers))  # 去重后检查最长连续区间。
-    longest_run = 1  # 至少一个数字时连续段长度从 1 开始。
-    current_run = 1  # 当前连续段长度。
-    for previous, current in zip(unique_numbers, unique_numbers[1:], strict=False):
-        if current == previous + 1:
-            current_run += 1
-        else:
-            longest_run = max(longest_run, current_run)
-            current_run = 1
-    return max(longest_run, current_run) >= 10
-
-
 def _candidate_key(candidate: _DeltaCandidate) -> tuple[str, str]:
     """Build a stable dedupe key for one candidate."""
 
@@ -1801,9 +4091,11 @@ def _substantive_priority(*values: str) -> int:
 
     joined = "\n".join(values)
     if _has_numeric_token(joined):
-        return 3
+        return 4
     if _has_identifier_token(joined):
-        return 2
+        return 3
+    if _has_protocol_sentence_verb(joined):
+        return 2  # 片段上限优先展示数值/标识符，再展示普通完整句；所有候选仍计入省略数。
     return 1
 
 
@@ -1864,6 +4156,12 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
     ``1.2.3``, dates, firmware versions, and model names. A tiny state machine is
     clearer and safer here than a broad regular expression.
     """
+
+    if re.fullmatch(
+        rf"(?i)table\s+\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?\s*[.:]\s*\S.+",
+        compact_inline(line),
+    ):
+        return [compact_inline(line)]  # 独立完整表题必须作为一个可读/可审计单位，不能拆成 `Table N.` + 孤立标题。
 
     units: list[str] = []
     current: list[str] = []
@@ -1928,15 +4226,16 @@ def _first_units(
     max_snippets: int,
     *,
     suppressed_table_unit_keys: set[str] | None = None,
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, list[str]]:
     """Return leading snippets for added or deleted whole sections."""
 
     table_unit_keys = suppressed_table_unit_keys or set()  # 整章新增/删除也只隐藏有视觉摘要覆盖的表格行。
     review_units = _paragraph_review_units(text, suppressed_table_unit_keys=table_unit_keys)  # 未覆盖表格行继续作为文字兜底。
-    units = [_report_unit(unit) for unit in review_units]  # 报告片段只做展示格式清洗，不改变比较身份。
+    grouped_units = _coherent_delta_unit_groups(list(enumerate(review_units)))
+    units = [text for _index, text, _source_units in grouped_units]
     if max_snippets <= 0:
-        return [], len(units)
-    return units[:max_snippets], max(0, len(units) - max_snippets)
+        return [], len(units), units
+    return units[:max_snippets], max(0, len(units) - max_snippets), units
 
 
 def _change_sort_key(change: SectionChange) -> tuple[int, int, str]:

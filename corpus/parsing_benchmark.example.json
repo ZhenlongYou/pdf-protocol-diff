@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "oif-cei-native-text",
+      "required": false,
+      "description": "Published OIF-CEI pages with selectable specification text.",
+      "document": {
+        "path": "OIF-CEI-5.1.pdf",
+        "start_page": 55,
+        "end_page": 60
+      },
+      "expect": {
+        "states": ["reliable", "degraded"],
+        "ocr_used": false
+      }
+    },
+    {
+      "id": "jlt-multicolumn-article",
+      "required": false,
+      "description": "Multi-column JLT article: preserve evidence but never require a reliable assessment.",
+      "document": {
+        "path": "JLT.2017.2650205.pdf",
+        "start_page": 1,
+        "end_page": 7
+      },
+      "expect": {
+        "states": ["degraded", "indeterminate"]
+      }
+    },
+    {
+      "id": "form-layout",
+      "required": false,
+      "description": "Form-like layout; the parser must not silently promote it to reliable.",
+      "document": {
+        "path": "Antrag_Verlängerung.pdf",
+        "start_page": 1,
+        "end_page": 2
+      },
+      "expect": {
+        "states": ["degraded", "indeterminate"]
+      }
+    },
+    {
+      "id": "scan-image-dominant",
+      "required": false,
+      "description": "Image-dominant scan; valid outcomes depend on the installed OCR engine and language data.",
+      "document": {
+        "path": "scanned-image-book.pdf",
+        "start_page": 1,
+        "end_page": 5
+      },
+      "ocr_language": "eng",
+      "expect": {
+        "states": ["degraded", "indeterminate"]
+      }
+    },
+    {
+      "id": "slide-reading-order",
+      "required": false,
+      "description": "Slide deck with non-linear reading order; do not assert a reliable result.",
+      "document": {
+        "path": "DSP_Slides_WS_2023_24.pdf",
+        "start_page": 1,
+        "end_page": 5
+      },
+      "expect": {
+        "states": ["degraded", "indeterminate"]
+      }
+    },
+    {
+      "id": "pcie-phy-native-text",
+      "required": false,
+      "description": "PCIe PHY test pages with verified procedure wording anchors.",
+      "document": {
+        "path": "PHY_Test_Spec_Rev4.0_Ver1.2_08182021.pdf",
+        "start_page": 36,
+        "end_page": 40
+      },
+      "expect": {
+        "states": ["reliable", "degraded"],
+        "must_extract": ["Overview of Calibration Steps at 16.0 GT/s"],
+        "ocr_used": false
+      }
+    }
+  ]
+}

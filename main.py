@@ -40,13 +40,19 @@ OUTPUT_DIR = "results"
 # more sections as added/deleted.
 MIN_SECTION_MATCH_SIMILARITY = 0.72
 
-# Similarity at or above this value is considered unchanged and omitted from the
-# default report. Lower this if you want tiny punctuation changes to show up.
-UNCHANGED_SIMILARITY = 0.985
-
 # Maximum visible diff snippets per changed section. This does not limit
 # section matching or comparison; it only keeps the generated report readable.
 MAX_SNIPPETS_PER_SECTION = 20
+
+# Optional Tesseract language expression for scan-like pages. Examples:
+# "eng", "chi_sim", or "chi_sim+eng". Leave as None for Tesseract's default.
+OCR_LANGUAGE = None
+
+# Optional layout parser policy. ``native`` is the fast default and never
+# imports Docling. Set ``auto`` only when testing complex multi-column pages;
+# ``docling`` requests the same guarded repair and reports a clear install error
+# if its optional dependency is not present.
+LAYOUT_BACKEND = "native"
 
 # When both paths above are blank, generate multi-page demo PDFs so the
 # no-argument run demonstrates page drift, headers/footers, and section changes.
@@ -58,6 +64,9 @@ RUN_DEMO_IF_INPUTS_MISSING = True
 INCLUDE_UNCHANGED_SECTIONS = False
 
 # =============================================================================
+
+
+_LEGACY_UNCHANGED_SIMILARITY = 0.985  # 仅供旧 CLI 启动脚本解析兼容，不是用户可调判定参数。
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -75,6 +84,7 @@ if __name__ == "__main__":  # PyCharm 直接运行 main.py 时先切到项目 .v
 from protocol_pdf_diff.compare import run_diff  # noqa: E402
 from protocol_pdf_diff.models import DiffOptions  # noqa: E402
 from protocol_pdf_diff.pdf_extract import MissingDependencyError, PdfReadError  # noqa: E402
+from protocol_pdf_diff.quality import ReliabilityState  # noqa: E402
 from protocol_pdf_diff.reporting import write_reports  # noqa: E402
 from protocol_pdf_diff.sample_data import write_demo_pdfs  # noqa: E402
 
@@ -121,8 +131,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--unchanged-similarity",
         type=float,
-        default=UNCHANGED_SIMILARITY,
-        help="安全词尾屈折的未变化判定阈值；否定、数值和标识符变化不会被隐藏",
+        default=_LEGACY_UNCHANGED_SIMILARITY,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--max-snippets",
@@ -135,6 +145,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=INCLUDE_UNCHANGED_SECTIONS,
         help="在报告中也列出未变化章节",
+    )
+    parser.add_argument(
+        "--ocr-language",
+        default=OCR_LANGUAGE,
+        help="扫描页 OCR 语言，例如 eng 或 chi_sim+eng；需要对应 Tesseract 语言包",
+    )
+    parser.add_argument(
+        "--layout-backend",
+        choices=("native", "auto", "docling"),
+        default=LAYOUT_BACKEND,
+        help="版面解析策略：native（默认快速）、auto（仅复杂页）或 docling（需可选依赖）",
     )
     parser.add_argument(
         "--demo",
@@ -173,18 +194,19 @@ def main() -> int:
     """Program entry point used by both PyCharm and command-line runs."""
 
     args = parse_args()
-    options = DiffOptions(
-        min_section_match_similarity=args.min_section_match_similarity,
-        unchanged_similarity=args.unchanged_similarity,
-        max_snippets_per_section=args.max_snippets,
-        include_unchanged_sections=args.include_unchanged,
-        old_start_page=args.old_start_page,
-        old_end_page=args.old_end_page,
-        new_start_page=args.new_start_page,
-        new_end_page=args.new_end_page,
-    )
-
     try:
+        options = DiffOptions(
+            min_section_match_similarity=args.min_section_match_similarity,
+            unchanged_similarity=args.unchanged_similarity,
+            max_snippets_per_section=args.max_snippets,
+            include_unchanged_sections=args.include_unchanged,
+            old_start_page=args.old_start_page,
+            old_end_page=args.old_end_page,
+            new_start_page=args.new_start_page,
+            new_end_page=args.new_end_page,
+            ocr_language=args.ocr_language,
+            layout_backend=args.layout_backend,
+        )  # 共享配置验证属于可预期的用户输入错误，必须由同一中文错误路径捕获。
         old_pdf, new_pdf = resolve_inputs(args)
         result = run_diff(old_pdf, new_pdf, options)
         outputs = write_reports(result, PROJECT_ROOT / args.output_dir, options)
@@ -192,15 +214,29 @@ def main() -> int:
         print(f"运行失败: {exc}", file=sys.stderr)
         return 2
 
-    print("比较完成。报告已生成:")
+    assessment = result.assessment
+    if assessment is None:
+        reliability_label = "无法判断"
+        reliability_headline = "比较结果缺少可靠性评估数据"
+    elif assessment.state is ReliabilityState.RELIABLE:
+        reliability_label = "可靠"
+        reliability_headline = assessment.headline
+    elif assessment.state is ReliabilityState.DEGRADED:
+        reliability_label = "需人工复核"
+        reliability_headline = assessment.headline
+    else:
+        reliability_label = "无法判断"
+        reliability_headline = assessment.headline
+
+    print("处理完成。报告已生成:")
+    print(f"- 识别可信度: {reliability_label}")
+    print(f"- 结论: {reliability_headline}")
     print(f"- HTML:     {outputs['html']}")
     print(f"- Markdown: {outputs['markdown']}")
     print(f"- TXT:      {outputs['text']}")
     print(f"- 正文 CSV: {outputs['csv']}")
     print(f"- 表格 CSV: {outputs['table_csv']}")
     print(f"- JSON:     {outputs['json']}")
-    if result.warnings:
-        print("\n注意: 报告中包含 PDF 抽取警告，请先查看。")
     return 0
 
 
