@@ -2471,6 +2471,64 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertEqual([row], cleaned)
 
+    def test_public_reader_evidence_deduplicates_change_and_visual_group(self) -> None:
+        """The same physical table in two evidence collections still counts once."""
+
+        row = "Minimum value 0 —"
+        old_section = Section(
+            "old-duplicate-evidence",
+            "9 Duplicate evidence",
+            "Duplicate evidence",
+            1,
+            ("9 Duplicate evidence",),
+            ("9",),
+            10,
+            10,
+            f"{row}\n{row}",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-duplicate-evidence",
+            start_page=11,
+            end_page=11,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            removed_snippets=[row, row],
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. One row",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [row],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        new_table = replace(old_table, page_number=11)
+        table_change = TableChange(
+            "modified",
+            (old_table,),
+            (new_table,),
+            1.0,
+            False,
+            (),
+        )
+        visual_group = reporting_module._TableVisualGroup(
+            (old_table,),
+            (new_table,),
+        )
+
+        cleaned = _reader_section_change(change, [table_change, visual_group])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([row], cleaned.removed_snippets)
+
     def test_tiny_formula_between_table_rows_is_not_treated_as_a_bridge(self) -> None:
         """A one-letter formula remains visible even when adjacent rows are table-backed."""
 

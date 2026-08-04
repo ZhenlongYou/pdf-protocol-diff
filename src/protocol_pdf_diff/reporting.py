@@ -6316,7 +6316,18 @@ def _reader_table_text_by_page(tables: Iterable[TableVisual]) -> dict[int, str]:
     """Group losslessly serialized table evidence by its physical PDF page."""
 
     parts: dict[int, list[str]] = {}
+    seen: set[tuple[object, ...]] = set()
     for table in tables:
+        physical_key = (
+            table.page_number,
+            table.table_number,
+            compact_inline(table.title).casefold(),
+            tuple(round(value, 3) for value in table.bbox),
+            tuple(compact_inline(row) for row in table.row_texts),
+        )
+        if physical_key in seen:
+            continue  # 同一表可能同时来自 TableChange 和未变化配对组，只能计一次 occurrence。
+        seen.add(physical_key)
         parts.setdefault(table.page_number, []).append(
             _reader_table_group_audit_text((table,))
         )
