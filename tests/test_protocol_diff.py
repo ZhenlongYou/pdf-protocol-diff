@@ -4039,10 +4039,13 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("Updated based on comment resolution spreadsheet oif2026.245.01.", snippet_text)
         self.assertIn("OIF 2024.058.13", table_csv)  # 修订历史只由表格事实系统承载一次。
         self.assertIn("Updated based on comment resolution spreadsheet oif2026.245.01.", table_csv)
+        technical_table_count = sum(
+            change["role"] == "technical" for change in payload["table_changes"]
+        )  # 读者 HTML 只导航技术表，出版/修订表继续留在 JSON 与 table CSV 审计面。
         self.assertEqual(
-            len(payload["table_changes"]),
+            technical_table_count,
             html.count('href="#table-change-'),
-        )  # HTML 导航和 JSON 使用相同的变化表集合。
+        )
         self.assertTrue(
             all(
                 len(change["old_titles"]) == len(set(change["old_titles"]))
@@ -10233,9 +10236,21 @@ class ReportRoleSerializationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, Path(temp_dir), DiffOptions())
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            table_csv = outputs["table_csv"].read_text(encoding="utf-8-sig")
+            reader_reports = [
+                outputs[key].read_text(encoding="utf-8")
+                for key in ("html", "markdown", "text")
+            ]
 
+        # 机器审计继续保留修订历史表的角色和每一行事实。
         self.assertEqual("document_metadata", payload["table_changes"][0]["role"])
         self.assertEqual(2, payload["table_changes"][0]["row_change_count"])
+        self.assertIn("document_metadata", table_csv)
+        self.assertIn("Initial publication", table_csv)
+        # 读者报告不再显示修订历史表卡或其中的出版记录。
+        for reader_report in reader_reports:
+            self.assertNotIn("Initial publication", reader_report)
+            self.assertNotIn("Editorial update", reader_report)
 
     def test_electrical_parameter_table_remains_technical(self) -> None:
         electrical_table = TableVisual(
@@ -10319,7 +10334,7 @@ class ReportRoleSerializationTests(unittest.TestCase):
         self.assertTrue(all(row["role"] in {"technical", "document_metadata"} for row in prose_rows))
         self.assertIn("role", table_header)
 
-    def test_prose_roles_precede_supplementary_table_evidence(self) -> None:
+    def test_reader_reports_hide_metadata_but_audit_outputs_retain_it(self) -> None:
         body_old = ("The receiver shall support calibration mode A. " * 14)
         body_new = ("The receiver shall support calibration mode B. " * 14)
         table = TableVisual(
@@ -10346,13 +10361,22 @@ class ReportRoleSerializationTests(unittest.TestCase):
             outputs = write_reports(result, Path(temp_dir), DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
             markdown = outputs["markdown"].read_text(encoding="utf-8")
+            text = outputs["text"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            with outputs["csv"].open(encoding="utf-8-sig") as handle:
+                prose_rows = list(csv.DictReader(handle))
 
+        # 原始比较结果仍需保留技术正文和元信息两类事实，供机器审计追溯。
         self.assertEqual(1, sum(change.role == "technical" for change in result.changes))
         self.assertEqual(1, sum(change.role == "document_metadata" for change in result.changes))
-        self.assertLess(html.index("技术正文变化"), html.index("文档元信息变化"))
-        self.assertLess(html.index("文档元信息变化"), html.index("表格补充证据"))
-        self.assertLess(markdown.index("## 技术正文变化"), markdown.index("## 文档元信息变化"))
-        self.assertLess(markdown.index("## 文档元信息变化"), markdown.index("## 表格补充证据"))
+        # 三种读者报告不得再为作者、版权或修订记录占用正文空间。
+        for reader_report in (html, markdown, text):
+            self.assertNotIn("文档元信息变化", reader_report)
+            self.assertNotIn("Copyright 2025 Example Organization", reader_report)
+            self.assertNotIn("Copyright 2026 Example Organization", reader_report)
+        # JSON/CSV 是无损审计面，必须继续输出 document_metadata 事实。
+        self.assertTrue(any(change["role"] == "document_metadata" for change in payload["changes"]))
+        self.assertTrue(any(row["role"] == "document_metadata" for row in prose_rows))
         self.assertIn("<span>核心技术变化</span>", html)
 
 

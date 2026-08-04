@@ -290,6 +290,9 @@ def write_reports(
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     reader_changes: list[SectionChange] = []
     for change in result.changes:
+        # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
+        if change.role == "document_metadata":
+            continue
         reader_change = _reader_section_change(change, reader_table_evidence)
         if reader_change is not None:
             reader_changes.append(reader_change)
@@ -397,7 +400,8 @@ def _render_markdown(
     """Render the main review report in Markdown."""
 
     counts = _change_counts(result.changes)
-    technical_changes, metadata_changes = _section_changes_by_role(result.changes)
+    # write_reports 已把元信息从读者副本剔除；此处只渲染技术正文，避免空板块和零值指标占空间。
+    technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
         change.change_type == "review" for change in technical_changes
     )
@@ -442,7 +446,6 @@ def _render_markdown(
         "|---|---:|",
         f"| 核心技术变化 | {material_technical_count} |",
         f"| 正文字符复核项 | {technical_review_count} |",
-        f"| 文档元信息变化 | {len(metadata_changes)} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
         f"| 变化表格 | {len(material_table_changes)} |",
         f"| 表格行变化 | {table_row_change_count} |",
@@ -458,22 +461,14 @@ def _render_markdown(
             "",
         ]
     )
-    next_index = _append_markdown_changes(lines, technical_changes, start_index=1)
+    _append_markdown_changes(lines, technical_changes, start_index=1)
     if not technical_changes:
         message = (
             _empty_report_message(result)
-            if not metadata_changes and not table_changes
+            if not table_changes
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         lines.extend([message, ""])
-
-    if metadata_changes:
-        lines.extend(["## 文档元信息变化", "", "以下内容保留供追溯，但不计入核心技术变化。", ""])
-        next_index = _append_markdown_changes(
-            lines,
-            metadata_changes,
-            start_index=next_index,
-        )
 
     if table_changes:
         lines.extend(["## 表格补充证据（变化与复核）", ""])
@@ -650,22 +645,17 @@ def _render_html(
     comparison_note = _comparison_method_note(result)
     scope_note = _report_scope_note(options)
     assessment_html = _render_assessment_html(_assessment_for_report(result))
-    technical_changes, metadata_changes = _section_changes_by_role(result.changes)
+    # HTML 与 Markdown 共用技术正文口径，元信息只留在机器审计文件。
+    technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
         change.change_type == "review" for change in technical_changes
     )
     material_technical_count = len(technical_changes) - technical_review_count
     table_changes = _ordered_table_changes(table_changes)
     indexed_technical = list(enumerate(technical_changes, start=1))
-    indexed_metadata = list(
-        enumerate(metadata_changes, start=len(indexed_technical) + 1)
-    )
     title = "协议 PDF 差异报告"
     technical_nav_items = "\n".join(
         _render_nav_item(index, change) for index, change in indexed_technical
-    )
-    metadata_nav_items = "\n".join(
-        _render_nav_item(index, change) for index, change in indexed_metadata
     )
     table_nav_items = "\n".join(
         _render_table_nav_item(index, change)
@@ -674,8 +664,6 @@ def _render_html(
     nav_parts: list[str] = []
     if technical_nav_items:
         nav_parts.extend(['<div class="nav-title">技术正文变化与复核</div>', technical_nav_items])
-    if metadata_nav_items:
-        nav_parts.extend(['<div class="nav-title nav-section-gap">文档元信息变化</div>', metadata_nav_items])
     if table_nav_items:
         nav_parts.extend(['<div class="nav-title nav-section-gap">表格补充证据</div>', table_nav_items])
     nav_items = "\n".join(nav_parts)
@@ -688,13 +676,10 @@ def _render_html(
     if not technical_cards:
         technical_message = (
             _empty_report_message(result)
-            if not metadata_changes and not table_changes
+            if not table_changes
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
-    metadata_cards = "\n".join(
-        _render_change_html(index, change) for index, change in indexed_metadata
-    )
     table_visual_html = _render_table_changes_html(table_changes)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
@@ -1034,7 +1019,6 @@ def _render_html(
       <section class="summary">
         <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
         <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
-        <div class="metric"><strong>{len(metadata_changes)}</strong><span>文档元信息变化</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
@@ -1053,7 +1037,6 @@ def _render_html(
       </section>
       <h2 class="section-heading" id="text-changes">技术正文变化</h2>
       {technical_cards}
-      {f'<h2 class="section-heading" id="metadata-changes">文档元信息变化</h2><p class="change-summary">以下内容保留供追溯，但不计入核心技术变化。</p>{metadata_cards}' if metadata_cards else ''}
       {table_visual_html}
     </main>
   </div>
@@ -6003,6 +5986,9 @@ def _reader_table_changes(changes: list[TableChange]) -> list[TableChange]:
 
     reader_changes: list[TableChange] = []
     for change in changes:
+        # 出版历史类表格仍写入原始 JSON/CSV，但不占用面向技术读者的表格证据区。
+        if change.role == "document_metadata":
+            continue
         can_hide_generic_review = bool(
             change.old_tables
             and change.new_tables
@@ -6067,6 +6053,13 @@ def _reader_section_change(
 
     if _reader_change_is_coordinate_proven_table_body_duplicate(change, table_evidence):
         return None
+    # 混合章节不能整卡删除；只剔除由同章节完整表格截图逐片段证明的重复表体。
+    change = _reader_change_without_evidenced_table_body_fragments(
+        change,
+        table_evidence,
+    )
+    if change is None:
+        return None
     change = _reader_change_without_evidenced_table_caption_fragments(
         change,
         table_evidence,
@@ -6079,6 +6072,282 @@ def _reader_section_change(
     if _reader_change_is_layout_reorder_only(change):
         return replace(change, change_type="review")
     return change
+
+
+def _reader_change_without_evidenced_table_body_fragments(
+    change: SectionChange,
+    table_evidence: (
+        list[TableChange | _TableVisualGroup]
+        | tuple[TableChange | _TableVisualGroup, ...]
+    ),
+) -> SectionChange | None:
+    """Hide only mixed-section snippets already preserved by a visible table card.
+
+    The proof is deliberately stricter than generic text similarity: both PDF
+    sides need the same paired caption, complete bbox character coverage,
+    section/page containment, and either reliable rows or an explicit table
+    review row.  Raw ``SectionChange`` data is never mutated; this helper only
+    builds the reader copy used by HTML/Markdown/TXT.
+    """
+
+    # 单侧新增/删除没有成对章节坐标，不能调用只适用于 paired modified section 的证明函数。
+    if (
+        change.change_type != "modified"
+        or change.old_section is None
+        or change.new_section is None
+    ):
+        return change
+    # 复用整卡去重的坐标/标题/完整性门禁，避免远处或不完整截图误删正文。
+    eligible_evidence = [
+        evidence
+        for evidence in table_evidence
+        if _reader_table_change_proves_section_duplicate(change, evidence)
+    ]
+    if not eligible_evidence:
+        return change
+    # 每一侧只与自己的表格审计文字比对，页码平移不会造成跨版本误覆盖。
+    old_table_text = " ".join(
+        _reader_table_group_audit_text(evidence.old_tables)
+        for evidence in eligible_evidence
+    )
+    new_table_text = " ".join(
+        _reader_table_group_audit_text(evidence.new_tables)
+        for evidence in eligible_evidence
+    )
+    # 可见列表和完整审计列表分别过滤，之后重算真正仍未展示的读者片段数。
+    removed = _reader_filter_evidenced_table_fragments(
+        change.removed_snippets,
+        old_table_text,
+    )
+    added = _reader_filter_evidenced_table_fragments(
+        change.added_snippets,
+        new_table_text,
+    )
+    replaced = _reader_filter_evidenced_table_pairs(
+        change.replaced_snippets,
+        old_table_text=old_table_text,
+        new_table_text=new_table_text,
+    )
+    audit_removed = _reader_filter_evidenced_table_fragments(
+        _audit_removed_snippets(change),
+        old_table_text,
+    )
+    audit_added = _reader_filter_evidenced_table_fragments(
+        _audit_added_snippets(change),
+        new_table_text,
+    )
+    audit_replaced = _reader_filter_evidenced_table_pairs(
+        _audit_replaced_snippets(change),
+        old_table_text=old_table_text,
+        new_table_text=new_table_text,
+    )
+    # 原先被表格噪声挤出展示上限的正常正文，要从完整 occurrence 中补回原有展示容量。
+    if change.audit_removed_snippets is not None:
+        removed = _reader_refill_visible_occurrences(
+            removed,
+            audit_removed,
+            limit=len(change.removed_snippets),
+        )
+    if change.audit_added_snippets is not None:
+        added = _reader_refill_visible_occurrences(
+            added,
+            audit_added,
+            limit=len(change.added_snippets),
+        )
+    if change.audit_replaced_snippets is not None:
+        replaced = _reader_refill_visible_occurrences(
+            replaced,
+            audit_replaced,
+            limit=len(change.replaced_snippets),
+        )
+    # 新版比较器提供三份完整 occurrence 列表时，可安全去掉仅由已隐藏表格行造成的“未展示”提示。
+    if all(
+        audit is not None
+        for audit in (
+            change.audit_added_snippets,
+            change.audit_removed_snippets,
+            change.audit_replaced_snippets,
+        )
+    ):
+        omitted_snippet_count = max(
+            0,
+            len(audit_added)
+            + len(audit_removed)
+            + len(audit_replaced)
+            - len(added)
+            - len(removed)
+            - len(replaced),
+        )
+    else:
+        # 旧调用方只有可见列表时缺少重算依据，必须保留原省略计数而不是猜测为零。
+        omitted_snippet_count = change.omitted_snippet_count
+    cleaned = replace(
+        change,
+        removed_snippets=removed,
+        added_snippets=added,
+        replaced_snippets=replaced,
+        omitted_snippet_count=omitted_snippet_count,
+        audit_removed_snippets=(
+            audit_removed if change.audit_removed_snippets is not None else None
+        ),
+        audit_added_snippets=(
+            audit_added if change.audit_added_snippets is not None else None
+        ),
+        audit_replaced_snippets=(
+            audit_replaced if change.audit_replaced_snippets is not None else None
+        ),
+    )
+    # 一张只含表格重复文字的卡片已由下方截图完整替代，不再留空壳或折叠提示。
+    if (
+        not cleaned.removed_snippets
+        and not cleaned.added_snippets
+        and not cleaned.replaced_snippets
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
+
+
+def _reader_refill_visible_occurrences(
+    visible: list[str] | list[SnippetPair],
+    audit: list[str] | list[SnippetPair],
+    *,
+    limit: int,
+) -> list[str] | list[SnippetPair]:
+    """Refill reader slots from the cleaned audit without losing duplicates."""
+
+    if limit <= 0 or len(visible) >= limit:
+        return visible[:limit]
+    # Counter 按 occurrence 计数；相同表述出现两次时仍可补足两条，不被集合去重吞掉。
+    selected = list(visible)
+    selected_counts = Counter(selected)
+    audit_counts = Counter(audit)
+    for item in audit:
+        if len(selected) >= limit:
+            break
+        if selected_counts[item] >= audit_counts[item]:
+            continue
+        selected.append(item)
+        selected_counts[item] += 1
+    return selected
+
+
+def _reader_filter_evidenced_table_fragments(
+    snippets: list[str],
+    table_text: str,
+) -> list[str]:
+    """Drop covered table fragments while preserving prose and tiny orphan text."""
+
+    # 先对完整有序列表做强证据判定，短桥接标签只能依赖相邻两条已证明表格行。
+    strongly_covered = [
+        _reader_snippet_is_evidenced_table_fragment(snippet, table_text)
+        for snippet in snippets
+    ]
+    kept: list[str] = []
+    for index, snippet in enumerate(snippets):
+        if strongly_covered[index]:
+            continue
+        # `DC`/`DC2` 之类一两个词本身不可授权删除；夹在两个已覆盖表格行之间时才视为拆行残片。
+        if (
+            0 < index < len(snippets) - 1
+            and strongly_covered[index - 1]
+            and strongly_covered[index + 1]
+            and _reader_tiny_table_bridge_is_covered(snippet, table_text)
+        ):
+            continue
+        kept.append(snippet)
+    return kept
+
+
+def _reader_filter_evidenced_table_pairs(
+    pairs: list[SnippetPair],
+    *,
+    old_table_text: str,
+    new_table_text: str,
+) -> list[SnippetPair]:
+    """Drop a replacement only when both complete sides are table-backed."""
+
+    # 任一侧仍含未证明正文时保留整对，避免把真实术语或限值修改拆丢。
+    return [
+        pair
+        for pair in pairs
+        if not (
+            _reader_snippet_is_evidenced_table_fragment(pair.old, old_table_text)
+            and _reader_snippet_is_evidenced_table_fragment(pair.new, new_table_text)
+        )
+    ]
+
+
+def _reader_snippet_is_evidenced_table_fragment(
+    snippet: str,
+    table_text: str,
+) -> bool:
+    """Require exact-token table coverage plus a layout/row-shaped fragment."""
+
+    compact = compact_inline(snippet)
+    if not compact or not compact_inline(table_text):
+        return False
+    collapse_kind = _reader_snippet_collapse_kind(compact)
+    # 可读规范句即使出现在表格附近也继续展示；长线性化表体由 layout 强证据单独处理。
+    if collapse_kind != "layout" and _READER_PROSE_VERB_RE.search(compact):
+        return False
+    # 字段标签的大小写来自序列化格式而非技术语义；覆盖比较统一 casefold，但仍保留数字和符号形态。
+    snippet_tokens = [
+        token.casefold() for token in _reader_table_body_tokens(compact)
+    ]
+    table_tokens = [
+        token.casefold() for token in _reader_table_body_tokens(table_text)
+    ]
+    if not snippet_tokens or not table_tokens:
+        return False
+    shared_count = sum(
+        (Counter(snippet_tokens) & Counter(table_tokens)).values()
+    )
+    coverage = shared_count / len(snippet_tokens)
+    if collapse_kind == "layout" and len(compact) >= _READER_LAYOUT_SNIPPET_MIN_CHARS:
+        return len(snippet_tokens) >= 12 and shared_count >= 10 and coverage >= 0.65
+    # 短表格行常被多行单元格拆开；字段词或数值形态加高 token 覆盖可证明其来自结构化表体。
+    header_count = len(_READER_LAYOUT_HEADER_RE.findall(compact))
+    has_numeric_or_operator = bool(re.search(r"\d|[=<>≤≥±×]", compact))
+    has_row_label = bool(
+        re.search(
+            r"(?i)\b(?:minimum|maximum|min|max|step(?:\s+size)?|parameter|symbol|value|units?)\b",
+            compact,
+        )
+    )
+    row_shape_proven = bool(
+        header_count >= 2
+        or has_row_label
+        or (len(snippet_tokens) >= 5 and coverage >= 0.85)
+        or (
+            has_numeric_or_operator
+            and len(snippet_tokens) >= 5
+        )
+    )
+    return bool(
+        len(snippet_tokens) >= 3
+        and shared_count >= 3
+        and row_shape_proven
+        and (
+            compact.casefold() in compact_inline(table_text).casefold()
+            or coverage >= 0.75
+        )
+    )
+
+
+def _reader_tiny_table_bridge_is_covered(snippet: str, table_text: str) -> bool:
+    """Recognize one/two-token split labels only inside two proven table rows."""
+
+    tokens = [token.casefold() for token in _reader_table_body_tokens(snippet)]
+    if not 1 <= len(tokens) <= 2:
+        return False
+    table_counts = Counter(
+        token.casefold() for token in _reader_table_body_tokens(table_text)
+    )
+    return bool(
+        not (Counter(tokens) - table_counts)
+        or compact_inline(snippet).casefold() in compact_inline(table_text).casefold()
+    )
 
 
 def _reader_change_without_covered_standalone_table_references(
@@ -7633,16 +7902,6 @@ def _change_counts(changes: list[SectionChange]) -> dict[str, int]:
     for change in changes:
         counts[change.change_type] = counts.get(change.change_type, 0) + 1
     return counts
-
-
-def _section_changes_by_role(
-    changes: list[SectionChange],
-) -> tuple[list[SectionChange], list[SectionChange]]:
-    """Keep technical prose primary while preserving metadata findings."""
-
-    technical = [change for change in changes if change.role == "technical"]
-    metadata = [change for change in changes if change.role == "document_metadata"]
-    return technical, metadata
 
 
 def _ordered_table_changes(changes: list[TableChange]) -> list[TableChange]:

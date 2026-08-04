@@ -2240,6 +2240,192 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             )
         )
 
+    def test_mixed_section_hides_only_snippets_covered_by_visible_table_evidence(self) -> None:
+        """A mixed section keeps prose while screenshot-backed table walls leave no fold notice."""
+
+        # 该长串模拟真实 058 中由多页表格线性化后形成的不可读文字墙。
+        table_wall = (
+            "Parameter Symbol Value Units Conditions Index Transition Threshold Level "
+            "Label Description Reference First Last "
+            + " ".join(f"P{index} X{index} {index} UI" for index in range(1, 45))
+        )
+        # 这些短片段模拟同一表格被拆成多条新增记录，并包含两个只在限流后审计列表中的条目。
+        table_fragments = [
+            "Parameter Symbol Value Units",
+            "Transmitter equalizer, 3rd pre-cursor coefficient c(-3)",
+            "Minimum value 0 —",
+            "Maximum value 0 —",
+            "Step size 0.02 —",
+        ]
+        normal_prose = (
+            "For channel compliance testing, the transmitter package claimed by the "
+            "vendor should be used."
+        )
+        old_section = Section(
+            "old-mixed-table",
+            "9 Mixed table section",
+            "Mixed table section",
+            1,
+            ("9 Mixed table section",),
+            ("9",),
+            10,
+            10,
+            table_wall,
+        )
+        new_section = replace(old_section, section_id="new-mixed-table", start_page=11, end_page=11)
+        prose_pair = SnippetPair(
+            "The package model is defined in IEEE 802.3dj Clause 178A.",
+            "The package model is defined in IEEE Std 802.3dj Clause 178A.",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            added_snippets=[normal_prose, *table_fragments[:2]],
+            removed_snippets=[table_wall],
+            replaced_snippets=[prose_pair],
+            omitted_snippet_count=3,
+            audit_added_snippets=[normal_prose, *table_fragments],
+            audit_removed_snippets=[table_wall],
+            audit_replaced_snippets=[prose_pair],
+        )
+        # 两侧表格大体一致，只保留一个真实 R0 数值变化来生成可见表格复核卡。
+        common_rows = [
+            f"表格行: T1 | Parameter={table_wall} | Symbol= | Value= | Units=",
+            (
+                "表格行: T1 | Parameter=Transmitter equalizer, 3rd pre-cursor "
+                "coefficient — Minimum value\nMaximum value\nStep size | Symbol=c(-3) | "
+                "Value=0\n0\n0.02 | Units=—\n—\n—"
+            ),
+        ]
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. COM Parameter Values",
+            (10.0, 20.0, 500.0, 700.0),
+            "data:image/jpeg;base64,AA==",
+            [*common_rows, "表格行: T1 | Parameter=R0 | Symbol=R0 | Value=50 | Units=Ω"],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=False,
+        )
+        new_table = replace(
+            old_table,
+            page_number=11,
+            row_texts=[
+                *common_rows,
+                "表格行: T1 | Parameter=R0 | Symbol=R0 | Value=46.25 | Units=Ω",
+            ],
+        )
+        result = DiffResult(
+            Path("old.pdf"),
+            Path("new.pdf"),
+            [old_section],
+            [new_section],
+            [change],
+            [],
+            old_total_pages=11,
+            new_total_pages=11,
+            old_table_visuals=[old_table],
+            new_table_visuals=[new_table],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # 通过公开报告入口同时验证 HTML、Markdown、TXT 和无损 JSON 审计面。
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            text = paths["text"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 正常技术句和独立替换必须留在读者报告，表格截图继续提供原页证据。
+        for reader_report in (html, markdown, text):
+            self.assertIn(normal_prose, reader_report)
+            self.assertIn("The package model is defined", reader_report)
+            self.assertIn("802.3dj Clause 178A", reader_report)
+            self.assertIn("Table 9-1. COM Parameter Values", reader_report)
+            self.assertNotIn(table_wall, reader_report)
+            self.assertNotIn(table_fragments[0], reader_report)
+            self.assertNotIn("疑似表格或公式的版面文字已折叠", reader_report)
+            self.assertNotIn("处未展示", reader_report)
+        # JSON 必须继续保存被读者层隐藏的完整 occurrence 和原始省略计数。
+        self.assertIn(table_wall, payload["changes"][0]["removed_snippets"])
+        self.assertEqual(table_fragments, payload["changes"][0]["added_snippets"][1:])
+        self.assertEqual(3, payload["changes"][0]["omitted_snippet_count"])
+
+    def test_incomplete_table_visual_cannot_hide_one_mixed_section_fragment(self) -> None:
+        """Without complete bbox coverage, even obvious table text stays visible for review."""
+
+        table_wall = (
+            "Parameter Symbol Value Units Conditions Index Transition Threshold Level "
+            + " ".join(str(index) for index in range(1, 90))
+        )
+        old_section = Section(
+            "old-incomplete-table",
+            "9 Incomplete table section",
+            "Incomplete table section",
+            1,
+            ("9 Incomplete table section",),
+            ("9",),
+            10,
+            10,
+            table_wall,
+        )
+        new_section = replace(old_section, section_id="new-incomplete-table", start_page=11, end_page=11)
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            removed_snippets=[table_wall],
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. Incomplete values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [table_wall],
+            "structured rows",
+            content_fully_represented=False,
+            row_alignment_reliable=True,
+        )
+        new_table = replace(old_table, page_number=11)
+        evidence = TableChange("modified", (old_table,), (new_table,), 1.0, False, ())
+
+        # 不完整截图只能作为辅助证据，不能授权读者层删除正文片段。
+        cleaned = _reader_section_change(change, [evidence])
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([table_wall], cleaned.removed_snippets)
+
+    def test_single_side_section_skips_paired_table_fragment_proof(self) -> None:
+        """Added/deleted sections have no paired coordinates and must never hit the proof assert."""
+
+        new_section = Section(
+            "new-only",
+            "9 New section",
+            "New section",
+            1,
+            ("9 New section",),
+            ("9",),
+            11,
+            11,
+            "The receiver shall support the new operating mode.",
+        )
+        change = SectionChange(
+            "added",
+            None,
+            new_section,
+            0.0,
+            added_snippets=[new_section.body],
+        )
+
+        # 即使调用方同时传入其它表格证据，单侧章节仍原样进入读者报告且不抛断言。
+        cleaned = _reader_section_change(change, [])
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([new_section.body], cleaned.added_snippets)
+
     def test_coordinate_table_dedup_preserves_changed_normative_tail(self) -> None:
         """A real prose edit after a table wall must never be hidden with the table."""
 

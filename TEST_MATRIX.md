@@ -42,6 +42,8 @@
 | 坐标证据块 | 原生文字、表格和 OCR 分别产生不可变、连续排序的 `DocumentBlock`，不改正文比较文本 | `test_public_extraction_returns_contiguous_native_text_blocks`、`test_successful_public_ocr_adds_tesseract_page_bounds_block`、`test_public_table_visual_becomes_pdfplumber_table_block` |
 | 页面解析路由 | 每页只归入一种 native/OCR/image 路由，且 OCR、图像、版面风险的优先级固定 | `test_pure_classifier_has_documented_precedence_for_all_five_routes`、`test_quality_metrics_group_each_selected_page_by_one_parser_route` |
 | 解析审计 JSON 隐私 | 报告只序列化每页路由、风险标志和 block 数，不复制 page/block 原文 | `test_json_report_serializes_route_audit_without_page_or_block_text` |
+| 文档元信息读者降噪 | HTML/Markdown/TXT 不显示作者、邮箱、版权和修订历史；JSON/CSV 继续无损保留 | `test_reader_reports_hide_metadata_but_audit_outputs_retain_it`、`test_generic_caption_revision_table_is_document_metadata` |
+| 截图覆盖表体去重 | 同章节、同表题且完整坐标覆盖的表格截图可替代重复线性化片段；正常技术句、不完整截图和单侧章节不得误删 | `test_mixed_section_hides_only_snippets_covered_by_visible_table_evidence`、`test_incomplete_table_visual_cannot_hide_one_mixed_section_fragment`、`test_single_side_section_skips_paired_table_fragment_proof` |
 
 ## 当前已知边界
 
