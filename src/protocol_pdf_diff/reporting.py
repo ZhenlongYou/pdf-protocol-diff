@@ -19,6 +19,8 @@ from pathlib import Path
 from .models import (
     DiffOptions,
     DiffResult,
+    FormulaChange,
+    FormulaVisual,
     PageExtractionAudit,
     Section,
     SectionChange,
@@ -314,10 +316,13 @@ def write_reports(
         "new_selected_pages": _selected_page_payload(result, "new"),
         "changes": [_change_to_dict(change) for change in result.changes],
         "table_changes": [_table_change_to_dict(change) for change in table_changes],
+        "formula_changes": [_formula_change_to_dict(change) for change in result.formula_changes],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
         "old_table_visuals": [_table_visual_to_dict(table) for table in result.old_table_visuals],
         "new_table_visuals": [_table_visual_to_dict(table) for table in result.new_table_visuals],
+        "old_formula_visuals": [_formula_visual_to_dict(formula) for formula in result.old_formula_visuals],
+        "new_formula_visuals": [_formula_visual_to_dict(formula) for formula in result.new_formula_visuals],
         "warnings": result.warnings,
         "assessment": _assessment_to_dict(_assessment_for_report(result)),
         "provenance": _provenance_to_dict(result.provenance),
@@ -447,11 +452,44 @@ def _render_markdown(
         f"| 核心技术变化 | {material_technical_count} |",
         f"| 正文字符复核项 | {technical_review_count} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
+        f"| 公式视觉核对项 | {len(result.formula_changes)} |",
         f"| 变化表格 | {len(material_table_changes)} |",
         f"| 表格行变化 | {table_row_change_count} |",
         f"| 表格复核项 | {table_review_count} |",
         "",
     ]
+
+    if result.formula_changes:
+        lines.extend(
+            [
+                "## 公式视觉核对",
+                "",
+                "说明: `_{} / ^{}` 只表示字号和坐标已证明的上下标；根号、分式和矢量结构以 HTML 中的源 PDF 截图为准。",
+                "",
+            ]
+        )
+        for index, formula_change in enumerate(result.formula_changes, start=1):
+            old_formula = formula_change.old_formula
+            new_formula = formula_change.new_formula
+            lines.append(f"### F{index}. {_formula_change_title(formula_change)}")
+            lines.append(f"- 类型: {_CHANGE_LABELS.get(formula_change.change_type, formula_change.change_type)}")
+            lines.append(f"- 说明: {formula_change.reason}")
+            if old_formula is not None:
+                lines.append(
+                    f"- 旧版: 第 {old_formula.page_number} 页 {old_formula.formula_number} "
+                    f"`{old_formula.semantic_text}`"
+                )
+            if new_formula is not None:
+                lines.append(
+                    f"- 新版: 第 {new_formula.page_number} 页 {new_formula.formula_number} "
+                    f"`{new_formula.semantic_text}`"
+                )
+            if old_formula is not None and new_formula is not None:
+                lines.append(
+                    f"- 语义/视觉相似度: {formula_change.similarity:.3f} / "
+                    f"{formula_change.visual_similarity:.3f}"
+                )
+            lines.append("")
 
     lines.extend(
         [
@@ -465,7 +503,7 @@ def _render_markdown(
     if not technical_changes:
         message = (
             _empty_report_message(result)
-            if not table_changes
+            if not table_changes and not result.formula_changes
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         lines.extend([message, ""])
@@ -666,6 +704,19 @@ def _render_html(
         nav_parts.extend(['<div class="nav-title">技术正文变化与复核</div>', technical_nav_items])
     if table_nav_items:
         nav_parts.extend(['<div class="nav-title nav-section-gap">表格补充证据</div>', table_nav_items])
+    if result.formula_changes:
+        nav_parts.extend(
+            [
+                '<div class="nav-title nav-section-gap">公式证据</div>',
+                (
+                    '<a class="nav-item nav-formula" href="#formula-changes">'
+                    '<span class="nav-label">公式</span>'
+                    '<div class="nav-body"><strong>视觉核对</strong>'
+                    f'<div class="nav-location">{len(result.formula_changes)} 项待核对</div>'
+                    '</div></a>'
+                ),
+            ]
+        )
     nav_items = "\n".join(nav_parts)
     if not nav_items:
         nav_items = f'<div class="empty-nav">{_escape(_empty_report_message(result))}</div>'
@@ -676,11 +727,12 @@ def _render_html(
     if not technical_cards:
         technical_message = (
             _empty_report_message(result)
-            if not table_changes
+            if not table_changes and not result.formula_changes
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
     table_visual_html = _render_table_changes_html(table_changes)
+    formula_visual_html = _render_formula_changes_html(result.formula_changes)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
         len(_material_table_row_changes(change))
@@ -946,6 +998,15 @@ def _render_html(
       height: auto;
       background: #fff;
     }}
+    .formula-semantic {{
+      margin: 0;
+      padding: 10px 12px;
+      overflow-wrap: anywhere;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+    }}
+    .formula-note {{ margin: 8px 0 0; color: var(--muted); font-size: 13px; }}
     .table-shot-page {{
       border-bottom: 1px solid var(--line);
     }}
@@ -1019,6 +1080,7 @@ def _render_html(
       <section class="summary">
         <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
         <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
+        <div class="metric"><strong>{len(result.formula_changes)}</strong><span>公式视觉核对</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
@@ -1035,6 +1097,7 @@ def _render_html(
           <dt>提示</dt><dd>页码来自 PDF 抽取顺序；最终结论请回到源 PDF 复核。</dd>
         </dl>
       </section>
+      {formula_visual_html}
       <h2 class="section-heading" id="text-changes">技术正文变化</h2>
       {technical_cards}
       {table_visual_html}
@@ -1108,6 +1171,93 @@ def _render_table_changes_html(table_changes: list[TableChange]) -> str:
         {cards}
       </section>
     """
+
+
+def _render_formula_changes_html(formula_changes: list[FormulaChange]) -> str:
+    """Render source-backed formula findings without pretending to be full Math OCR."""
+
+    if not formula_changes:
+        return ""
+    cards = "\n".join(
+        _render_formula_change_html(index, change)
+        for index, change in enumerate(formula_changes, start=1)
+    )
+    return f"""
+      <section class="table-visuals" id="formula-changes">
+        <h2>公式视觉核对</h2>
+        <p class="change-summary">上下标由字号、基线偏移和水平邻接共同确认；源 PDF 裁剪为权威视觉证据，根号、分式、堆叠极限和矢量绘制不从扁平文字猜测。</p>
+        {cards}
+      </section>
+    """
+
+
+def _render_formula_change_html(index: int, change: FormulaChange) -> str:
+    """Render one old/new formula pair with readable scripts and clean crops."""
+
+    old_side = _render_formula_side("旧版源公式", change.old_formula)
+    new_side = _render_formula_side("新版源公式", change.new_formula)
+    similarity = ""
+    if change.old_formula is not None and change.new_formula is not None:
+        similarity = (
+            f'<p class="formula-note">语义相似度 {change.similarity:.3f} · '
+            f'视觉 dHash 相似度 {change.visual_similarity:.3f}</p>'
+        )
+    return f"""
+        <article class="change-card" id="formula-{index}">
+          <div class="change-head">
+            <div><span class="change-type">F{index} · {_escape(_CHANGE_LABELS.get(change.change_type, change.change_type))}</span><h3>{_escape(_formula_change_title(change))}</h3></div>
+          </div>
+          <p class="change-summary">{_escape(change.reason)}</p>
+          <div class="table-shot-grid formula-shot-grid">{old_side}{new_side}</div>
+          {similarity}
+        </article>
+    """
+
+
+def _render_formula_side(label: str, formula: FormulaVisual | None) -> str:
+    """Render one source formula or an explicit missing-side placeholder."""
+
+    if formula is None:
+        return f'<div class="table-shot"><h4>{_escape(label)}</h4><div class="empty-side">该版本无配对公式</div></div>'
+    caption = f"{label} · 第 {formula.page_number} 页 · {formula.formula_number}"
+    semantic = _formula_semantic_html(formula.semantic_text)
+    image_html = (
+        f'<img alt="{_escape(caption)}" src="{formula.image_data_uri}">'
+        if formula.image_data_uri
+        else '<div class="empty-side">源截图生成失败，请按页码回到 PDF 复核。</div>'
+    )
+    return (
+        '<div class="table-shot">'
+        f'<h4>{_escape(caption)}</h4>'
+        f'<p class="formula-semantic">{semantic}</p>'
+        f'{image_html}'
+        '</div>'
+    )
+
+
+def _formula_semantic_html(value: str) -> str:
+    """Render the module's bounded ``_{} / ^{}`` notation as HTML scripts."""
+
+    rendered = _escape(value)
+    rendered = re.sub(r"_\{([^{}]+)\}", r"<sub>\1</sub>", rendered)
+    rendered = re.sub(r"\^\{([^{}]+)\}", r"<sup>\1</sup>", rendered)
+    return rendered
+
+
+def _formula_change_title(change: FormulaChange) -> str:
+    """Build a short location title for Markdown, navigation, and HTML."""
+
+    old_label = (
+        f"第 {change.old_formula.page_number} 页 {change.old_formula.formula_number}"
+        if change.old_formula is not None
+        else "旧版无配对"
+    )
+    new_label = (
+        f"第 {change.new_formula.page_number} 页 {change.new_formula.formula_number}"
+        if change.new_formula is not None
+        else "新版无配对"
+    )
+    return f"{old_label} → {new_label}"
 
 
 def _build_table_changes(result: DiffResult) -> list[TableChange]:
@@ -8252,7 +8402,8 @@ def _report_scope_note(options: DiffOptions) -> str:
     """Explain output boundaries that matter during protocol review."""
 
     return (
-        "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核；图片、印章、普通矢量图等其它视觉元素不比较；"
+        "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核，编号显示公式会提供源裁剪和坐标已证明的上下标；"
+        "图片、印章、普通矢量图等其它视觉元素不比较；"
         "重复页眉页脚和动态页码会尽量过滤；"
         f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
     )
@@ -8267,8 +8418,8 @@ def _empty_report_message(result: DiffResult) -> str:
     if assessment.state is ReliabilityState.DEGRADED:
         return "未检出差异，但不能据此确认一致。"
     if _page_fallback_section_count(result):
-        return "未检出受支持的可抽取文字或结构化表格差异。"
-    return "未检出受支持的可抽取文字或结构化表格差异。"
+        return "未检出受支持的可抽取文字、结构化表格或编号显示公式差异。"
+    return "未检出受支持的可抽取文字、结构化表格或编号显示公式差异。"
 
 
 def _assessment_for_report(result: DiffResult) -> PairAssessment:
@@ -8678,4 +8829,41 @@ def _table_visual_to_dict(table: TableVisual) -> dict[str, object]:
         "is_continuation": table.is_continuation,
         "content_fully_represented": table.content_fully_represented,
         "row_alignment_reliable": table.row_alignment_reliable,
+    }
+
+
+def _formula_visual_to_dict(formula: FormulaVisual) -> dict[str, object]:
+    """Serialize formula evidence without repeating embedded JPEG bytes."""
+
+    return {
+        "page_number": formula.page_number,
+        "formula_number": formula.formula_number,
+        "bbox": list(formula.bbox),
+        "source_text": formula.source_text,
+        "semantic_text": formula.semantic_text,
+        "script_count": formula.script_count,
+        "image_dhash": formula.image_dhash,
+        "has_embedded_image": bool(formula.image_data_uri),
+        "source_image_authoritative_for_complex_structure": True,
+    }
+
+
+def _formula_change_to_dict(change: FormulaChange) -> dict[str, object]:
+    """Serialize one formula finding and both source-side metadata records."""
+
+    return {
+        "change_type": change.change_type,
+        "reason": change.reason,
+        "similarity": change.similarity,
+        "visual_similarity": change.visual_similarity,
+        "old_formula": (
+            _formula_visual_to_dict(change.old_formula)
+            if change.old_formula is not None
+            else None
+        ),
+        "new_formula": (
+            _formula_visual_to_dict(change.new_formula)
+            if change.new_formula is not None
+            else None
+        ),
     }

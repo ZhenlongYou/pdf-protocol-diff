@@ -16,10 +16,13 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .formula_visuals import normalized_formula_key
 from .models import (
     DiffOptions,
     DiffResult,
     ExtractionResult,
+    FormulaChange,
+    FormulaVisual,
     PageText,
     Section,
     SectionChange,
@@ -176,6 +179,10 @@ def compare_extractions(
     new_covered_table_unit_keys = _covered_table_visual_row_keys(new_table_visuals)
     old_covered_table_unit_keys.update(old_reconciled_table_unit_keys)
     new_covered_table_unit_keys.update(new_reconciled_table_unit_keys)
+    formula_changes = _compare_formula_visuals(
+        old_extraction.formula_visuals,
+        new_extraction.formula_visuals,
+    )
     changes = compare_sections(
         old_sections,
         new_sections,
@@ -208,11 +215,144 @@ def compare_extractions(
         new_selected_end_page=_selected_end_page(new_extraction),
         old_table_visuals=old_table_visuals,
         new_table_visuals=new_table_visuals,
+        old_formula_visuals=list(old_extraction.formula_visuals),
+        new_formula_visuals=list(new_extraction.formula_visuals),
+        formula_changes=formula_changes,
         assessment=assessment,
         provenance=provenance,
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
     )
+
+
+def _compare_formula_visuals(
+    old_formulas: list[FormulaVisual],
+    new_formulas: list[FormulaVisual],
+) -> list[FormulaChange]:
+    """Pair displayed formulas by geometry-aware semantics, then report deltas."""
+
+    changes: list[FormulaChange] = []
+    used_old: set[int] = set()
+    used_new: set[int] = set()
+    old_by_key: dict[str, list[int]] = {}
+    new_by_key: dict[str, list[int]] = {}
+    for index, formula in enumerate(old_formulas):
+        old_by_key.setdefault(normalized_formula_key(formula.semantic_text), []).append(index)
+    for index, formula in enumerate(new_formulas):
+        new_by_key.setdefault(normalized_formula_key(formula.semantic_text), []).append(index)
+
+    for key in sorted(set(old_by_key) & set(new_by_key)):
+        for old_index, new_index in zip(old_by_key[key], new_by_key[key], strict=False):
+            old_formula = old_formulas[old_index]
+            new_formula = new_formulas[new_index]
+            used_old.add(old_index)
+            used_new.add(new_index)
+            visual_similarity = _formula_visual_similarity(old_formula, new_formula)
+            if old_formula.formula_number != new_formula.formula_number:
+                changes.append(
+                    FormulaChange(
+                        change_type="modified",
+                        old_formula=old_formula,
+                        new_formula=new_formula,
+                        similarity=1.0,
+                        visual_similarity=visual_similarity,
+                        reason="公式主体文字一致，公式编号发生顺延或调整。",
+                    )
+                )
+            elif visual_similarity < 0.78:
+                changes.append(
+                    FormulaChange(
+                        change_type="review",
+                        old_formula=old_formula,
+                        new_formula=new_formula,
+                        similarity=1.0,
+                        visual_similarity=visual_similarity,
+                        reason="可抽取公式文字一致，但源截图结构差异较大，需回到源 PDF 核对根号、分式或矢量符号。",
+                    )
+                )
+
+    fuzzy_candidates: list[tuple[float, float, int, int]] = []
+    for old_index, old_formula in enumerate(old_formulas):
+        if old_index in used_old:
+            continue
+        old_key = normalized_formula_key(old_formula.semantic_text)
+        for new_index, new_formula in enumerate(new_formulas):
+            if new_index in used_new:
+                continue
+            new_key = normalized_formula_key(new_formula.semantic_text)
+            similarity = difflib.SequenceMatcher(None, old_key, new_key).ratio()
+            score = similarity + (
+                0.08 if old_formula.formula_number == new_formula.formula_number else 0.0
+            )
+            if similarity >= 0.55 and score >= 0.72:
+                fuzzy_candidates.append((score, similarity, old_index, new_index))
+    for _score, similarity, old_index, new_index in sorted(
+        fuzzy_candidates,
+        key=lambda item: (-item[0], item[2], item[3]),
+    ):
+        if old_index in used_old or new_index in used_new:
+            continue
+        old_formula = old_formulas[old_index]
+        new_formula = new_formulas[new_index]
+        used_old.add(old_index)
+        used_new.add(new_index)
+        changes.append(
+            FormulaChange(
+                change_type="modified",
+                old_formula=old_formula,
+                new_formula=new_formula,
+                similarity=similarity,
+                visual_similarity=_formula_visual_similarity(old_formula, new_formula),
+                reason="公式可抽取文字或坐标已证明的上下标发生变化。",
+            )
+        )
+
+    for old_index, old_formula in enumerate(old_formulas):
+        if old_index not in used_old:
+            changes.append(
+                FormulaChange(
+                    change_type="deleted",
+                    old_formula=old_formula,
+                    new_formula=None,
+                    similarity=0.0,
+                    visual_similarity=0.0,
+                    reason="旧版显示公式在新版中没有可靠配对。",
+                )
+            )
+    for new_index, new_formula in enumerate(new_formulas):
+        if new_index not in used_new:
+            changes.append(
+                FormulaChange(
+                    change_type="added",
+                    old_formula=None,
+                    new_formula=new_formula,
+                    similarity=0.0,
+                    visual_similarity=0.0,
+                    reason="新版出现未能与旧版可靠配对的显示公式。",
+                )
+            )
+    return sorted(changes, key=_formula_change_sort_key)
+
+
+def _formula_visual_similarity(old: FormulaVisual, new: FormulaVisual) -> float:
+    """Convert two 64-bit dHashes into a bounded review-only similarity."""
+
+    if not old.image_dhash or not new.image_dhash:
+        return 1.0  # 截图缺失已有抽取警告，不再伪造视觉变化。
+    try:
+        distance = (int(old.image_dhash, 16) ^ int(new.image_dhash, 16)).bit_count()
+    except ValueError:
+        return 1.0
+    return max(0.0, 1.0 - distance / 64.0)
+
+
+def _formula_change_sort_key(change: FormulaChange) -> tuple[int, str, int]:
+    """Order formula findings by visible source location and side."""
+
+    formula = change.new_formula or change.old_formula
+    assert formula is not None
+    side_rank = 0 if change.old_formula is not None else 1
+    return formula.page_number, formula.formula_number, side_rank
 
 
 def _covered_table_visual_row_keys(*table_groups: list[TableVisual]) -> set[str]:

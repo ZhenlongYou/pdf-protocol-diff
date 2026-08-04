@@ -19,6 +19,7 @@ from collections import Counter  # 比较表格 bbox、原始单元格与结构�
 from pathlib import Path
 from statistics import median
 
+from .formula_visuals import extract_formula_visuals
 from .layout_blocks import (
     build_pdfplumber_text_blocks,
     extract_pdfplumber_coordinate_words,
@@ -27,7 +28,7 @@ from .layout_blocks import (
     page_bounds,
     reassign_block_reading_order,
 )
-from .models import DocumentBlock, ExtractionResult, PageText, TableVisual
+from .models import DocumentBlock, ExtractionResult, FormulaVisual, PageText, TableVisual
 from .page_ocr import (
     _extract_scan_page_text_with_evidence,
     classify_page_parser_route,
@@ -209,6 +210,7 @@ def _extract_pdf_text_with_pdfplumber(
         )  # 复用统一页码校验，保证不同入口的页码口径一致。
         pages: list[PageText] = []  # 保存每一页清洗后的正文和表格行。
         table_visuals: list[TableVisual] = []  # 保存表格截图和识别摘要，供 HTML 报告显示。
+        formula_visuals: list[FormulaVisual] = []  # 显示公式单独保留无标注源截图和几何上下标。
         selected_pages = [
             (index, pdf.pages[index - 1])
             for index in range(selected_start, selected_end + 1)
@@ -265,6 +267,14 @@ def _extract_pdf_text_with_pdfplumber(
             )
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
+            page_formulas, formula_warnings = extract_formula_visuals(
+                page,
+                coordinate_evidence[index][0],
+                index,
+                excluded_bboxes=tuple(visual.bbox for visual in page_visuals),
+            )
+            formula_visuals.extend(page_formulas)
+            warnings.extend(formula_warnings)
             pages.append(
                 PageText(
                     page_number=index,
@@ -295,6 +305,7 @@ def _extract_pdf_text_with_pdfplumber(
         selected_start=selected_start,
         selected_end=selected_end,
         table_visuals=table_visuals,
+        formula_visuals=formula_visuals,
         source_sha256=source_digest.hexdigest(),
     )  # 统一追加空页和低字符数警告。
 
@@ -3415,26 +3426,43 @@ def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float
     left = max(page_left, bbox[0] - 90.0)  # 表题有时比表格本体更宽，左侧多取一点。
     right = min(page_right, bbox[2] + 90.0) if page_right else bbox[2] + 90.0  # 右侧同样外扩，避免漏掉跨列表题。
     top = max(0.0, bbox[1] - 90.0)  # 表题通常在表格上方；90pt 能覆盖多行题名和 line-number 残留。
-    try:
-        caption_page = page.crop((left, top, right, bbox[1]))
-        caption_text = caption_page.extract_text(x_tolerance=1, y_tolerance=3) or ""
-    except Exception:
-        return ""
-    candidates = [
-        _strip_caption_line_noise(line)
-        for raw_line in caption_text.splitlines()
-        if (line := normalize_line(raw_line))
-    ]  # 表题候选先去掉页边行号和尾部孤立行号。
-    candidates = [candidate for candidate in candidates if candidate and not _looks_like_non_table_caption(candidate)]
-    for candidate in reversed(candidates):
-        if _looks_like_table_caption(candidate):
-            return candidate
-    for candidate in reversed(candidates):
-        if _looks_like_figure_caption(candidate):
-            return candidate  # 返回 Figure 题名供上游过滤掉该候选。
-    for candidate in reversed(candidates):
-        if _looks_like_table_context_caption(candidate):
-            return candidate  # Revision history 这类无编号表，用上下文表述作为标题。
+    candidate_windows: list[list[str]] = []
+    for window_left, window_right in (
+        (left, right),
+        (page_left, page_right),
+    ):
+        if candidate_windows and window_left == left and window_right == right:
+            continue  # 局部窗口已经覆盖整页宽度时不重复抽取。
+        try:
+            caption_page = page.crop((window_left, top, window_right, bbox[1]))
+            caption_text = caption_page.extract_text(x_tolerance=1, y_tolerance=3) or ""
+        except Exception:
+            continue
+        candidates = [
+            _strip_caption_line_noise(line)
+            for raw_line in caption_text.splitlines()
+            if (line := normalize_line(raw_line))
+        ]  # 表题候选先去掉页边行号和尾部孤立行号。
+        candidate_windows.append(
+            [
+                candidate
+                for candidate in candidates
+                if candidate and not _looks_like_non_table_caption(candidate)
+            ]
+        )
+
+    # 每个窗口先按距 bbox 的近远顺序找明确 Table/Figure 题名。局部窗口中的
+    # Figure 不能被整页窗口里更远的上一张 Table 题名覆盖；图中窄线框若在
+    # 局部窗口漏掉 ``Figure`` 前缀，第二个整页窗口仍能补回完整题名。
+    for candidates in candidate_windows:
+        for predicate in (_looks_like_table_caption, _looks_like_figure_caption):
+            for candidate in reversed(candidates):
+                if predicate(candidate):
+                    return candidate
+    for candidates in candidate_windows:
+        for candidate in reversed(candidates):
+            if _looks_like_table_context_caption(candidate):
+                return candidate
     return ""
 
 
@@ -3762,6 +3790,9 @@ def _rejoin_table_cell_subscript_lines(
             return "\n".join(compound_lines)
     if len(lines) < 2 or len(words) < 2:
         return cell
+    inline_repair = _rebuild_table_inline_subscript_lines(lines, words)
+    if inline_repair is not None:
+        return inline_repair
     line_evidence = _visual_subscript_line_evidence(words)
     if len(line_evidence) != len(lines) or any(
         _non_whitespace_character_counts(line)
@@ -3788,6 +3819,128 @@ def _rejoin_table_cell_subscript_lines(
         repaired.append(lines[index])
         index += 1
     return "\n".join(repaired)
+
+
+def _rebuild_table_inline_subscript_lines(
+    raw_lines: list[str],
+    words: list[dict[str, object]],
+) -> str | None:
+    """Place a lowered suffix after its in-line base using lossless geometry.
+
+    pdfplumber may serialize ``f_b /2 GHz`` as ``f /2 GHz\nb``.  The older
+    repair only inspected the last word (``GHz``), so it could not discover
+    the real base in the middle of the preceding line.  This helper accepts a
+    merge only when every word on the lowered visual line has one unique base,
+    each source line is character-for-character conserved, and the final cell
+    contains exactly the original non-whitespace character multiset.
+    """
+
+    observed_words: list[dict[str, object]] = []
+    for word in words:
+        try:
+            text = normalize_line(str(word.get("text", "")))
+            x0 = float(word["x0"])
+            x1 = float(word["x1"])
+            top = float(word["top"])
+            bottom = float(word["bottom"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not text or x1 <= x0 or bottom <= top:
+            return None
+        observed_words.append(
+            {
+                "text": text,
+                "x0": x0,
+                "x1": x1,
+                "top": top,
+                "bottom": bottom,
+            }
+        )
+
+    indexed_lines = _indexed_visual_word_lines(observed_words)
+    if len(indexed_lines) != len(raw_lines):
+        return None
+    observed_line_texts = [
+        _words_to_visual_line([observed_words[index] for index in line])
+        for line in indexed_lines
+    ]
+    if any(
+        _non_whitespace_character_counts(raw_line)
+        != _non_whitespace_character_counts(observed_line)
+        for raw_line, observed_line in zip(
+            raw_lines,
+            observed_line_texts,
+            strict=False,
+        )
+    ):
+        return None
+
+    for line_index in range(len(indexed_lines) - 1):
+        base_indexes = indexed_lines[line_index]
+        suffix_indexes = indexed_lines[line_index + 1]
+        candidate_edges = [
+            (base_index, suffix_index)
+            for base_index in base_indexes
+            for suffix_index in suffix_indexes
+            if _words_form_visual_subscript(
+                observed_words[base_index],
+                observed_words[suffix_index],
+            )
+        ]
+        endpoint_degrees = Counter(
+            index
+            for edge in candidate_edges
+            for index in edge
+        )
+        accepted_edges = [
+            edge
+            for edge in candidate_edges
+            if endpoint_degrees[edge[0]] == endpoint_degrees[edge[1]] == 1
+        ]
+        if len(suffix_indexes) != 1 or len(accepted_edges) != 1:
+            continue  # 多行参数组仍交给既有的行扩展逻辑，不能压成一个复合单元格。
+        base_index, suffix_index = accepted_edges[0]
+        if (
+            str(observed_words[base_index]["text"]) != "f"
+            or str(observed_words[suffix_index]["text"]) != "b"
+        ):
+            continue  # 当前新增路径只补恢复频率基准 f_b；其它下标继续走既有通用证据门禁。
+        base_position = base_indexes.index(base_index)
+        if base_position > len(base_indexes) - 3:
+            continue  # 只处理基符后仍有运算符和单位的行内下标；行尾下标已有旧逻辑覆盖。
+        following_text = " ".join(
+            str(observed_words[index]["text"])
+            for index in base_indexes[base_position + 1 :]
+        )
+        if re.match(r"^[⁄/]\s*2(?:\s|$)", following_text) is None:
+            continue  # 只在源行明确呈现 f /2 ...、降低行呈现 b 时调整字符次序。
+        if {suffix for _base, suffix in accepted_edges} != set(suffix_indexes):
+            continue  # 降低行含普通文字或一对多歧义时保留原始换行。
+        combined_indexes = sorted(
+            [*base_indexes, *suffix_indexes],
+            key=lambda index: (
+                float(observed_words[index]["x0"]),
+                float(observed_words[index]["x1"]),
+                float(observed_words[index]["top"]),
+            ),
+        )
+        rebuilt_line = _rebuild_body_subscript_visual_line(
+            combined_indexes,
+            observed_words,
+            accepted_edges,
+        )
+        repaired_lines = [
+            *observed_line_texts[:line_index],
+            rebuilt_line,
+            *observed_line_texts[line_index + 2 :],
+        ]
+        repaired = "\n".join(repaired_lines)
+        if (
+            _non_whitespace_character_counts(repaired)
+            == _non_whitespace_character_counts("\n".join(raw_lines))
+        ):
+            return repaired
+    return None
 
 
 def _geometry_compound_script_lines(
@@ -6184,6 +6337,7 @@ def _finalize_extraction_result(
     selected_start: int,
     selected_end: int,
     table_visuals: list[TableVisual] | None = None,
+    formula_visuals: list[FormulaVisual] | None = None,
     source_sha256: str | None = None,
 ) -> ExtractionResult:
     """Add common extraction warnings and build the final result object."""
@@ -6211,6 +6365,7 @@ def _finalize_extraction_result(
         selected_start_page=selected_start,
         selected_end_page=selected_end,
         table_visuals=list(table_visuals or []),
+        formula_visuals=list(formula_visuals or []),
         source_sha256=source_sha256,
     )
 

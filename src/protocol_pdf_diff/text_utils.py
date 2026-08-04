@@ -19,8 +19,16 @@ _INVISIBLE_EXTRACTION_CONTROL_RE = re.compile(
 )
 _KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
     {
+        "\uf028": "(",
+        "\uf029": ")",
+        "\uf02a": "*",
+        "\uf02b": "+",
         "\uf02c": ",",
+        "\uf02d": "−",
+        "\uf02f": "/",
+        "\uf03d": "=",
         "\uf03c": "<",
+        "\uf03e": ">",
         "\uf061": "α",
         "\uf067": "γ",
         "\uf073": "σ",
@@ -28,7 +36,7 @@ _KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
         "\uf0a3": "≤",
         "\uf0a4": "⁄",
     }
-)  # OIF PDFs use legacy Adobe Symbol code positions for comma, <, alpha/gamma/sigma/tau, <=, and fraction slash.
+)  # OIF PDFs use legacy Adobe Symbol code positions for basic formula punctuation/operators, alpha/gamma/sigma/tau, <=, and fraction slash.
 _KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES = {
     "A": frozenset({"fe", "ne", "v"}),
     "C": frozenset({"p"}),

@@ -147,6 +147,7 @@ class ExtractionResult:
     selected_start_page: int | None = None
     selected_end_page: int | None = None
     table_visuals: list["TableVisual"] = field(default_factory=list)  # 保存表格截图和识别摘要，供 HTML 报告展示视觉证据。
+    formula_visuals: list["FormulaVisual"] = field(default_factory=list)  # 保存显示公式的源截图和坐标上下标语义。
     source_sha256: str | None = None  # 解析入口对实际快照字节计算；禁止报告层事后重读路径伪装成同一输入。
 
 
@@ -188,6 +189,32 @@ class TableVisual:
     page_bbox: tuple[float, float, float, float] | None = None  # 原页边界用于按页高比例证明真实跨页；旧调用缺省时不猜测。
     content_fully_represented: bool = False  # 只有 bbox 原文守恒且最终结构化行无内容损失时为真，供读者层去除重复表格正文。
     row_alignment_reliable: bool = False  # 多行单元格已取得可靠行对齐时为真；缺证据时禁止据此隐藏正文。
+
+
+@dataclass(frozen=True)
+class FormulaVisual:
+    """One displayed equation backed by source pixels and word geometry."""
+
+    page_number: int  # 源 PDF 的 1-based 页码。
+    formula_number: str  # 源文显示的公式号，例如 ``(31-3)``。
+    bbox: tuple[float, float, float, float]  # 公式、上下标和公式号的源页外接框。
+    image_data_uri: str  # 无标注的源页 JPEG 裁剪，复杂根号/分式以它为准。
+    source_text: str  # 坐标词的左到右原始摘要，不伪造 LaTeX。
+    semantic_text: str  # 仅对几何已证明的上下标使用 ``_{} / ^{}`` 表示。
+    script_count: int  # 已用字号、基线和水平邻接证明的上下标数。
+    image_dhash: str = ""  # 64-bit dHash，只供相同文字层的视觉复核，不代替语义。
+
+
+@dataclass(frozen=True)
+class FormulaChange:
+    """One paired or single-sided displayed-formula finding."""
+
+    change_type: str  # modified / added / deleted / review。
+    old_formula: FormulaVisual | None  # 旧版公式；新增项为 None。
+    new_formula: FormulaVisual | None  # 新版公式；删除项为 None。
+    similarity: float  # 上下标语义字符串的配对相似度。
+    visual_similarity: float  # 源截图 dHash 相似度，只作复核证据。
+    reason: str  # 面向读者的有限结论，不宣称全量数学 OCR。
 
 
 @dataclass(frozen=True)
@@ -387,6 +414,9 @@ class DiffResult:
     new_selected_end_page: int | None = None
     old_table_visuals: list[TableVisual] = field(default_factory=list)  # 旧 PDF 的表格截图识别结果。
     new_table_visuals: list[TableVisual] = field(default_factory=list)  # 新 PDF 的表格截图识别结果。
+    old_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 旧 PDF 的编号显示公式证据。
+    new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
+    formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
     assessment: "PairAssessment | None" = None
     provenance: "DiffProvenance | None" = None
     old_extraction_audit: tuple[PageExtractionAudit, ...] = ()  # 旧版只保留无正文快照，完整 ExtractionResult 可在比较后释放。
