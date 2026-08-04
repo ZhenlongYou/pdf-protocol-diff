@@ -1057,10 +1057,13 @@ def _render_html(
     .table-kind-review {{ color: #7a4b00; background: #fff7db; border-color: #f5d889; }}
     .section-heading {{ margin: 22px 0 12px; font-size: 21px; }}
     @media (max-width: 860px) {{
-      .layout {{ grid-template-columns: 1fr; }}
+      .layout {{ grid-template-columns: minmax(0, 1fr); }}
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
       main {{ padding: 14px; }}
-      .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: 1fr; }}
+      .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: minmax(0, 1fr); }}
+      .table-shot-grid, .table-shot {{ min-width: 0; max-width: 100%; }}
+      .table-row-summary {{ table-layout: fixed; min-width: 0; }}
+      .table-row-summary th, .table-row-summary td {{ overflow-wrap: anywhere; word-break: break-word; min-width: 0; }}
       .change-head {{ display: block; }}
       .pages {{ margin-top: 4px; }}
     }}

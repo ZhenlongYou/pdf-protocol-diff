@@ -147,8 +147,8 @@ class ExtractionResult:
     selected_start_page: int | None = None
     selected_end_page: int | None = None
     table_visuals: list["TableVisual"] = field(default_factory=list)  # 保存表格截图和识别摘要，供 HTML 报告展示视觉证据。
-    formula_visuals: list["FormulaVisual"] = field(default_factory=list)  # 保存显示公式的源截图和坐标上下标语义。
     source_sha256: str | None = None  # 解析入口对实际快照字节计算；禁止报告层事后重读路径伪装成同一输入。
+    formula_visuals: list["FormulaVisual"] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存显示公式源截图和坐标语义。
 
 
 def snapshot_page_extraction_audit(
@@ -414,13 +414,13 @@ class DiffResult:
     new_selected_end_page: int | None = None
     old_table_visuals: list[TableVisual] = field(default_factory=list)  # 旧 PDF 的表格截图识别结果。
     new_table_visuals: list[TableVisual] = field(default_factory=list)  # 新 PDF 的表格截图识别结果。
-    old_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 旧 PDF 的编号显示公式证据。
-    new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
-    formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
     assessment: "PairAssessment | None" = None
     provenance: "DiffProvenance | None" = None
     old_extraction_audit: tuple[PageExtractionAudit, ...] = ()  # 旧版只保留无正文快照，完整 ExtractionResult 可在比较后释放。
     new_extraction_audit: tuple[PageExtractionAudit, ...] = ()  # 新版使用同样的轻量审计合同，避免长文档重复驻留内存。
+    old_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存旧 PDF 编号公式。
+    new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
+    formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
 
 
 def _normalize_key(value: str) -> str:
