@@ -6318,13 +6318,7 @@ def _reader_table_text_by_page(tables: Iterable[TableVisual]) -> dict[int, str]:
     parts: dict[int, list[str]] = {}
     seen: set[tuple[object, ...]] = set()
     for table in tables:
-        physical_key = (
-            table.page_number,
-            table.table_number,
-            compact_inline(table.title).casefold(),
-            tuple(round(value, 3) for value in table.bbox),
-            tuple(compact_inline(row) for row in table.row_texts),
-        )
+        physical_key = _reader_table_physical_key(table)
         if physical_key in seen:
             continue  # 同一表可能同时来自 TableChange 和未变化配对组，只能计一次 occurrence。
         seen.add(physical_key)
@@ -6335,6 +6329,29 @@ def _reader_table_text_by_page(tables: Iterable[TableVisual]) -> dict[int, str]:
         page_number: " ".join(part for part in page_parts if compact_inline(part))
         for page_number, page_parts in parts.items()
     }
+
+
+def _reader_table_physical_key(table: TableVisual) -> tuple[object, ...]:
+    """Identify one physical screenshot region across overlapping evidence views."""
+
+    return (
+        table.page_number,
+        table.table_number,
+        compact_inline(table.title).casefold(),
+        tuple(round(value, 3) for value in table.bbox),
+        tuple(compact_inline(row) for row in table.row_texts),
+    )
+
+
+def _reader_evidence_physical_key(
+    evidence: TableChange | _TableVisualGroup,
+) -> tuple[tuple[tuple[object, ...], ...], tuple[tuple[object, ...], ...]]:
+    """Identify one paired physical table regardless of its evidence wrapper."""
+
+    return (
+        tuple(sorted(_reader_table_physical_key(table) for table in evidence.old_tables)),
+        tuple(sorted(_reader_table_physical_key(table) for table in evidence.new_tables)),
+    )
 
 
 def _reader_table_text_for_snippet(
@@ -6620,12 +6637,14 @@ class _ReaderTableTextIndex:
 def _reader_table_text_index(table_text: str) -> _ReaderTableTextIndex:
     """Tokenize a table body once even when visible and audit snippets reuse it."""
 
-    compact = compact_inline(table_text)
+    decoded_table_text = decode_table_cell(table_text)
+    compact = compact_inline(decoded_table_text)
     return _ReaderTableTextIndex(
         compact=compact,
         compact_casefold=compact.casefold(),
         token_counts=Counter(
-            token.casefold() for token in _reader_table_body_tokens(table_text)
+            token.casefold()
+            for token in _reader_table_body_tokens(decoded_table_text)
         ),
     )
 
@@ -6965,12 +6984,19 @@ def _reader_change_is_coordinate_proven_table_body_duplicate(
     eligible_evidence: list[
         tuple[TableChange | _TableVisualGroup, str, str]
     ] = []
+    seen_physical_evidence: set[
+        tuple[tuple[tuple[object, ...], ...], tuple[tuple[object, ...], ...]]
+    ] = set()
     for table_change in table_evidence:
         if not _reader_table_change_proves_section_duplicate(
             change,
             table_change,
         ):
             continue
+        physical_key = _reader_evidence_physical_key(table_change)
+        if physical_key in seen_physical_evidence:
+            continue  # TableChange 与配对组可能包装同一物理表，整卡证明也只能计一次。
+        seen_physical_evidence.add(physical_key)
         old_table_text = _reader_table_group_audit_text(table_change.old_tables)
         new_table_text = _reader_table_group_audit_text(table_change.new_tables)
         eligible_evidence.append((table_change, old_table_text, new_table_text))
@@ -7202,11 +7228,11 @@ def _reader_table_group_audit_text(tables: tuple[TableVisual, ...]) -> str:
     """Serialize caption and rows only for conservative duplicate coverage."""
 
     return " ".join(
-        part
+        decode_table_cell(part)
         for table in tables
         for part in (table.title, *table.row_texts)
         if compact_inline(part)
-    )
+    )  # 结构化行把单元格换行编码为 `\n`；覆盖比较前必须还原成真实 token 边界。
 
 
 def _reader_table_body_tokens(value: str) -> list[str]:

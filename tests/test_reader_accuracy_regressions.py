@@ -2529,12 +2529,83 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual([row], cleaned.removed_snippets)
 
+    def test_whole_card_duplicate_proof_counts_one_physical_table_once(self) -> None:
+        """Duplicate evidence collections cannot combine one table into two-table proof."""
+
+        table_body = (
+            "Parameter Symbol Value Units Conditions Index Transition Threshold Level Label "
+            "Description Reference First Last "
+            + " ".join(f"P{index} S{index} {index} UI" for index in range(1, 35))
+        )
+        duplicated_body = f"{table_body} {table_body}"
+        old_section = Section(
+            "old-whole-card-budget",
+            "9 Whole card budget",
+            "Whole card budget",
+            1,
+            ("9 Whole card budget",),
+            ("9",),
+            10,
+            10,
+            duplicated_body,
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-whole-card-budget",
+            start_page=11,
+            end_page=11,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            replaced_snippets=[SnippetPair(duplicated_body, duplicated_body)],
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. Whole card values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [table_body],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        new_table = replace(old_table, page_number=11)
+        table_change = TableChange(
+            "modified",
+            (old_table,),
+            (new_table,),
+            1.0,
+            False,
+            (),
+        )
+        visual_group = reporting_module._TableVisualGroup(
+            (old_table,),
+            (new_table,),
+        )
+
+        single = _reader_change_is_coordinate_proven_table_body_duplicate(
+            change,
+            [table_change],
+        )
+        duplicated = _reader_change_is_coordinate_proven_table_body_duplicate(
+            change,
+            [table_change, visual_group],
+        )
+
+        self.assertFalse(single)
+        self.assertEqual(single, duplicated)
+
     def test_empty_cell_dash_does_not_understate_structured_row_occurrences(self) -> None:
         """A display dash is not an occurrence identity when fields move in serialization."""
 
         snippet = "Step size 0.02 —"
         structured_rows = " ".join(
-            "Parameter=Step size | Symbol= | Value=0.02 | Units=—"
+            "Parameter=Coefficient — Minimum value\\nMaximum value\\nStep size | "
+            "Symbol=c(0) | Value=0\\n0\\n0.02 | Units=—\\n—\\n—"
             for _index in range(3)
         )
 
