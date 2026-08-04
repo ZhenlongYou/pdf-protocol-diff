@@ -2616,6 +2616,32 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertEqual([], cleaned)
 
+    def test_greek_symbol_remains_part_of_table_occurrence_identity(self) -> None:
+        """Ignoring an empty-cell dash must not erase a Greek technical symbol."""
+
+        snippet = "Step size α —"
+        table_text = "Step size α — Step size β — Step size γ —"
+
+        cleaned = reporting_module._reader_filter_evidenced_table_fragments(
+            [snippet, snippet, snippet],
+            table_text,
+        )
+
+        self.assertEqual([snippet, snippet], cleaned)
+
+    def test_comparison_operator_remains_part_of_table_occurrence_identity(self) -> None:
+        """Limits with ≤, ≥ and = are different physical row occurrences."""
+
+        snippet = "Step size ≤ —"
+        table_text = "Step size ≤ — Step size ≥ — Step size = —"
+
+        cleaned = reporting_module._reader_filter_evidenced_table_fragments(
+            [snippet, snippet, snippet],
+            table_text,
+        )
+
+        self.assertEqual([snippet, snippet], cleaned)
+
     def test_tiny_formula_between_table_rows_is_not_treated_as_a_bridge(self) -> None:
         """A one-letter formula remains visible even when adjacent rows are table-backed."""
 

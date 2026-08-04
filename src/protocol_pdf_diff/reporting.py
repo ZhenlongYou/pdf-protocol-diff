@@ -6472,7 +6472,7 @@ def _reader_evidenced_fragment_flags(
             demand = Counter(
                 token.casefold()
                 for token in _reader_table_body_tokens(snippets[index])
-                if re.search(r"[A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]", token)
+                if token != "—"
             )
             available = _reader_table_text_index(bound_text).token_counts
             token_capacity = min(
