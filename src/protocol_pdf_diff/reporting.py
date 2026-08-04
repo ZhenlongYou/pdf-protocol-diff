@@ -6114,32 +6114,58 @@ def _reader_change_without_evidenced_table_body_fragments(
         _reader_table_group_audit_text(evidence.new_tables)
         for evidence in eligible_evidence
     )
+    old_table_text_by_page = _reader_table_text_by_page(
+        table
+        for evidence in eligible_evidence
+        for table in evidence.old_tables
+    )
+    new_table_text_by_page = _reader_table_text_by_page(
+        table
+        for evidence in eligible_evidence
+        for table in evidence.new_tables
+    )
     # 可见列表和完整审计列表分别过滤，之后重算真正仍未展示的读者片段数。
     removed = _reader_filter_evidenced_table_fragments(
         change.removed_snippets,
         old_table_text,
+        section=change.old_section,
+        table_text_by_page=old_table_text_by_page,
     )
     added = _reader_filter_evidenced_table_fragments(
         change.added_snippets,
         new_table_text,
+        section=change.new_section,
+        table_text_by_page=new_table_text_by_page,
     )
     replaced = _reader_filter_evidenced_table_pairs(
         change.replaced_snippets,
         old_table_text=old_table_text,
         new_table_text=new_table_text,
+        old_section=change.old_section,
+        new_section=change.new_section,
+        old_table_text_by_page=old_table_text_by_page,
+        new_table_text_by_page=new_table_text_by_page,
     )
     audit_removed = _reader_filter_evidenced_table_fragments(
         _audit_removed_snippets(change),
         old_table_text,
+        section=change.old_section,
+        table_text_by_page=old_table_text_by_page,
     )
     audit_added = _reader_filter_evidenced_table_fragments(
         _audit_added_snippets(change),
         new_table_text,
+        section=change.new_section,
+        table_text_by_page=new_table_text_by_page,
     )
     audit_replaced = _reader_filter_evidenced_table_pairs(
         _audit_replaced_snippets(change),
         old_table_text=old_table_text,
         new_table_text=new_table_text,
+        old_section=change.old_section,
+        new_section=change.new_section,
+        old_table_text_by_page=old_table_text_by_page,
+        new_table_text_by_page=new_table_text_by_page,
     )
     # 原先被表格噪声挤出展示上限的正常正文，要从完整 occurrence 中补回原有展示容量。
     if change.audit_removed_snippets is not None:
@@ -6160,6 +6186,21 @@ def _reader_change_without_evidenced_table_body_fragments(
             audit_replaced,
             limit=len(change.replaced_snippets),
         )
+    # 原比较器的展示上限跨 added/removed/replaced 共用；某一类表格噪声释放的
+    # 槽位也必须能补回另一类高价值正文，不能继续显示虚假的 omitted 数量。
+    removed, added, replaced = _reader_refill_across_change_kinds(
+        removed=removed,
+        added=added,
+        replaced=replaced,
+        audit_removed=audit_removed,
+        audit_added=audit_added,
+        audit_replaced=audit_replaced,
+        limit=(
+            len(change.removed_snippets)
+            + len(change.added_snippets)
+            + len(change.replaced_snippets)
+        ),
+    )
     # 新版比较器提供三份完整 occurrence 列表时，可安全去掉仅由已隐藏表格行造成的“未展示”提示。
     if all(
         audit is not None
@@ -6232,27 +6273,225 @@ def _reader_refill_visible_occurrences(
     return selected
 
 
+def _reader_refill_across_change_kinds(
+    *,
+    removed: list[str],
+    added: list[str],
+    replaced: list[SnippetPair],
+    audit_removed: list[str],
+    audit_added: list[str],
+    audit_replaced: list[SnippetPair],
+    limit: int,
+) -> tuple[list[str], list[str], list[SnippetPair]]:
+    """Use reader capacity released by one delta kind for another kind."""
+
+    remaining = max(0, limit - len(removed) - len(added) - len(replaced))
+    if remaining == 0:
+        return removed, added, replaced
+
+    def append_missing(
+        selected: list[str] | list[SnippetPair],
+        audit: list[str] | list[SnippetPair],
+    ) -> None:
+        nonlocal remaining
+        selected_counts = Counter(selected)
+        audit_counts = Counter(audit)
+        for item in audit:
+            if remaining == 0:
+                break
+            if selected_counts[item] >= audit_counts[item]:
+                continue
+            selected.append(item)
+            selected_counts[item] += 1
+            remaining -= 1
+
+    # 替换同时提供旧值和新值，信息密度最高；其后按新增、删除补足剩余槽位。
+    append_missing(replaced, audit_replaced)
+    append_missing(added, audit_added)
+    append_missing(removed, audit_removed)
+    return removed, added, replaced
+
+
+def _reader_table_text_by_page(tables: Iterable[TableVisual]) -> dict[int, str]:
+    """Group losslessly serialized table evidence by its physical PDF page."""
+
+    parts: dict[int, list[str]] = {}
+    for table in tables:
+        parts.setdefault(table.page_number, []).append(
+            _reader_table_group_audit_text((table,))
+        )
+    return {
+        page_number: " ".join(part for part in page_parts if compact_inline(part))
+        for page_number, page_parts in parts.items()
+    }
+
+
+def _reader_table_text_for_snippet(
+    snippet: str,
+    *,
+    section: Section | None,
+    table_text: str,
+    table_text_by_page: dict[int, str] | None,
+) -> str:
+    """Bind one snippet to same-page table evidence before allowing suppression."""
+
+    if section is None or table_text_by_page is None:
+        return table_text
+    if not table_text_by_page:
+        return ""
+    if not section.page_bodies:
+        # Legacy/synthetic single-page sections have an unambiguous page; a
+        # multi-page section without page provenance must fail closed.
+        if section.start_page != section.end_page:
+            return ""
+        return table_text_by_page.get(section.start_page, "")
+
+    compact = compact_inline(snippet).casefold()
+    if not compact:
+        return ""
+    page_bodies = {
+        page_number: compact_inline(body).casefold()
+        for page_number, body in section.page_bodies
+    }
+    occurrence_pages = {
+        page_number
+        for page_number, body in page_bodies.items()
+        if compact in body
+    }
+    if not occurrence_pages:
+        # Long review units may be rewrapped or symbol-normalized after page
+        # extraction.  A high same-page token coverage can recover that page,
+        # while the all-occurrences check below still rejects remote ambiguity.
+        snippet_counts = Counter(
+            token.casefold() for token in _reader_table_body_tokens(snippet)
+        )
+        required = sum(snippet_counts.values())
+        if required >= 8:
+            occurrence_pages = {
+                page_number
+                for page_number, body in page_bodies.items()
+                if sum(
+                    (
+                        snippet_counts
+                        & _reader_table_text_index(body).token_counts
+                    ).values()
+                )
+                / required
+                >= 0.85
+            }
+    if not occurrence_pages:
+        # A review unit can straddle one physical page break; bind it only when
+        # no single page already contains it and both contributing pages carry
+        # table evidence.
+        page_numbers = sorted(page_bodies)
+        for left_page, right_page in zip(page_numbers, page_numbers[1:]):
+            if right_page != left_page + 1:
+                continue
+            if compact in f"{page_bodies[left_page]} {page_bodies[right_page]}":
+                occurrence_pages.update((left_page, right_page))
+    evidence_pages = set(table_text_by_page)
+    if not occurrence_pages or not occurrence_pages <= evidence_pages:
+        return ""  # 同文还出现在远处非表格页时，无法证明当前 occurrence 的来源。
+    return " ".join(
+        table_text_by_page[page_number]
+        for page_number in sorted(occurrence_pages)
+        if table_text_by_page.get(page_number)
+    )
+
+
+def _reader_evidenced_fragment_flags(
+    snippets: list[str],
+    *,
+    section: Section | None,
+    table_text: str,
+    table_text_by_page: dict[int, str] | None,
+) -> tuple[list[bool], list[str]]:
+    """Prove fragments and consume duplicate text occurrences conservatively."""
+
+    bound_texts = [
+        _reader_table_text_for_snippet(
+            snippet,
+            section=section,
+            table_text=table_text,
+            table_text_by_page=table_text_by_page,
+        )
+        for snippet in snippets
+    ]
+    candidates = [
+        bool(bound_text)
+        and _reader_snippet_is_evidenced_table_fragment(snippet, bound_text)
+        for snippet, bound_text in zip(snippets, bound_texts)
+    ]
+    keys = [compact_inline(snippet).casefold() for snippet in snippets]
+    multiplicity = Counter(
+        key for key, candidate in zip(keys, candidates) if candidate and key
+    )
+    capacities: dict[tuple[str, str], int] = {}
+    used: Counter[tuple[str, str]] = Counter()
+    flags: list[bool] = []
+    for index, (candidate, key, bound_text) in enumerate(
+        zip(candidates, keys, bound_texts)
+    ):
+        if not candidate or not key:
+            flags.append(False)
+            continue
+        budget_key = (compact_inline(bound_text).casefold(), key)
+        if multiplicity[key] > 1 and budget_key not in capacities:
+            exact_count = budget_key[0].count(key)
+            # Structured rows insert `=` and move values into another field,
+            # so literal counting can understate a short row fragment.  The
+            # exact token multiset supplies the remaining occurrence budget.
+            demand = Counter(
+                token.casefold()
+                for token in _reader_table_body_tokens(snippets[index])
+            )
+            available = _reader_table_text_index(bound_text).token_counts
+            token_capacity = min(
+                (available[token] // count for token, count in demand.items()),
+                default=0,
+            )
+            capacities[budget_key] = max(1, exact_count, token_capacity)
+        capacity = capacities.get(budget_key, 1)
+        if multiplicity[key] > 1 and used[budget_key] >= capacity:
+            flags.append(False)
+            continue
+        used[budget_key] += 1
+        flags.append(True)
+    return flags, bound_texts
+
+
 def _reader_filter_evidenced_table_fragments(
     snippets: list[str],
     table_text: str,
+    *,
+    section: Section | None = None,
+    table_text_by_page: dict[int, str] | None = None,
 ) -> list[str]:
-    """Drop covered table fragments while preserving prose and tiny orphan text."""
+    """Drop covered table text while preserving a readable suffix from the same snippet."""
 
     # 先对完整有序列表做强证据判定，短桥接标签只能依赖相邻两条已证明表格行。
-    strongly_covered = [
-        _reader_snippet_is_evidenced_table_fragment(snippet, table_text)
-        for snippet in snippets
-    ]
+    strongly_covered, bound_texts = _reader_evidenced_fragment_flags(
+        snippets,
+        section=section,
+        table_text=table_text,
+        table_text_by_page=table_text_by_page,
+    )
     kept: list[str] = []
     for index, snippet in enumerate(snippets):
         if strongly_covered[index]:
+            # PDF extractors can concatenate a long table body and the following
+            # normative sentence.  Keep only that readable suffix instead of
+            # deleting the whole occurrence or restoring the table wall.
+            prose_tail = _reader_visible_prose_tail(snippet)
+            if prose_tail:
+                kept.append(prose_tail)
             continue
         # `DC`/`DC2` 之类一两个词本身不可授权删除；夹在两个已覆盖表格行之间时才视为拆行残片。
         if (
             0 < index < len(snippets) - 1
             and strongly_covered[index - 1]
             and strongly_covered[index + 1]
-            and _reader_tiny_table_bridge_is_covered(snippet, table_text)
+            and _reader_tiny_table_bridge_is_covered(snippet, bound_texts[index])
         ):
             continue
         kept.append(snippet)
@@ -6264,18 +6503,41 @@ def _reader_filter_evidenced_table_pairs(
     *,
     old_table_text: str,
     new_table_text: str,
+    old_section: Section | None = None,
+    new_section: Section | None = None,
+    old_table_text_by_page: dict[int, str] | None = None,
+    new_table_text_by_page: dict[int, str] | None = None,
 ) -> list[SnippetPair]:
     """Drop a replacement only when both complete sides are table-backed."""
 
-    # 任一侧仍含未证明正文时保留整对，避免把真实术语或限值修改拆丢。
-    return [
-        pair
-        for pair in pairs
-        if not (
-            _reader_snippet_is_evidenced_table_fragment(pair.old, old_table_text)
-            and _reader_snippet_is_evidenced_table_fragment(pair.new, new_table_text)
-        )
-    ]
+    old_flags, _old_bound_texts = _reader_evidenced_fragment_flags(
+        [pair.old for pair in pairs],
+        section=old_section,
+        table_text=old_table_text,
+        table_text_by_page=old_table_text_by_page,
+    )
+    new_flags, _new_bound_texts = _reader_evidenced_fragment_flags(
+        [pair.new for pair in pairs],
+        section=new_section,
+        table_text=new_table_text,
+        table_text_by_page=new_table_text_by_page,
+    )
+    kept: list[SnippetPair] = []
+    for pair, old_covered, new_covered in zip(pairs, old_flags, new_flags):
+        # 任一侧仍含未证明正文时保留整对，避免把真实术语或限值修改拆丢。
+        if not (old_covered and new_covered):
+            kept.append(pair)
+            continue
+        old_tail = _reader_visible_prose_tail(pair.old)
+        new_tail = _reader_visible_prose_tail(pair.new)
+        if old_tail and new_tail:
+            if compact_inline(old_tail) != compact_inline(new_tail):
+                kept.append(SnippetPair(old_tail, new_tail))
+            continue
+        if old_tail or new_tail:
+            # 不制造 `symbol=<empty>` 一类单侧替换；无法对称裁剪时保留原始事实。
+            kept.append(pair)
+    return kept
 
 
 def _reader_snippet_is_evidenced_table_fragment(
@@ -6285,7 +6547,8 @@ def _reader_snippet_is_evidenced_table_fragment(
     """Require exact-token table coverage plus a layout/row-shaped fragment."""
 
     compact = compact_inline(snippet)
-    if not compact or not compact_inline(table_text):
+    table_index = _reader_table_text_index(table_text)
+    if not compact or not table_index.compact:
         return False
     collapse_kind = _reader_snippet_collapse_kind(compact)
     # 可读规范句即使出现在表格附近也继续展示；长线性化表体由 layout 强证据单独处理。
@@ -6295,13 +6558,10 @@ def _reader_snippet_is_evidenced_table_fragment(
     snippet_tokens = [
         token.casefold() for token in _reader_table_body_tokens(compact)
     ]
-    table_tokens = [
-        token.casefold() for token in _reader_table_body_tokens(table_text)
-    ]
-    if not snippet_tokens or not table_tokens:
+    if not snippet_tokens or not table_index.token_counts:
         return False
     shared_count = sum(
-        (Counter(snippet_tokens) & Counter(table_tokens)).values()
+        (Counter(snippet_tokens) & table_index.token_counts).values()
     )
     coverage = shared_count / len(snippet_tokens)
     if collapse_kind == "layout" and len(compact) >= _READER_LAYOUT_SNIPPET_MIN_CHARS:
@@ -6329,9 +6589,32 @@ def _reader_snippet_is_evidenced_table_fragment(
         and shared_count >= 3
         and row_shape_proven
         and (
-            compact.casefold() in compact_inline(table_text).casefold()
+            compact.casefold() in table_index.compact_casefold
             or coverage >= 0.75
         )
+    )
+
+
+@dataclass(frozen=True)
+class _ReaderTableTextIndex:
+    """Cached normalization for one immutable serialized table evidence string."""
+
+    compact: str
+    compact_casefold: str
+    token_counts: Counter[str]
+
+
+@lru_cache(maxsize=256)
+def _reader_table_text_index(table_text: str) -> _ReaderTableTextIndex:
+    """Tokenize a table body once even when visible and audit snippets reuse it."""
+
+    compact = compact_inline(table_text)
+    return _ReaderTableTextIndex(
+        compact=compact,
+        compact_casefold=compact.casefold(),
+        token_counts=Counter(
+            token.casefold() for token in _reader_table_body_tokens(table_text)
+        ),
     )
 
 
@@ -6341,12 +6624,17 @@ def _reader_tiny_table_bridge_is_covered(snippet: str, table_text: str) -> bool:
     tokens = [token.casefold() for token in _reader_table_body_tokens(snippet)]
     if not 1 <= len(tokens) <= 2:
         return False
+    compact = compact_inline(snippet)
+    # 单字母通常是独立公式/变量，不能因恰好夹在表格片段间而删除；这里只
+    # 接受 DC、DC2、R0 一类至少两字符且带大写/数字形态的行标签。
+    if not re.fullmatch(r"(?:[A-Z][A-Za-z0-9_]{1,15})(?:\s+[A-Z][A-Za-z0-9_]{1,15})?", compact):
+        return False
     table_counts = Counter(
         token.casefold() for token in _reader_table_body_tokens(table_text)
     )
     return bool(
         not (Counter(tokens) - table_counts)
-        or compact_inline(snippet).casefold() in compact_inline(table_text).casefold()
+        or compact.casefold() in compact_inline(table_text).casefold()
     )
 
 

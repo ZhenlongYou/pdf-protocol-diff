@@ -2399,6 +2399,209 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual([table_wall], cleaned.removed_snippets)
 
+    def test_table_wall_filter_preserves_readable_normative_suffixes(self) -> None:
+        """A table-heavy snippet may be shortened, but its changed prose tail must survive."""
+
+        table_body = (
+            "Parameter Symbol Value Units Conditions Index Transition Threshold Level Label "
+            "Description Reference First Last "
+            + " ".join(str(value) for value in range(1, 101))
+        )
+        old_tail = "The receiver shall remain disabled during link training."
+        new_tail = "The receiver shall remain enabled during link training."
+        old_section = Section(
+            "old-table-tail",
+            "9 Table with prose tail",
+            "Table with prose tail",
+            1,
+            ("9 Table with prose tail",),
+            ("9",),
+            10,
+            10,
+            f"{table_body} {old_tail}",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-table-tail",
+            start_page=11,
+            end_page=11,
+            body=f"{table_body} {new_tail}",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            removed_snippets=[f"{table_body} {old_tail}"],
+            added_snippets=[f"{table_body} {new_tail}"],
+            audit_removed_snippets=[f"{table_body} {old_tail}"],
+            audit_added_snippets=[f"{table_body} {new_tail}"],
+            audit_replaced_snippets=[],
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. Coordinate-backed values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [table_body],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        new_table = replace(old_table, page_number=11)
+        evidence = TableChange("modified", (old_table,), (new_table,), 1.0, False, ())
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([old_tail], cleaned.removed_snippets)
+        self.assertEqual([new_tail], cleaned.added_snippets)
+        self.assertEqual([old_tail], cleaned.audit_removed_snippets)
+        self.assertEqual([new_tail], cleaned.audit_added_snippets)
+
+    def test_table_fragment_filter_consumes_duplicate_text_occurrences(self) -> None:
+        """One visible table row cannot authorize deletion of two equal occurrences."""
+
+        row = "Minimum value 0 —"
+        cleaned = reporting_module._reader_filter_evidenced_table_fragments(
+            [row, row],
+            f"Parameter Symbol Value Units {row}",
+        )
+
+        self.assertEqual([row], cleaned)
+
+    def test_tiny_formula_between_table_rows_is_not_treated_as_a_bridge(self) -> None:
+        """A one-letter formula remains visible even when adjacent rows are table-backed."""
+
+        snippets = ["Parameter Symbol Value Units", "f", "Minimum value 0 UI"]
+        table_text = "Parameter Symbol Value Units f Minimum value 0 UI"
+
+        cleaned = reporting_module._reader_filter_evidenced_table_fragments(
+            snippets,
+            table_text,
+        )
+
+        self.assertEqual(["f"], cleaned)
+
+    def test_remote_table_page_cannot_hide_same_text_in_long_section(self) -> None:
+        """Same text on a non-table page makes the occurrence provenance ambiguous."""
+
+        row = "Minimum value 0 —"
+        old_section = Section(
+            "old-remote-row",
+            "9 Long section",
+            "Long section",
+            1,
+            ("9 Long section",),
+            ("9",),
+            1,
+            20,
+            row,
+            page_bodies=((1, row), (20, f"Parameter Symbol Value Units {row}")),
+        )
+        new_section = replace(old_section, section_id="new-remote-row")
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            removed_snippets=[row],
+        )
+        old_table = TableVisual(
+            20,
+            1,
+            "Table 9-1. Remote values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            [f"Parameter Symbol Value Units {row}"],
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        evidence = TableChange(
+            "modified",
+            (old_table,),
+            (old_table,),
+            1.0,
+            False,
+            (),
+        )
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([row], cleaned.removed_snippets)
+
+    def test_table_filter_refills_reader_capacity_across_delta_kinds(self) -> None:
+        """Removed table noise yields its slots to normal replacements, not omitted text."""
+
+        table_rows = ["Parameter Symbol Value Units", "Minimum value 0 —"]
+        old_section = Section(
+            "old-cross-kind-refill",
+            "9 Mixed deltas",
+            "Mixed deltas",
+            1,
+            ("9 Mixed deltas",),
+            ("9",),
+            10,
+            10,
+            " ".join(table_rows),
+        )
+        new_section = replace(old_section, section_id="new-cross-kind-refill", start_page=11, end_page=11)
+        pairs = [
+            SnippetPair(f"Old requirement {index} shall apply.", f"New requirement {index} shall apply.")
+            for index in range(1, 4)
+        ]
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            added_snippets=table_rows,
+            replaced_snippets=pairs[:1],
+            omitted_snippet_count=2,
+            audit_added_snippets=table_rows,
+            audit_removed_snippets=[],
+            audit_replaced_snippets=pairs,
+        )
+        old_table = TableVisual(
+            10,
+            1,
+            "Table 9-1. Refill values",
+            (10.0, 20.0, 500.0, 700.0),
+            "",
+            table_rows,
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        new_table = replace(old_table, page_number=11)
+        evidence = TableChange("modified", (old_table,), (new_table,), 1.0, False, ())
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([], cleaned.added_snippets)
+        self.assertEqual(pairs, cleaned.replaced_snippets)
+        self.assertEqual(0, cleaned.omitted_snippet_count)
+
+    def test_table_fragment_filter_reuses_cached_table_token_index(self) -> None:
+        """Repeated snippet checks tokenize one large table body only once."""
+
+        table_text = " ".join(
+            f"Parameter P{index} Symbol S{index} Value {index} Units UI"
+            for index in range(1000)
+        )
+        snippets = [f"Parameter P{index} Symbol S{index} Value {index} Units UI" for index in range(40)]
+        reporting_module._reader_table_text_index.cache_clear()
+
+        reporting_module._reader_filter_evidenced_table_fragments(snippets, table_text)
+        cache_info = reporting_module._reader_table_text_index.cache_info()
+
+        self.assertEqual(1, cache_info.misses)
+        self.assertGreaterEqual(cache_info.hits, len(snippets) - 1)
+
     def test_single_side_section_skips_paired_table_fragment_proof(self) -> None:
         """Added/deleted sections have no paired coordinates and must never hit the proof assert."""
 

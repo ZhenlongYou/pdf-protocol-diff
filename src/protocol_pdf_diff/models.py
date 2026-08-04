@@ -247,6 +247,11 @@ class Section:
     end_page: int
     body: str
     role: str = "technical"
+    page_bodies: tuple[tuple[int, str], ...] = field(
+        default=(),
+        compare=False,
+        repr=False,
+    )  # 报告降噪需把片段绑定回原页；不参与历史 Section 身份与相等性语义。
 
     @property
     def location(self) -> str:

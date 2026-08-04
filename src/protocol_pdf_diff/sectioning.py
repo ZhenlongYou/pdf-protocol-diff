@@ -108,6 +108,7 @@ class _OpenSection:
     start_page: int
     end_page: int
     lines: list[str]
+    page_lines: dict[int, list[str]]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -207,6 +208,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         if heading_candidate != line
                         else []
                     ),  # 结构识别可忽略疑似页边数，但原始标题行仍进入正文比较，防止真实尾数被静默吞掉。
+                    page_lines=(
+                        {page.page_number: [line]}
+                        if heading_candidate != line
+                        else {}
+                    ),
                 )
                 continue
 
@@ -220,9 +226,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     start_page=page.page_number,
                     end_page=page.page_number,
                     lines=[],
+                    page_lines={},
                 )
             current.end_page = page.page_number
             current.lines.append(line)
+            current.page_lines.setdefault(page.page_number, []).append(line)
 
     if current:
         sections.append(_close_section(current, len(sections) + 1))
@@ -782,6 +790,11 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         end_page=open_section.end_page,
         body=body,
         role=_section_role(open_section),
+        page_bodies=tuple(
+            (page_number, "\n".join(lines).strip())
+            for page_number, lines in sorted(open_section.page_lines.items())
+            if any(line.strip() for line in lines)
+        ),
     )
 
 
@@ -837,6 +850,7 @@ def _page_fallback_sections(pages: list[PageText]) -> list[Section]:
                 start_page=page.page_number,
                 end_page=page.page_number,
                 body=body,
+                page_bodies=((page.page_number, body),),
             )
         )
     return sections
