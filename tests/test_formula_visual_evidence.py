@@ -28,9 +28,8 @@ OIF_532_05 = Path("/Users/mac/Documents/文件对比工具/oif2024.532.05.pdf")
 OIF_532_04 = Path("/Users/mac/Documents/文件对比工具/oif2024.532.04.pdf")
 
 
-@unittest.skipUnless(OIF_532_05.is_file(), "本地 OIF 2024.532.05 样本不存在")
 class FormulaVisualEvidenceTests(unittest.TestCase):
-    """公开样本验收公式几何和误截图边界。"""
+    """验收公式报告边界，并在样本存在时补充真实 OIF 检查。"""
 
     def test_formula_fields_do_not_shift_legacy_high_position_arguments(self) -> None:
         """新增公式字段必须追加，不能改变旧 dataclass 位置参数含义。"""
@@ -65,6 +64,7 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         self.assertEqual("legacy-provenance", result.provenance)
         self.assertEqual([], result.formula_changes)
 
+    @unittest.skipUnless(OIF_532_05.is_file(), "本地 OIF 2024.532.05 样本不存在")
     def test_real_532_figure_mcb_label_is_not_a_table_visual(self) -> None:
         """Figure 31-5 内的 MCB 单格线框不能进入表格截图。"""
 
@@ -288,6 +288,74 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         self.assertEqual(2, html.count('class="formula-shot-open"'))
         self.assertIn('id="formula-zoom-dialog"', html)
 
+    def test_html_keeps_formula_unplaced_without_text_or_number_anchor(self) -> None:
+        """同页但没有正文或公式号锚点时，公式必须留在未归属复核区。"""
+
+        # 两个同页新增条款都与公式无关，页码和 added 偏置不能替代真实归属证据。
+        sections = [
+            Section(
+                section_id=f"7.{index}",
+                heading=f"7.{index} Unrelated clause",
+                title="Unrelated clause",
+                level=2,
+                heading_path=("7 Requirements", f"7.{index} Unrelated clause"),
+                number_path=("7", f"7.{index}"),
+                start_page=5,
+                end_page=5,
+                body=f"Unrelated requirement {index}.",
+            )
+            for index in (1, 2)
+        ]
+        formula = FormulaVisual(
+            page_number=5,
+            formula_number="(99-9)",
+            bbox=(10.0, 20.0, 200.0, 40.0),
+            image_data_uri="data:image/jpeg;base64,bm9uZQ==",
+            source_text="x ≥ 123 (99-9)",
+            semantic_text="x ≥ 123",
+            script_count=0,
+            image_dhash="0000000000000000",
+        )
+        result = DiffResult(
+            old_pdf=Path("old.pdf"),
+            new_pdf=Path("new.pdf"),
+            old_sections=[],
+            new_sections=sections,
+            changes=[
+                SectionChange(
+                    "added",
+                    None,
+                    section,
+                    0.0,
+                    added_snippets=[section.body],
+                )
+                for section in sections
+            ],
+            warnings=[],
+            formula_changes=[
+                FormulaChange(
+                    change_type="added",
+                    old_formula=None,
+                    new_formula=formula,
+                    similarity=0.0,
+                    visual_similarity=None,
+                    reason="新版出现新的公式视觉证据。",
+                )
+            ],
+        )
+
+        # 通过公开报告入口验证用户最终看到未归属说明，而不是某个随机正文条款。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertIn('id="unplaced-formulas"', html)
+        self.assertGreater(
+            html.index('id="formula-1"'),
+            html.index('id="unplaced-formulas"'),
+        )
+
+    @unittest.skipUnless(OIF_532_05.is_file(), "本地 OIF 2024.532.05 样本不存在")
     def test_real_532_table_inline_fb_subscript_is_not_moved_after_ghz(self) -> None:
         """Table 31-10 的 ``f_b/2`` 不能被拆成行尾 ``GHz`` 后的孤立 b。"""
 
@@ -318,7 +386,10 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         self.assertGreaterEqual(formula.script_count, 3)
         self.assertTrue(formula.image_data_uri.startswith("data:image/jpeg;base64,"))
 
-    @unittest.skipUnless(OIF_532_04.is_file(), "本地 OIF 2024.532.04 样本不存在")
+    @unittest.skipUnless(
+        OIF_532_04.is_file() and OIF_532_05.is_file(),
+        "本地 OIF 2024.532.04/05 样本不存在",
+    )
     def test_real_532_report_renders_formula_scripts_and_source_crops(self) -> None:
         """真实 532 公式应跟随正文条款，并保留索引、上下标和可放大源裁图。"""
 

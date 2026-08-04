@@ -1360,6 +1360,9 @@ def _formula_owner_index(
             contains_number = int(
                 _section_contains_formula_number(section, formula.formula_number)
             )
+            # 页码只限定候选范围；正文和编号均未命中时必须失败关闭到未归属区。
+            if not contains_formula_text and not contains_number:
+                continue
             preferred_added_owner = int(side == "new" and change.change_type == "added")
             depth = len(section.number_path) or len(section.heading_path)
             page_span = section.end_page - section.start_page
