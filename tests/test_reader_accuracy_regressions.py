@@ -2529,6 +2529,22 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual([row], cleaned.removed_snippets)
 
+    def test_empty_cell_dash_does_not_understate_structured_row_occurrences(self) -> None:
+        """A display dash is not an occurrence identity when fields move in serialization."""
+
+        snippet = "Step size 0.02 —"
+        structured_rows = " ".join(
+            "Parameter=Step size | Symbol= | Value=0.02 | Units=—"
+            for _index in range(3)
+        )
+
+        cleaned = reporting_module._reader_filter_evidenced_table_fragments(
+            [snippet, snippet, snippet],
+            structured_rows,
+        )
+
+        self.assertEqual([], cleaned)
+
     def test_tiny_formula_between_table_rows_is_not_treated_as_a_bridge(self) -> None:
         """A one-letter formula remains visible even when adjacent rows are table-backed."""
 
