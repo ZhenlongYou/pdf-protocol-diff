@@ -1,0 +1,5 @@
+version = 1
+id = "pdf-protocol-diff"
+canonical_path = "codex_projects/pdf_protocol_diff"
+github_host = "github.com"
+github_repository = "ZhenlongYou/pdf-protocol-diff"
