@@ -12,6 +12,9 @@ from argparse import (
     Namespace,  # 构造与 build_desktop.parse_args 等价的无副作用打包参数。
 )
 from pathlib import Path  # 定位项目内 Windows manifest，验证构建命令没有引用临时文件。
+from tkinter import (
+    ttk,
+)  # 读取生产 ttk 样式最终解析出的字体，防止只验证原生 Tk 控件而假绿。
 from unittest import mock  # 只替换 Win32/Tk 创建边界，验证 DPI 调用严格早于第一个窗口。
 
 from build_desktop import (
@@ -227,6 +230,18 @@ class CrossPlatformGuiTests(unittest.TestCase):
             entry_family = str(
                 tkfont.Font(root=root, font=page_entry.cget("font")).actual("family")
             )  # 将 Tk 字体名称解析为系统最终采用的字体族。
+            style = ttk.Style(
+                root
+            )  # 读取生产构造器已配置的真实 ttk 主题，而不是重新拼一套预期值。
+            ttk_families = {
+                style_name: str(
+                    tkfont.Font(
+                        root=root,
+                        font=style.lookup(style_name, "font"),
+                    ).actual("family")
+                )
+                for style_name in ("TLabel", "TEntry", "Primary.TButton")
+            }  # 普通标签、路径输入框和主按钮覆盖三类最显眼的 ttk 控件。
 
             self.assertTrue(
                 app.ui_font
@@ -234,6 +249,14 @@ class CrossPlatformGuiTests(unittest.TestCase):
             self.assertEqual(
                 app.ui_font, entry_family
             )  # 原生页码框不能再独自回退为另一套 Windows 字体。
+            self.assertEqual(
+                {
+                    "TLabel": app.ui_font,
+                    "TEntry": app.ui_font,
+                    "Primary.TButton": app.ui_font,
+                },
+                ttk_families,
+            )  # ttk 样式也必须解析到同一真实字体，不能只让原生 Entry 看起来正确。
         finally:
             root.destroy()  # 始终释放窗口资源，避免后续 GUI 测试复用到已污染的默认根窗口。
 
@@ -284,16 +307,59 @@ class CrossPlatformGuiTests(unittest.TestCase):
                 "760x520+0+0"
             )  # 压缩到响应式下限，确保完整表单高度超过当前视口。
             root.update()  # 让 Canvas 写入最终 scrollregion，并接收后续鼠标滚轮事件。
-            before_scroll = app.content_canvas.yview()  # 记录用户滚动前的可见区比例。
-            root.event_generate(
+            page_entry = next(
+                iter(app.page_entry_widgets.values())
+            )  # 从真实子控件派发事件，覆盖鼠标位于输入框上时的冒泡路径。
+            app.content_canvas.yview_moveto(
+                0.0
+            )  # 每组方向检查从顶部开始，避免前一事件污染边界条件。
+            root.update()
+            before_mousewheel = (
+                app.content_canvas.yview()
+            )  # 记录 Windows/macOS 滚轮前的可见区比例。
+            page_entry.event_generate(
                 "<MouseWheel>", delta=-120
             )  # 模拟 Windows/macOS 向下滚动一格。
             root.update()  # 处理滚轮回调并刷新 Canvas 视口。
-            after_scroll = app.content_canvas.yview()  # 读取滚轮后的可见区比例。
+            after_mousewheel_down = (
+                app.content_canvas.yview()
+            )  # 读取向下滚动后的可见区比例。
+            page_entry.event_generate(
+                "<MouseWheel>", delta=120
+            )  # 正 delta 必须把内容向上移回，不能只验证一个方向。
+            root.update()
+            after_mousewheel_up = (
+                app.content_canvas.yview()
+            )  # 读取反向滚动后的可见区比例。
+
+            app.content_canvas.yview_moveto(0.0)  # Linux/X11 方向检查同样从顶部开始。
+            root.update()
+            before_linux_wheel = (
+                app.content_canvas.yview()
+            )  # 记录 Button-5 派发前的可见区比例。
+            page_entry.event_generate("<Button-5>")  # Linux Button-5 表示内容向下移动。
+            root.update()
+            after_button_5 = (
+                app.content_canvas.yview()
+            )  # 读取 Linux 向下滚动后的可见区比例。
+            page_entry.event_generate("<Button-4>")  # Linux Button-4 表示内容向上移动。
+            root.update()
+            after_button_4 = (
+                app.content_canvas.yview()
+            )  # 读取 Linux 反向滚动后的可见区比例。
 
             self.assertGreater(
-                after_scroll[0], before_scroll[0]
-            )  # 滚轮必须实际向下移动内容，不能只有一根无法使用的滚动条。
+                after_mousewheel_down[0], before_mousewheel[0]
+            )  # Windows/macOS 滚轮必须实际向下移动内容，不能只有一根无法使用的滚动条。
+            self.assertLess(
+                after_mousewheel_up[0], after_mousewheel_down[0]
+            )  # Windows/macOS 反向滚轮必须把内容向上移回。
+            self.assertGreater(
+                after_button_5[0], before_linux_wheel[0]
+            )  # Linux Button-5 必须向下，交换 Button-4/5 方向时本断言会失败。
+            self.assertLess(
+                after_button_4[0], after_button_5[0]
+            )  # Linux Button-4 必须向上，并且事件从子 Entry 也能到达根窗口绑定。
         finally:
             root.destroy()  # 释放真实窗口，避免影响其它 Tk 测试的默认根状态。
 
