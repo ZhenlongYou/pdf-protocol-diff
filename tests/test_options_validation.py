@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math  # 构造 NaN/Inf 边界，确认无效阈值不会静默进入匹配算法。
+import os  # 为 Windows 重定向子进程显式指定 UTF-8，避免中文 stderr 被写成反斜杠转义。
 from pathlib import Path  # 定位当前项目的 src 目录，保证单文件测试也能独立运行。
 import subprocess  # 走真实命令行入口，验证配置错误不会泄露 traceback。
 import sys  # 在导入项目包前显式配置本地 src 路径。
@@ -65,6 +66,10 @@ class AccuracyOptionValidationTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+            env={
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+            },  # Windows 管道不是交互控制台；固定 UTF-8 后断言检查的才是用户消息而非编码副作用。
         )
 
         self.assertEqual(2, completed.returncode)
