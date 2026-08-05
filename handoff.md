@@ -9,7 +9,8 @@
 - target_repository: `ZhenlongYou/pdf-protocol-diff`
 - branch: `codex/split-pdf-protocol-diff-20260805`
 - base_main: `98ae59d2b334b5204e16c444f2c52ddfd2451c48`
-- status: in_progress
+- recorded_commit: `012e2ee003c58285f25fbb585555aeaef1b648df`
+- status: ready
 - real_entrypoint: `python3 gui_app.py --smoke-test`
 
-历史 split commit 的 tree 与父仓项目 tree 完全一致。迁移前 GUI smoke 与 805 项 unittest 通过；下一步从 GitHub 重新 clone 到 canonical 路径并执行独立仓 gate。
+历史 split commit 的 tree 与父仓项目 tree 完全一致。GitHub fresh clone 已进入 canonical 路径，迁移前后 GUI smoke 与 805 项 unittest 均通过；`.venv` 和被忽略的本地数据已恢复；等待最终复审、合入与独立仓 gate。
