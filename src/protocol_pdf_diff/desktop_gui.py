@@ -17,10 +17,12 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from collections.abc import Callable  # 为可注入的 Win32 DPI setter 提供明确调用契约，便于跨平台测试。
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import tkinter as tk
+import tkinter.font as tkfont  # 读取当前 Tcl/Tk 实际可用字体，避免 Windows 回退不存在的 macOS 字体。
 from tkinter import ttk
 
 from .compare import run_diff
@@ -60,6 +62,106 @@ UI_THEME = {
     "disabled_accent": "#4B5B7B",
     "disabled_accent_ink": "#D4DEFA",
 }
+
+
+def select_ui_font(
+    available_families: set[str] | tuple[str, ...],
+    *,
+    default_family: str,
+    platform_name: str | None = None,
+) -> str:
+    """Return the first installed native-looking Chinese UI font for one OS."""
+
+    platform = platform_name or sys.platform  # 测试可传入目标平台，生产环境使用真实操作系统。
+    available = set(available_families)  # 集合查询避免字体列表较长时重复线性扫描。
+    if platform.startswith("win"):
+        candidates = ("Microsoft YaHei UI", "Segoe UI", "Arial")  # Windows 优先保证中文和系统控件字形协调。
+    elif platform == "darwin":
+        candidates = ("PingFang SC", "SF Pro Text", "Helvetica Neue", "Arial")  # macOS 保留当前苹方视觉基线。
+    else:
+        candidates = (
+            "Noto Sans CJK SC",
+            "Noto Sans CJK",
+            "WenQuanYi Micro Hei",
+            "DejaVu Sans",
+        )  # Linux 选择常见 CJK 字体，并保留通用无衬线回退。
+    return next(
+        (family for family in candidates if family in available),
+        default_family,
+    )  # 精简系统没有候选字体时使用 Tk 已解析的默认字体，不返回虚假字体名。
+
+
+def preferred_ui_font(root: tk.Misc) -> str:
+    """Resolve the concrete UI font available to the current Tk interpreter."""
+
+    available = tkfont.families(root)  # 字体可用性由当前显示会话和 Tcl/Tk 解释器共同决定。
+    default_family = str(
+        tkfont.nametofont("TkDefaultFont", root=root).actual("family")
+    )  # Tk 默认字体是候选缺失时最可信的最终回退。
+    return select_ui_font(available, default_family=default_family)  # 统一走可测试的纯字体选择逻辑。
+
+
+def responsive_window_size(
+    screen_width: int,
+    screen_height: int,
+    *,
+    target_width: int,
+    target_height: int,
+    floor_width: int,
+    floor_height: int,
+    margin: int = 80,
+) -> tuple[int, int]:
+    """Keep the initial window inside the logical screen without losing usability."""
+
+    usable_width = max(
+        min(floor_width, screen_width),
+        screen_width - margin,
+    )  # 正常屏幕保留系统边缘空间，极小屏幕则允许窗口降到实际宽度。
+    usable_height = max(
+        min(floor_height, screen_height),
+        screen_height - margin,
+    )  # 高 DPI 后的逻辑高度可能很小，不能坚持固定 700px 导致按钮落到屏幕外。
+    return min(target_width, usable_width), min(
+        target_height,
+        usable_height,
+    )  # 目标尺寸只在当前屏幕容得下时采用。
+
+
+def configure_windows_dpi_awareness(
+    *,
+    platform_name: str | None = None,
+    modern_setter: Callable[[int], object] | None = None,
+) -> str:
+    """Request Windows Per-Monitor V2 scaling before the first Tk window exists."""
+
+    platform = platform_name or sys.platform  # 测试注入目标平台，生产使用当前解释器平台。
+    if not platform.startswith("win"):
+        return "not-applicable"  # macOS/Linux 不加载 Win32 DLL，继续使用各自 Tk 缩放机制。
+    setter = modern_setter  # 注入点让 macOS CI 能验证 Windows 常量和调用时机。
+    if setter is None:
+        try:
+            import ctypes  # 仅 Windows 启动路径需要加载系统 DLL，避免其它平台产生无意义依赖。
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)  # 保留 Win32 last-error 供现场排错。
+            setter = user32.SetProcessDpiAwarenessContext  # Windows 10 1703+ 支持 Per-Monitor V2。
+            setter.argtypes = [ctypes.c_void_p]  # DPI awareness context 是 Win32 句柄值而不是普通整数。
+            setter.restype = ctypes.c_bool  # BOOL 返回值转换为 Python 布尔语义。
+        except (AttributeError, OSError):
+            return "unsupported"  # 旧 Windows 没有现代 API 时由打包 manifest 的兼容字段接管。
+    try:
+        applied = bool(setter(-4))  # -4 是 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2。
+    except (OSError, TypeError, ValueError):
+        return "unsupported"  # API 不可用时不阻断 GUI，仍允许系统或 manifest 处理缩放。
+    if applied:
+        return "per-monitor-v2"  # 成功必须发生在任何 Tk 根窗口创建之前。
+    return "already-configured"  # manifest 或先前调用已设置时 Win32 会拒绝重复修改，属于可接受状态。
+
+
+def create_tk_root() -> tk.Tk:
+    """Create the first Tk root only after process DPI awareness is configured."""
+
+    configure_windows_dpi_awareness()  # 微软要求在任何 HWND/Tk 窗口创建前设置进程 DPI awareness。
+    return tk.Tk()  # 所有生产与 smoke-test 入口共用此工厂，避免某条路径遗漏调用时机。
 
 
 def default_output_dir() -> Path:
@@ -151,7 +253,23 @@ class ProtocolDiffDesktopApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("协议 PDF 差异对比工具")
-        self.root.minsize(980, 700)
+        self.initial_window_size = responsive_window_size(
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+            target_width=980,
+            target_height=700,
+            floor_width=760,
+            floor_height=520,
+        )  # 保留 macOS 既有 980×700 观感，Windows 高 DPI 逻辑屏较小时自动收进屏幕。
+        self.root.geometry(
+            f"{self.initial_window_size[0]}x{self.initial_window_size[1]}"
+        )  # 显式初始尺寸消除不同 Tk 平台按请求尺寸推导出的启动差异。
+        self.minimum_window_size = (
+            min(760, self.initial_window_size[0]),
+            min(520, self.initial_window_size[1]),
+        )  # 小屏允许降到真实可用尺寸，内部滚动区负责保证全部操作仍可到达。
+        self.root.minsize(*self.minimum_window_size)  # 最小尺寸与当前逻辑屏幕绑定，不再固定逼出屏幕边界。
+        self.ui_font = preferred_ui_font(self.root)  # 当前系统真实字体只解析一次，所有 Tk/ttk 控件共用同一结果。
 
         self.old_pdf_var = tk.StringVar()
         self.new_pdf_var = tk.StringVar()
@@ -183,9 +301,10 @@ class ProtocolDiffDesktopApp:
             # 固定控件渲染，避免不同系统主题改变输入框、边框和禁用态的层级。
             style.theme_use("clam")
         self.root.configure(background=UI_THEME["canvas"])
+        self.root.option_add("*Font", (self.ui_font, 12))  # 覆盖原生 Tk 控件，避免页码框在 Windows 单独回退字体。
         style.configure(
             ".",
-            font=("PingFang SC", 12),
+            font=(self.ui_font, 12),
             background=UI_THEME["canvas"],
             foreground=UI_THEME["secondary_ink"],
         )
@@ -196,13 +315,13 @@ class ProtocolDiffDesktopApp:
             "Title.TLabel",
             background=UI_THEME["canvas"],
             foreground=UI_THEME["ink"],
-            font=("PingFang SC", 22, "bold"),
+            font=(self.ui_font, 22, "bold"),
         )
         style.configure(
             "Status.TLabel",
             background=UI_THEME["canvas"],
             foreground=UI_THEME["muted"],
-            font=("PingFang SC", 12),
+            font=(self.ui_font, 12),
         )
         style.configure(
             "SectionBody.TFrame",
@@ -212,7 +331,7 @@ class ProtocolDiffDesktopApp:
             "SectionTitle.TLabel",
             background=UI_THEME["surface_raised"],
             foreground=UI_THEME["ink"],
-            font=("PingFang SC", 12, "bold"),
+            font=(self.ui_font, 12, "bold"),
         )
         style.configure(
             "TEntry",
@@ -260,7 +379,7 @@ class ProtocolDiffDesktopApp:
             lightcolor=UI_THEME["browse_button_border"],
             darkcolor=UI_THEME["browse_button_border"],
             relief="flat",
-            font=("PingFang SC", 12, "bold"),
+            font=(self.ui_font, 12, "bold"),
             padding=(14, 7),
         )
         style.map(
@@ -282,7 +401,7 @@ class ProtocolDiffDesktopApp:
             lightcolor=UI_THEME["accent"],
             darkcolor=UI_THEME["accent"],
             relief="flat",
-            font=("PingFang SC", 12, "bold"),
+            font=(self.ui_font, 12, "bold"),
             padding=(16, 8),
         )
         style.map(
@@ -313,35 +432,83 @@ class ProtocolDiffDesktopApp:
             bordercolor=UI_THEME["accent_soft"],
         )
         style.configure(
+            "Dark.Vertical.TScrollbar",
+            background=UI_THEME["surface_raised"],
+            troughcolor=UI_THEME["canvas"],
+            bordercolor=UI_THEME["section_border"],
+            lightcolor=UI_THEME["surface_raised"],
+            darkcolor=UI_THEME["surface_raised"],
+            arrowcolor=UI_THEME["muted"],
+            relief="flat",
+        )  # 滚动条使用同一深色主题，避免 Windows 原生亮色轨道破坏整体层级。
+        style.map(
+            "Dark.Vertical.TScrollbar",
+            background=[("pressed", UI_THEME["accent_active"]), ("active", UI_THEME["button_hover"])],
+            arrowcolor=[("pressed", UI_THEME["ink"]), ("active", UI_THEME["secondary_ink"])],
+        )  # 悬停和按下状态保留足够反馈，但不抢过主按钮。
+        style.configure(
             "ResultSummary.TLabel",
             background=UI_THEME["surface_raised"],
             foreground=UI_THEME["ink"],
-            font=("PingFang SC", 12, "bold"),
+            font=(self.ui_font, 12, "bold"),
         )
         style.configure(
             "ResultPath.TLabel",
             background=UI_THEME["surface_raised"],
             foreground=UI_THEME["muted"],
-            font=("PingFang SC", 11),
+            font=(self.ui_font, 11),
         )
 
     def _build_layout(self) -> None:
         """Create the complete form and result controls."""
 
-        container = ttk.Frame(self.root, padding=20)
-        container.grid(row=0, column=0, sticky="nsew")
+        shell = ttk.Frame(self.root)
+        shell.grid(row=0, column=0, sticky="nsew")  # 外壳只负责 Canvas 和滚动条，不改变原有卡片顺序。
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        shell.columnconfigure(0, weight=1)  # 内容视口吸收窗口宽度变化。
+        shell.rowconfigure(0, weight=1)  # 内容视口吸收窗口高度变化。
+        self.content_canvas = tk.Canvas(
+            shell,
+            background=UI_THEME["canvas"],
+            highlightthickness=0,
+            borderwidth=0,
+            yscrollincrement=24,
+        )  # Canvas 提供矮屏滚动能力，同时保持原有深色画布。
+        self.content_canvas.grid(row=0, column=0, sticky="nsew")  # 视口填满除滚动条外的窗口区域。
+        self.content_scrollbar = ttk.Scrollbar(
+            shell,
+            orient="vertical",
+            command=self.content_canvas.yview,
+            style="Dark.Vertical.TScrollbar",
+        )  # 可见滚动条让缩放后的 Windows 用户能发现剩余内容。
+        self.content_scrollbar.grid(row=0, column=1, sticky="ns")  # 滚动条固定在内容区右侧。
+        self.content_canvas.configure(
+            yscrollcommand=self.content_scrollbar.set
+        )  # Canvas 与滚动条双向同步当前位置和滑块比例。
+        container = ttk.Frame(self.content_canvas, padding=20)
+        self.content_container = container  # 保存内容容器，窗口变化时重新计算请求高度。
+        self.content_window = self.content_canvas.create_window(
+            (0, 0),
+            window=container,
+            anchor="nw",
+        )  # 把原有完整表单嵌入可滚动视口，不拆散功能分区。
+        container.bind("<Configure>", self._update_content_scrollregion)  # 卡片尺寸变化后刷新滚动范围。
+        self.content_canvas.bind("<Configure>", self._fit_content_to_viewport)  # 窗口缩放时同步内容宽度和文字换行。
+        self.root.bind("<MouseWheel>", self._on_content_mousewheel, add="+")  # Windows/macOS 滚轮和触控板驱动内容区。
+        self.root.bind("<Button-4>", self._on_content_mousewheel, add="+")  # Linux/X11 向上滚轮使用 Button-4。
+        self.root.bind("<Button-5>", self._on_content_mousewheel, add="+")  # Linux/X11 向下滚轮使用 Button-5。
         container.columnconfigure(0, weight=1)
 
         ttk.Label(container, text="协议 PDF 差异对比工具", style="Title.TLabel").grid(
             row=0, column=0, sticky="w"
         )
-        ttk.Label(
+        self.subtitle_label = ttk.Label(
             container,
             text="选择两份协议 PDF，设置可选页码范围，生成 HTML / TXT / CSV / JSON 差异报告。",
             style="Status.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(6, 18))
+        )  # 保存副标题引用，窗口变窄时动态调整换行宽度。
+        self.subtitle_label.grid(row=1, column=0, sticky="w", pady=(6, 18))  # 副标题位置和原界面保持一致。
 
         files_frame = self._create_elevated_section(container, row=2, text="PDF 文件", pady=(0, 14))
         files_frame.columnconfigure(1, weight=1)
@@ -417,12 +584,59 @@ class ProtocolDiffDesktopApp:
         result_frame = self._create_elevated_section(container, row=8, text="结果", pady=(10, 0))
         container.rowconfigure(8, weight=1)
         result_frame.columnconfigure(0, weight=1)
-        ttk.Label(result_frame, textvariable=self.summary_var, style="ResultSummary.TLabel", wraplength=820).grid(
-            row=0, column=0, sticky="w", padx=12, pady=(10, 6)
-        )
-        ttk.Label(result_frame, textvariable=self.report_path_var, style="ResultPath.TLabel", wraplength=820).grid(
-            row=1, column=0, sticky="w", padx=12, pady=(0, 12)
-        )
+        self.result_summary_label = ttk.Label(
+            result_frame,
+            textvariable=self.summary_var,
+            style="ResultSummary.TLabel",
+            wraplength=820,
+        )  # 结果摘要跟随视口宽度换行，避免 Windows 字体较宽时被截断。
+        self.result_summary_label.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))  # 保持原摘要留白。
+        self.result_path_label = ttk.Label(
+            result_frame,
+            textvariable=self.report_path_var,
+            style="ResultPath.TLabel",
+            wraplength=820,
+        )  # 长输出路径同样使用动态换行宽度。
+        self.result_path_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 12))  # 保持原路径留白。
+
+    def _update_content_scrollregion(self, _event: tk.Event | None = None) -> None:
+        """Refresh the scrollable area after any child changes its requested size."""
+
+        bounds = self.content_canvas.bbox("all")  # 读取当前所有 Canvas 子项的实际边界。
+        if bounds is not None:
+            self.content_canvas.configure(scrollregion=bounds)  # 只有存在内容时才写入合法滚动范围。
+
+    def _fit_content_to_viewport(self, event: tk.Event) -> None:
+        """Stretch content to the viewport and update text wrapping responsively."""
+
+        requested_height = self.content_container.winfo_reqheight()  # 完整表单请求高度决定是否需要垂直滚动。
+        self.content_canvas.itemconfigure(
+            self.content_window,
+            width=event.width,
+            height=max(event.height, requested_height),
+        )  # 宽度始终贴合视口，高度至少容纳全部卡片。
+        wrap_width = max(320, event.width - 40)  # 扣除容器左右 padding，保留小屏可读的最小换行宽度。
+        self.subtitle_label.configure(wraplength=wrap_width)  # 副标题不再依赖平台默认文本宽度。
+        result_wrap_width = max(280, wrap_width - 24)  # 结果卡片内部再扣除左右留白。
+        self.result_summary_label.configure(wraplength=result_wrap_width)  # 摘要随窗口宽度重新排版。
+        self.result_path_label.configure(wraplength=result_wrap_width)  # 长路径随窗口宽度重新排版。
+        self._update_content_scrollregion()  # 宽度变化可能改变文字高度，需要立即刷新滚动范围。
+
+    def _on_content_mousewheel(self, event: tk.Event) -> str | None:
+        """Scroll the form with Windows/macOS wheel events and Linux X11 buttons."""
+
+        button_number = getattr(event, "num", None)  # Linux 把滚轮方向编码在 Button-4/5，而非 delta。
+        if button_number == 4:
+            units = -1  # Button-4 表示内容向上移动一格。
+        elif button_number == 5:
+            units = 1  # Button-5 表示内容向下移动一格。
+        else:
+            delta = int(getattr(event, "delta", 0))  # Windows 常见 ±120，macOS 触控板可能返回较小数值。
+            if delta == 0:
+                return None  # 没有方向的合成事件不拦截其它控件行为。
+            units = -max(1, abs(delta) // 120) if delta > 0 else max(1, abs(delta) // 120)  # 统一正值向上、负值向下。
+        self.content_canvas.yview_scroll(units, "units")  # 通过 Canvas 公共滚动接口更新视口和滚动条滑块。
+        return "break"  # 防止同一次滚轮事件继续冒泡并重复滚动。
 
     def _create_elevated_section(
         self,
@@ -512,6 +726,7 @@ class ProtocolDiffDesktopApp:
         entry = tk.Entry(
             parent,  # 原生 Entry 在 macOS 上比 ttk.Entry 的焦点/输入表现更直接。
             textvariable=variable,  # 绑定到对应页码变量，collect_config 会读取这些值。
+            font=(self.ui_font, 12),  # 显式绑定跨平台字体，避免打包 Windows 时使用另一套默认字形。
             width=12,  # 比旧版略宽，避免用户误以为只是窄标签。
             justify="center",  # 页码通常较短，居中显示更像可编辑数字框。
             relief="solid",  # 明确画出边框，减少“不知道哪里能输入”的问题。
@@ -744,8 +959,7 @@ def run_smoke_test() -> None:
     click through the application.
     """
 
-    root = tk.Tk()
-    root.geometry("980x700+0+0")  # 用接近真实首屏的窗口尺寸做控件输入检查。
+    root = create_tk_root()  # 冻结 EXE 自检也必须复现真实启动前的 DPI 配置顺序。
     app = ProtocolDiffDesktopApp(root)
     assert root.title() == "协议 PDF 差异对比工具"
     assert app.output_dir_var.get()
@@ -763,6 +977,11 @@ def run_smoke_test() -> None:
     missing_labels = sorted(required_labels - widget_texts)  # 找出缺失控件，方便构建失败时定位。
     assert not missing_labels, f"桌面界面缺少关键控件: {', '.join(missing_labels)}"  # 缺控件时直接失败。
     assert len(app.file_browse_buttons) == 3  # 旧 PDF、新 PDF、输出目录都必须有选择按钮。
+    assert app.ui_font in set(tkfont.families(root))  # 实际字体必须存在，不能让 Windows 悄悄回退不存在的 PingFang。
+    assert app.initial_window_size[0] <= root.winfo_screenwidth()  # 初始窗口不能超出 DPI 换算后的逻辑屏幕宽度。
+    assert app.initial_window_size[1] <= root.winfo_screenheight()  # 初始窗口不能超出 DPI 换算后的逻辑屏幕高度。
+    assert app.content_canvas.cget("yscrollcommand")  # 缩放后内容超高时必须仍有可用滚动路径。
+    assert app.content_scrollbar.winfo_exists()  # 可发现的滚动条必须进入真实控件树。
     for label, entry in app.page_entry_widgets.items():
         assert entry.winfo_class() == "Entry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
         assert entry.winfo_manager() == "grid", f"{label} 未加入布局"  # 防止控件创建了但没有显示。
@@ -772,6 +991,10 @@ def run_smoke_test() -> None:
         entry.insert(0, "2")  # 用 Tk 的文本插入接口验证控件可写，避免 Windows runner 不派发按键字符。
         root.update_idletasks()  # 处理布局和控件状态更新，确认输入框值已经变化。
         assert entry.get() == "2", f"{label} 无法输入页码"  # 如果 Entry 被错误禁用，这里会暴露。
+        entry_family = str(
+            tkfont.Font(root=root, font=entry.cget("font")).actual("family")
+        )  # 解析控件最终字体，避免只检查配置字符串却仍发生系统回退。
+        assert entry_family == app.ui_font, f"{label} 未使用统一界面字体"  # 原生 Tk 输入框必须与 ttk 文本一致。
     root.destroy()
 
 
@@ -793,7 +1016,7 @@ def collect_widget_texts(widget: tk.Widget) -> set[str]:
 def main() -> int:
     """Launch the desktop application."""
 
-    root = tk.Tk()
+    root = create_tk_root()  # 源码运行与 Windows EXE 使用同一 DPI-aware 根窗口工厂。
     ProtocolDiffDesktopApp(root)
     root.mainloop()
     return 0

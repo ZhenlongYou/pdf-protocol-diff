@@ -30,6 +30,7 @@ if __name__ == "__main__":  # 只有直接执行打包脚本时才替换解释�
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 保留原始打包参数并切到 .venv。
 
 APP_NAME = "ProtocolPdfDiff"
+WINDOWS_DPI_MANIFEST = PROJECT_ROOT / "windows_dpi.manifest"  # Windows EXE 在创建 Tk 窗口前声明 Per-Monitor V2。
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,6 +53,44 @@ def parse_args() -> argparse.Namespace:
         help="Build one executable file instead of the default app/onedir layout.",
     )
     return parser.parse_args()
+
+
+def build_command(
+    args: argparse.Namespace,
+    *,
+    platform_name: str | None = None,
+) -> list[str]:
+    """Return deterministic PyInstaller arguments for the requested platform."""
+
+    target_platform = platform_name or sys.platform  # 测试可生成 Windows/macOS 命令，生产使用当前构建机平台。
+    command = [
+        "--noconfirm",
+        "--clean",
+        "--name",
+        APP_NAME,
+        "--paths",
+        str(PROJECT_ROOT / "src"),
+    ]  # 基础参数在所有目标系统保持一致，确保入口和依赖解析不漂移。
+    if not args.console:
+        command.append("--windowed")  # 默认交付桌面应用，不额外显示终端窗口。
+    if args.onefile:
+        command.append("--onefile")  # Windows 分发继续使用单文件 EXE。
+    if target_platform == "darwin":
+        command.extend(
+            [
+                "--osx-bundle-identifier",
+                "com.rinys.protocolpdfdiff",
+            ]
+        )  # macOS bundle 保留稳定标识符。
+    elif target_platform.startswith("win"):
+        command.extend(
+            [
+                "--manifest",
+                str(WINDOWS_DPI_MANIFEST),
+            ]
+        )  # 微软建议通过应用 manifest 在任何 HWND 创建前确定 DPI awareness。
+    command.append(str(PROJECT_ROOT / "gui_app.py"))  # 唯一冻结入口仍是用户实际双击的 GUI 脚本。
+    return command  # 调用方可直接交给 PyInstaller，也便于测试完整参数。
 
 
 def main() -> int:
@@ -89,27 +128,7 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    command = [
-        "--noconfirm",
-        "--clean",
-        "--name",
-        APP_NAME,
-        "--paths",
-        str(PROJECT_ROOT / "src"),
-    ]
-    if not args.console:
-        command.append("--windowed")
-    if args.onefile:
-        command.append("--onefile")
-    if sys.platform == "darwin":
-        command.extend(
-            [
-                "--osx-bundle-identifier",
-                "com.rinys.protocolpdfdiff",
-            ]
-        )
-
-    command.append(str(PROJECT_ROOT / "gui_app.py"))
+    command = build_command(args)  # 使用可测试的单一命令生成器，避免 Windows/macOS 构建参数分叉漂移。
     PyInstaller.__main__.run(command)
 
     artifact = expected_artifact(args.onefile)

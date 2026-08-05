@@ -280,6 +280,20 @@ python3 gui_app.py
 
 GUI 与命令行复用同一套比较逻辑，生成的报告格式也完全一致。
 
+桌面界面使用跨平台字体探测：Windows 优先采用 `Microsoft YaHei UI` / `Segoe UI`，
+macOS 优先采用 `PingFang SC`，其它系统使用已安装的 CJK 无衬线字体或 Tk 默认字体。
+普通 Tk 控件和 ttk 控件共用同一字体；窗口在高 DPI 或较矮屏幕上会自动缩小，并通过
+深色滚动条保证全部输入和操作仍可到达。可用真实入口执行非交互 GUI 自检：
+
+```bash
+python3 main.py --gui-smoke-test
+python3 gui_app.py --smoke-test
+```
+
+Windows 源码启动会在创建首个 Tk 窗口前请求 Per-Monitor V2；PyInstaller EXE 还会嵌入
+`windows_dpi.manifest`，让 100%、125% 和 150% 缩放使用明确的 DPI awareness，而不是
+交给系统做模糊位图缩放。
+
 ## 打包成无 Python 桌面程序
 
 打包使用 PyInstaller。它不能跨系统编译：macOS 只能构建 macOS app，

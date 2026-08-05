@@ -162,6 +162,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="忽略 PDF 参数，生成并比较内置示例 PDF",
     )
+    parser.add_argument(
+        "--gui-smoke-test",
+        action="store_true",
+        help="构造真实桌面界面并检查跨平台字体、布局和关键控件后退出",
+    )  # 与 TestRecord 的生产自检入口对齐，Windows CI 不需要模拟用户点击。
     return parser.parse_args()
 
 
@@ -194,6 +199,12 @@ def main() -> int:
     """Program entry point used by both PyCharm and command-line runs."""
 
     args = parse_args()
+    if args.gui_smoke_test:
+        from protocol_pdf_diff.desktop_gui import run_smoke_test  # 延迟导入确保先完成项目 .venv 切换。
+
+        run_smoke_test()  # 真实创建字体、Canvas、滚动条和输入控件，不用无界面的假对象替代。
+        print("GUI smoke test passed")  # 稳定标记供 Windows CI、PyCharm 和交付门禁判断成功。
+        return 0  # 自检不需要 PDF 输入，也不得继续进入耗时比较流程。
     try:
         options = DiffOptions(
             min_section_match_similarity=args.min_section_match_similarity,

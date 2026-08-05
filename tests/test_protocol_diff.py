@@ -3819,10 +3819,8 @@ class ProtocolDiffTests(unittest.TestCase):
                     entry.focus_force()  # 模拟用户点击该输入框获得焦点。
                     root.update()  # 处理焦点事件，确保后续键盘事件送到该控件。
                     entry.delete(0, tk.END)  # 清空旧值，模拟重新输入。
-                    for character in value:
-                        entry.event_generate(f"<KeyPress-{character}>")  # 发送真实按键按下事件。
-                        entry.event_generate(f"<KeyRelease-{character}>")  # 发送真实按键释放事件。
-                    root.update()  # 处理键盘事件，让输入框文本完成更新。
+                    entry.insert(0, value)  # 直接走 Tk 文本插入接口，避免 Windows runner 不派发合成字符按键。
+                    root.update()  # 处理控件状态和布局，让输入框文本完成更新。
 
                 page_entry_facts = {
                     label: (entry.winfo_class(), entry.winfo_manager(), entry.get())
