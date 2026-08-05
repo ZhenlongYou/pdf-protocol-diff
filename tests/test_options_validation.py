@@ -65,11 +65,12 @@ class AccuracyOptionValidationTests(unittest.TestCase):
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env={
                 **os.environ,
                 "PYTHONIOENCODING": "utf-8",
-            },  # Windows 管道不是交互控制台；固定 UTF-8 后断言检查的才是用户消息而非编码副作用。
+            },  # Windows 管道不是交互控制台；输出端和父进程解码均固定 UTF-8，避免 cp1252 误解码中文。
         )
 
         self.assertEqual(2, completed.returncode)
