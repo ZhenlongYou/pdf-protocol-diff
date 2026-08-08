@@ -143,6 +143,67 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         self.assertEqual(old_formula, by_type["deleted"].old_formula)
         self.assertEqual(new_formula, by_type["added"].new_formula)
 
+    def test_formula_number_only_change_stays_visual_without_core_technical_change(self) -> None:
+        """公式号顺延保留源截图核对，但不能抬高核心技术变化数量。"""
+
+        # 两侧公式主体、上下标语义和截图指纹保持一致，唯一变化是显示编号。
+        old_formula = FormulaVisual(
+            page_number=10,
+            formula_number="(31-1)",
+            bbox=(10.0, 20.0, 200.0, 40.0),
+            image_data_uri="data:image/jpeg;base64,c2FtZQ==",
+            source_text="SCD11 ≤ -12 dB for f_b / 2 < f (31-1)",
+            semantic_text="SCD11 ≤ -12 dB for f_{b} / 2 < f",
+            script_count=1,
+            image_dhash="0000000000000000",
+        )
+        new_formula = FormulaVisual(
+            **{
+                **old_formula.__dict__,
+                "page_number": 11,
+                "formula_number": "(31-2)",
+            }
+        )
+        # 直接构造比较层已经确认的 formula change，通过公开报告入口检查读者/审计分层。
+        result = DiffResult(
+            old_pdf=Path("old_formula_number.pdf"),
+            new_pdf=Path("new_formula_number.pdf"),
+            old_sections=[],
+            new_sections=[],
+            changes=[],
+            warnings=[],
+            formula_changes=[
+                FormulaChange(
+                    change_type="modified",
+                    old_formula=old_formula,
+                    new_formula=new_formula,
+                    similarity=1.0,
+                    visual_similarity=1.0,
+                    reason="公式主体文字一致，公式编号发生顺延或调整。",
+                )
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            html = outputs["html"].read_text(encoding="utf-8")
+            markdown = outputs["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        # 公式源截图和说明仍可见，而正文核心技术变化保持为零。
+        self.assertIn('id="formula-index"', html)
+        self.assertIn("公式主体文字一致，公式编号发生顺延或调整", markdown)
+        self.assertIn("<strong>0</strong><span>核心技术变化</span>", html)
+        self.assertEqual(1, len(payload["formula_changes"]))
+        self.assertEqual(
+            "(31-1)",
+            payload["formula_changes"][0]["old_formula"]["formula_number"],
+        )
+        self.assertEqual(
+            "(31-2)",
+            payload["formula_changes"][0]["new_formula"]["formula_number"],
+        )
+
     def test_html_embeds_formula_evidence_in_owning_section_card(self) -> None:
         """公式截图应跟随所属正文条款，顶部只留下可跳转的紧凑索引。"""
 

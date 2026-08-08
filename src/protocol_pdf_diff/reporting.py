@@ -9,7 +9,7 @@ import json
 import math
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
@@ -296,6 +296,7 @@ def write_reports(
         new_sections=result.new_sections,
     )  # 读者正文去重需要全部已配对表，包括因内容完全相同而不生成变化卡的表。
     table_changes = _ordered_table_changes(_build_table_changes(result))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
+    # 读者表格只中和完整值中的定位编号，任何其它字符变化仍保留该行。
     reader_table_changes = _reader_table_changes(table_changes)
     reader_table_evidence: list[TableChange | _TableVisualGroup] = [
         *table_changes,
@@ -470,6 +471,10 @@ def _render_markdown(
         "",
     ]
 
+    # 表格截图和行级事实是读者的首要对比证据，必须先于公式索引和长篇技术正文。
+    if table_changes:
+        _append_markdown_table_changes(lines, table_changes)
+
     if result.formula_changes:
         lines.extend(
             [
@@ -519,59 +524,71 @@ def _render_markdown(
         )
         lines.extend([message, ""])
 
-    if table_changes:
-        lines.extend(["## 表格补充证据（变化与复核）", ""])
-        for index, table_change in enumerate(table_changes, start=1):
-            lines.append(f"### T{index}. {_table_change_title(table_change)}")
-            lines.append(f"- 角色: {table_change.role}")
-            lines.append(f"- 类型: {_CHANGE_LABELS.get(table_change.change_type, table_change.change_type)}")
-            lines.append(f"- 旧表: {_table_side_description(table_change.old_tables)}")
-            lines.append(f"- 新表: {_table_side_description(table_change.new_tables)}")
-            if table_change.old_tables and table_change.new_tables:
-                lines.append(f"- 配对相似度: {table_change.similarity:.3f}")
-            if table_change.caption_changed:
-                lines.append("- 表题/表号发生变化；行内容变化另列如下。")
-            for row_change in table_change.row_changes:
-                reader_old_value = _reader_table_inline_text(row_change.old_value)
-                reader_new_value = _reader_table_inline_text(row_change.new_value)
-                difference_hint = _reader_pair_difference_hint(
-                    reader_old_value,
-                    reader_new_value,
-                )
-                item = _reader_table_cell_text(
-                    _reader_table_inline_text(row_change.item),
-                    max_chars=_READER_TABLE_ITEM_MAX_CHARS,
-                )
-                old_value = _reader_table_cell_text(
-                    reader_old_value,
-                    max_chars=_READER_TABLE_VALUE_MAX_CHARS,
-                    difference_hint=difference_hint,
-                )
-                new_value = _reader_table_cell_text(
-                    reader_new_value,
-                    max_chars=_READER_TABLE_VALUE_MAX_CHARS,
-                    difference_hint=difference_hint,
-                )
-                lines.append(
-                    f"- {row_change.change_type}: {item} | "
-                    f"旧 `{old_value}` | 新 `{new_value}`"
-                )
-                if glyph_note := _unverified_pua_mapping_note(
-                    row_change.old_value,
-                    row_change.new_value,
-                    reader_old_text=reader_old_value,
-                    reader_new_text=reader_new_value,
-                    force_reader_equivalent=(
-                        row_change.change_type == "需人工复核"
-                        and _table_row_display_key(reader_old_value)
-                        == _table_row_display_key(reader_new_value)
-                    ),
-                ):
-                    lines.append(f"  - 说明: {glyph_note}")
-            lines.append("")
-
     return reader_safe_glyphs("\n".join(lines))
     # Markdown 及由它派生的 TXT 都是读者界面；JSON/CSV 仍保留原始 PUA 审计值。
+
+
+def _append_markdown_table_changes(
+    lines: list[str],
+    table_changes: list[TableChange],
+) -> None:
+    """把表格截图对应的结构化事实追加到 Markdown 读者报告。"""
+
+    # 标题与 HTML 使用相同文案，便于不同格式之间快速定位同一证据区。
+    lines.extend(["## 表格补充证据（变化与复核）", ""])
+    # 一个循环项对应一张旧/新逻辑表，保持 T 编号与 HTML 导航一致。
+    for index, table_change in enumerate(table_changes, start=1):
+        lines.append(f"### T{index}. {_table_change_title(table_change)}")
+        lines.append(f"- 角色: {table_change.role}")
+        lines.append(f"- 类型: {_CHANGE_LABELS.get(table_change.change_type, table_change.change_type)}")
+        lines.append(f"- 旧表: {_table_side_description(table_change.old_tables)}")
+        lines.append(f"- 新表: {_table_side_description(table_change.new_tables)}")
+        # 双侧均存在时才显示配对分数，单侧新增/删除没有可解释的相似度。
+        if table_change.old_tables and table_change.new_tables:
+            lines.append(f"- 配对相似度: {table_change.similarity:.3f}")
+        # 表题变化与行变化分开说明，避免把编号变化误读成参数变化。
+        if table_change.caption_changed:
+            lines.append("- 表题/表号发生变化；行内容变化另列如下。")
+        # 每个结构化行事实保留旧值、新值和复核类型，数值不会被标题编号过滤覆盖。
+        for row_change in table_change.row_changes:
+            reader_old_value = _reader_table_inline_text(row_change.old_value)
+            reader_new_value = _reader_table_inline_text(row_change.new_value)
+            difference_hint = _reader_pair_difference_hint(
+                reader_old_value,
+                reader_new_value,
+            )
+            item = _reader_table_cell_text(
+                _reader_table_inline_text(row_change.item),
+                max_chars=_READER_TABLE_ITEM_MAX_CHARS,
+            )
+            old_value = _reader_table_cell_text(
+                reader_old_value,
+                max_chars=_READER_TABLE_VALUE_MAX_CHARS,
+                difference_hint=difference_hint,
+            )
+            new_value = _reader_table_cell_text(
+                reader_new_value,
+                max_chars=_READER_TABLE_VALUE_MAX_CHARS,
+                difference_hint=difference_hint,
+            )
+            lines.append(
+                f"- {row_change.change_type}: {item} | "
+                f"旧 `{old_value}` | 新 `{new_value}`"
+            )
+            # 未验证的私用区字符映射必须紧跟该行提示，不能静默伪装成确定文本。
+            if glyph_note := _unverified_pua_mapping_note(
+                row_change.old_value,
+                row_change.new_value,
+                reader_old_text=reader_old_value,
+                reader_new_text=reader_new_value,
+                force_reader_equivalent=(
+                    row_change.change_type == "需人工复核"
+                    and _table_row_display_key(reader_old_value)
+                    == _table_row_display_key(reader_new_value)
+                ),
+            ):
+                lines.append(f"  - 说明: {glyph_note}")
+        lines.append("")
 
 
 def _append_markdown_changes(
@@ -724,10 +741,12 @@ def _render_html(
         for index, change in enumerate(table_changes, start=1)
     )
     nav_parts: list[str] = []
-    if technical_nav_items:
-        nav_parts.extend(['<div class="nav-title">技术正文变化与复核</div>', technical_nav_items])
+    # 表格证据是审阅入口，侧栏顺序必须与正文中的首个证据区一致。
     if table_nav_items:
-        nav_parts.extend(['<div class="nav-title nav-section-gap">表格补充证据</div>', table_nav_items])
+        nav_parts.extend(['<div class="nav-title">表格补充证据</div>', table_nav_items])
+    if technical_nav_items:
+        technical_nav_class = "nav-title nav-section-gap" if nav_parts else "nav-title"
+        nav_parts.extend([f'<div class="{technical_nav_class}">技术正文变化与复核</div>', technical_nav_items])
     if result.formula_changes:
         nav_parts.extend(
             [
@@ -1225,11 +1244,11 @@ def _render_html(
           <dt>提示</dt><dd>页码来自 PDF 抽取顺序；最终结论请回到源 PDF 复核。</dd>
         </dl>
       </section>
+      {table_visual_html}
       {formula_index_html}
       <h2 class="section-heading" id="text-changes">技术正文变化</h2>
       {technical_cards}
       {unplaced_formula_html}
-      {table_visual_html}
     </main>
   </div>
   {formula_zoom_html}
@@ -6455,7 +6474,39 @@ def _reader_pair_difference_hint(old_text: str, new_text: str) -> str:
     )
 
 
-def _reader_table_changes(changes: list[TableChange]) -> list[TableChange]:
+_READER_LOCATOR_NUMBER_RE = re.compile(
+    rf"(?i)\b(?P<prefix>(?:see(?:\s+(?:section|clause|condition))?|section|clause|"
+    rf"figure|table|condition|equation|page)\s*\(?)\s*"
+    rf"(?P<number>\d+(?:(?:\.\d+)|(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+))*)"
+    rf"(?P<suffix>\)?)(?=$|[\s,.;:)])"
+)
+
+
+def _reader_neutralize_locator_numbers(value: str) -> str:
+    """只中和显式定位词后的编号，不接触普通工程数字。"""
+
+    # 保留定位词与括号，使 Figure、Table、Equation 等类别之间不能互相冒充一致。
+    return _READER_LOCATOR_NUMBER_RE.sub(
+        lambda match: f"{match.group('prefix')}<locator-number>{match.group('suffix')}",
+        compact_inline(value),
+    )
+
+
+def _reader_values_match_after_locator_renumbering(
+    old_value: str,
+    new_value: str,
+) -> bool:
+    """判断完整文本是否只改变了显式定位编号。"""
+
+    # 只有除定位编号外的所有字符都一致时才隐藏，0.023→0.025 UI 会继续失败并保留。
+    return old_value != new_value and _reader_neutralize_locator_numbers(
+        old_value
+    ).casefold() == _reader_neutralize_locator_numbers(new_value).casefold()
+
+
+def _reader_table_changes(
+    changes: list[TableChange],
+) -> list[TableChange]:
     """Remove generic flat-structure reminders from reader formats only.
 
     The raw table model, JSON, and CSV retain the reminder.  A reader does not
@@ -6483,6 +6534,27 @@ def _reader_table_changes(changes: list[TableChange]) -> list[TableChange]:
                 and row.change_type == "需人工复核"
             )
         )
+        # 行项目已由表格配对确定；只有完整旧/新值在引用中和后相等时才删除该行。
+        reference_filtered_rows = tuple(
+            row
+            for row in row_changes
+            if not _reader_values_match_after_locator_renumbering(
+                row.old_value,
+                row.new_value,
+            )
+        )
+        reference_only_suppressed = bool(row_changes) and not reference_filtered_rows
+        row_changes = reference_filtered_rows
+        # 一张表若只含已证明的 Condition 引用顺延，则读者卡整体消失；审计模型仍保留原行。
+        if reference_only_suppressed and not change.caption_changed:
+            continue
+        # 描述性表题完全一致且只改表号时，caption 卡仅保留在 JSON/CSV 审计层。
+        if (
+            not row_changes
+            and change.caption_changed
+            and _reader_table_caption_change_is_locator_renumbering(change)
+        ):
+            continue
         if not row_changes and change.change_type == "review":
             if not can_hide_generic_review:
                 continue
@@ -6507,6 +6579,27 @@ def _reader_table_changes(changes: list[TableChange]) -> list[TableChange]:
             replace(change, change_type=change_type, row_changes=row_changes)
         )
     return reader_changes
+
+
+def _reader_table_caption_change_is_locator_renumbering(
+    change: TableChange,
+) -> bool:
+    """确认 caption-only 表卡除表号外具有相同描述性表题。"""
+
+    if not change.old_tables or not change.new_tables:
+        return False
+    # 跨页续表可能重复表题；比较去重后的中和表题集合，普通标题文字仍须完全一致。
+    old_titles = {
+        _reader_neutralize_locator_numbers(table.title).casefold()
+        for table in change.old_tables
+        if compact_inline(table.title)
+    }
+    new_titles = {
+        _reader_neutralize_locator_numbers(table.title).casefold()
+        for table in change.new_tables
+        if compact_inline(table.title)
+    }
+    return bool(old_titles) and old_titles == new_titles
 
 
 def _reader_table_structure_status(tables: tuple[TableVisual, ...]) -> str:
@@ -6546,12 +6639,123 @@ def _reader_section_change(
     )
     if change is None:
         return None
+    # 已配对同题条款的结构编号只用于定位；读者层移除该片段，原始审计事实保持不变。
+    change = _reader_change_without_proven_heading_renumber(change)
+    if change is None:
+        return None
+    # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
+    change = _reader_change_without_locator_renumbering(change)
+    if change is None:
+        return None
     change = _reader_change_without_covered_standalone_table_references(change)
     if change is None:
         return None
     if _reader_change_is_layout_reorder_only(change):
         return replace(change, change_type="review")
     return change
+
+
+def _reader_change_without_locator_renumbering(
+    change: SectionChange,
+) -> SectionChange | None:
+    """移除整句中唯一差异为 Section/Figure/Table 等定位编号的替换。"""
+
+    # 只对成对替换句生效，新增或删除文字仍按原逻辑完整报告。
+    return _reader_change_without_replaced_pairs(
+        change,
+        lambda pair: _reader_values_match_after_locator_renumbering(
+            pair.old,
+            pair.new,
+        ),
+    )
+
+
+def _reader_change_without_proven_heading_renumber(
+    change: SectionChange,
+) -> SectionChange | None:
+    """隐藏同一已配对条款的纯标题编号顺延，不改动正文数字。"""
+
+    old_section = change.old_section
+    new_section = change.new_section
+    # 单侧章节、无结构编号或标题语义不同均没有足够证据把编号当作纯定位变化。
+    if (
+        change.change_type != "modified"
+        or old_section is None
+        or new_section is None
+        or not old_section.number_path
+        or not new_section.number_path
+        or old_section.number_path == new_section.number_path
+        or not compact_inline(old_section.title)
+        or compact_inline(old_section.title).casefold()
+        != compact_inline(new_section.title).casefold()
+    ):
+        return change
+
+    # 只识别比较器生成的完整标题替换，绝不对普通正文中的裸数字做全局替换。
+    old_heading_fact = compact_inline(f"章节标题: {old_section.heading}").casefold()
+    new_heading_fact = compact_inline(f"章节标题: {new_section.heading}").casefold()
+
+    def is_heading_renumbering(pair: SnippetPair) -> bool:
+        """识别该条款完整标题中的纯编号顺延。"""
+
+        return (
+            compact_inline(pair.old).casefold() == old_heading_fact
+            and compact_inline(pair.new).casefold() == new_heading_fact
+        )
+
+    # 共用 occurrence 过滤器负责读者副本和省略数量，原始结果仍保持完整。
+    return _reader_change_without_replaced_pairs(change, is_heading_renumbering)
+
+
+def _reader_change_without_replaced_pairs(
+    change: SectionChange,
+    should_hide: Callable[[SnippetPair], bool],
+) -> SectionChange | None:
+    """从读者副本中移除满足窄判据的替换句，并重算遗漏数量。"""
+
+    # 可见片段和完整审计片段必须使用同一判据，避免审计计数与卡片内容失配。
+    replaced = [pair for pair in change.replaced_snippets if not should_hide(pair)]
+    audit_replaced = [
+        pair for pair in _audit_replaced_snippets(change) if not should_hide(pair)
+    ]
+    # 只有三类完整审计 occurrence 都存在时才有资格重算，旧模型继续保守沿用原值。
+    if all(
+        audit is not None
+        for audit in (
+            change.audit_added_snippets,
+            change.audit_removed_snippets,
+            change.audit_replaced_snippets,
+        )
+    ):
+        omitted_snippet_count = max(
+            0,
+            len(_audit_added_snippets(change))
+            + len(_audit_removed_snippets(change))
+            + len(audit_replaced)
+            - len(change.added_snippets)
+            - len(change.removed_snippets)
+            - len(replaced),
+        )
+    else:
+        omitted_snippet_count = change.omitted_snippet_count
+    # replace 只创建人读副本；result.changes 仍供 JSON/CSV 原样序列化。
+    cleaned = replace(
+        change,
+        replaced_snippets=replaced,
+        omitted_snippet_count=omitted_snippet_count,
+        audit_replaced_snippets=(
+            audit_replaced if change.audit_replaced_snippets is not None else None
+        ),
+    )
+    # 没有其它正文事实时整卡消失；仍有数值或语义变化时只隐藏命中的编号片段。
+    if (
+        not cleaned.removed_snippets
+        and not cleaned.added_snippets
+        and not cleaned.replaced_snippets
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
 
 
 def _reader_change_without_evidenced_table_body_fragments(
@@ -8735,6 +8939,8 @@ def _report_scope_note(options: DiffOptions) -> str:
         "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核，编号显示公式会提供源裁剪和坐标已证明的上下标；"
         "图片、印章、普通矢量图等其它视觉元素不比较；"
         "重复页眉页脚和动态页码会尽量过滤；"
+        "已证明的章节、Figure、表格和条件引用编号顺延不计入读者差异，数值、限值和单位仍严格比较；"
+        "公式编号顺延仍保留源截图视觉核对，但不计入核心技术变化；"
         f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
     )
 

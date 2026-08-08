@@ -4645,7 +4645,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
 
     def test_standalone_table_reference_is_hidden_when_full_sentence_has_same_change(self) -> None:
-        """Raw audit keeps every reference occurrence; readers hide context-free duplicates."""
+        """审计保留所有表号替换，读者隐藏整句和孤立引用中的纯表号变化。"""
 
         old_text = (
             "1 Receiver requirements\n"
@@ -4685,13 +4685,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             for change in reader_changes
             for pair in change.replaced_snippets
         ]
-        self.assertTrue(any("Further receiver electrical" in pair.old for pair in reader_pairs))
-        self.assertFalse(
-            any(
-                pair.old.strip() in {"Table 32-9.", "Table 32-10."}
-                for pair in reader_pairs
-            )
-        )
+        # 完整句和孤立引用都只改变显式 Table 编号，因此不再占用读者差异列表。
+        self.assertFalse(reader_pairs)
 
     def test_standalone_table_renumber_is_reader_hidden_when_table_card_proves_it(self) -> None:
         """A paired table card replaces a context-free renumber only in reader output."""

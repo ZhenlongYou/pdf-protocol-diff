@@ -3160,17 +3160,148 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertIn('href="#table-change-1"', html)
         self.assertIn("表格行变化", html)
-        self.assertLess(html.index('id="text-changes"'), html.index('id="table-changes"'))  # 正文是主审阅面，表格证据后置补充。
+        # 表格截图和行级事实是审阅入口，必须排在技术正文之前，避免读者先穿过长正文墙。
+        self.assertLess(html.index('id="table-changes"'), html.index('id="text-changes"'))
         self.assertIn("Table 1 Receiver limits", html)
         self.assertIn("Table 2 Receiver limits", html)
+        # 报告必须直接说明编号中性与数值严格性的边界，防止读者误解为全局数字归一化。
+        self.assertIn("数值、限值和单位仍严格比较", html)
         self.assertIn("表格补充证据（变化与复核）", markdown)
+        self.assertIn("数值、限值和单位仍严格比较", markdown)
+        # Markdown/TXT 与 HTML 使用同一信息层级，复制到文档后仍要先看到表格证据。
+        self.assertLess(
+            markdown.index("## 表格补充证据（变化与复核）"),
+            markdown.index("## 技术正文变化与复核"),
+        )
         self.assertIn("46.25 Ω", payload["table_changes"][0]["row_changes"][0]["new_value"])
         self.assertIn("46.25 Ω", table_csv)
         self.assertIn("Condition=See Note 1", payload["table_changes"][0]["row_changes"][0]["old_value"])
         self.assertIn("Condition=See Note 2", payload["table_changes"][0]["row_changes"][0]["new_value"])
 
-    def test_table_caption_only_change_is_reported(self) -> None:
-        """Renumbering a table must remain visible when every row is unchanged."""
+    def test_reader_hides_proven_condition_reference_shift_but_audit_keeps_it(self) -> None:
+        """相同表值只因显式条款引用顺延时，不应占用读者表格证据区。"""
+
+        # 同题同正文条款同时模拟真实报告中的章节顺延，但表格判断只依赖完整格值。
+        old_section_text = (
+            "31.3.13 Output Jitter\n"
+            "Output jitter shall be measured with the declared reference receiver."
+        )
+        new_section_text = (
+            "31.3.14 Output Jitter\n"
+            "Output jitter shall be measured with the declared reference receiver."
+        )
+        # 表格参数和值完全一致，唯一变化是 Condition 中引用了顺延后的条款号。
+        old_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 31-10. Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=[
+                "表格行: T1 | Parameter=Residual jitter | Condition=See 31.3.13 | Value=0.023 | Units=UI"
+            ],
+            grid_summary="structured rows",
+        )
+        new_table = TableVisual(
+            **{
+                **old_table.__dict__,
+                "row_texts": [
+                    "表格行: T1 | Parameter=Residual jitter | Condition=See 31.3.14 | Value=0.023 | Units=UI"
+                ],
+            }
+        )
+        # 真实比较和报告入口共同验证定位中和只发生在读者报告中。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_condition_reference.pdf"),
+                pages=[PageText(page_number=1, text=old_section_text)],
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_condition_reference.pdf"),
+                pages=[PageText(page_number=1, text=new_section_text)],
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+            table_csv = paths["table_csv"].read_text(encoding="utf-8-sig")
+
+        # 读者报告不显示纯引用编号顺延形成的表格卡。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Condition=See 31.3.13", rendered)
+            self.assertNotIn("Condition=See 31.3.14", rendered)
+        # JSON/CSV 保留条件引用的旧值和新值，确保过滤可审计、可回放。
+        row_payload = payload["table_changes"][0]["row_changes"][0]
+        self.assertIn("Condition=See 31.3.13", row_payload["old_value"])
+        self.assertIn("Condition=See 31.3.14", row_payload["new_value"])
+        self.assertIn("Condition=See 31.3.13", table_csv)
+        self.assertIn("Condition=See 31.3.14", table_csv)
+
+    def test_reader_keeps_table_value_change_when_condition_reference_also_shifts(self) -> None:
+        """Condition 引用顺延不能遮住同一行的 UI 数值变化。"""
+
+        # 同题条款模拟 31.3.13 → 31.3.14，工程值则单独从 0.023 改为 0.025。
+        old_section_text = (
+            "31.3.13 Output Jitter\n"
+            "Output jitter shall be measured with the declared reference receiver."
+        )
+        new_section_text = (
+            "31.3.14 Output Jitter\n"
+            "Output jitter shall be measured with the declared reference receiver."
+        )
+        old_table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 31-10. Receiver limits",
+            bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=[
+                "表格行: T1 | Parameter=Residual jitter | Condition=See 31.3.13 | Value=0.023 | Units=UI"
+            ],
+            grid_summary="structured rows",
+        )
+        # 新表除引用顺延外还把技术值改为 0.025 UI，这一字符差异必须阻止整行隐藏。
+        new_table = TableVisual(
+            **{
+                **old_table.__dict__,
+                "row_texts": [
+                    "表格行: T1 | Parameter=Residual jitter | Condition=See 31.3.14 | Value=0.025 | Units=UI"
+                ],
+            }
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_condition_value.pdf"),
+                pages=[PageText(page_number=1, text=old_section_text)],
+                table_visuals=[old_table],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_condition_value.pdf"),
+                pages=[PageText(page_number=1, text=new_section_text)],
+                table_visuals=[new_table],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+
+        # 两种人读格式都展示旧、新完整数值，证明定位中和没有扩大到工程数字。
+        for rendered in (html_text, markdown):
+            self.assertIn("0.023 UI", rendered)
+            self.assertIn("0.025 UI", rendered)
+            self.assertIn("Residual jitter", rendered)
+
+    def test_reader_hides_single_table_caption_renumber_but_audit_keeps_it(self) -> None:
+        """单张表除表号外完全一致时，读者报告隐藏、审计数据保留。"""
 
         old_table = TableVisual(
             page_number=1,
@@ -3206,15 +3337,89 @@ class ProtocolDiffTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = write_reports(result, temp_dir, DiffOptions())
-            html = paths["html"].read_text(encoding="utf-8")
-            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
             payload = json.loads(paths["json"].read_text(encoding="utf-8"))
 
-        self.assertIn("Table 1 Receiver limits", html)
-        self.assertIn("Table 2 Receiver limits", html)
+        # 人读格式不把纯表号变化列为差异，JSON 仍提供原表题供审计回放。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Table 1 Receiver limits", rendered)
+            self.assertNotIn("Table 2 Receiver limits", rendered)
         self.assertEqual(1, len(payload["table_changes"]))
         self.assertTrue(payload["table_changes"][0]["caption_changed"])
         self.assertEqual(0, payload["table_changes"][0]["row_change_count"])
+
+    def test_reader_hides_each_pure_table_caption_renumber(self) -> None:
+        """多张描述性表题分别只改表号时，都不再列作读者差异。"""
+
+        # 两张不同表题都只改 31-x 的末级表号，正文和表格行保持完全一致。
+        old_tables = [
+            TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 31-9. Receiver electrical operating limits",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=["表格行: T1 | Parameter=Voltage | Value=1 | Units=V"],
+                grid_summary="structured rows",
+            ),
+            TableVisual(
+                page_number=2,
+                table_number=1,
+                title="Table 31-10. Output jitter measurement limits",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=["表格行: T1 | Parameter=Jitter | Value=0.023 | Units=UI"],
+                grid_summary="structured rows",
+            ),
+        ]
+        new_tables = [
+            TableVisual(
+                **{
+                    **old_tables[0].__dict__,
+                    "title": "Table 31-10. Receiver electrical operating limits",
+                }
+            ),
+            TableVisual(
+                **{
+                    **old_tables[1].__dict__,
+                    "title": "Table 31-11. Output jitter measurement limits",
+                }
+            ),
+        ]
+        # 正文保持不变，报告中的任何表格变化都只能来自已证明的表号顺延。
+        stable_page = PageText(
+            page_number=1,
+            text="31.3 Receiver Requirements\nReceiver requirements remain unchanged.",
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_table_shift.pdf"),
+                pages=[stable_page],
+                total_pages=2,
+                table_visuals=old_tables,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_table_shift.pdf"),
+                pages=[stable_page],
+                total_pages=2,
+                table_visuals=new_tables,
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 人读格式不再把统一表号偏移列为变化，机器审计仍保留两张 caption_changed 记录。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Receiver electrical operating limits", rendered)
+            self.assertNotIn("Output jitter measurement limits", rendered)
+        self.assertEqual(2, len(payload["table_changes"]))
+        self.assertTrue(all(change["caption_changed"] for change in payload["table_changes"]))
 
     def test_wrapped_table_rows_remain_physical_without_geometry_evidence(self) -> None:
         """Text shape alone cannot prove that two physical table rows are one row."""
@@ -6356,6 +6561,298 @@ class ProtocolDiffTests(unittest.TestCase):
             [(pair.old, pair.new) for pair in result.changes[0].replaced_snippets],
         )
 
+    def test_reader_reports_hide_proven_heading_renumber_but_json_keeps_audit(self) -> None:
+        """纯标题编号顺延不占读者报告，但机器审计必须保留原始编号。"""
+
+        # 相同标题和正文提供条款身份，唯一变化只有结构编号 2.1 → 2.2。
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_reader_renumber.pdf"),
+            pages=[PageText(page_number=1, text="2.1 Security\nSupplier shall encrypt logs.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_reader_renumber.pdf"),
+            pages=[PageText(page_number=1, text="2.2 Security\nSupplier shall encrypt logs.")],
+        )
+        # 通过公开比较与报告入口验证读者层和审计层的边界。
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            text_report = paths["text"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 三种人读格式都不应把已证明的定位编号顺延列作技术差异。
+        for rendered in (html, markdown, text_report):
+            self.assertNotIn("章节标题: 2.1 Security", rendered)
+            self.assertNotIn("章节标题: 2.2 Security", rendered)
+        # JSON 保留原始替换事实，便于审计和后续规则回放。
+        self.assertEqual(1, len(payload["changes"]))
+        self.assertEqual(
+            "章节标题: 2.1 Security",
+            payload["changes"][0]["replaced_snippets"][0]["old"],
+        )
+        self.assertEqual(
+            "章节标题: 2.2 Security",
+            payload["changes"][0]["replaced_snippets"][0]["new"],
+        )
+
+    def test_reader_heading_renumber_never_hides_technical_value_or_term_changes(self) -> None:
+        """编号中性只作用于标题定位，UI 数值和技术术语仍严格比较。"""
+
+        # 同一条款同时包含编号顺延、数值变化和技术术语变化，防止宽泛数字归一化误删后两者。
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_mixed_renumber.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "31.3.10 Transmit Equalization\n"
+                        "CMIT-LT shall limit residual jitter to 0.023 UI for every lane."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_mixed_renumber.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "31.3.11 Transmit Equalization\n"
+                        "CMIS-LT shall limit residual jitter to 0.025 UI for every lane."
+                    ),
+                )
+            ],
+        )
+        # 公开报告入口同时验证人读差异和机器审计，没有调用编号过滤私有 helper。
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html = paths["html"].read_text(encoding="utf-8")
+            # 高亮标签会拆开连续源码字符串，数值 oracle 应检查浏览器可见文本。
+            html_text = _visible_html_text(html)
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 标题编号替换不再作为差异片段展示，但卡片定位仍可保留真实章节号供回查源 PDF。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("章节标题: 31.3.10 Transmit Equalization", rendered)
+            self.assertNotIn("章节标题: 31.3.11 Transmit Equalization", rendered)
+            self.assertIn("CMIT-LT", rendered)
+            self.assertIn("CMIS-LT", rendered)
+            self.assertIn("0.023 UI", rendered)
+            self.assertIn("0.025 UI", rendered)
+        # 审计层仍含标题编号和技术事实，证明读者过滤没有改变后续数值比较输入。
+        audit_pairs = payload["changes"][0]["replaced_snippets"]
+        self.assertTrue(any("章节标题: 31.3.10" in pair["old"] for pair in audit_pairs))
+        self.assertTrue(any("0.023 UI" in pair["old"] for pair in audit_pairs))
+        self.assertTrue(any("0.025 UI" in pair["new"] for pair in audit_pairs))
+
+    def test_reader_hides_pure_section_and_table_reference_shifts(self) -> None:
+        """正文整句只改 Section/Table 定位编号时，读者隐藏而审计保留。"""
+
+        # 同一句同时顺延条款号和表号，句中没有其它技术值变化。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_locator_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nSee Section 31.3.10 and Table 31-5 for the calibration method.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_locator_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nSee Section 31.3.11 and Table 31-6 for the calibration method.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 三种显式定位词均被窄范围中和，原始旧、新句仍在 JSON 中可追溯。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Section 31.3.10", rendered)
+            self.assertNotIn("Section 31.3.11", rendered)
+            self.assertNotIn("Table 31-5", rendered)
+            self.assertNotIn("Table 31-6", rendered)
+        audit_pair = payload["changes"][0]["replaced_snippets"][0]
+        self.assertIn("Section 31.3.10", audit_pair["old"])
+        self.assertIn("Table 31-6", audit_pair["new"])
+
+    def test_reader_hides_pure_figure_number_shifts_in_each_context(self) -> None:
+        """每个整句只改 Figure 编号时，都在读者报告中视为一致。"""
+
+        # 两个不同技术条款各自只改变 Figure 编号，句中其它技术文字完全一致。
+        section_specs = [
+            (
+                "31.3.10",
+                "31.3.11",
+                "Jitter Mask",
+                "Figure 31-3 shows the receiver jitter mask for every supported lane.",
+                "Figure 31-4 shows the receiver jitter mask for every supported lane.",
+            ),
+            (
+                "31.3.11",
+                "31.3.12",
+                "Output Calibration",
+                "Figure 31-4 illustrates the output jitter calibration method.",
+                "Figure 31-5 illustrates the output jitter calibration method.",
+            ),
+        ]
+        old_sections: list[Section] = []
+        new_sections: list[Section] = []
+        changes: list[SectionChange] = []
+        # 直接构造公开报告模型，隔离验证读者编号策略而不借助抽取器猜测配对。
+        for index, (old_number, new_number, title, old_body, new_body) in enumerate(
+            section_specs,
+            start=1,
+        ):
+            old_section = Section(
+                section_id=f"old-{index}",
+                heading=f"{old_number} {title}",
+                title=title,
+                level=3,
+                heading_path=(f"{old_number} {title}",),
+                number_path=(old_number,),
+                start_page=index,
+                end_page=index,
+                body=old_body,
+            )
+            new_section = Section(
+                section_id=f"new-{index}",
+                heading=f"{new_number} {title}",
+                title=title,
+                level=3,
+                heading_path=(f"{new_number} {title}",),
+                number_path=(new_number,),
+                start_page=index,
+                end_page=index,
+                body=new_body,
+            )
+            old_sections.append(old_section)
+            new_sections.append(new_section)
+            changes.append(
+                SectionChange(
+                    change_type="modified",
+                    old_section=old_section,
+                    new_section=new_section,
+                    similarity=0.98,
+                    replaced_snippets=[
+                        SnippetPair(
+                            f"章节标题: {old_section.heading}",
+                            f"章节标题: {new_section.heading}",
+                        ),
+                        SnippetPair(old_body, new_body),
+                    ],
+                )
+            )
+        result = DiffResult(
+            old_pdf=Path("old_figure_shift.pdf"),
+            new_pdf=Path("new_figure_shift.pdf"),
+            old_sections=old_sections,
+            new_sections=new_sections,
+            changes=changes,
+            warnings=[],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 读者报告不再列出纯 Figure 顺延，JSON 仍保存两个原始引用替换。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Figure 31-3 shows", rendered)
+            self.assertNotIn("Figure 31-5 illustrates", rendered)
+        self.assertEqual(2, len(payload["changes"]))
+        self.assertTrue(
+            any(
+                "Figure 31-3" in pair["old"] and "Figure 31-4" in pair["new"]
+                for change in payload["changes"]
+                for pair in change["replaced_snippets"]
+            )
+        )
+
+    def test_reader_hides_single_pure_figure_shift_but_keeps_value_change(self) -> None:
+        """单句纯图号变化可隐藏，同句工程值变化必须保留。"""
+
+        # 单个句子除图号外完全一致，符合用户要求的编号中性阅读规则。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_single_figure.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nThe return loss is shown in Figure 32-5.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_single_figure.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nThe return loss is shown in Figure 32-6.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 两种读者格式隐藏纯图号替换，机器审计仍保留旧、新原句。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Figure 32-5", rendered)
+            self.assertNotIn("Figure 32-6", rendered)
+        self.assertIn("Figure 32-5", payload["changes"][0]["replaced_snippets"][0]["old"])
+        self.assertIn("Figure 32-6", payload["changes"][0]["replaced_snippets"][0]["new"])
+
+        # 同句把限值从 33.5 dB 改为 34.0 dB，定位编号中和后文本仍不相等。
+        changed_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_figure_value.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nFigure 32-5 shows a 33.5 dB limit.")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_figure_value.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nFigure 32-6 shows a 34.0 dB limit.")],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            changed_paths = write_reports(changed_result, temp_dir, DiffOptions())
+            changed_html = _visible_html_text(
+                changed_paths["html"].read_text(encoding="utf-8")
+            )
+            changed_markdown = changed_paths["markdown"].read_text(encoding="utf-8")
+
+        # 数值变化使整句继续展示，旧值、新值和图号均可见。
+        for rendered in (changed_html, changed_markdown):
+            self.assertIn("Figure 32-5", rendered)
+            self.assertIn("Figure 32-6", rendered)
+            self.assertIn("33.5 dB", rendered)
+            self.assertIn("34.0 dB", rendered)
+
     def test_renumbered_same_heading_with_disjoint_body_is_not_forced_into_modified(self) -> None:
         """A fallback title match cannot override a body score below the configured floor."""
 
@@ -6931,7 +7428,8 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, temp_dir, options)
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
-        self.assertIn("一致编号偏移", html)
+        # 结构配对依据留在 JSON；纯编号标题被读者过滤后不再额外显示“编号偏移”噪声。
+        self.assertNotIn("一致编号偏移", html)
         self.assertEqual(
             2,
             sum(
