@@ -6,9 +6,10 @@
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `4a4dd5f779e27e50beb952b0c064ee632a563918`
-- status: implementation_and_local_acceptance_complete_pending_commit_review_push
+- recorded_commit: `67f9445fb8a5ba7fe6b25e7c77f370f187c55bc8`
+- status: ready
 - real_entrypoint: `python3 main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_编号中性与表格前置验收_20260809/532`
-- accepted_report: `/Users/mac/Desktop/PDF对比工具_编号中性与表格前置验收_20260809/532/protocol_diff_20260809_013923/protocol_diff_report.html`
+- accepted_report: `/Users/mac/Desktop/PDF对比工具_编号中性与表格前置验收_20260809/532/protocol_diff_20260809_020333/protocol_diff_report.html`
 
 ## Implemented
 
@@ -20,7 +21,7 @@
 
 ## Acceptance Evidence
 
-- 全项目：`814` 项 unittest 通过。
+- 全项目：`815` 项 unittest 通过。
 - 受影响报告模块：`265` 项协议测试与 `152` 项公式/阅读准确性测试通过。
 - `python3 main.py` 真实入口完成 532.04/532.05 全文比较；最终 HTML 中表格区位于公式索引和正文之前。
 - 真实阅读版未出现纯 `Figure 31-5 → 31-6`、纯 Equation/Figure/page 联合顺延或孤立 `See 31.3.11`；`CMIT-LT → CMIS-LT`、`33.5 dB` 等技术事实仍存在。
@@ -28,8 +29,10 @@
 - Playwright 浏览器首屏、表格截图、公式放大弹窗与 `<sub>/<sup>` 渲染通过；仅 favicon 缺失产生无功能影响的 404。
 - GUI 的项目环境与普通 `python3` 启动路径均通过真实窗口 smoke test。
 - 故障注入把过滤器故意放宽后，UI/dB 数值保护测试均失败；恢复实现后转绿。
+- 审查发现的大小写漏洞已修复：定位句、表题和章节标题均精确区分 `mV/MV`、`UI/ui` 与技术标识符大小写。
+- 两个独立 reviewer 对 `67f9445` 给出 PASS 并写入 commit-bound attestation：`019fcb67-bcc9-7270-988d-113d07697892`、`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`。
 
-## Pending
+## Delivery
 
-- 提交最终实现并取得两个独立审查 attestation。
-- 推送持久项目分支 `project/pdf-protocol-diff`，再快进并推送 `main`，记录远端精确 OID。
+- 已先推送持久项目分支 `project/pdf-protocol-diff`，再快进并推送 `main`；两条分支永久保留。
+- canonical checkout 最终停留在 `main`，工作树保持干净。
