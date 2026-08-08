@@ -6501,7 +6501,7 @@ def _reader_values_match_after_locator_renumbering(
     # 只有除定位编号外的所有字符都一致时才隐藏，0.023→0.025 UI 会继续失败并保留。
     return old_value != new_value and _reader_neutralize_locator_numbers(
         old_value
-    ).casefold() == _reader_neutralize_locator_numbers(new_value).casefold()
+    ) == _reader_neutralize_locator_numbers(new_value)
 
 
 def _reader_table_changes(
@@ -6590,12 +6590,12 @@ def _reader_table_caption_change_is_locator_renumbering(
         return False
     # 跨页续表可能重复表题；比较去重后的中和表题集合，普通标题文字仍须完全一致。
     old_titles = {
-        _reader_neutralize_locator_numbers(table.title).casefold()
+        _reader_neutralize_locator_numbers(table.title)
         for table in change.old_tables
         if compact_inline(table.title)
     }
     new_titles = {
-        _reader_neutralize_locator_numbers(table.title).casefold()
+        _reader_neutralize_locator_numbers(table.title)
         for table in change.new_tables
         if compact_inline(table.title)
     }
@@ -6686,21 +6686,20 @@ def _reader_change_without_proven_heading_renumber(
         or not new_section.number_path
         or old_section.number_path == new_section.number_path
         or not compact_inline(old_section.title)
-        or compact_inline(old_section.title).casefold()
-        != compact_inline(new_section.title).casefold()
+        or compact_inline(old_section.title) != compact_inline(new_section.title)
     ):
         return change
 
     # 只识别比较器生成的完整标题替换，绝不对普通正文中的裸数字做全局替换。
-    old_heading_fact = compact_inline(f"章节标题: {old_section.heading}").casefold()
-    new_heading_fact = compact_inline(f"章节标题: {new_section.heading}").casefold()
+    old_heading_fact = compact_inline(f"章节标题: {old_section.heading}")
+    new_heading_fact = compact_inline(f"章节标题: {new_section.heading}")
 
     def is_heading_renumbering(pair: SnippetPair) -> bool:
         """识别该条款完整标题中的纯编号顺延。"""
 
         return (
-            compact_inline(pair.old).casefold() == old_heading_fact
-            and compact_inline(pair.new).casefold() == new_heading_fact
+            compact_inline(pair.old) == old_heading_fact
+            and compact_inline(pair.new) == new_heading_fact
         )
 
     # 共用 occurrence 过滤器负责读者副本和省略数量，原始结果仍保持完整。

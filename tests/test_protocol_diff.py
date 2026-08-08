@@ -3349,6 +3349,36 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(payload["table_changes"][0]["caption_changed"])
         self.assertEqual(0, payload["table_changes"][0]["row_change_count"])
 
+        # 表号顺延若同时把表题单位从 mV 改成 MV，就不再是 caption-only 定位变化。
+        case_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_title_unit.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[
+                    TableVisual(**{**old_table.__dict__, "title": "Table 1 mV receiver limits"})
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_title_unit.pdf"),
+                pages=[PageText(page_number=1, text="1 Scope\nStable requirement.")],
+                table_visuals=[
+                    TableVisual(**{**new_table.__dict__, "title": "Table 2 MV receiver limits"})
+                ],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            case_paths = write_reports(case_result, temp_dir, DiffOptions())
+            case_html = _visible_html_text(
+                case_paths["html"].read_text(encoding="utf-8")
+            )
+            case_markdown = case_paths["markdown"].read_text(encoding="utf-8")
+
+        # 两种读者格式都保留大小写敏感单位，证明表题门禁也采用精确比较。
+        for rendered in (case_html, case_markdown):
+            self.assertIn("Table 1 mV receiver limits", rendered)
+            self.assertIn("Table 2 MV receiver limits", rendered)
+
     def test_reader_hides_each_pure_table_caption_renumber(self) -> None:
         """多张描述性表题分别只改表号时，都不再列作读者差异。"""
 
@@ -6651,6 +6681,30 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(any("0.023 UI" in pair["old"] for pair in audit_pairs))
         self.assertTrue(any("0.025 UI" in pair["new"] for pair in audit_pairs))
 
+        # 标题中的技术标识符大小写同样属于真实文字变化，不能因章节号顺延被中和。
+        title_case_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_heading_case.pdf"),
+                pages=[PageText(page_number=1, text="2.1 CMIT-LT Mode\nStable requirement.")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_heading_case.pdf"),
+                pages=[PageText(page_number=1, text="2.2 cmit-lt Mode\nStable requirement.")],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            title_case_paths = write_reports(title_case_result, temp_dir, DiffOptions())
+            title_case_html = _visible_html_text(
+                title_case_paths["html"].read_text(encoding="utf-8")
+            )
+            title_case_markdown = title_case_paths["markdown"].read_text(encoding="utf-8")
+
+        # HTML 与 Markdown 都显示旧、新标识符，标题编号过滤因此保持大小写敏感。
+        for rendered in (title_case_html, title_case_markdown):
+            self.assertIn("CMIT-LT", rendered)
+            self.assertIn("cmit-lt", rendered)
+
     def test_reader_hides_pure_section_and_table_reference_shifts(self) -> None:
         """正文整句只改 Section/Table 定位编号时，读者隐藏而审计保留。"""
 
@@ -6692,6 +6746,44 @@ class ProtocolDiffTests(unittest.TestCase):
         audit_pair = payload["changes"][0]["replaced_snippets"][0]
         self.assertIn("Section 31.3.10", audit_pair["old"])
         self.assertIn("Table 31-6", audit_pair["new"])
+
+    def test_reader_keeps_case_sensitive_unit_and_identifier_with_locator_shift(self) -> None:
+        """定位编号顺延不能吞掉 mV/MV 或技术标识符的大小写变化。"""
+
+        # 图号顺延同时伴随单位数量级和技术标识符大小写变化，必须保留完整旧、新句。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_case_sensitive_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nFigure 31-5 shows CMIT-LT at a 1 mV limit.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_case_sensitive_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nFigure 31-6 shows cmit-lt at a 1 MV limit.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+
+        # 两种读者格式都必须保留大小写敏感事实，证明编号中和后的比较仍为精确比较。
+        for rendered in (html_text, markdown):
+            self.assertIn("CMIT-LT", rendered)
+            self.assertIn("cmit-lt", rendered)
+            self.assertIn("1 mV", rendered)
+            self.assertIn("1 MV", rendered)
 
     def test_reader_hides_pure_figure_number_shifts_in_each_context(self) -> None:
         """每个整句只改 Figure 编号时，都在读者报告中视为一致。"""
