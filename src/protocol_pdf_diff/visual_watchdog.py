@@ -25,9 +25,11 @@ from .models import (
     DocumentBlockKind,
     ExtractionResult,
     PageText,
+    Section,
     VisualReviewItem,
     VisualWatchdogAudit,
 )
+from .text_utils import compact_inline
 
 VISUAL_RENDER_DPI = 96
 VISUAL_PIXEL_DELTA_THRESHOLD = 28
@@ -720,13 +722,20 @@ def _reader_visible_semantic_change_pages(
     old_pages: set[int] = set()
     new_pages: set[int] = set()
     for change in reader_changes:
-        if change.old_section is not None:
+        for pair in change.replaced_snippets:
             old_pages.update(
-                range(change.old_section.start_page, change.old_section.end_page + 1)
+                _reader_snippet_unique_page(change.old_section, pair.old)
             )
-        if change.new_section is not None:
             new_pages.update(
-                range(change.new_section.start_page, change.new_section.end_page + 1)
+                _reader_snippet_unique_page(change.new_section, pair.new)
+            )
+        for snippet in change.removed_snippets:
+            old_pages.update(
+                _reader_snippet_unique_page(change.old_section, snippet)
+            )
+        for snippet in change.added_snippets:
+            new_pages.update(
+                _reader_snippet_unique_page(change.new_section, snippet)
             )
     for change in _reader_table_changes(table_changes):
         old_pages.update(table.page_number for table in change.old_tables)
@@ -737,3 +746,37 @@ def _reader_visible_semantic_change_pages(
         if change.new_formula is not None:
             new_pages.add(change.new_formula.page_number)
     return old_pages, new_pages
+
+
+def _reader_snippet_unique_page(
+    section: Section | None,
+    snippet: str,
+) -> set[int]:
+    """Bind a reader-visible snippet to one physical page or fail closed.
+
+    A section card may span many pages, so its location range is not page-level
+    provenance. Only an exact unique occurrence in ``page_bodies`` can exempt
+    an unmatched page from the unchanged-page pixel audit. Legacy single-page
+    sections remain unambiguous; multi-page sections without provenance do not.
+    """
+
+    if section is None:
+        return set()
+    normalized = compact_inline(snippet)
+    if not normalized:
+        return set()
+    heading_fact = compact_inline(f"章节标题: {section.heading}")
+    if normalized == heading_fact:
+        return {section.start_page}
+    if not section.page_bodies:
+        return (
+            {section.start_page}
+            if section.start_page == section.end_page
+            else set()
+        )
+    occurrence_pages = {
+        page_number
+        for page_number, body in section.page_bodies
+        if normalized in compact_inline(body)
+    }
+    return occurrence_pages if len(occurrence_pages) == 1 else set()

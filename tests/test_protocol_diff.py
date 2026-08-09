@@ -8644,6 +8644,77 @@ class ProtocolDiffTests(unittest.TestCase):
             any("无法用完全一致或读者等价文字安全配对" in warning for warning in warnings)
         )
 
+    def test_multi_page_section_card_cannot_cover_suppressed_unmatched_page(self) -> None:
+        """A page-1 value card cannot certify hidden page-2 locator pixels."""
+
+        common = (
+            "The receiver shall preserve calibrated voltage timing "
+            "interoperability behavior for every declared mode."
+        )
+        old_pages = [
+            [
+                "1 Link Requirements",
+                "The calibrated limit shall be 10 mV.",
+                common,
+                common,
+                common,
+                common,
+            ],
+            [
+                "See Table 5 for limits.",
+                "See Figure 4 for mask.",
+                common,
+                common,
+                common,
+                common,
+            ],
+            *[
+                [f"{index} Requirement {index}", *[common for _ in range(6)]]
+                for index in range(2, 7)
+            ],
+        ]
+        new_pages = [list(page) for page in old_pages]
+        new_pages[0][1] = "The calibrated limit shall be 12 mV."
+        new_pages[1][0] = "See Figure 5 for mask."
+        new_pages[1][1] = "See Table 6 for limits."
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(root / "old.pdf", old_pages)
+            new_pdf = write_multipage_text_pdf(
+                root / "new.pdf",
+                new_pages,
+                decorative_marks={2: "small-new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+            outputs = write_reports(result, root / "reports", DiffOptions())
+            readers = {
+                "html": _visible_html_text(
+                    outputs["html"].read_text(encoding="utf-8")
+                ),
+                "markdown": outputs["markdown"].read_text(encoding="utf-8"),
+                "text": outputs["text"].read_text(encoding="utf-8"),
+            }
+
+        for reader in readers.values():
+            self.assertIn("10 mV", reader)
+            self.assertIn("12 mV", reader)
+            for locator in (
+                "See Table 5",
+                "See Table 6",
+                "See Figure 4",
+                "See Figure 5",
+            ):
+                self.assertNotIn(locator, reader)
+        audit = result.provenance.visual_watchdog_audit
+        self.assertEqual(5, audit.eligible_page_pair_count)
+        self.assertEqual(5, audit.checked_page_pair_count)
+        self.assertEqual(2, audit.ambiguous_page_count)
+        self.assertFalse(audit.complete)
+        self.assertEqual([], result.visual_review_items)
+        self.assertEqual("degraded", result.assessment.state.value)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
     def test_visual_watchdog_pairs_unique_pages_even_when_page_order_is_swapped(self) -> None:
         """A crossed unique page identity must not fall outside an LCS silently."""
 
