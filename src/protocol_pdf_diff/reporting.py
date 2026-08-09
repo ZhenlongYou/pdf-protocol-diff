@@ -6474,31 +6474,73 @@ def _reader_pair_difference_hint(old_text: str, new_text: str) -> str:
     )
 
 
-_READER_LOCATOR_NUMBER_RE = re.compile(
-    rf"(?i)\b(?P<prefix>(?:see(?:\s+(?:section|clause|condition))?|section|clause|"
-    rf"figure|table|condition|equation|page)\s*\(?)\s*"
-    rf"(?P<number>\d+(?:(?:\.\d+)|(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+))*)"
-    rf"(?P<suffix>\)?)(?=$|[\s,.;:)])"
+# 定位编号允许小数式 Section 层级和短横线式 Figure/Table 编号，但不会吞掉普通工程量。
+_READER_LOCATOR_NUMBER_PATTERN = (
+    rf"\d+(?:(?:\.\d+)|(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+))*"
+)
+# 引用列表可使用逗号、分号、and/or，引用范围可使用 to/through；句末标点不属于引用本体。
+_READER_LOCATOR_JOIN_PATTERN = (
+    r"(?:\s*[,;]\s*(?:(?:and|or)\s+)?|\s+(?:and|or|to|through)\s+)"
+)
+# 每类同时记录单数和复数写法；只有复数前缀才允许后续编号省略定位词。
+_READER_LOCATOR_PREFIXES = (
+    ("section", r"(?:section|clause)", r"(?:sections|clauses)"),
+    ("figure", r"figure", r"figures"),
+    ("table", r"table", r"tables"),
+    ("condition", r"condition", r"conditions"),
+    ("equation", r"equation", r"equations"),
+    ("page", r"page", r"pages"),
+)
+# 每个表达式吞并完整同类引用；单数前缀的后续项必须再次写出定位词，避免吞掉工程值。
+_READER_LOCATOR_REFERENCE_RES = tuple(
+    (
+        locator_kind,
+        re.compile(
+            rf"(?i)\b(?:see\s+)?(?:"
+            rf"{plural_prefix}\s*\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
+            rf"(?:{_READER_LOCATOR_JOIN_PATTERN}(?:(?:{singular_prefix}|{plural_prefix})\s*)?"
+            rf"\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?)*"
+            rf"|{singular_prefix}\s*\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
+            rf"(?:{_READER_LOCATOR_JOIN_PATTERN}(?:{singular_prefix}|{plural_prefix})\s*"
+            rf"\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?)*"
+            rf")"
+        ),
+    )
+    for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
+)
+# 无显式 Section/Clause 词的 “See 31.3.10” 只中和该编号，后续裸数字继续按正文严格比较。
+_READER_BARE_SEE_REFERENCE_RE = re.compile(
+    rf"(?i)\bsee\s+\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
 )
 
 
 def _reader_neutralize_locator_numbers(value: str) -> str:
-    """只中和显式定位词后的编号，不接触普通工程数字。"""
+    """中和完整引用列表或范围，不接触引用之外的工程数字与文字。"""
 
-    # 保留定位词与括号，使 Figure、Table、Equation 等类别之间不能互相冒充一致。
-    return _READER_LOCATOR_NUMBER_RE.sub(
-        lambda match: f"{match.group('prefix')}<locator-number>{match.group('suffix')}",
-        compact_inline(value),
+    # 先规整换行空白，保证跨行引用和单行引用使用相同的读者比较输入。
+    neutralized = compact_inline(value)
+    # 同类引用的数量、连接词、单复数和范围端点都属于出处定位，不参与读者技术差异。
+    for locator_kind, reference_re in _READER_LOCATOR_REFERENCE_RES:
+        neutralized = reference_re.sub(
+            f"<{locator_kind}-references>",
+            neutralized,
+        )
+    # 最后处理中间没有 Section/Clause 词的裸 See 引用，避免与上述显式类别重复匹配。
+    neutralized = _READER_BARE_SEE_REFERENCE_RE.sub(
+        "<section-references>",
+        neutralized,
     )
+    # 返回仍保持大小写敏感的完整句子，确保 mV/MV 和技术标识符变化继续可见。
+    return neutralized
 
 
 def _reader_values_match_after_locator_renumbering(
     old_value: str,
     new_value: str,
 ) -> bool:
-    """判断完整文本是否只改变了显式定位编号。"""
+    """判断完整文本是否只改变了显式定位引用列表或范围。"""
 
-    # 只有除定位编号外的所有字符都一致时才隐藏，0.023→0.025 UI 会继续失败并保留。
+    # 只有除定位出处外的所有字符都一致时才隐藏，0.023→0.025 UI 会继续失败并保留。
     return old_value != new_value and _reader_neutralize_locator_numbers(
         old_value
     ) == _reader_neutralize_locator_numbers(new_value)
@@ -8938,7 +8980,7 @@ def _report_scope_note(options: DiffOptions) -> str:
         "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核，编号显示公式会提供源裁剪和坐标已证明的上下标；"
         "图片、印章、普通矢量图等其它视觉元素不比较；"
         "重复页眉页脚和动态页码会尽量过滤；"
-        "已证明的章节、Figure、表格和条件引用编号顺延不计入读者差异，数值、限值和单位仍严格比较；"
+        "章节、Figure、表格和条件的引用编号、列表及范围变化不计入读者差异，数值、限值和单位仍严格比较；"
         "公式编号顺延仍保留源截图视觉核对，但不计入核心技术变化；"
         f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
     )

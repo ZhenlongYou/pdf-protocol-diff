@@ -1223,8 +1223,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("20", markdown)
         self.assertIn("complete final review", markdown)
 
-    def test_reader_reports_keep_numbered_prose_expanded_without_layout_evidence(self) -> None:
-        """Several section references are still prose, not proof of a linearized table."""
+    def test_reader_hides_numbered_reference_prose_but_audit_keeps_it(self) -> None:
+        """长正文中的纯 Section 引用列表变化也只保留在审计层。"""
 
         shared_body = (
             "The review process and receiver scope remain unchanged for this revision. "
@@ -1265,10 +1265,13 @@ class ProtocolDiffTests(unittest.TestCase):
             text = outputs["text"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-        self.assertNotIn('<details class="snippet-detail', html)
+        # 引用清单即使位于完整规范句中，也不再进入三种读者报告的技术差异区。
         for reader in (markdown, text):
-            self.assertIn("31.8", reader)
-            self.assertIn("31.9", reader)
+            self.assertNotIn("31.8", reader)
+            self.assertNotIn("31.9", reader)
+        self.assertNotIn("31.8", _visible_html_text(html))
+        self.assertNotIn("31.9", _visible_html_text(html))
+        # JSON 仍输出完整规范句，证明长引用列表没有从原始比较事实中丢失。
         self.assertEqual(
             [{"old": old_clause, "new": new_clause}],
             payload["changes"][0]["replaced_snippets"],
@@ -6747,10 +6750,57 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Section 31.3.10", audit_pair["old"])
         self.assertIn("Table 31-6", audit_pair["new"])
 
+    def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
+        """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
+
+        # 复刻用户截图：第一句增加一个表格引用，第二句只顺延引用范围的末端。
+        old_body = (
+            "Each module-to-host lane shall meet the specifications of Table 31-4 and Table 31-5. "
+            "Definitions and methodologies can be found in Sections 31.3.4 to 31.3.18."
+        )
+        # 新版正文的技术语义未改，只扩展了引用表列表和 Section 引用范围。
+        new_body = (
+            "Each module-to-host lane shall meet the specifications of Table 31-4, Table 31-5 and Table 31-6. "
+            "Definitions and methodologies can be found in Sections 31.3.4 to 31.3.19."
+        )
+        # 从公开比较入口生成真实 SectionChange，避免只测试私有正则辅助函数。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_reference_lists.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_body}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_reference_lists.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_body}")],
+            ),
+            DiffOptions(),
+        )
+
+        # 公开写报告入口必须同时满足读者降噪和 JSON 无损审计两个契约。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # HTML 与 Markdown 都不再把纯引用来源变化显示成技术差异。
+        for rendered in (html_text, markdown):
+            self.assertNotIn("Table 31-4 and Table 31-5", rendered)
+            self.assertNotIn("Table 31-4, Table 31-5 and Table 31-6", rendered)
+            self.assertNotIn("Sections 31.3.4 to 31.3.18", rendered)
+            self.assertNotIn("Sections 31.3.4 to 31.3.19", rendered)
+        # JSON 仍保留截图中的四个原始引用事实，供机器审计和后续复查。
+        audit_pairs = payload["changes"][0]["replaced_snippets"]
+        audit_text = json.dumps(audit_pairs, ensure_ascii=False)
+        self.assertIn("Table 31-4 and Table 31-5", audit_text)
+        self.assertIn("Table 31-4, Table 31-5 and Table 31-6", audit_text)
+        self.assertIn("Sections 31.3.4 to 31.3.18", audit_text)
+        self.assertIn("Sections 31.3.4 to 31.3.19", audit_text)
+
     def test_reader_keeps_case_sensitive_unit_and_identifier_with_locator_shift(self) -> None:
         """定位编号顺延不能吞掉 mV/MV 或技术标识符的大小写变化。"""
 
-        # 图号顺延同时伴随单位数量级和技术标识符大小写变化，必须保留完整旧、新句。
+        # 图引用列表增加的同时伴随单位数量级和标识符大小写变化，必须保留完整旧、新句。
         result = compare_extractions(
             ExtractionResult(
                 pdf_path=Path("old_case_sensitive_refs.pdf"),
@@ -6766,7 +6816,7 @@ class ProtocolDiffTests(unittest.TestCase):
                 pages=[
                     PageText(
                         page_number=1,
-                        text="1 Scope\nFigure 31-6 shows cmit-lt at a 1 MV limit.",
+                        text="1 Scope\nFigures 31-6 and 31-7 show cmit-lt at a 1 MV limit.",
                     )
                 ],
             ),
@@ -6784,6 +6834,43 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("cmit-lt", rendered)
             self.assertIn("1 mV", rendered)
             self.assertIn("1 MV", rendered)
+
+    def test_reader_keeps_bare_engineering_value_after_singular_locator(self) -> None:
+        """单数 Condition 后由 and 连接的裸数值仍必须按工程值比较。"""
+
+        # 该句刻意制造“Condition 编号 + and + dB 数值”，防止引用列表表达式过度吞并数字。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_condition_and_value.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nCondition 5 and 33.5 dB of insertion loss apply.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_condition_and_value.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Scope\nCondition 6 and 34.0 dB of insertion loss apply.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        # 公开报告入口必须显示两个 dB 值，证明引用中和只覆盖 Condition 5/6。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+
+        # HTML 和 Markdown 都保留旧、新限值，禁止引用降噪影响后续数值核对。
+        for rendered in (html_text, markdown):
+            self.assertIn("33.5 dB", rendered)
+            self.assertIn("34.0 dB", rendered)
 
     def test_reader_hides_pure_figure_number_shifts_in_each_context(self) -> None:
         """每个整句只改 Figure 编号时，都在读者报告中视为一致。"""
