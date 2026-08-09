@@ -3,17 +3,19 @@
 The native pdfplumber path remains the default because it is fast, deterministic
 and already supplies the table screenshots used by reports.  A Docling result
 is considered only for pages the native extractor has already marked as having
-non-linear reading-order risk.  It must also agree strongly with the native
-text before it can replace that page's comparison text.
+non-linear reading-order risk.  It must either be identical or prove that it
+only moved complete unique prose lines without changing any technical token.
 """
 
 from __future__ import annotations
 
 import importlib.util
 from importlib.metadata import PackageNotFoundError, version
+from collections import Counter
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
+import re
 from typing import Iterable, Sequence
 
 from .models import ExtractionResult, PageText
@@ -69,13 +71,17 @@ def choose_docling_page_text(
     candidate_text: str,
     *,
     layout_risk: bool,
+    allow_whole_line_reordering: bool = False,
 ) -> str | None:
-    """Accept only a substantial Docling candidate with identical page text.
+    """Accept identical text or a proved token-preserving whole-line reorder.
 
     Whitespace and line boundaries can carry section, table, code and literal
-    structure.  Without shared coordinates the two strings cannot prove that a
-    reflow is semantic-preserving, so every internal character must agree.
-    Any difference fails closed to the native extraction.
+    structure.  The default therefore still requires every internal character
+    to agree.  The enrichment path may explicitly allow reordered complete
+    prose lines on a page already proven to have non-linear layout risk; the
+    title, every line, case, punctuation, number, unit and occurrence count must
+    remain exact.  Ordered lists, table-like rows and ambiguous duplicates fail
+    closed to the native extraction.
     """
 
     if not layout_risk:
@@ -84,9 +90,50 @@ def choose_docling_page_text(
     native = native_text.strip()
     if len(candidate) < _MIN_CANDIDATE_CHARACTERS or not native:
         return None
-    if native != candidate:
-        return None
-    return candidate
+    if native == candidate:
+        return candidate
+    if allow_whole_line_reordering and _safe_whole_line_reordering(native, candidate):
+        return candidate
+    return None
+
+
+_ORDERED_LINE_PREFIX_RE = re.compile(
+    r"^(?:\(?\d+(?:\.\d+)*[.)]?|\(?[A-Za-z][.)]|[-*•])\s+"
+)
+_PROSE_LINE_END_RE = re.compile(r"[.!?。！？:]$")
+
+
+def _safe_whole_line_reordering(native: str, candidate: str) -> bool:
+    """Prove that Docling only moved unique, sentence-like complete lines."""
+
+    native_lines = [_compact_line(line) for line in native.splitlines() if line.strip()]
+    candidate_lines = [_compact_line(line) for line in candidate.splitlines() if line.strip()]
+    if len(native_lines) < 4 or len(native_lines) != len(candidate_lines):
+        return False
+    # The leading heading anchors the page identity and cannot move between columns.
+    if native_lines[0] != candidate_lines[0]:
+        return False
+    native_body = native_lines[1:]
+    candidate_body = candidate_lines[1:]
+    if native_body == candidate_body:
+        return False
+    if Counter(native_body) != Counter(candidate_body):
+        return False
+    # Duplicate lines cannot be mapped one-to-one, so their reordering is not provable.
+    if any(count != 1 for count in Counter(native_body).values()):
+        return False
+    for line in native_body:
+        if _ORDERED_LINE_PREFIX_RE.match(line):
+            return False
+        if not _PROSE_LINE_END_RE.search(line):
+            return False
+    return True
+
+
+def _compact_line(value: str) -> str:
+    """Normalize only whitespace inside one unchanged line."""
+
+    return " ".join(value.split())
 
 
 def enrich_with_optional_layout_backend(
@@ -147,6 +194,7 @@ def enrich_with_optional_layout_backend(
             page.text,
             candidates.get(page.page_number, ""),
             layout_risk=page.layout_risk,
+            allow_whole_line_reordering=True,
         )
         if selected is None:
             pages.append(page)

@@ -6797,6 +6797,43 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Sections 31.3.4 to 31.3.18", audit_text)
         self.assertIn("Sections 31.3.4 to 31.3.19", audit_text)
 
+    def test_reader_hides_formula_reference_list_with_empty_extracted_locator(self) -> None:
+        """公式出处中一个空括号是抽取缺号，不应变成读者技术差异。"""
+
+        old_sentence = (
+            "The reference mated MCB-HCB loss is given in Equation (31-5) "
+            "and Equation ()."
+        )
+        new_sentence = (
+            "The reference mated MCB-HCB loss is given in Equation (31-6)."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_empty_equation_reference.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_empty_equation_reference.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            rendered_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+            audit = paths["json"].read_text(encoding="utf-8")
+
+        for rendered in rendered_reports:
+            self.assertNotIn(old_sentence, rendered)
+            self.assertNotIn(new_sentence, rendered)
+        self.assertIn(old_sentence, audit)
+        self.assertIn(new_sentence, audit)
+
     def test_reader_pairs_added_removed_reference_list_sentences(self) -> None:
         """长引用列表被 diff 拆成新增和删除时，读者层仍应将两句视为一致。"""
 
@@ -8394,8 +8431,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("至少一份 PDF 未识别到稳定章节", report_html)
         self.assertIn("至少一份 PDF 未识别到稳定章节", report_text)
 
-    def test_visual_only_pdf_changes_do_not_create_text_diffs(self) -> None:
-        """Graphic-only changes are intentionally ignored by the text diff."""
+    def test_visual_only_pdf_changes_become_review_evidence_without_fake_text_diffs(self) -> None:
+        """Graphic-only changes must be visible without pretending they are text edits."""
 
         pages = [
             [
@@ -8418,8 +8455,112 @@ class ProtocolDiffTests(unittest.TestCase):
                 decorative_marks={1: "new"},
             )
             result = run_diff(old_pdf, new_pdf, DiffOptions())
+            outputs = write_reports(result, temp_path / "reports", DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+            report_json = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            app = object.__new__(ProtocolDiffDesktopApp)
+            app.summary_var = mock.Mock()
+            app.report_path_var = mock.Mock()
+            app.status_var = mock.Mock()
+            app.open_html_button = mock.Mock()
+            app.open_dir_button = mock.Mock()
+            app._handle_success(DesktopRunSuccess(result=result, outputs=outputs))
+            desktop_summary = app.summary_var.set.call_args.args[0]
 
         self.assertEqual([], result.changes)
+        self.assertEqual(1, len(result.visual_review_items))
+        self.assertEqual(1, result.visual_review_items[0].old_page_number)
+        self.assertEqual(1, result.visual_review_items[0].new_page_number)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertTrue(
+            any("未解释的视觉变化" in reason for reason in result.assessment.reasons)
+        )
+        self.assertIn("视觉漏检核对", report_html)
+        self.assertIn("图形变化未被文字、表格或公式差异覆盖", report_html)
+        self.assertEqual(1, len(report_json["visual_review_items"]))
+        self.assertIn("视觉待核对 1", desktop_summary)
+
+    def test_visual_watchdog_aligns_exact_text_pages_after_an_inserted_page(self) -> None:
+        """A page insertion must not make the visual watchdog compare unrelated pages."""
+
+        old_pages = [
+            ["1 Scope", "Common scope text."],
+            ["2 Diagram", "The diagram below defines the supported path."],
+        ]
+        new_pages = [
+            ["Cover note", "This page was inserted in the new revision."],
+            *old_pages,
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_shifted_visual.pdf",
+                old_pages,
+                decorative_marks={2: "old"},
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_shifted_visual.pdf",
+                new_pages,
+                decorative_marks={3: "new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual(1, len(result.visual_review_items))
+        visual = result.visual_review_items[0]
+        self.assertEqual(2, visual.old_page_number)
+        self.assertEqual(3, visual.new_page_number)
+        self.assertEqual("monotonic-exact-text", visual.alignment_method)
+
+    def test_visual_watchdog_flags_same_page_graphics_when_both_text_layers_are_empty(self) -> None:
+        """Image-only pages still need a visual review signal when semantic parsing is empty."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_image_only.pdf",
+                [[]],
+                decorative_marks={1: "old"},
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_image_only.pdf",
+                [[]],
+                decorative_marks={1: "new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual(1, len(result.visual_review_items))
+        self.assertEqual("same-page-empty-text", result.visual_review_items[0].alignment_method)
+        self.assertEqual("indeterminate", result.assessment.state.value)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
+    def test_visual_watchdog_can_be_explicitly_disabled_for_performance_diagnosis(self) -> None:
+        """The opt-out suppresses only visual review work, not ordinary semantic comparison."""
+
+        pages = [["1 Scope", "The receiver shall support 53.125 GBd operation."]]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_visual_disabled.pdf",
+                pages,
+                decorative_marks={1: "old"},
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_visual_disabled.pdf",
+                pages,
+                decorative_marks={1: "new"},
+            )
+
+            result = run_diff(
+                old_pdf,
+                new_pdf,
+                DiffOptions(visual_watchdog=False),
+            )
+
+        self.assertEqual([], result.changes)
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(result.provenance.effective_thresholds.visual_watchdog)
 
     def test_repeated_middle_body_lines_are_not_removed_as_page_furniture(self) -> None:
         """Repeated body clauses on short pages must survive header/footer cleanup."""

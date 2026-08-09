@@ -247,6 +247,20 @@ def _reported_table_change_count(outputs: dict[str, Path]) -> int | None:
     return len(table_changes) if isinstance(table_changes, list) else None
 
 
+def _reported_visual_review_count(outputs: dict[str, Path]) -> int | None:
+    """Read the page-level watchdog count shown in the non-technical summary."""
+
+    json_path = outputs.get("json")
+    if json_path is None:
+        return None
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        visual_items = payload.get("visual_review_items")
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return None
+    return len(visual_items) if isinstance(visual_items, list) else None
+
+
 class ProtocolDiffDesktopApp:
     """Desktop GUI coordinator for selecting PDFs and launching comparisons."""
 
@@ -888,12 +902,19 @@ class ProtocolDiffDesktopApp:
             if table_change_count is not None
             else "；表格变化请查看报告"
         )
+        visual_review_count = _reported_visual_review_count(payload.outputs)
+        visual_note = (
+            f"，视觉待核对 {visual_review_count}"
+            if visual_review_count is not None
+            else "；视觉待核对项请查看报告"
+        )
         self.summary_var.set(
             f"{assessment_note}："
             f"章节修改 {counts.get('modified', 0)}，"
             f"章节新增 {counts.get('added', 0)}，"
             f"章节删除 {counts.get('deleted', 0)}"
             f"{table_note}"
+            f"{visual_note}"
         )
         html_path = payload.outputs["html"]
         self.report_path_var.set(f"HTML 报告: {html_path}")

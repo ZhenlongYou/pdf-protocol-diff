@@ -54,6 +54,11 @@ OCR_LANGUAGE = None
 # if its optional dependency is not present.
 LAYOUT_BACKEND = "native"
 
+# Keep the source-pixel watchdog enabled for normal reviews.  It only compares
+# pages whose extracted text is identical and reports unexplained graphics as
+# manual-review evidence; it never turns pixels into invented technical text.
+VISUAL_WATCHDOG = True
+
 # When both paths above are blank, generate multi-page demo PDFs so the
 # no-argument run demonstrates page drift, headers/footers, and section changes.
 # If either path is explicitly filled but invalid, the script fails instead of
@@ -158,6 +163,13 @@ def parse_args() -> argparse.Namespace:
         help="版面解析策略：native（默认快速）、auto（仅复杂页）或 docling（需可选依赖）",
     )
     parser.add_argument(
+        "--no-visual-watchdog",
+        action="store_false",
+        dest="visual_watchdog",
+        default=VISUAL_WATCHDOG,
+        help="关闭文字一致页的视觉漏检核对；仅建议用于性能排障",
+    )
+    parser.add_argument(
         "--demo",
         action="store_true",
         help="忽略 PDF 参数，生成并比较内置示例 PDF",
@@ -217,6 +229,7 @@ def main() -> int:
             new_end_page=args.new_end_page,
             ocr_language=args.ocr_language,
             layout_backend=args.layout_backend,
+            visual_watchdog=args.visual_watchdog,
         )  # 共享配置验证属于可预期的用户输入错误，必须由同一中文错误路径捕获。
         old_pdf, new_pdf = resolve_inputs(args)
         result = run_diff(old_pdf, new_pdf, options)

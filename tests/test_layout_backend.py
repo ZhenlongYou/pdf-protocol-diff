@@ -661,6 +661,71 @@ class LayoutBackendRoutingTests(unittest.TestCase):
         self.assertTrue(any("Docling" in warning for warning in result.warnings))
         extractor.assert_called_once_with(Path("complex.pdf"), page_range=(1, 1))
 
+    def test_auto_mode_accepts_token_preserving_whole_line_reordering_on_risky_page(self) -> None:
+        """Docling may repair reading order only by moving complete unchanged lines."""
+
+        native = (
+            "1 Scope\n"
+            "Left column first requirement.\n"
+            "Right column first note.\n"
+            "Left column second requirement.\n"
+            "Right column second note."
+        )
+        candidate = (
+            "1 Scope\n"
+            "Left column first requirement.\n"
+            "Left column second requirement.\n"
+            "Right column first note.\n"
+            "Right column second note."
+        )
+        extraction = ExtractionResult(
+            pdf_path=Path("two-column.pdf"),
+            pages=[PageText(page_number=1, text=native, layout_risk=True)],
+        )
+        with mock.patch.object(layout_backend, "_docling_is_available", return_value=True):
+            with mock.patch.object(
+                layout_backend,
+                "_extract_docling_page_texts",
+                return_value={1: candidate},
+            ):
+                result = enrich_with_optional_layout_backend(extraction, "auto")
+
+        self.assertEqual(candidate, result.pages[0].text)
+        self.assertEqual("docling", result.pages[0].comparison_text_source)
+        self.assertTrue(result.pages[0].layout_risk)
+
+    def test_auto_mode_rejects_reordered_candidate_with_unit_case_change(self) -> None:
+        """The reorder allowance cannot hide mV-to-MV or any other line mutation."""
+
+        native = (
+            "1 Scope\n"
+            "The lower column limit is 10 mV.\n"
+            "The upper column limit is 20 mV.\n"
+            "The lower column note applies.\n"
+            "The upper column note applies."
+        )
+        unsafe_candidate = (
+            "1 Scope\n"
+            "The lower column limit is 10 MV.\n"
+            "The lower column note applies.\n"
+            "The upper column limit is 20 mV.\n"
+            "The upper column note applies."
+        )
+        extraction = ExtractionResult(
+            pdf_path=Path("unsafe-two-column.pdf"),
+            pages=[PageText(page_number=1, text=native, layout_risk=True)],
+        )
+        with mock.patch.object(layout_backend, "_docling_is_available", return_value=True):
+            with mock.patch.object(
+                layout_backend,
+                "_extract_docling_page_texts",
+                return_value={1: unsafe_candidate},
+            ):
+                result = enrich_with_optional_layout_backend(extraction, "auto")
+
+        self.assertEqual(native, result.pages[0].text)
+        self.assertEqual("native", result.pages[0].comparison_text_source)
+
 
 if __name__ == "__main__":
     unittest.main()

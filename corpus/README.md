@@ -37,6 +37,24 @@ python3 tools/benchmark_pdf_parsing.py parsing_benchmark.example.json \
 OCR 页、告警数、字符数和耗时；不含 case id、description、anchor、文件名/路径、全文、root
 绝对路径、hash 或临时报告路径。`pass` 表示抽取门通过，不提升扫描/复杂布局页面的自动判等资格。
 
+## Gold Accuracy 可量化识别率
+
+`gold_accuracy.example.json` 使用人工核对的变化事件，而不是少量“出现/不出现”锚点。
+每个事件声明类型（正文、表格、公式或视觉）、旧/新 literal、可选条款位置、预期出现
+次数、是否属于关键事实，以及它应不应该出现在 HTML/Markdown/TXT 读者层。运行：
+
+```bash
+python3 tools/evaluate_diff_accuracy.py corpus/gold_accuracy.example.json \
+  --corpus-root /path/to/private/pdf-corpus \
+  --output-json /tmp/pdf_diff_gold_accuracy.json
+```
+
+输出包含总体 recall、关键事实 recall、视觉 recall、false-negative 数量和逐 case 状态。
+只有 `oracle_complete: true` 明确表示该版本对的实际变化已经穷举标注时，才计算
+precision；不完整 oracle 的 precision 必须为 `null`，防止把未知变化当作真阴性。
+短 literal 若命中多处会直接失败；应增加 `location` 或准确的 `occurrences`，不能任选
+一处凑成命中。summary 只保留 case/event 序号与计数，不复制 PDF 路径或技术正文。
+
 受控模式自建临时 corpus，不能同时传入 `--corpus-root`；传入会在参数校验阶段以退出码 2
 拒绝，避免误以为私有文件参与了受控验证。
 
@@ -48,7 +66,7 @@ OCR 页、告警数、字符数和耗时；不含 case id、description、anchor
 - `degraded`：仍会输出可定位的正文和表格证据，但存在文字量不足、按页回退、多栏/非线性布局、异常密集的单字/短碎片抽取、抽取警告等风险，必须人工复核原 PDF。
 - `indeterminate`：缺少可比较文字或章节；不能从零变化推导出文档相同。
 
-扫描件、图片主导 PDF、复杂多栏论文、表单、幻灯片、CAD 导出、字体映射损坏文件，以及依赖图形/盖章/矢量图变化的审阅都属于降级或不支持范围。这里“unsupported”是能力边界，不是第四个状态：整页 OCR 若成功可提供 `degraded` 的文字差异定位证据，没有可比较文字或章节时是 `indeterminate`；纯视觉、非表格图片差异当前不做判断。self-diff 可以守住“同一输入不得产生实质变化”，但不能把本来不可抽取的文档提升成 `reliable`。OCR 和非表格视觉比较也不属于 Corpus v0 的可靠判等承诺。
+扫描件、图片主导 PDF、复杂多栏论文、表单、幻灯片、CAD 导出、字体映射损坏文件，以及依赖图形/盖章/矢量图语义的审阅都属于降级或不支持范围。这里“unsupported”是能力边界，不是第四个状态：整页 OCR 若成功可提供 `degraded` 的文字差异定位证据，没有可比较文字或章节时是 `indeterminate`；纯视觉、非表格图片变化只由文字一致页的像素哨兵追加人工复核证据，不自动判断图形语义。self-diff 可以守住“同一输入不得产生实质变化”，但不能把本来不可抽取的文档提升成 `reliable`。OCR 和非表格视觉语义比较也不属于 Corpus v0 的可靠判等承诺。
 
 ## 私有文件放在哪里
 

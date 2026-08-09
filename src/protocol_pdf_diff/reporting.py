@@ -29,6 +29,7 @@ from .models import (
     TableChange,
     TableRowChange,
     TableVisual,
+    VisualReviewItem,
 )
 from .quality import (
     DiffProvenance,
@@ -331,6 +332,9 @@ def write_reports(
         "changes": [_change_to_dict(change) for change in result.changes],
         "table_changes": [_table_change_to_dict(change) for change in table_changes],
         "formula_changes": [_formula_change_to_dict(change) for change in result.formula_changes],
+        "visual_review_items": [
+            _visual_review_item_to_dict(item) for item in result.visual_review_items
+        ],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
         "old_table_visuals": [_table_visual_to_dict(table) for table in result.old_table_visuals],
@@ -467,6 +471,7 @@ def _render_markdown(
         f"| 正文字符复核项 | {technical_review_count} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
         f"| 公式视觉核对项 | {len(result.formula_changes)} |",
+        f"| 视觉漏检核对项 | {len(result.visual_review_items)} |",
         f"| 变化表格 | {len(material_table_changes)} |",
         f"| 表格行变化 | {table_row_change_count} |",
         f"| 表格复核项 | {table_review_count} |",
@@ -509,6 +514,27 @@ def _render_markdown(
                 )
             lines.append("")
 
+    if result.visual_review_items:
+        lines.extend(
+            [
+                "## 视觉漏检核对",
+                "",
+                "说明: 这些页面的可抽取文字一致，但源 PDF 像素存在实质变化；该证据只提示可能漏识别，不自动解释图形语义。",
+                "",
+            ]
+        )
+        for index, item in enumerate(result.visual_review_items, start=1):
+            lines.extend(
+                [
+                    f"### V{index}. 旧页 {item.old_page_number or '-'} / 新页 {item.new_page_number or '-'}",
+                    f"- 说明: {item.reason}",
+                    f"- 像素相似度: {item.pixel_similarity:.4f}",
+                    f"- 变化像素比例: {item.changed_pixel_ratio:.4%}",
+                    f"- 页面配对依据: {item.alignment_method}",
+                    "",
+                ]
+            )
+
     lines.extend(
         [
             "## 技术正文变化与复核",
@@ -521,7 +547,7 @@ def _render_markdown(
     if not technical_changes:
         message = (
             _empty_report_message(result)
-            if not table_changes and not result.formula_changes
+            if not table_changes and not result.formula_changes and not result.visual_review_items
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         lines.extend([message, ""])
@@ -762,6 +788,19 @@ def _render_html(
                 ),
             ]
         )
+    if result.visual_review_items:
+        nav_parts.extend(
+            [
+                '<div class="nav-title nav-section-gap">视觉漏检核对</div>',
+                (
+                    '<a class="nav-item nav-formula" href="#visual-review-items">'
+                    '<span class="nav-label">视觉</span>'
+                    '<div class="nav-body"><strong>疑似未解释变化</strong>'
+                    f'<div class="nav-location">{len(result.visual_review_items)} 页待核对</div>'
+                    '</div></a>'
+                ),
+            ]
+        )
     nav_items = "\n".join(nav_parts)
     if not nav_items:
         nav_items = f'<div class="empty-nav">{_escape(_empty_report_message(result))}</div>'
@@ -777,7 +816,7 @@ def _render_html(
     if not technical_cards:
         technical_message = (
             _empty_report_message(result)
-            if not table_changes and not result.formula_changes
+            if not table_changes and not result.formula_changes and not result.visual_review_items
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
@@ -787,6 +826,7 @@ def _render_html(
     unplaced_formula_html = _render_unplaced_formula_changes_html(unplaced_formulas)
     # 放大对话框只在存在公式截图时输出，避免无公式报告携带无意义交互代码。
     formula_zoom_html = _render_formula_zoom_dialog_html(bool(formula_placements))
+    visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
         len(_material_table_row_changes(change))
@@ -1230,6 +1270,7 @@ def _render_html(
         <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
         <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
         <div class="metric"><strong>{len(result.formula_changes)}</strong><span>公式视觉核对</span></div>
+        <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉漏检核对</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
@@ -1248,6 +1289,7 @@ def _render_html(
       </section>
       {table_visual_html}
       {formula_index_html}
+      {visual_review_html}
       <h2 class="section-heading" id="text-changes">技术正文变化</h2>
       {technical_cards}
       {unplaced_formula_html}
@@ -1329,6 +1371,57 @@ def _render_table_changes_html(table_changes: list[TableChange]) -> str:
         <p class="change-summary">展示检测到的行级变化、表题/表号变化、单侧新增/删除，以及结构或字体编码尚未验证的表格复核项；旧/新表题、页码、配对分数和完整事实同时写入 JSON 与 CSV。</p>
         {cards}
       </section>
+    """
+
+
+def _render_visual_review_items_html(items: list[VisualReviewItem]) -> str:
+    """Render pixel evidence separately from semantic text/table/formula facts."""
+
+    if not items:
+        return ""
+    cards = "\n".join(
+        _render_visual_review_item_html(index, item)
+        for index, item in enumerate(items, start=1)
+    )
+    return f"""
+      <section class="table-visuals" id="visual-review-items">
+        <h2>视觉漏检核对</h2>
+        <p class="change-summary">以下页面的可抽取文字一致，但源 PDF 像素存在实质变化。它们是防止漏报的人工复核证据，不会被自动解释成正文、表格或公式修改。</p>
+        {cards}
+      </section>
+    """
+
+
+def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
+    """Render old/new source pages and the material-difference mask."""
+
+    old_page = item.old_page_number if item.old_page_number is not None else "-"
+    new_page = item.new_page_number if item.new_page_number is not None else "-"
+    old_image = (
+        f'<img src="{item.old_image_data_uri}" alt="旧版第 {old_page} 页视觉证据">'
+        if item.old_image_data_uri
+        else '<p class="change-summary">旧版无对应页面。</p>'
+    )
+    new_image = (
+        f'<img src="{item.new_image_data_uri}" alt="新版第 {new_page} 页视觉证据">'
+        if item.new_image_data_uri
+        else '<p class="change-summary">新版无对应页面。</p>'
+    )
+    diff_image = (
+        f'<img src="{item.diff_image_data_uri}" alt="V{index} 差异掩膜">'
+        if item.diff_image_data_uri
+        else '<p class="change-summary">没有可渲染的差异掩膜。</p>'
+    )
+    return f"""
+        <article class="table-visual-card" id="visual-review-{index}">
+          <h3>V{index}. 旧页 {old_page} / 新页 {new_page}</h3>
+          <p class="change-summary">{_escape(item.reason)} 像素相似度 {item.pixel_similarity:.4f}，变化比例 {item.changed_pixel_ratio:.4%}，配对依据 {_escape(item.alignment_method)}。</p>
+          <div class="table-shot-grid">
+            <div class="table-shot"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
+            <div class="table-shot"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
+          </div>
+          <div class="table-shot" style="margin-top: 12px"><h4>差异掩膜</h4>{diff_image}</div>
+        </article>
     """
 
 
@@ -6566,6 +6659,18 @@ _READER_TYPED_LOCATOR_REFERENCE_RES = tuple(
     )
     for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
 )
+# PDF 字体映射偶尔只丢失括号内的出处编号，例如 ``Equation ()``。它仍是一个
+# 已显式标注类别的定位引用；先在读者副本中补成占位编号，随后由上面的完整
+# 引用列表规则原子中和。JSON/CSV 继续保存原始空括号，不修改审计事实。
+_READER_EMPTY_TYPED_LOCATOR_RES = tuple(
+    (
+        locator_kind,
+        re.compile(
+            rf"(?i)\b(?:{singular_prefix}|{plural_prefix})\s*\(\s*\)"
+        ),
+    )
+    for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
+)
 # 无显式 Section/Clause 词的 “See 31.3.10” 只中和该编号，后续裸数字继续按正文严格比较。
 _READER_BARE_SEE_REFERENCE_RE = re.compile(
     rf"(?i)\bsee\s+\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
@@ -6577,6 +6682,12 @@ def _reader_neutralize_locator_numbers(value: str) -> str:
 
     # 先规整换行空白，保证跨行引用和单行引用使用相同的读者比较输入。
     neutralized = compact_inline(value)
+    # 仅修复带显式定位词的空括号，避免一个丢失的公式/表格号破坏整句引用判断。
+    for locator_kind, empty_reference_re in _READER_EMPTY_TYPED_LOCATOR_RES:
+        neutralized = empty_reference_re.sub(
+            f"{locator_kind} 0",
+            neutralized,
+        )
     # 先处理中间可省略定位词的复数列表；形态和单位门禁保证正文工程值留在句中。
     for locator_kind, reference_re in _READER_PLURAL_LOCATOR_REFERENCE_RES:
         neutralized = reference_re.sub(
@@ -9167,7 +9278,7 @@ def _report_scope_note(options: DiffOptions) -> str:
 
     return (
         "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核，编号显示公式会提供源裁剪和坐标已证明的上下标；"
-        "图片、印章、普通矢量图等其它视觉元素不比较；"
+        "文字一致页的图片、印章和普通矢量图变化会由视觉漏检哨兵提示，但不会自动解释图形语义；"
         "重复页眉页脚和动态页码会尽量过滤；"
         "章节、Figure、表格和条件的引用编号、列表及范围变化不计入读者差异，数值、限值和单位仍严格比较；"
         "公式编号顺延仍保留源截图视觉核对，但不计入核心技术变化；"
@@ -9340,6 +9451,11 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
             "ocr_render_resolution": thresholds.ocr_render_resolution,
             "ocr_page_timeout_seconds": thresholds.ocr_page_timeout_seconds,
             "ocr_maximum_render_pixels": thresholds.ocr_maximum_render_pixels,
+            "visual_watchdog": thresholds.visual_watchdog,
+            "visual_render_dpi": thresholds.visual_render_dpi,
+            "visual_pixel_delta_threshold": thresholds.visual_pixel_delta_threshold,
+            "visual_min_changed_pixel_ratio": thresholds.visual_min_changed_pixel_ratio,
+            "visual_min_component_area": thresholds.visual_min_component_area,
             "quality_min_reliable_characters": thresholds.min_reliable_characters,
             "quality_max_reliable_empty_page_ratio": thresholds.max_reliable_empty_page_ratio,
             "quality_min_pages_for_density_check": thresholds.min_pages_for_density_check,
@@ -9632,4 +9748,19 @@ def _formula_change_to_dict(change: FormulaChange) -> dict[str, object]:
             if change.new_formula is not None
             else None
         ),
+    }
+
+
+def _visual_review_item_to_dict(item: VisualReviewItem) -> dict[str, object]:
+    """Serialize visual watchdog facts without embedding full-page image payloads."""
+
+    return {
+        "old_page_number": item.old_page_number,
+        "new_page_number": item.new_page_number,
+        "change_type": item.change_type,
+        "pixel_similarity": item.pixel_similarity,
+        "changed_pixel_ratio": item.changed_pixel_ratio,
+        "reason": item.reason,
+        "alignment_method": item.alignment_method,
+        "diff_bbox": list(item.diff_bbox) if item.diff_bbox is not None else None,
     }

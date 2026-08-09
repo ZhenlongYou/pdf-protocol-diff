@@ -27,6 +27,12 @@ from .page_ocr import (
 )
 from .sectioning import canonical_number_identity
 from .text_utils import normalize_line
+from .visual_watchdog import (
+    VISUAL_MIN_CHANGED_PIXEL_RATIO,
+    VISUAL_MIN_COMPONENT_AREA,
+    VISUAL_PIXEL_DELTA_THRESHOLD,
+    VISUAL_RENDER_DPI,
+)
 
 
 SUPPORTED_PROFILE = (
@@ -143,6 +149,11 @@ class EffectiveThresholds:
     ocr_render_resolution: int = OCR_RENDER_RESOLUTION
     ocr_page_timeout_seconds: int = OCR_PAGE_TIMEOUT_SECONDS
     ocr_maximum_render_pixels: int = OCR_MAXIMUM_RENDER_PIXELS
+    visual_watchdog: bool = True
+    visual_render_dpi: int = VISUAL_RENDER_DPI
+    visual_pixel_delta_threshold: int = VISUAL_PIXEL_DELTA_THRESHOLD
+    visual_min_changed_pixel_ratio: float = VISUAL_MIN_CHANGED_PIXEL_RATIO
+    visual_min_component_area: int = VISUAL_MIN_COMPONENT_AREA
 
 
 @dataclass(frozen=True)
@@ -348,6 +359,11 @@ def build_provenance(
             ocr_render_resolution=OCR_RENDER_RESOLUTION,
             ocr_page_timeout_seconds=OCR_PAGE_TIMEOUT_SECONDS,
             ocr_maximum_render_pixels=OCR_MAXIMUM_RENDER_PIXELS,
+            visual_watchdog=options.visual_watchdog,
+            visual_render_dpi=VISUAL_RENDER_DPI,
+            visual_pixel_delta_threshold=VISUAL_PIXEL_DELTA_THRESHOLD,
+            visual_min_changed_pixel_ratio=VISUAL_MIN_CHANGED_PIXEL_RATIO,
+            visual_min_component_area=VISUAL_MIN_COMPONENT_AREA,
         ),
     )
 

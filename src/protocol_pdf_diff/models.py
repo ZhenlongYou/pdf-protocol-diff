@@ -218,6 +218,23 @@ class FormulaChange:
 
 
 @dataclass(frozen=True)
+class VisualReviewItem:
+    """One page-level visual delta that the semantic diff did not explain."""
+
+    old_page_number: int | None  # 旧版源 PDF 的 1-based 页码；整页新增时为 None。
+    new_page_number: int | None  # 新版源 PDF 的 1-based 页码；整页删除时为 None。
+    change_type: str  # modified / added / deleted；始终属于复核证据而非已解释语义。
+    pixel_similarity: float  # 对齐后像素相似度，仅用于排序和复核，不参与技术判等。
+    changed_pixel_ratio: float  # 超过视觉阈值的页面像素比例。
+    reason: str  # 明确说明为何需要回到源 PDF 核对。
+    alignment_method: str = "same-page-text"  # 页面配对依据，供 JSON 审计与后续算法升级。
+    diff_bbox: tuple[int, int, int, int] | None = None  # 差异像素在渲染图上的紧致外接框。
+    old_image_data_uri: str = ""  # 旧页离线缩略图，仅供 HTML 人工复核。
+    new_image_data_uri: str = ""  # 新页离线缩略图，仅供 HTML 人工复核。
+    diff_image_data_uri: str = ""  # 差异掩膜预览，不伪装成语义结论。
+
+
+@dataclass(frozen=True)
 class TableRowChange:
     """One auditable row-level finding inside a paired table."""
 
@@ -340,6 +357,7 @@ class DiffOptions:
     new_end_page: int | None = None
     ocr_language: str | None = None
     layout_backend: str = "native"  # 默认不启动重型版面解析，保护普通 PDF 的处理时间。
+    visual_watchdog: bool = True  # 默认启用页级像素漏检哨兵；它只增加复核证据，不改写语义差异。
 
     def __post_init__(self) -> None:
         """Reject comparison settings that would silently disable matching."""
@@ -421,6 +439,7 @@ class DiffResult:
     old_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存旧 PDF 编号公式。
     new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
     formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
+    visual_review_items: list[VisualReviewItem] = field(default_factory=list)  # 语义层未覆盖的页级视觉变化，只作漏检哨兵。
 
 
 def _normalize_key(value: str) -> str:

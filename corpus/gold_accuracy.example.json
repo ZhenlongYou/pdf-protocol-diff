@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "oif-vsr-reader-and-critical-facts",
+      "required": false,
+      "old": {
+        "path": "oif2024.532.04.pdf"
+      },
+      "new": {
+        "path": "oif2024.532.05.pdf"
+      },
+      "options": {
+        "layout_backend": "native"
+      },
+      "oracle_complete": false,
+      "expected_events": [
+        {
+          "id": "critical-frequency",
+          "kind": "text",
+          "old": "TP0a is defined to be separated from TP0, the ball of the package performing the host-to- module transmit function, by 4 dB of PCB attenuation at 28 GHz.",
+          "new": "TP0a is defined to be separated from TP0, the ball of the package performing the host-to- module transmit function, by 4 dB of PCB attenuation at 53.125 GHz.",
+          "location": "31.C.1 Host Transmitter output test point",
+          "critical": true,
+          "reader_visible": true
+        },
+        {
+          "id": "section-reference-renumbering",
+          "kind": "text",
+          "old": "Definitions and methodologies can be found in Sections 31.3.4 to 31.3.18.",
+          "new": "Definitions and methodologies can be found in Sections 31.3.4 to 31.3.19.",
+          "location": "31.3.3 Module-to-Host Electrical Specifications",
+          "occurrences": 1,
+          "critical": false,
+          "reader_visible": false
+        }
+      ]
+    }
+  ]
+}
