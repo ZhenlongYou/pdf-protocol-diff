@@ -1971,10 +1971,7 @@ def _proven_running_header_boxes(
     top_words = [word for word in words if float(word.get("bottom", height + 1)) <= height * 0.18]
     boxes: list[tuple[float, float, float, float]] = []
     for _top, _bottom, line_text, line_words in _word_line_records(top_words):
-        if (
-            "implementation agreement" in line_text
-            and re.search(r"\b(?:interface|protocol|specification)\b|\bi/o\b", line_text)
-        ):
+        if _looks_like_running_header_title(line_text):
             boxes.extend(
                 _tight_word_bbox(word, width=width, height=height)
                 for word in line_words
@@ -1986,25 +1983,67 @@ def _document_proven_running_header_boxes(
     pages: list[tuple[int, object]],
     words_by_page: dict[int, list[dict[str, object]]],
 ) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
-    """Authorize tight header-word removal only with document-wide repetition."""
+    """Authorize tight header-word removal only with stable repetition."""
 
-    candidates = {
-        page_number: boxes
-        for page_number, page in pages
-        if (
-            boxes := _proven_running_header_boxes(
-                page,
-                words=words_by_page.get(page_number, []),
+    candidates: dict[
+        int,
+        tuple[str, tuple[tuple[float, float, float, float], ...]],
+    ] = {}
+    for page_number, page in pages:
+        words = words_by_page.get(page_number, [])
+        width = float(getattr(page, "width", 0) or 0)
+        height = float(getattr(page, "height", 0) or 0)
+        if width <= 0 or height <= 0:
+            continue
+        matching_lines = [
+            (line_text, line_words)
+            for _top, _bottom, line_text, line_words in _word_line_records(
+                [
+                    word
+                    for word in words
+                    if float(word.get("bottom", height + 1)) <= height * 0.18
+                ]
             )
+            if _looks_like_running_header_title(line_text)
+        ]
+        if len(matching_lines) != 1:
+            continue
+        line_text, line_words = matching_lines[0]
+        candidates[page_number] = (
+            normalize_line(line_text).casefold(),
+            tuple(
+                _tight_word_bbox(word, width=width, height=height)
+                for word in line_words
+            ),
         )
-    }
     required_pages = max(
         3,
         math.ceil(len(pages) * _DOCUMENT_RUNNING_HEADER_MIN_PAGE_COVERAGE),
     )
-    if len(candidates) < required_pages:
+    signature_counts = Counter(signature for signature, _boxes in candidates.values())
+    if not signature_counts:
         return {}
-    return candidates
+    stable_signature, stable_count = signature_counts.most_common(1)[0]
+    if stable_count < required_pages:
+        return {}
+    return {
+        page_number: boxes
+        for page_number, (signature, boxes) in candidates.items()
+        if signature == stable_signature
+    }
+
+
+def _looks_like_running_header_title(line_text: str) -> bool:
+    """Recognize the narrow class of OIF-style running document titles."""
+
+    candidate = normalize_line(line_text).casefold()
+    return bool(
+        "implementation agreement" in candidate
+        and re.search(
+            r"\b(?:interface|protocol|specification)\b|\bi/o\b",
+            candidate,
+        )
+    )
 
 
 def _word_lines_with_bounds(words: list[dict[str, object]]) -> list[tuple[float, float, str]]:

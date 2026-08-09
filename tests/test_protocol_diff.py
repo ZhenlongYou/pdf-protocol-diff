@@ -8912,6 +8912,35 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
 
+    def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
+        """Per-page technical titles cannot borrow the repeated-header deletion rule."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                "The calibrated receiver requirement shall preserve timing behavior.",
+            ]
+            for index in range(1, 9)
+        ]
+        headers = {
+            index: [f"OIF Implementation Agreement Protocol Mode {index}"]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pdf_path = write_multipage_text_pdf(
+                Path(temp_dir) / "distinct_protocol_titles.pdf",
+                pages,
+                header_lines=headers,
+            )
+
+            extraction = extract_pdf_text(pdf_path)
+
+        for index, page in enumerate(extraction.pages, start=1):
+            self.assertIn(
+                f"OIF Implementation Agreement Protocol Mode {index}",
+                page.text,
+            )
+
     def test_visual_watchdog_keeps_small_graphic_beside_proven_header_words(self) -> None:
         """Header proof may mask its words, never a full-width top band."""
 
