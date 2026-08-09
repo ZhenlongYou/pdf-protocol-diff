@@ -310,6 +310,8 @@ def write_reports(
         reader_change = _reader_section_change(change, reader_table_evidence)
         if reader_change is not None:
             reader_changes.append(reader_change)
+    # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
+    reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
     reader_result = replace(
         result,
         changes=reader_changes,
@@ -6491,19 +6493,41 @@ _READER_LOCATOR_PREFIXES = (
     ("equation", r"equation", r"equations"),
     ("page", r"page", r"pages"),
 )
-# 每个表达式吞并完整同类引用；单数前缀的后续项必须再次写出定位词，避免吞掉工程值。
-_READER_LOCATOR_REFERENCE_RES = tuple(
+# 裸列表编号必须保持同一种整数、点分层级或短横线编号形态，防止把异形工程量并入引用。
+_READER_LOCATOR_BARE_NUMBER_PATTERNS = (
+    r"\d+(?:\.\d+)+(?!\s*(?:\.|" + TABLE_NUMBER_DASH_CLASS + r")\s*\d)",
+    rf"\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)+(?!\s*{TABLE_NUMBER_DASH_CLASS}\s*\d)",
+    rf"\d+(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
+)
+# 裸编号后若紧跟已知工程单位，该数字属于正文值而不是 Figure/Condition 等引用列表项。
+_READER_ENGINEERING_UNIT_PATTERN = (
+    r"(?:%|[fpnumkMGTµμ]?(?:V|A|W|F|H|Hz)|[fpnumµμ]?s|"
+    r"[kMGT]?(?:bps|b/s|bit/s|B/s|T/s|Ω)|UI(?:pp|RMS)?|"
+    r"dB(?:m|c)?|ppm|°C|ohms?|volts?|amps?|watts?|seconds?|hertz|decibels?)"
+)
+# 复数定位词允许省略后续定位词，但所有裸编号必须同形且不得紧邻工程单位。
+_READER_PLURAL_LOCATOR_REFERENCE_RES = tuple(
     (
         locator_kind,
         re.compile(
-            rf"(?i)\b(?:see\s+)?(?:"
-            rf"{plural_prefix}\s*\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
-            rf"(?:{_READER_LOCATOR_JOIN_PATTERN}(?:(?:{singular_prefix}|{plural_prefix})\s*)?"
-            rf"\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?)*"
-            rf"|{singular_prefix}\s*\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
+            rf"(?i)\b(?:see\s+)?{plural_prefix}\s*\(?{number_pattern}\)?"
+            rf"(?:{_READER_LOCATOR_JOIN_PATTERN}"
+            rf"(?:(?:{singular_prefix}|{plural_prefix})\s*)?\(?{number_pattern}\)?"
+            rf"(?!\s*{_READER_ENGINEERING_UNIT_PATTERN}(?=$|[^A-Za-z0-9_])))*"
+        ),
+    )
+    for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
+    for number_pattern in _READER_LOCATOR_BARE_NUMBER_PATTERNS
+)
+# 单数写法及重复显式定位词列表只吞并带前缀的项，因此后续裸工程值天然保留。
+_READER_TYPED_LOCATOR_REFERENCE_RES = tuple(
+    (
+        locator_kind,
+        re.compile(
+            rf"(?i)\b(?:see\s+)?(?:{singular_prefix}|{plural_prefix})\s*"
+            rf"\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
             rf"(?:{_READER_LOCATOR_JOIN_PATTERN}(?:{singular_prefix}|{plural_prefix})\s*"
             rf"\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?)*"
-            rf")"
         ),
     )
     for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
@@ -6519,8 +6543,14 @@ def _reader_neutralize_locator_numbers(value: str) -> str:
 
     # 先规整换行空白，保证跨行引用和单行引用使用相同的读者比较输入。
     neutralized = compact_inline(value)
-    # 同类引用的数量、连接词、单复数和范围端点都属于出处定位，不参与读者技术差异。
-    for locator_kind, reference_re in _READER_LOCATOR_REFERENCE_RES:
+    # 先处理中间可省略定位词的复数列表；形态和单位门禁保证正文工程值留在句中。
+    for locator_kind, reference_re in _READER_PLURAL_LOCATOR_REFERENCE_RES:
+        neutralized = reference_re.sub(
+            f"<{locator_kind}-references>",
+            neutralized,
+        )
+    # 再处理中间每项都显式写出定位词的列表及单个定位引用。
+    for locator_kind, reference_re in _READER_TYPED_LOCATOR_REFERENCE_RES:
         neutralized = reference_re.sub(
             f"<{locator_kind}-references>",
             neutralized,
@@ -6544,6 +6574,131 @@ def _reader_values_match_after_locator_renumbering(
     return old_value != new_value and _reader_neutralize_locator_numbers(
         old_value
     ) == _reader_neutralize_locator_numbers(new_value)
+
+
+def _reader_changes_without_cross_card_locator_pairs(
+    changes: list[SectionChange],
+) -> list[SectionChange]:
+    """在同一位置唯一配对 added/removed 引用句，并只修改读者副本。"""
+
+    # key 同时包含角色、报告位置和编号中和后的整句，防止跨章节或跨文档角色误配。
+    added_by_key: dict[tuple[str, str, str], list[tuple[int, int, str]]] = {}
+    removed_by_key: dict[tuple[str, str, str], list[tuple[int, int, str]]] = {}
+    # 只有没有被限流的卡片才具备完整读者 occurrence，可安全参与跨卡片消除。
+    for change_index, change in enumerate(changes):
+        if change.omitted_snippet_count != 0:
+            continue
+        location_key = compact_inline(change.report_location)
+        # 新增句按其完整中和文本建索引；列表长度差异会落到与旧句相同的 key。
+        for snippet_index, snippet in enumerate(change.added_snippets):
+            key = (
+                change.role,
+                location_key,
+                _reader_neutralize_locator_numbers(snippet),
+            )
+            added_by_key.setdefault(key, []).append(
+                (change_index, snippet_index, snippet)
+            )
+        # 删除句使用同一 key 结构，后续只接受恰好一对的无歧义匹配。
+        for snippet_index, snippet in enumerate(change.removed_snippets):
+            key = (
+                change.role,
+                location_key,
+                _reader_neutralize_locator_numbers(snippet),
+            )
+            removed_by_key.setdefault(key, []).append(
+                (change_index, snippet_index, snippet)
+            )
+
+    # occurrence 索引而不是字符串集合可正确处理同一卡片中的重复文本。
+    hidden_added: set[tuple[int, int]] = set()
+    hidden_removed: set[tuple[int, int]] = set()
+    for key, added_occurrences in added_by_key.items():
+        removed_occurrences = removed_by_key.get(key, [])
+        # 重复候选存在歧义时保守保留；不得仅凭相同模板文字跨卡片批量消除。
+        if len(added_occurrences) != 1 or len(removed_occurrences) != 1:
+            continue
+        added_change_index, added_snippet_index, new_value = added_occurrences[0]
+        removed_change_index, removed_snippet_index, old_value = removed_occurrences[0]
+        # 再次使用完整旧/新严格判据，确保 key 构造没有把相同原句或技术变化误判为引用变化。
+        if not _reader_values_match_after_locator_renumbering(old_value, new_value):
+            continue
+        hidden_added.add((added_change_index, added_snippet_index))
+        hidden_removed.add((removed_change_index, removed_snippet_index))
+
+    # 没有跨卡片命中时直接复用列表，避免无意义地复制全部 SectionChange。
+    if not hidden_added and not hidden_removed:
+        return changes
+
+    reader_changes: list[SectionChange] = []
+    for change_index, change in enumerate(changes):
+        # 删除已唯一配对的读者 occurrence，同时收集其原值用于同步 reader audit 副本。
+        hidden_added_values = [
+            snippet
+            for snippet_index, snippet in enumerate(change.added_snippets)
+            if (change_index, snippet_index) in hidden_added
+        ]
+        hidden_removed_values = [
+            snippet
+            for snippet_index, snippet in enumerate(change.removed_snippets)
+            if (change_index, snippet_index) in hidden_removed
+        ]
+        added_snippets = [
+            snippet
+            for snippet_index, snippet in enumerate(change.added_snippets)
+            if (change_index, snippet_index) not in hidden_added
+        ]
+        removed_snippets = [
+            snippet
+            for snippet_index, snippet in enumerate(change.removed_snippets)
+            if (change_index, snippet_index) not in hidden_removed
+        ]
+        # audit_* 在 reader 副本中同步过滤，原始 result.changes 仍由 JSON/CSV 无损序列化。
+        cleaned = replace(
+            change,
+            added_snippets=added_snippets,
+            removed_snippets=removed_snippets,
+            audit_added_snippets=_reader_audit_without_occurrences(
+                change.audit_added_snippets,
+                hidden_added_values,
+            ),
+            audit_removed_snippets=_reader_audit_without_occurrences(
+                change.audit_removed_snippets,
+                hidden_removed_values,
+            ),
+        )
+        # 整卡只剩已证明的引用列表增删时删除；任何替换或其它片段仍原样保留。
+        if (
+            not cleaned.added_snippets
+            and not cleaned.removed_snippets
+            and not cleaned.replaced_snippets
+            and cleaned.omitted_snippet_count == 0
+        ):
+            continue
+        reader_changes.append(cleaned)
+    # 返回新的读者卡片序列，调用者仍持有完全未修改的原始 DiffResult。
+    return reader_changes
+
+
+def _reader_audit_without_occurrences(
+    audit_snippets: list[str] | None,
+    hidden_values: list[str],
+) -> list[str] | None:
+    """按 occurrence 数量从读者 audit 副本移除已隐藏句。"""
+
+    # None 表示旧模型沿用可见列表；此时保留 None 即可维持兼容语义。
+    if audit_snippets is None or not hidden_values:
+        return audit_snippets
+    remaining_counts = Counter(hidden_values)
+    retained: list[str] = []
+    # 每个 hidden occurrence 只消费一次，重复句不会被字符串集合过量删除。
+    for snippet in audit_snippets:
+        if remaining_counts[snippet] > 0:
+            remaining_counts[snippet] -= 1
+            continue
+        retained.append(snippet)
+    # 返回过滤后的 reader audit；原始机器审计列表没有被原地修改。
+    return retained
 
 
 def _reader_table_changes(

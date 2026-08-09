@@ -6797,6 +6797,101 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Sections 31.3.4 to 31.3.18", audit_text)
         self.assertIn("Sections 31.3.4 to 31.3.19", audit_text)
 
+    def test_reader_pairs_added_removed_reference_list_sentences(self) -> None:
+        """长引用列表被 diff 拆成新增和删除时，读者层仍应将两句视为一致。"""
+
+        # 大幅扩展列表会让底层 SequenceMatcher 拆成 added/removed，而不是 replaced pair。
+        old_sentence = "Use Tables 1 and 2 for compliance."
+        new_sentence = "Use Tables 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 for compliance."
+        # 通过公开比较入口保留真实拆分行为，确保报告过滤覆盖这一用户可见路径。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_long_reference_list.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_long_reference_list.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+            ),
+            DiffOptions(),
+        )
+        # 先锁定底层确实产生独立新增/删除卡，避免测试偶然退化为已覆盖的 replaced pair。
+        raw_removed = [
+            snippet
+            for change in result.changes
+            for snippet in change.removed_snippets
+        ]
+        raw_added = [
+            snippet
+            for change in result.changes
+            for snippet in change.added_snippets
+        ]
+        self.assertEqual([old_sentence], raw_removed)
+        self.assertEqual([new_sentence], raw_added)
+        self.assertFalse(
+            any(change.replaced_snippets for change in result.changes)
+        )
+
+        # 写报告时只在读者副本中重新配对；原始 JSON 仍输出新增和删除事实。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
+            markdown = paths["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        # 两种读者格式均不得显示纯引用清单扩展，避免长列表逃过降噪规则。
+        for rendered in (html_text, markdown):
+            self.assertNotIn(old_sentence, rendered)
+            self.assertNotIn(new_sentence, rendered)
+        # JSON 的 removed/added 字段继续保持底层审计事实，供后续追溯与算法分析。
+        audit_removed = [
+            snippet
+            for change in payload["changes"]
+            for snippet in change["removed_snippets"]
+        ]
+        audit_added = [
+            snippet
+            for change in payload["changes"]
+            for snippet in change["added_snippets"]
+        ]
+        self.assertEqual([old_sentence], audit_removed)
+        self.assertEqual([new_sentence], audit_added)
+
+    def test_reader_cross_card_reference_pair_keeps_value_change(self) -> None:
+        """跨卡片引用列表配对不得隐藏同句中的工程限值变化。"""
+
+        # 列表大幅扩展仍会触发 added/deleted 拆分，但 33.5→34.0 dB 必须阻止读者消除。
+        old_sentence = "Use Tables 1 and 2 with a 33.5 dB insertion-loss limit."
+        new_sentence = (
+            "Use Tables 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 with a 34.0 dB "
+            "insertion-loss limit."
+        )
+        # 使用公开比较入口复现跨卡片形态，同时保留完整技术句作为最终 oracle。
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_cross_card_value.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_cross_card_value.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+            ),
+            DiffOptions(),
+        )
+
+        # HTML 与 Markdown 都必须显示旧、新 dB 值，证明跨卡片 key 仍对正文值精确比较。
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            rendered_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+            )
+
+        # 任一读者格式缺少旧值或新值，都说明引用清单降噪越过了数值边界。
+        for rendered in rendered_reports:
+            self.assertIn("33.5 dB", rendered)
+            self.assertIn("34.0 dB", rendered)
+
     def test_reader_keeps_case_sensitive_unit_and_identifier_with_locator_shift(self) -> None:
         """定位编号顺延不能吞掉 mV/MV 或技术标识符的大小写变化。"""
 
@@ -6835,42 +6930,63 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("1 mV", rendered)
             self.assertIn("1 MV", rendered)
 
-    def test_reader_keeps_bare_engineering_value_after_singular_locator(self) -> None:
-        """单数 Condition 后由 and 连接的裸数值仍必须按工程值比较。"""
+    def test_reader_keeps_bare_engineering_values_after_locator_phrases(self) -> None:
+        """单数或复数定位短语后的裸工程值都必须继续严格比较。"""
 
-        # 该句刻意制造“Condition 编号 + and + dB 数值”，防止引用列表表达式过度吞并数字。
-        result = compare_extractions(
-            ExtractionResult(
-                pdf_path=Path("old_condition_and_value.pdf"),
-                pages=[
-                    PageText(
-                        page_number=1,
-                        text="1 Scope\nCondition 5 and 33.5 dB of insertion loss apply.",
-                    )
-                ],
+        # 同时覆盖审查发现的复数 Figures/Conditions 误吞 dB、mV、UI 反例。
+        cases = [
+            (
+                "Condition 5 and 33.5 dB of insertion loss apply.",
+                "Condition 6 and 34.0 dB of insertion loss apply.",
+                "33.5 dB",
+                "34.0 dB",
             ),
-            ExtractionResult(
-                pdf_path=Path("new_condition_and_value.pdf"),
-                pages=[
-                    PageText(
-                        page_number=1,
-                        text="1 Scope\nCondition 6 and 34.0 dB of insertion loss apply.",
-                    )
-                ],
+            (
+                "Figures 5 and 33.5 dB of insertion loss apply.",
+                "Figures 6 and 34.0 dB of insertion loss apply.",
+                "33.5 dB",
+                "34.0 dB",
             ),
-            DiffOptions(),
-        )
+            (
+                "Figures 31-5 and 1 mV of residual voltage apply.",
+                "Figures 31-6 and 2 mV of residual voltage apply.",
+                "1 mV",
+                "2 mV",
+            ),
+            (
+                "Conditions 5 and 0.023 UI of residual jitter apply.",
+                "Conditions 6 and 0.025 UI of residual jitter apply.",
+                "0.023 UI",
+                "0.025 UI",
+            ),
+        ]
+        # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。
+        for old_sentence, new_sentence, old_value, new_value in cases:
+            with self.subTest(old_sentence=old_sentence):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old_locator_and_value.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new_locator_and_value.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+                    ),
+                    DiffOptions(),
+                )
 
-        # 公开报告入口必须显示两个 dB 值，证明引用中和只覆盖 Condition 5/6。
-        with tempfile.TemporaryDirectory() as temp_dir:
-            paths = write_reports(result, temp_dir, DiffOptions())
-            html_text = _visible_html_text(paths["html"].read_text(encoding="utf-8"))
-            markdown = paths["markdown"].read_text(encoding="utf-8")
+                # HTML 与 Markdown 必须同时暴露旧、新工程值，证明引用中和没有越界。
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    paths = write_reports(result, temp_dir, DiffOptions())
+                    rendered_reports = (
+                        _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                        paths["markdown"].read_text(encoding="utf-8"),
+                    )
 
-        # HTML 和 Markdown 都保留旧、新限值，禁止引用降噪影响后续数值核对。
-        for rendered in (html_text, markdown):
-            self.assertIn("33.5 dB", rendered)
-            self.assertIn("34.0 dB", rendered)
+                # 每种读者格式都必须保留两个值；任一格式隐藏都视为回归。
+                for rendered in rendered_reports:
+                    self.assertIn(old_value, rendered)
+                    self.assertIn(new_value, rendered)
 
     def test_reader_hides_pure_figure_number_shifts_in_each_context(self) -> None:
         """每个整句只改 Figure 编号时，都在读者报告中视为一致。"""
