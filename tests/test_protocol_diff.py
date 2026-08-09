@@ -7085,6 +7085,18 @@ class ProtocolDiffTests(unittest.TestCase):
                 "1] lanes",
                 "2] lanes",
             ),
+            (
+                "The limit (Sections 31.3 and 31.4) GBd is required.",
+                "The limit (Sections 31.5 and 31.6) GBd is required.",
+                "31.3 and 31.4) GBd",
+                "31.5 and 31.6) GBd",
+            ),
+            (
+                "The limit [Figures 31-3 and 31-4] lanes are required.",
+                "The limit [Figures 31-5 and 31-6] lanes are required.",
+                "31-3 and 31-4] lanes",
+                "31-5 and 31-6] lanes",
+            ),
         ]
         # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。
         for old_sentence, new_sentence, old_value, new_value in cases:
