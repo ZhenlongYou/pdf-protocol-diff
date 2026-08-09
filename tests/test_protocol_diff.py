@@ -7073,6 +7073,18 @@ class ProtocolDiffTests(unittest.TestCase):
                 "1 with ±0.1",
                 "2 with ±0.1",
             ),
+            (
+                "The limit (Figures 5 and 1) lanes are required.",
+                "The limit (Figures 6 and 2) lanes are required.",
+                "1) lanes",
+                "2) lanes",
+            ),
+            (
+                "The limit [Figures 5 and 1] lanes are required.",
+                "The limit [Figures 6 and 2] lanes are required.",
+                "1] lanes",
+                "2] lanes",
+            ),
         ]
         # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。
         for old_sentence, new_sentence, old_value, new_value in cases:

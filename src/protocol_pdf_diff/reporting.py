@@ -6493,8 +6493,11 @@ _READER_LOCATOR_PREFIXES = (
     ("equation", r"equation", r"equations"),
     ("page", r"page", r"pages"),
 )
-# 句末允许任意已证明完整的裸引用列表。
-_READER_LOCATOR_LIST_SENTENCE_END_PATTERN = r"(?=\s*(?:$|[.)\]]))"
+# 句末允许任意已证明完整的裸引用列表。右括号后还必须紧跟真正的句末，
+# 防止 `(Figures 5 and 1) lanes` 中的技术计数被回溯成引用编号。
+_READER_LOCATOR_LIST_SENTENCE_END_PATTERN = (
+    r"(?=\s*(?:$|[.!?](?:\s|$)|[)\]]\s*(?:$|[.!?](?:\s|$))))"
+)
 # 共享父编号的点分/短横线列表还可以在非数值续句动词前结束。介词、系动词不在
 # 正向证明集中，因为 `1 in`/`1 by`/`1 at`/`1 with` 都可以是技术数值。
 _READER_LOCATOR_STRUCTURED_FOLLOWING_WORD_PATTERN = (
