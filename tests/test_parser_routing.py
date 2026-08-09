@@ -3,19 +3,35 @@
 from __future__ import annotations
 
 import json  # 读取报告 JSON，验证审计信息不会泄漏页面或块正文。
-from pathlib import Path  # 临时 PDF 和手工构造 extraction 需要平台无关路径。
 import tempfile  # 每个公开提取场景使用独立、自动清理的输入目录。
 import unittest  # 沿用项目的标准库测试框架。
+from pathlib import Path  # 临时 PDF 和手工构造 extraction 需要平台无关路径。
 from unittest import mock  # 只替换 PDF/OCR 外部边界，抽取与评估路径仍真实执行。
 
 from PIL import Image  # 伪 pdfplumber 页面返回真实 Pillow 图像供 OCR 分支使用。
 
-from protocol_pdf_diff.compare import compare_extractions  # 通过公开比较入口生成质量与报告数据。
-from protocol_pdf_diff.models import DocumentBlock, DocumentBlockKind, DiffOptions, ExtractionResult, PageExtractionAudit, PageParserRoute, PageText  # 路由模型必须保持旧 PageText 构造兼容。
-from protocol_pdf_diff.page_ocr import classify_page_parser_route  # 纯分类器必须可脱离文件名和告警单独验证。
-from protocol_pdf_diff.pdf_extract import extract_pdf_text  # 公共 PDF 抽取入口负责把事实写回页面。
+from protocol_pdf_diff.compare import (
+    compare_extractions,  # 通过公开比较入口生成质量与报告数据。
+)
+from protocol_pdf_diff.models import (  # 路由模型必须保持旧 PageText 构造兼容。
+    DiffOptions,
+    DocumentBlock,
+    DocumentBlockKind,
+    ExtractionResult,
+    PageExtractionAudit,
+    PageParserRoute,
+    PageText,
+)
+from protocol_pdf_diff.page_ocr import (
+    classify_page_parser_route,  # 纯分类器必须可脱离文件名和告警单独验证。
+)
+from protocol_pdf_diff.pdf_extract import (
+    extract_pdf_text,  # 公共 PDF 抽取入口负责把事实写回页面。
+)
 from protocol_pdf_diff.reporting import write_reports  # JSON 报告是用户可见的审计出口。
-from protocol_pdf_diff.sample_data import write_multipage_text_pdf  # 生成真实原生文本 PDF，避免伪造普通页面路径。
+from protocol_pdf_diff.sample_data import (
+    write_multipage_text_pdf,  # 生成真实原生文本 PDF，避免伪造普通页面路径。
+)
 
 
 class _OnePagePdf:
@@ -854,6 +870,7 @@ class ParserRoutingTests(unittest.TestCase):
                 "block_count": 1,
                 "comparison_text_source": "native",
                 "layout_backend_version": None,
+                "visual_noise_bbox_count": 0,
             }],
             payload["extraction_audit"]["old"],
         )
@@ -910,6 +927,7 @@ class ParserRoutingTests(unittest.TestCase):
                 "block_count": 1,
                 "comparison_text_source": "native",
                 "layout_backend_version": None,
+                "visual_noise_bbox_count": 0,
             }],
             audit,
         )

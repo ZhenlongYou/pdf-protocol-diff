@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import csv
 import hashlib
-from html.parser import HTMLParser
 import json
 import os
 import re
+import sys
 import tempfile
 import unittest
-from unittest import mock
-from pathlib import Path
-import sys
 from argparse import Namespace
+from html.parser import HTMLParser
+from pathlib import Path
+from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -27,16 +27,18 @@ if str(SRC_DIR) not in sys.path:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import protocol_pdf_diff.pdf_extract as pdf_extract_module
 from main import resolve_inputs
 from protocol_pdf_diff import __version__
 from protocol_pdf_diff import compare as compare_module
 from protocol_pdf_diff import reporting as reporting_module
-from protocol_pdf_diff.compare import compare_extractions
-from protocol_pdf_diff.compare import run_diff
-from protocol_pdf_diff.compare import _is_global_noise_snippet  # 直接覆盖报告层短碎片过滤规则。
-from protocol_pdf_diff.compare import _merge_wrapped_lines  # 验证 PCIe 页眉簇过滤不会吞掉正文修订历史。
-from protocol_pdf_diff.compare import _split_line_preserving_numbers  # 验证列表破折号粘连会拆成独立审阅句。
-from protocol_pdf_diff.compare import _unit_pair_score  # 真实报告不得输出低于安全门槛的错误替换对。
+from protocol_pdf_diff.compare import (
+    _is_global_noise_snippet,  # 直接覆盖报告层短碎片过滤规则。
+    _merge_wrapped_lines,  # 验证 PCIe 页眉簇过滤不会吞掉正文修订历史。
+    _split_line_preserving_numbers,  # 验证列表破折号粘连会拆成独立审阅句。
+    compare_extractions,
+    run_diff,
+)
 from protocol_pdf_diff.desktop_gui import (
     DesktopRunSuccess,
     ProtocolDiffDesktopApp,
@@ -47,7 +49,6 @@ from protocol_pdf_diff.desktop_gui import (
     parse_positive_int,
     run_smoke_test,
 )
-import protocol_pdf_diff.pdf_extract as pdf_extract_module
 from protocol_pdf_diff.models import (
     DiffOptions,
     DiffResult,
@@ -57,22 +58,23 @@ from protocol_pdf_diff.models import (
     SectionChange,
     SnippetPair,
     TableVisual,
+    VisualWatchdogAudit,
 )
 from protocol_pdf_diff.pdf_extract import (
     MissingDependencyError,  # 验证缺少 pdfplumber 时直接失败，而不是静默退回 pypdf。
     _clean_extracted_page_text,  # 验证抽取层先过滤页边行号、DRAFT 和版权页脚。
     _clean_table_cell,  # 验证表格数学符号残片在进入结构化事实前被修正。
     _combine_text_and_table_lines,  # 验证结构化表格行覆盖原始长表格文本后的降噪行为。
+    _expanded_rows_preserve_source_alignment,  # 多列列表未展开时仍须保留 bbox 原始行序。
+    _expanded_rows_preserve_source_cells,  # bbox 替换授权必须逐物理行、逐列证明无内容丢失。
     _filtered_layout_page,  # 验证页面级证据不足时不会误删孤立旋转字母。
     _geometry_compound_script_lines,  # 复合上下标候选必须双向唯一，否则整格回退。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
     _should_skip_detected_table,  # 验证 Figure/空伪表格不会进入表格截图和正文 diff。
-    _expanded_rows_preserve_source_cells,  # bbox 替换授权必须逐物理行、逐列证明无内容丢失。
-    _expanded_rows_preserve_source_alignment,  # 多列列表未展开时仍须保留 bbox 原始行序。
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
     _table_lines_from_rows_with_coverage,  # 结构化行覆盖不足时必须保留 bbox 原始比较文本。
-    _table_row_replacement_flags,  # 整表不安全时，只替换逐行完整结构化的数据行。
     _table_row_bbox_matches_raw_cells,  # 行级替换必须精确覆盖实际会被删除的字符。
+    _table_row_replacement_flags,  # 整表不安全时，只替换逐行完整结构化的数据行。
     extract_pdf_text,
 )
 from protocol_pdf_diff.reporting import (
@@ -1405,6 +1407,40 @@ class ProtocolDiffTests(unittest.TestCase):
         assert result.provenance is not None
         self.assertEqual(parsed_digest, result.provenance.old_input.sha256)
         self.assertEqual(parsed_digest, result.provenance.new_input.sha256)
+
+    def test_visual_watchdog_pixels_cannot_come_from_bytes_after_extraction_snapshot(self) -> None:
+        """Replacing a path after extraction must fail closed instead of forging visual evidence."""
+
+        body = "The receiver shall preserve every calibrated operating requirement. " * 5
+        pages = [[f"{index} Requirement {index}", body] for index in range(1, 8)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(temp_path / "old_snapshot.pdf", pages)
+            new_pdf = write_multipage_text_pdf(temp_path / "new_snapshot.pdf", pages)
+            extraction_calls = 0
+
+            def extract_then_replace_path(*args: object, **kwargs: object) -> ExtractionResult:
+                nonlocal extraction_calls
+                extraction = extract_pdf_text(*args, **kwargs)
+                extraction_calls += 1
+                if extraction_calls == 2:
+                    write_multipage_text_pdf(
+                        old_pdf,
+                        pages,
+                        decorative_marks={4: "new"},
+                    )
+                return extraction
+
+            with mock.patch(
+                "protocol_pdf_diff.compare.extract_pdf_text",
+                side_effect=extract_then_replace_path,
+            ):
+                result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual([], result.changes)
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertFalse(result.provenance.visual_watchdog_audit.source_hashes_match)
 
     def test_each_quality_risk_degrades_without_discarding_sections(self) -> None:
         """Low text, warnings, empty pages, and layout risk are review signals only."""
@@ -8510,7 +8546,73 @@ class ProtocolDiffTests(unittest.TestCase):
         visual = result.visual_review_items[0]
         self.assertEqual(2, visual.old_page_number)
         self.assertEqual(3, visual.new_page_number)
-        self.assertEqual("monotonic-exact-text", visual.alignment_method)
+        self.assertEqual("unique-exact-text", visual.alignment_method)
+
+    def test_visual_watchdog_does_not_force_ambiguous_duplicate_page_alignment(self) -> None:
+        """Repeated page text plus insertion must not fabricate modified-page evidence."""
+
+        repeated_page = ["1 Repeated diagram", "The repeated diagram template is unchanged."]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_repeated_pages.pdf",
+                [repeated_page, repeated_page],
+                decorative_marks={1: "old", 2: "new"},
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_repeated_pages.pdf",
+                [repeated_page, repeated_page, repeated_page],
+                decorative_marks={2: "old", 3: "new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertGreater(
+            result.provenance.visual_watchdog_audit.ambiguous_page_count,
+            0,
+        )
+
+    def test_visual_watchdog_pairs_unique_pages_even_when_page_order_is_swapped(self) -> None:
+        """A crossed unique page identity must not fall outside an LCS silently."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"Unique requirement {index}.{line} preserves calibrated voltage timing "
+                    "interoperability behavior for every declared operating mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 8)
+        ]
+        swapped_pages = [pages[1], pages[0], *pages[2:]]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_swapped_unique.pdf",
+                pages,
+                decorative_marks={2: "old"},
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_swapped_unique.pdf",
+                swapped_pages,
+                decorative_marks={1: "new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        matching = [
+            item
+            for item in result.visual_review_items
+            if item.old_page_number == 2 and item.new_page_number == 1
+        ]
+        self.assertEqual(1, len(matching))
+        self.assertEqual("unique-exact-text", matching[0].alignment_method)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
 
     def test_visual_watchdog_flags_same_page_graphics_when_both_text_layers_are_empty(self) -> None:
         """Image-only pages still need a visual review signal when semantic parsing is empty."""
@@ -8534,6 +8636,339 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("same-page-empty-text", result.visual_review_items[0].alignment_method)
         self.assertEqual("indeterminate", result.assessment.state.value)
         self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
+    def test_visual_watchdog_flags_one_small_material_vector_symbol(self) -> None:
+        """A connected local symbol must not disappear behind a whole-page ratio gate."""
+
+        body = "The receiver shall preserve every calibrated operating requirement. " * 5
+        pages = [[f"{index} Requirement {index}", body] for index in range(1, 8)]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(temp_path / "old_small_symbol.pdf", pages)
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_small_symbol.pdf",
+                pages,
+                decorative_marks={4: "small-new"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual(1, len(result.visual_review_items))
+        self.assertEqual(4, result.visual_review_items[0].old_page_number)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
+    def test_visual_watchdog_ignores_only_coordinate_proven_running_footer_pixels(self) -> None:
+        """Filtered revision footers must not return as eight duplicate visual alerts."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared operating mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 9)
+        ]
+        old_footers = {
+            index: [
+                "Copyright AAAAAAAAAA Protocol Working Group",
+                "www.example.test/revision/AAAAAAAAA",
+            ]
+            for index in range(1, 9)
+        }
+        new_footers = {
+            index: [
+                "Copyright BBBBBBBBBB Protocol Working Group",
+                "www.example.test/revision/BBBBBBBBB",
+            ]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_dynamic_footer.pdf",
+                pages,
+                footer_lines=old_footers,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_dynamic_footer.pdf",
+                pages,
+                footer_lines=new_footers,
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+            outputs = write_reports(result, temp_path / "reports", DiffOptions())
+            html_size = outputs["html"].stat().st_size
+
+        self.assertEqual([], result.changes)
+        self.assertEqual([], result.visual_review_items)
+        self.assertTrue(result.assessment.allows_no_difference_conclusion)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        self.assertLess(html_size, 250_000)
+
+    def test_visual_watchdog_ignores_coordinate_proven_running_header_pixels(self) -> None:
+        """Filtered implementation-agreement headers must not return as visual alerts."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The calibrated receiver requirement {index}.{line} shall preserve "
+                    "voltage timing interoperability behavior for every operating mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 9)
+        ]
+        old_headers = {
+            index: ["OIF Implementation Agreement Protocol AAAAAAAAAA"]
+            for index in range(1, 9)
+        }
+        new_headers = {
+            index: ["OIF Implementation Agreement Protocol BBBBBBBBBB"]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_dynamic_header.pdf",
+                pages,
+                header_lines=old_headers,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_dynamic_header.pdf",
+                pages,
+                header_lines=new_headers,
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual([], result.changes)
+        self.assertEqual([], result.visual_review_items)
+        self.assertTrue(result.assessment.allows_no_difference_conclusion)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+
+    def test_visual_watchdog_checks_reader_equivalent_reference_page_for_graphics(self) -> None:
+        """Reference renumbering is ignored while a same-page vector change is retained."""
+
+        old_pages: list[list[str]] = []
+        new_pages: list[list[str]] = []
+        for index in range(1, 9):
+            stable_lines = [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            old_lines = list(stable_lines)
+            new_lines = list(stable_lines)
+            if index == 4:
+                old_lines.append("Definitions are in Sections 31.3.4 to 31.3.18.")
+                new_lines.append("Definitions are in Sections 31.3.4 to 31.3.19.")
+            old_pages.append(old_lines)
+            new_pages.append(new_lines)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_reference_and_vector.pdf",
+                old_pages,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_reference_and_vector.pdf",
+                new_pages,
+                decorative_marks={4: "small-new"},
+            )
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+            outputs = write_reports(result, temp_path / "reports", DiffOptions())
+            reader_texts = {
+                key: outputs[key].read_text(encoding="utf-8")
+                for key in ("html", "markdown", "text")
+            }
+
+        self.assertEqual(1, len(result.visual_review_items))
+        item = result.visual_review_items[0]
+        self.assertEqual((4, 4), (item.old_page_number, item.new_page_number))
+        self.assertEqual("reader-equivalent-text", item.alignment_method)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        for reader in reader_texts.values():
+            self.assertNotIn("31.3.18", reader)
+            self.assertNotIn("31.3.19", reader)
+
+    def test_visual_watchdog_masks_repeated_reader_equivalent_reference_lines(self) -> None:
+        """Repeated locator-only line boxes are masked independently on both versions."""
+
+        old_pages: list[list[str]] = []
+        new_pages: list[list[str]] = []
+        for index in range(1, 9):
+            stable_lines = [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            if index == 4:
+                old_lines = [
+                    *stable_lines,
+                    "Definitions are in Sections 31.3.4 to 31.3.18.",
+                    "Definitions are in Sections 31.3.4 to 31.3.18.",
+                ]
+                new_lines = [
+                    *stable_lines,
+                    "Definitions are in Sections 31.3.4 to 31.3.19.",
+                    "Definitions are in Sections 31.3.4 to 31.3.19.",
+                ]
+            else:
+                old_lines = list(stable_lines)
+                new_lines = list(stable_lines)
+            old_pages.append(old_lines)
+            new_pages.append(new_lines)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(temp_path / "old_repeated_refs.pdf", old_pages)
+            new_pdf = write_multipage_text_pdf(temp_path / "new_repeated_refs.pdf", new_pages)
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual([], result.visual_review_items)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+
+    def test_visual_watchdog_marks_reflowed_page_incomplete_without_false_card(self) -> None:
+        """Direct pixel subtraction must not turn a moved page into a visual change."""
+
+        old_pages: list[list[str]] = []
+        new_pages: list[list[str]] = []
+        for index in range(1, 9):
+            stable_lines = [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            old_lines = list(stable_lines)
+            new_lines = list(stable_lines)
+            if index == 4:
+                old_lines.append("Definitions are in Sections 31.3.4 to 31.3.18.")
+                new_lines.append("Definitions are in Sections 31.3.4 to 31.3.19.")
+            old_pages.append(old_lines)
+            new_pages.append(new_lines)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_reflowed_reference.pdf",
+                old_pages,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_reflowed_reference.pdf",
+                new_pages,
+                body_origins={4: (92.0, 718.0)},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        audit = result.provenance.visual_watchdog_audit
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(audit.complete)
+        self.assertEqual(1, audit.failed_page_pair_count)
+        self.assertTrue(any("文字版式" in warning for warning in result.warnings))
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
+    def test_visual_watchdog_fails_closed_without_locator_line_coordinates(self) -> None:
+        """Reader-equivalent OCR text without line boxes cannot certify a pixel all-clear."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_unboxed_reference.pdf",
+                [["1 Limits", "See Sections 31.3.4 to 31.3.18."]],
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_unboxed_reference.pdf",
+                [["1 Limits", "See Sections 31.3.4 to 31.3.19."]],
+            )
+            old_extraction = ExtractionResult(
+                pdf_path=old_pdf,
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Limits\nSee Sections 31.3.4 to 31.3.18.",
+                        ocr_used=True,
+                    )
+                ],
+                source_sha256=hashlib.sha256(old_pdf.read_bytes()).hexdigest(),
+            )
+            new_extraction = ExtractionResult(
+                pdf_path=new_pdf,
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Limits\nSee Sections 31.3.4 to 31.3.19.",
+                        ocr_used=True,
+                    )
+                ],
+                source_sha256=hashlib.sha256(new_pdf.read_bytes()).hexdigest(),
+            )
+            with mock.patch(
+                "protocol_pdf_diff.compare.extract_pdf_text",
+                side_effect=[old_extraction, new_extraction],
+            ):
+                result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        audit = result.provenance.visual_watchdog_audit
+        self.assertFalse(audit.complete)
+        self.assertEqual(1, audit.failed_page_pair_count)
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
+    def test_visual_watchdog_failure_blocks_reliable_all_clear(self) -> None:
+        """A failed default watchdog cannot be represented as a completed clean check."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared operating mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 8)
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(temp_path / "old_failed_watchdog.pdf", pages)
+            new_pdf = write_multipage_text_pdf(temp_path / "new_failed_watchdog.pdf", pages)
+            with mock.patch(
+                "protocol_pdf_diff.compare.detect_visual_review_items",
+                return_value=(
+                    [],
+                    ["watchdog failed"],
+                    VisualWatchdogAudit(
+                        enabled=True,
+                        attempted=True,
+                        backend_available=True,
+                        eligible_page_pair_count=7,
+                        checked_page_pair_count=0,
+                        failed_page_pair_count=7,
+                        ambiguous_page_count=0,
+                        excluded_region_count=0,
+                        complete=False,
+                        source_hashes_match=True,
+                    ),
+                ),
+            ):
+                result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual("degraded", result.assessment.state.value)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertIn("watchdog failed", result.warnings)
 
     def test_visual_watchdog_can_be_explicitly_disabled_for_performance_diagnosis(self) -> None:
         """The opt-out suppresses only visual review work, not ordinary semantic comparison."""

@@ -28,18 +28,24 @@ from .models import (
     SectionChange,
     SnippetPair,
     TableVisual,
+    VisualWatchdogAudit,
     snapshot_page_extraction_audit,
 )
+from .page_ocr import normalize_ocr_language
 from .pdf_extract import (
     _looks_like_known_atomic_unit,
     _looks_like_missing_table_value,
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
-from .page_ocr import normalize_ocr_language
 from .quality import PairAssessment, ReliabilityState, assess_pair, build_provenance
 from .sectioning import section_document
-from .table_codec import decode_table_cell, encode_table_field, split_table_cells, split_table_field
+from .table_codec import (
+    decode_table_cell,
+    encode_table_field,
+    split_table_cells,
+    split_table_field,
+)
 from .text_utils import (
     TABLE_NUMBER_DASH_CLASS,
     canonicalize_chinese_number_expressions,
@@ -53,7 +59,6 @@ from .text_utils import (
     normalize_for_similarity,
     normalize_line,
     normalize_table_number_dashes,
-    readable_symbol_font_glyphs,
     reader_symbol_mapping_key,
 )
 from .visual_watchdog import detect_visual_review_items
@@ -122,12 +127,31 @@ def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> 
     )
     result = compare_extractions(old_extraction, new_extraction, options)
     if options.visual_watchdog:
-        visual_review_items, visual_warnings = detect_visual_review_items(
+        visual_review_items, visual_warnings, visual_audit = detect_visual_review_items(
             old_extraction,
             new_extraction,
+            semantic_result=result,
         )
     else:
-        visual_review_items, visual_warnings = [], []
+        visual_review_items = []
+        visual_warnings = ["视觉漏检哨兵已关闭；本次结果不能证明没有像素层变化。"]
+        visual_audit = VisualWatchdogAudit(
+            enabled=False,
+            attempted=False,
+            backend_available=None,
+            eligible_page_pair_count=0,
+            checked_page_pair_count=0,
+            failed_page_pair_count=0,
+            ambiguous_page_count=0,
+            excluded_region_count=0,
+            complete=False,
+            source_hashes_match=None,
+        )
+    provenance = (
+        replace(result.provenance, visual_watchdog_audit=visual_audit)
+        if result.provenance is not None
+        else None
+    )
     return replace(
         result,
         visual_review_items=visual_review_items,
@@ -135,7 +159,9 @@ def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> 
         assessment=_assessment_with_visual_review(
             result.assessment,
             visual_review_count=len(visual_review_items),
+            audit=visual_audit,
         ),
+        provenance=provenance,
     )
 
 
@@ -143,25 +169,44 @@ def _assessment_with_visual_review(
     assessment: PairAssessment | None,
     *,
     visual_review_count: int,
+    audit: VisualWatchdogAudit,
 ) -> PairAssessment | None:
-    """Prevent a clean-equivalence conclusion while visual evidence is unexplained."""
+    """Prevent all-clear when visual evidence is unexplained or was not checked."""
 
-    if visual_review_count <= 0 or assessment is None:
+    if assessment is None:
         return assessment
-    reason = (
-        f"发现 {visual_review_count} 页未解释的视觉变化；"
-        "文字、表格和公式差异不足以覆盖这些源像素变化。"
-    )
+    reasons: list[str] = []
+    if visual_review_count > 0:
+        reasons.append(
+            f"发现 {visual_review_count} 页未解释的视觉变化；"
+            "文字、表格和公式差异不足以覆盖这些源像素变化。"
+        )
+    if not audit.complete:
+        if not audit.enabled:
+            reasons.append("视觉漏检哨兵已关闭，本次未完成像素层核对。")
+        else:
+            reasons.append(
+                "视觉漏检哨兵未完整覆盖可核对页面："
+                f"已核对 {audit.checked_page_pair_count}/"
+                f"{audit.eligible_page_pair_count} 对，失败 {audit.failed_page_pair_count} 对，"
+                f"歧义页 {audit.ambiguous_page_count} 个。"
+            )
+    if not reasons:
+        return assessment
     state = assessment.state
     headline = assessment.headline
     if state is ReliabilityState.RELIABLE:
         state = ReliabilityState.DEGRADED
-        headline = "需人工复核：存在语义层未解释的视觉变化"
+        headline = (
+            "需人工复核：存在语义层未解释的视觉变化"
+            if visual_review_count
+            else "需人工复核：视觉漏检核对未完整完成"
+        )
     return replace(
         assessment,
         state=state,
         headline=headline,
-        reasons=(*assessment.reasons, reason),
+        reasons=(*assessment.reasons, *reasons),
         allows_no_difference_conclusion=False,
     )
 
@@ -3460,12 +3505,6 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             right_index += 1
         left = value[left_index].casefold() if left_index >= 0 else ""
         right = value[right_index].casefold() if right_index < len(value) else ""
-        tight_separator = (
-            index > 0
-            and index + 1 < len(value)
-            and not value[index - 1].isspace()
-            and not value[index + 1].isspace()
-        )
         if character == "." and left.isdigit() and right.isdigit():
             continue  # 小数点由数字 token 自身保真，不再绑定原始 token 位置。
         if character == "," and any(

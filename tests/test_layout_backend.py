@@ -13,6 +13,11 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace  # 构造只含公开字段的 Docling 测试对象。
 from unittest import mock
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from protocol_pdf_diff import layout_backend
 from protocol_pdf_diff.layout_backend import (
     LayoutBackendMode,
@@ -639,7 +644,7 @@ class LayoutBackendRoutingTests(unittest.TestCase):
         self.assertIn("x = y", result.pages[0].text)
 
     def test_auto_mode_applies_only_an_agreeing_candidate_and_keeps_risk(self) -> None:
-        """The optional parser repairs text order without upgrading confidence."""
+        """The optional parser records exact agreement without upgrading confidence."""
 
         native = "1 Scope\nThe receiver shall support 53.125 GBd operation."
         extraction = ExtractionResult(
@@ -661,22 +666,22 @@ class LayoutBackendRoutingTests(unittest.TestCase):
         self.assertTrue(any("Docling" in warning for warning in result.warnings))
         extractor.assert_called_once_with(Path("complex.pdf"), page_range=(1, 1))
 
-    def test_auto_mode_accepts_token_preserving_whole_line_reordering_on_risky_page(self) -> None:
-        """Docling may repair reading order only by moving complete unchanged lines."""
+    def test_auto_mode_rejects_even_atomic_paragraph_reordering_without_owner_proof(self) -> None:
+        """Paragraph boundaries alone cannot prove cross-paragraph technical ownership."""
 
         native = (
-            "1 Scope\n"
-            "Left column first requirement.\n"
-            "Right column first note.\n"
-            "Left column second requirement.\n"
-            "Right column second note."
+            "1 Scope\n\n"
+            "Left column.\n"
+            "The common descriptive overview covers receiver behavior.\n\n"
+            "Right column.\n"
+            "The independent descriptive overview covers transmitter behavior."
         )
         candidate = (
-            "1 Scope\n"
-            "Left column first requirement.\n"
-            "Left column second requirement.\n"
-            "Right column first note.\n"
-            "Right column second note."
+            "1 Scope\n\n"
+            "Right column.\n"
+            "The independent descriptive overview covers transmitter behavior.\n\n"
+            "Left column.\n"
+            "The common descriptive overview covers receiver behavior."
         )
         extraction = ExtractionResult(
             pdf_path=Path("two-column.pdf"),
@@ -690,8 +695,8 @@ class LayoutBackendRoutingTests(unittest.TestCase):
             ):
                 result = enrich_with_optional_layout_backend(extraction, "auto")
 
-        self.assertEqual(candidate, result.pages[0].text)
-        self.assertEqual("docling", result.pages[0].comparison_text_source)
+        self.assertEqual(native, result.pages[0].text)
+        self.assertEqual("native", result.pages[0].comparison_text_source)
         self.assertTrue(result.pages[0].layout_risk)
 
     def test_auto_mode_rejects_reordered_candidate_with_unit_case_change(self) -> None:
@@ -725,6 +730,87 @@ class LayoutBackendRoutingTests(unittest.TestCase):
 
         self.assertEqual(native, result.pages[0].text)
         self.assertEqual("native", result.pages[0].comparison_text_source)
+
+    def test_auto_mode_rejects_token_preserving_limit_rebinding_across_labels(self) -> None:
+        """Unchanged tokens cannot prove that a moved value kept its labeled owner."""
+
+        native = (
+            "1 Operating modes\n"
+            "Mode A:\n"
+            "The calibrated limit is 10 mV.\n"
+            "Mode B:\n"
+            "The calibrated limit is 20 mV."
+        )
+        rebound = (
+            "1 Operating modes\n"
+            "Mode A:\n"
+            "The calibrated limit is 20 mV.\n"
+            "Mode B:\n"
+            "The calibrated limit is 10 mV."
+        )
+
+        self.assertIsNone(
+            choose_docling_page_text(
+                native,
+                rebound,
+                layout_risk=True,
+                allow_whole_line_reordering=True,
+            )
+        )
+
+    def test_auto_mode_rejects_period_label_state_rebinding(self) -> None:
+        """Period labels and word-only states are still context-bound single lines."""
+
+        native = (
+            "1 Operating modes\n"
+            "Mode Alpha.\n"
+            "The feature shall be enabled.\n"
+            "Mode Beta.\n"
+            "The feature shall be disabled."
+        )
+        rebound = (
+            "1 Operating modes\n"
+            "Mode Alpha.\n"
+            "The feature shall be disabled.\n"
+            "Mode Beta.\n"
+            "The feature shall be enabled."
+        )
+
+        self.assertIsNone(
+            choose_docling_page_text(
+                native,
+                rebound,
+                layout_risk=True,
+                allow_whole_line_reordering=True,
+            )
+        )
+
+    def test_auto_mode_rejects_mid_sentence_relative_context_in_atomic_paragraph(self) -> None:
+        """Moving a whole paragraph still cannot change an above/below reference."""
+
+        native = (
+            "1 Operating modes\n\n"
+            "Alpha description.\n"
+            "The behavior is defined above.\n\n"
+            "Beta description.\n"
+            "An independent behavior is available."
+        )
+        rebound = (
+            "1 Operating modes\n\n"
+            "Beta description.\n"
+            "An independent behavior is available.\n\n"
+            "Alpha description.\n"
+            "The behavior is defined above."
+        )
+
+        self.assertIsNone(
+            choose_docling_page_text(
+                native,
+                rebound,
+                layout_risk=True,
+                allow_whole_line_reordering=True,
+            )
+        )
 
 
 if __name__ == "__main__":

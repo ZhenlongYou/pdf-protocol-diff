@@ -8,14 +8,16 @@ OCR-derived text always remains degraded evidence rather than proof of equality.
 
 from __future__ import annotations
 
-import re  # 使用正则识别行号边栏、表头和表格值模式。
 import base64  # 把表格截图编码成 data URI，HTML 报告可以离线打开。
 import hashlib  # 对实际交给解析器的 PDF 快照计算摘要，避免报告期重读路径造成 provenance 漂移。
 import io  # 在内存中保存 JPEG 截图，避免生成临时图片文件。
 import math  # 用页面对角线和字符间距确认完整水印簇，避免误删孤立旋转字母。
+import re  # 使用正则识别行号边栏、表头和表格值模式。
 import shutil  # 检测 tesseract 可执行文件是否存在，决定是否启用 OCR。
 import tempfile  # 大 PDF 快照超过内存阈值时自动落到临时文件，仍保持解析字节与摘要一致。
-from collections import Counter  # 比较表格 bbox、原始单元格与结构化行的字符覆盖，只有全覆盖才替换比较面。
+from collections import (
+    Counter,  # 比较表格 bbox、原始单元格与结构化行的字符覆盖，只有全覆盖才替换比较面。
+)
 from pathlib import Path
 from statistics import median
 
@@ -28,14 +30,20 @@ from .layout_blocks import (
     page_bounds,
     reassign_block_reading_order,
 )
-from .models import DocumentBlock, ExtractionResult, FormulaVisual, PageText, TableVisual
+from .models import (
+    DocumentBlock,
+    ExtractionResult,
+    FormulaVisual,
+    PageText,
+    TableVisual,
+)
+from .page_furniture import (
+    looks_like_page_bearing_running_header,
+)
 from .page_ocr import (
     _extract_scan_page_text_with_evidence,
     classify_page_parser_route,
     normalize_ocr_language,
-)
-from .page_furniture import (
-    looks_like_page_bearing_running_header,
 )
 from .table_codec import (
     decode_table_cell,
@@ -249,6 +257,19 @@ def _extract_pdf_text_with_pdfplumber(
             for index, page in selected_pages
         }  # 已证明页的比较文本已干净，不得再让章节器盲剔合法的 `1 Introduction`。
         for index, page in selected_pages:
+            visual_noise_bboxes = tuple(
+                [
+                    *gutter_boxes_by_page.get(index, ()),
+                    *_proven_running_footer_boxes(
+                        page,
+                        words=coordinate_evidence[index][0],
+                    ),
+                    *_proven_running_header_boxes(
+                        page,
+                        words=coordinate_evidence[index][0],
+                    ),
+                ]
+            )  # 视觉层只屏蔽抽取层本次已用坐标证明并删除的页眉、页脚和窄边区域；禁止固定比例裁边。
             (
                 text,
                 page_warnings,
@@ -291,6 +312,7 @@ def _extract_pdf_text_with_pdfplumber(
                     ),
                     page_bbox=page_bounds(page),
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
+                    visual_noise_bboxes=visual_noise_bboxes,
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
     finally:

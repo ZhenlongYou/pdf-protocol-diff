@@ -6,15 +6,21 @@ never removes or rewrites pages, sections, warnings, or comparison findings.
 
 from __future__ import annotations
 
+import os
+import re
 from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
-import os
 from pathlib import Path
-import re
 
 from . import __version__
-from .models import DiffOptions, ExtractionResult, PageParserRoute, Section
+from .models import (
+    DiffOptions,
+    ExtractionResult,
+    PageParserRoute,
+    Section,
+    VisualWatchdogAudit,
+)
 from .page_ocr import (
     OCR_MAXIMUM_RENDER_PIXELS,
     OCR_MINIMUM_IMAGE_COVERAGE,
@@ -33,7 +39,6 @@ from .visual_watchdog import (
     VISUAL_PIXEL_DELTA_THRESHOLD,
     VISUAL_RENDER_DPI,
 )
-
 
 SUPPORTED_PROFILE = (
     "原生可选文本、以线性阅读顺序为主、具有稳定编号章节的协议或规范 PDF"
@@ -166,6 +171,7 @@ class DiffProvenance:
     old_input: InputProvenance
     new_input: InputProvenance
     effective_thresholds: EffectiveThresholds
+    visual_watchdog_audit: VisualWatchdogAudit | None = None
 
 
 def assess_pair(

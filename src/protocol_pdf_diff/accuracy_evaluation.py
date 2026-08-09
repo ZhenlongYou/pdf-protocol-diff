@@ -10,6 +10,11 @@ only when every executed case declares an exhaustive oracle.
 from __future__ import annotations
 
 import json
+import re
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -18,11 +23,19 @@ from .compare import run_diff
 from .models import DiffOptions
 from .reporting import write_reports
 
-
 _EVENT_KINDS = frozenset({"text", "table", "formula", "visual"})
 _TOP_LEVEL_KEYS = frozenset({"schema_version", "cases"})
 _CASE_KEYS = frozenset(
-    {"id", "required", "old", "new", "options", "oracle_complete", "expected_events"}
+    {
+        "id",
+        "required",
+        "old",
+        "new",
+        "options",
+        "oracle_complete",
+        "visual_coverage_required",
+        "expected_events",
+    }
 )
 _DOCUMENT_KEYS = frozenset({"path", "start_page", "end_page"})
 _OPTION_KEYS = frozenset({"layout_backend", "ocr_language", "min_section_match_similarity"})
@@ -40,6 +53,14 @@ _EVENT_KEYS = frozenset(
         "reader_visible",
     }
 )
+
+
+@dataclass(frozen=True)
+class _ReaderSurfaceEvidence:
+    """Visible text plus independently rendered report cards for one surface."""
+
+    full_text: str
+    blocks: tuple[tuple[str, str], ...] = ()
 
 
 def run_gold_accuracy_evaluation(
@@ -123,6 +144,9 @@ def validate_gold_accuracy_manifest(manifest: object) -> list[str]:
         _validate_options(case.get("options", {}), f"{location}.options", failures)
         if not isinstance(case.get("oracle_complete"), bool):
             failures.append(f"{location}.oracle_complete must be a boolean")
+        visual_coverage_required = case.get("visual_coverage_required", True)
+        if not isinstance(visual_coverage_required, bool):
+            failures.append(f"{location}.visual_coverage_required must be a boolean")
         events = case.get("expected_events")
         if not isinstance(events, list) or not events:
             failures.append(f"{location}.expected_events must be a non-empty array")
@@ -134,6 +158,13 @@ def validate_gold_accuracy_manifest(manifest: object) -> list[str]:
                 f"{location}.expected_events[{event_index}]",
                 failures,
                 seen_event_ids,
+            )
+        if visual_coverage_required is False and any(
+            isinstance(event, dict) and event.get("kind") == "visual"
+            for event in events
+        ):
+            failures.append(
+                f"{location}.visual_coverage_required cannot be false when visual events are expected"
             )
     return failures
 
@@ -274,22 +305,43 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
         with TemporaryDirectory(prefix="pdf_diff_gold_") as report_root:
             outputs = write_reports(result, report_root, options)
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
-            reader_blob = "\n".join(
-                outputs[key].read_text(encoding="utf-8")
-                for key in ("markdown", "html", "text")
-            )
+            reader_surfaces = {
+                "markdown": _read_markdown_evidence(outputs["markdown"]),
+                "text": _read_text_evidence(outputs["text"]),
+                # Parse visible HTML incrementally and discard image data URIs
+                # before the parser can buffer multi-megabyte attributes.
+                "html": _read_visible_html_evidence(outputs["html"]),
+            }
     except Exception as exc:
         return {
             "case_index": case_index,
             "status": "fail",
             "failures": [f"pipeline error: {type(exc).__name__}"],
         }
-    actual_events = _actual_events(payload, reader_blob)
+    actual_events = _actual_events(payload, reader_surfaces)
     expected_events = case["expected_events"]
     matched_expected, matched_actual, failures = _match_expected_events(
         expected_events,
         actual_events,
     )
+    visual_audit = payload.get("provenance", {}).get("visual_watchdog_run")
+    visual_coverage_required = case.get("visual_coverage_required", True)
+    visual_coverage_complete = bool(
+        isinstance(visual_audit, dict)
+        and visual_audit.get("enabled")
+        and visual_audit.get("complete")
+    )
+    if not isinstance(visual_audit, dict):
+        if visual_coverage_required:
+            failures.append("visual watchdog coverage audit missing")
+    elif visual_coverage_required and not visual_coverage_complete:
+        failures.append(
+            "visual watchdog coverage incomplete: "
+            f"checked {visual_audit.get('checked_page_pair_count', 0)}/"
+            f"{visual_audit.get('eligible_page_pair_count', 0)}, "
+            f"failed {visual_audit.get('failed_page_pair_count', 0)}, "
+            f"ambiguous {visual_audit.get('ambiguous_page_count', 0)}"
+        )
     oracle_complete = case["oracle_complete"]
     if oracle_complete:
         unexpected_count = len(actual_events) - len(matched_actual)
@@ -307,96 +359,298 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
         "status": "fail" if failures else "pass",
         "failures": failures,
         "oracle_complete": oracle_complete,
+        "visual_coverage_required": visual_coverage_required,
+        "visual_coverage_complete": visual_coverage_complete,
         "metrics": metrics,
     }
 
 
-def _actual_events(payload: dict[str, Any], reader_blob: str) -> list[dict[str, Any]]:
+def _actual_events(
+    payload: dict[str, Any],
+    reader_blob: str | Mapping[str, str | _ReaderSurfaceEvidence],
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for change in payload.get("changes", []):
         if change.get("role") != "technical":
             continue
+        occurrence_counts: Counter[tuple[str, str]] = Counter()
         for pair in change.get("replaced_snippets", []):
+            old_value = str(pair.get("old", ""))
+            new_value = str(pair.get("new", ""))
+            occurrence_counts[(old_value, new_value)] += 1
             events.append(
                 _literal_event(
                     "text",
-                    pair.get("old", ""),
-                    pair.get("new", ""),
+                    old_value,
+                    new_value,
                     reader_blob,
                     location=str(change.get("report_location", "")),
+                    scope_hints=(_change_reader_location(change),),
+                    scope_key=_reader_scope_key(change),
+                    occurrence_index=occurrence_counts[(old_value, new_value)],
                 )
             )
         for value in change.get("removed_snippets", []):
+            old_value = str(value)
+            occurrence_counts[(old_value, "")] += 1
             events.append(
                 _literal_event(
                     "text",
-                    value,
+                    old_value,
                     "",
                     reader_blob,
                     location=str(change.get("report_location", "")),
+                    scope_hints=(_change_reader_location(change),),
+                    scope_key=_reader_scope_key(change),
+                    occurrence_index=occurrence_counts[(old_value, "")],
                 )
             )
         for value in change.get("added_snippets", []):
+            new_value = str(value)
+            occurrence_counts[("", new_value)] += 1
             events.append(
                 _literal_event(
                     "text",
                     "",
-                    value,
+                    new_value,
                     reader_blob,
                     location=str(change.get("report_location", "")),
+                    scope_hints=(_change_reader_location(change),),
+                    scope_key=_reader_scope_key(change),
+                    occurrence_index=occurrence_counts[("", new_value)],
                 )
             )
     for table in payload.get("table_changes", []):
-        for row in table.get("row_changes", []):
+        if table.get("role", "technical") != "technical":
+            continue
+        occurrence_counts = Counter()
+        table_location = _table_event_location(table)
+        row_changes = table.get("row_changes", [])
+        if (
+            table.get("caption_changed")
+            or table.get("change_type") in {"added", "deleted", "review"}
+            or not row_changes
+        ):
+            old_card = _table_side_event_literal(table, side="old")
+            new_card = _table_side_event_literal(table, side="new")
+            occurrence_counts[(old_card, new_card)] += 1
             events.append(
                 _literal_event(
                     "table",
-                    str(row.get("old_value", "")),
-                    str(row.get("new_value", "")),
+                    old_card,
+                    new_card,
                     reader_blob,
+                    location=table_location,
+                    scope_hints=tuple(
+                        value for value in (old_card, new_card) if value
+                    ),
+                    scope_key=_reader_scope_key(table),
+                    occurrence_index=occurrence_counts[(old_card, new_card)],
                 )
             )
-    for formula in payload.get("formula_changes", []):
+        for row in row_changes:
+            old_value = str(row.get("old_value", ""))
+            new_value = str(row.get("new_value", ""))
+            occurrence_counts[(old_value, new_value)] += 1
+            events.append(
+                _literal_event(
+                    "table",
+                    old_value,
+                    new_value,
+                    reader_blob,
+                    location=table_location,
+                    scope_hints=_table_scope_hints(table),
+                    scope_key=_reader_scope_key(table),
+                    occurrence_index=occurrence_counts[(old_value, new_value)],
+                )
+            )
+    for formula_index, formula in enumerate(payload.get("formula_changes", []), start=1):
         old_formula = formula.get("old_formula") or {}
         new_formula = formula.get("new_formula") or {}
+        formula_marker = f"F{formula_index}"
         events.append(
             _literal_event(
                 "formula",
                 str(old_formula.get("semantic_text", "")),
                 str(new_formula.get("semantic_text", "")),
                 reader_blob,
+                location=_formula_event_location(old_formula, new_formula),
+                scope_hints=(formula_marker,),
+                scope_key=_reader_scope_key(formula, fallback=formula_marker),
             )
         )
-    visual_section_visible = "视觉漏检核对" in reader_blob
-    for visual in payload.get("visual_review_items", []):
+    for visual_index, visual in enumerate(payload.get("visual_review_items", []), start=1):
+        visual_marker = f"V{visual_index}."
+        visual_scope_key = f"V{visual_index}"
+        visibility = _literal_visibility(
+            (visual_marker,),
+            reader_blob,
+            scope_hints=(visual_marker,),
+            scope_key=_reader_scope_key(visual, fallback=visual_scope_key),
+        )
         events.append(
             {
                 "kind": "visual",
                 "old_page": visual.get("old_page_number"),
                 "new_page": visual.get("new_page_number"),
-                "reader_visible": visual_section_visible,
+                "reader_visible": all(visibility.values()),
+                "reader_visibility": visibility,
             }
         )
     return events
+
+
+def _change_reader_location(change: dict[str, Any]) -> str:
+    """Use the exact reader heading while retaining raw location for Gold matching."""
+
+    return str(
+        change.get("display_report_location")
+        or change.get("report_location")
+        or ""
+    )
+
+
+def _reader_scope_key(payload_item: dict[str, Any], *, fallback: str = "") -> str:
+    """Distinguish legacy payloads from explicitly suppressed reader cards."""
+
+    if "reader_card_id" in payload_item:
+        value = payload_item.get("reader_card_id")
+        return str(value) if value else "__suppressed__"
+    return fallback
+
+
+def _table_scope_hints(table: dict[str, Any]) -> tuple[str, ...]:
+    """Return rendered table-card anchors shared by HTML, Markdown, and TXT."""
+
+    hints = []
+    for side in ("old", "new"):
+        literal = _table_side_event_literal(table, side=side)
+        if literal:
+            hints.append(literal)
+    return tuple(hints)
+
+
+def _table_event_location(table: dict[str, Any]) -> str:
+    """Build a stable title/page location accepted by Gold manifest substrings."""
+
+    fragments: list[str] = []
+    for side in ("old", "new"):
+        titles = [str(value) for value in table.get(f"{side}_titles", []) if value]
+        pages = [str(value) for value in table.get(f"{side}_pages", [])]
+        if titles:
+            fragments.append(f"{side} titles: {' | '.join(titles)}")
+        if pages:
+            fragments.append(f"{side} pages: {', '.join(pages)}")
+    return "; ".join(fragments)
+
+
+def _table_side_event_literal(table: dict[str, Any], *, side: str) -> str:
+    """Mirror the stable table-side description rendered in every reader report."""
+
+    titles = [str(value) for value in table.get(f"{side}_titles", []) if value]
+    pages = [str(value) for value in table.get(f"{side}_pages", [])]
+    if not pages:
+        return "无对应表格"
+    title_text = " / ".join(titles) if titles else "无表题续段"
+    return f"{title_text}（页 {', '.join(pages)}）"
+
+
+def _formula_event_location(
+    old_formula: dict[str, Any],
+    new_formula: dict[str, Any],
+) -> str:
+    """Build a stable page/formula-number location for repeated expressions."""
+
+    fragments: list[str] = []
+    for side, formula in (("old", old_formula), ("new", new_formula)):
+        if not formula:
+            continue
+        page = formula.get("page_number")
+        number = formula.get("formula_number")
+        values = []
+        if page is not None:
+            values.append(f"page {page}")
+        if number:
+            values.append(f"formula {number}")
+        if values:
+            fragments.append(f"{side} " + " ".join(values))
+    return "; ".join(fragments)
 
 
 def _literal_event(
     kind: str,
     old: str,
     new: str,
-    reader_blob: str,
+    reader_blob: str | Mapping[str, str | _ReaderSurfaceEvidence],
     *,
     location: str = "",
+    scope_hints: tuple[str, ...] = (),
+    scope_key: str = "",
+    occurrence_index: int = 1,
 ) -> dict[str, Any]:
     literals = [value for value in (old, new) if value]
-    visible = bool(literals) and all(value in reader_blob for value in literals)
+    visibility = _literal_visibility(
+        tuple(literals),
+        reader_blob,
+        scope_hints=tuple(value for value in scope_hints if value),
+        scope_key=scope_key,
+        occurrence_index=occurrence_index,
+    )
+    visible = bool(literals) and all(visibility.values())
     return {
         "kind": kind,
         "old": old,
         "new": new,
         "location": location,
         "reader_visible": visible,
+        "reader_visibility": visibility,
     }
+
+
+def _literal_visibility(
+    literals: tuple[str, ...],
+    reader_blob: str | Mapping[str, str | _ReaderSurfaceEvidence],
+    *,
+    scope_hints: tuple[str, ...] = (),
+    scope_key: str = "",
+    occurrence_index: int = 1,
+) -> dict[str, bool]:
+    """Require one concrete report card on every surface to carry the event."""
+
+    surfaces = (
+        {"combined": reader_blob}
+        if isinstance(reader_blob, str)
+        else dict(reader_blob)
+    )
+    visibility: dict[str, bool] = {}
+    for name, surface in surfaces.items():
+        structured_surface = isinstance(surface, _ReaderSurfaceEvidence)
+        evidence = surface if structured_surface else _ReaderSurfaceEvidence(full_text=str(surface))
+        keyed_blocks = evidence.blocks
+        candidates = (
+            tuple(block for _key, block in keyed_blocks)
+            if structured_surface
+            else (evidence.full_text,)
+        )
+        if scope_key and keyed_blocks:
+            candidates = tuple(
+                block for key, block in keyed_blocks if key == scope_key
+            )
+        elif scope_hints and keyed_blocks:
+            candidates = tuple(
+                block
+                for _key, block in keyed_blocks
+                if all(_literal_matches(hint, block) for hint in scope_hints)
+            )
+        required_counts = Counter(literals)
+        visibility[name] = bool(literals) and any(
+            all(
+                _literal_occurrences(value, block) >= count * occurrence_index
+                for value, count in required_counts.items()
+            )
+            for block in candidates
+        )
+    return visibility
 
 
 def _match_expected_events(
@@ -422,7 +676,10 @@ def _match_expected_events(
         matched_expected.add(expected_index)
         matched_actual.update(candidate_indexes)
         if any(
-            actual_events[actual_index]["reader_visible"] != expected["reader_visible"]
+            not _reader_visibility_matches(
+                expected["reader_visible"],
+                actual_events[actual_index],
+            )
             for actual_index in candidate_indexes
         ):
             failures.append(f"expected event {expected_index + 1} reader visibility mismatch")
@@ -438,12 +695,265 @@ def _event_matches(expected: dict[str, Any], actual: dict[str, Any]) -> bool:
             and expected.get("new_page") == actual.get("new_page")
         )
     return all(
-        not expected.get(side) or expected[side] in actual.get(side, "")
+        not expected.get(side)
+        or _literal_matches(str(expected[side]), str(actual.get(side, "")))
         for side in ("old", "new")
     ) and (
         not expected.get("location")
-        or expected["location"] in actual.get("location", "")
+        or _literal_matches(
+            str(expected["location"]),
+            str(actual.get("location", "")),
+        )
     )
+
+
+def _reader_visibility_matches(expected_visible: bool, actual: dict[str, Any]) -> bool:
+    """Require material facts on every surface and suppressed facts on none."""
+
+    surface_states = actual.get("reader_visibility")
+    if isinstance(surface_states, dict) and surface_states:
+        values = [bool(value) for value in surface_states.values()]
+        return all(values) if expected_visible else not any(values)
+    return bool(actual.get("reader_visible")) is expected_visible
+
+
+def _literal_matches(expected: str, actual: str) -> bool:
+    """Match a case-sensitive normalized phrase at technical token boundaries."""
+
+    pattern, normalized_actual = _literal_pattern_and_actual(expected, actual)
+    if pattern is None:
+        return True
+    return re.search(pattern, normalized_actual) is not None
+
+
+def _literal_occurrences(expected: str, actual: str) -> int:
+    """Count non-overlapping case-sensitive technical phrases at safe boundaries."""
+
+    pattern, normalized_actual = _literal_pattern_and_actual(expected, actual)
+    if pattern is None:
+        return 0
+    return sum(1 for _match in re.finditer(pattern, normalized_actual))
+
+
+def _literal_pattern_and_actual(expected: str, actual: str) -> tuple[str | None, str]:
+    """Build the shared bounded literal pattern and normalized reader text."""
+
+    normalized_expected = " ".join(expected.split())
+    normalized_actual = " ".join(actual.split())
+    if not normalized_expected:
+        return None, normalized_actual
+    pattern = re.escape(normalized_expected).replace(r"\ ", r"\s+")
+    if normalized_expected[0].isdigit():
+        pattern = r"(?<![\w.+\-−])" + pattern
+    elif normalized_expected[0] in "+-−":
+        pattern = r"(?<![\w.+\-−])" + pattern
+    elif normalized_expected[0].isalnum() or normalized_expected[0] == "_":
+        pattern = r"(?<![\w/\-])" + pattern
+    if normalized_expected[-1].isdigit():
+        pattern += r"(?![\w.])"
+    elif normalized_expected[-1].isalnum() or normalized_expected[-1] == "_":
+        pattern += r"(?![\w/\-])"
+    return pattern, normalized_actual
+
+
+class _VisibleHTMLTextParser(HTMLParser):
+    """Collect rendered text while excluding scripts and collapsed detail bodies."""
+
+    _BLOCK_TAGS = frozenset(
+        {"p", "div", "li", "td", "th", "tr", "h1", "h2", "h3", "h4", "br", "summary"}
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.hidden_tag_depth = 0
+        self.closed_details_depth = 0
+        self.summary_depth = 0
+        self.blocks: list[tuple[str, list[str]]] = []
+        self._active_blocks: list[int] = []
+        self._tag_stack: list[tuple[str, int | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized = tag.casefold()
+        attr_map = {key.casefold(): value for key, value in attrs}
+        element_id = attr_map.get("id") or ""
+        opened_block: int | None = None
+        if re.fullmatch(
+            r"(?:change|table-change|formula|visual-review)-\d+",
+            element_id,
+        ):
+            opened_block = len(self.blocks)
+            self.blocks.append((_html_reader_block_key(element_id), []))
+            self._active_blocks.append(opened_block)
+        if normalized not in {"br", "img", "meta", "link", "input", "hr"}:
+            self._tag_stack.append((normalized, opened_block))
+        if normalized in {"style", "script"}:
+            self.hidden_tag_depth += 1
+        elif normalized == "details" and not any(
+            key.casefold() == "open" for key, _value in attrs
+        ):
+            self.closed_details_depth += 1
+        elif normalized == "summary":
+            self.summary_depth += 1
+        elif normalized == "sub" and self._is_visible():
+            self._append_visible("_{")
+        elif normalized == "sup" and self._is_visible():
+            self._append_visible("^{")
+        if normalized == "br" and self._is_visible():
+            self._append_visible(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.casefold()
+        visible_before_close = self._is_visible()
+        if normalized in {"sub", "sup"} and visible_before_close:
+            self._append_visible("}")
+        if normalized in {"style", "script"} and self.hidden_tag_depth:
+            self.hidden_tag_depth -= 1
+        elif normalized == "summary" and self.summary_depth:
+            self.summary_depth -= 1
+        elif normalized == "details" and self.closed_details_depth:
+            self.closed_details_depth -= 1
+        if visible_before_close and normalized in self._BLOCK_TAGS:
+            self._append_visible(" ")
+        while self._tag_stack:
+            opened_tag, opened_block = self._tag_stack.pop()
+            if opened_block is not None and opened_block in self._active_blocks:
+                self._active_blocks.remove(opened_block)
+            if opened_tag == normalized:
+                break
+
+    def handle_data(self, data: str) -> None:
+        if self._is_visible():
+            self._append_visible(data)
+
+    def _append_visible(self, value: str) -> None:
+        self.parts.append(value)
+        for block_index in self._active_blocks:
+            self.blocks[block_index][1].append(value)
+
+    def _is_visible(self) -> bool:
+        return self.hidden_tag_depth == 0 and (
+            self.closed_details_depth == 0 or self.summary_depth > 0
+        )
+
+
+def _read_visible_html_text(path: Path) -> str:
+    """Stream HTML reader text without retaining embedded base64 screenshots."""
+
+    return _read_visible_html_evidence(path).full_text
+
+
+def _read_visible_html_evidence(path: Path) -> _ReaderSurfaceEvidence:
+    """Stream visible HTML and retain only compact per-card text scopes."""
+
+    parser = _VisibleHTMLTextParser()
+    for fragment in _iter_html_without_image_data(path):
+        parser.feed(fragment)
+    parser.close()
+    return _ReaderSurfaceEvidence(
+        full_text=" ".join("".join(parser.parts).split()),
+        blocks=tuple(
+            (key, compact)
+            for key, parts in parser.blocks
+            if (compact := " ".join("".join(parts).split()))
+        ),
+    )
+
+
+def _read_markdown_evidence(path: Path) -> _ReaderSurfaceEvidence:
+    """Read Markdown and split T/F/V/body cards by their stable headings."""
+
+    text = path.read_text(encoding="utf-8")
+    return _ReaderSurfaceEvidence(
+        full_text=text,
+        blocks=_split_reader_blocks(text, r"(?m)^### (?:T|F|V)?\d+\.\s"),
+    )
+
+
+def _read_text_evidence(path: Path) -> _ReaderSurfaceEvidence:
+    """Read plain text and split the same numbered report cards."""
+
+    text = path.read_text(encoding="utf-8")
+    return _ReaderSurfaceEvidence(
+        full_text=text,
+        blocks=_split_reader_blocks(text, r"(?m)^(?:T|F|V)?\d+\.\s"),
+    )
+
+
+def _split_reader_blocks(
+    text: str,
+    marker_pattern: str,
+) -> tuple[tuple[str, str], ...]:
+    """Return compact card slices without treating section navigation as evidence."""
+
+    matches = list(re.finditer(marker_pattern, text))
+    blocks: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        section_break = re.search(r"(?m)^##\s+[^#\n].*$", text[match.end() : end])
+        if section_break:
+            end = match.end() + section_break.start()
+        block = " ".join(text[match.start() : end].split())
+        if block:
+            label_match = re.match(r"(?:###\s+)?((?:T|F|V)?\d+)\.", block)
+            if label_match:
+                label = label_match.group(1)
+                key = f"C{label}" if label.isdigit() else label
+                blocks.append((key, block))
+    return tuple(blocks)
+
+
+def _html_reader_block_key(element_id: str) -> str:
+    """Map report DOM ids to the same compact card ids stored in JSON."""
+
+    prefix, number = element_id.rsplit("-", 1)
+    return {
+        "change": f"C{number}",
+        "table-change": f"T{number}",
+        "formula": f"F{number}",
+        "visual-review": f"V{number}",
+    }[prefix]
+
+
+def _iter_html_without_image_data(path: Path):
+    """Yield HTML fragments while replacing data:image payloads before parsing."""
+
+    marker = "data:image/"
+    tail = ""
+    skipping_payload = False
+    with path.open("r", encoding="utf-8") as source:
+        while chunk := source.read(64 * 1024):
+            data = tail + chunk
+            tail = ""
+            while data:
+                if skipping_payload:
+                    quote_indexes = [
+                        index for quote in ('"', "'")
+                        if (index := data.find(quote)) >= 0
+                    ]
+                    if not quote_indexes:
+                        data = ""
+                        continue
+                    end = min(quote_indexes)
+                    yield data[end]
+                    data = data[end + 1 :]
+                    skipping_payload = False
+                    continue
+                marker_index = data.find(marker)
+                if marker_index >= 0:
+                    yield data[:marker_index] + "embedded-image"
+                    data = data[marker_index + len(marker) :]
+                    skipping_payload = True
+                    continue
+                keep = min(len(marker) - 1, len(data))
+                if keep:
+                    yield data[:-keep]
+                    tail = data[-keep:]
+                else:
+                    yield data
+                data = ""
+    if tail and not skipping_payload:
+        yield tail
 
 
 def _case_metrics(

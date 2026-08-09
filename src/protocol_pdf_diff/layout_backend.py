@@ -4,19 +4,20 @@ The native pdfplumber path remains the default because it is fast, deterministic
 and already supplies the table screenshots used by reports.  A Docling result
 is considered only for pages the native extractor has already marked as having
 non-linear reading-order risk.  It must either be identical or prove that it
-only moved complete unique prose lines without changing any technical token.
+is character-identical; reordered output is retained only as diagnostic
+evidence until ownership-preserving layout units can be proved end to end.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
-from importlib.metadata import PackageNotFoundError, version
-from collections import Counter
+import tempfile
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-import re
-from typing import Iterable, Sequence
 
 from .models import ExtractionResult, PageText
 
@@ -73,15 +74,13 @@ def choose_docling_page_text(
     layout_risk: bool,
     allow_whole_line_reordering: bool = False,
 ) -> str | None:
-    """Accept identical text or a proved token-preserving whole-line reorder.
+    """Accept only a character-identical candidate from the optional backend.
 
     Whitespace and line boundaries can carry section, table, code and literal
-    structure.  The default therefore still requires every internal character
-    to agree.  The enrichment path may explicitly allow reordered complete
-    prose lines on a page already proven to have non-linear layout risk; the
-    title, every line, case, punctuation, number, unit and occurrence count must
-    remain exact.  Ordered lists, table-like rows and ambiguous duplicates fail
-    closed to the native extraction.
+    structure. A token, line, or paragraph multiset cannot prove that a value,
+    state, or sentence remains bound to the same Mode/Condition owner after
+    reordering. The legacy ``allow_whole_line_reordering`` argument is retained
+    for API compatibility but intentionally grants no additional acceptance.
     """
 
     if not layout_risk:
@@ -92,48 +91,8 @@ def choose_docling_page_text(
         return None
     if native == candidate:
         return candidate
-    if allow_whole_line_reordering and _safe_whole_line_reordering(native, candidate):
-        return candidate
+    _ = allow_whole_line_reordering
     return None
-
-
-_ORDERED_LINE_PREFIX_RE = re.compile(
-    r"^(?:\(?\d+(?:\.\d+)*[.)]?|\(?[A-Za-z][.)]|[-*•])\s+"
-)
-_PROSE_LINE_END_RE = re.compile(r"[.!?。！？:]$")
-
-
-def _safe_whole_line_reordering(native: str, candidate: str) -> bool:
-    """Prove that Docling only moved unique, sentence-like complete lines."""
-
-    native_lines = [_compact_line(line) for line in native.splitlines() if line.strip()]
-    candidate_lines = [_compact_line(line) for line in candidate.splitlines() if line.strip()]
-    if len(native_lines) < 4 or len(native_lines) != len(candidate_lines):
-        return False
-    # The leading heading anchors the page identity and cannot move between columns.
-    if native_lines[0] != candidate_lines[0]:
-        return False
-    native_body = native_lines[1:]
-    candidate_body = candidate_lines[1:]
-    if native_body == candidate_body:
-        return False
-    if Counter(native_body) != Counter(candidate_body):
-        return False
-    # Duplicate lines cannot be mapped one-to-one, so their reordering is not provable.
-    if any(count != 1 for count in Counter(native_body).values()):
-        return False
-    for line in native_body:
-        if _ORDERED_LINE_PREFIX_RE.match(line):
-            return False
-        if not _PROSE_LINE_END_RE.search(line):
-            return False
-    return True
-
-
-def _compact_line(value: str) -> str:
-    """Normalize only whitespace inside one unchanged line."""
-
-    return " ".join(value.split())
 
 
 def enrich_with_optional_layout_backend(
@@ -168,10 +127,29 @@ def enrich_with_optional_layout_backend(
         return extraction
 
     try:
-        candidates = _extract_docling_page_texts(
-            extraction.pdf_path,
-            page_range=(min(risky_pages), max(risky_pages)),
-        )
+        if extraction.source_sha256:
+            with tempfile.TemporaryDirectory(prefix="pdf_diff_docling_") as temp_dir:
+                snapshot_path = Path(temp_dir) / "source.pdf"
+                digest = hashlib.sha256()
+                with extraction.pdf_path.open("rb") as source, snapshot_path.open("wb") as target:
+                    while chunk := source.read(1024 * 1024):
+                        digest.update(chunk)
+                        target.write(chunk)
+                if digest.hexdigest() != extraction.source_sha256:
+                    raise RuntimeError(
+                        "Docling 输入快照与原生文字抽取快照的 SHA-256 不一致"
+                    )
+                candidates = _extract_docling_page_texts(
+                    snapshot_path,
+                    page_range=(min(risky_pages), max(risky_pages)),
+                )
+        else:
+            # Manually constructed ExtractionResult objects have no source
+            # digest and are already outside the production all-clear contract.
+            candidates = _extract_docling_page_texts(
+                extraction.pdf_path,
+                page_range=(min(risky_pages), max(risky_pages)),
+            )
     except Exception as exc:
         if mode is LayoutBackendMode.DOCLING:
             raise LayoutBackendUnavailableError(
@@ -194,7 +172,6 @@ def enrich_with_optional_layout_backend(
             page.text,
             candidates.get(page.page_number, ""),
             layout_risk=page.layout_risk,
-            allow_whole_line_reordering=True,
         )
         if selected is None:
             pages.append(page)

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 OLD_DEMO_PAGES = [
     [
         "RINY Protocol Demo Agreement",
@@ -131,6 +130,9 @@ def write_multipage_text_pdf(
     path: str | Path,
     pages: list[list[str]],
     decorative_marks: dict[int, str] | None = None,
+    footer_lines: dict[int, list[str]] | None = None,
+    header_lines: dict[int, list[str]] | None = None,
+    body_origins: dict[int, tuple[float, float]] | None = None,
 ) -> Path:
     """Write a lightweight multi-page PDF for regression tests.
 
@@ -141,6 +143,14 @@ def write_multipage_text_pdf(
         decorative_marks: Optional page-number-to-variant map. A mark draws
             vector graphics without adding text, which lets tests prove that
             visual-only differences do not appear in text-based protocol diffs.
+        footer_lines: Optional page-number-to-lines map rendered in the bottom
+            margin. It lets regression fixtures exercise coordinate-proven
+            running-furniture filtering through the real PDF entry point.
+        header_lines: Optional page-number-to-lines map rendered in the top
+            margin for the same coordinate-proven running-header checks.
+        body_origins: Optional page-number-to-``(x, y)`` source coordinates for
+            controlled layout-reflow tests. Normal content starts at
+            ``(72, 740)``.
 
     Returns:
         The resolved output path.
@@ -149,6 +159,9 @@ def write_multipage_text_pdf(
     output_path = Path(path).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     decorative_marks = decorative_marks or {}
+    footer_lines = footer_lines or {}
+    header_lines = header_lines or {}
+    body_origins = body_origins or {}
 
     objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -157,7 +170,13 @@ def write_multipage_text_pdf(
     ]
     page_object_numbers: list[int] = []
     for page_number, lines in enumerate(pages, start=1):
-        stream = _page_stream(lines, decorative_marks.get(page_number))
+        stream = _page_stream(
+            lines,
+            decorative_marks.get(page_number),
+            footer_lines.get(page_number, []),
+            header_lines.get(page_number, []),
+            body_origins.get(page_number, (72.0, 740.0)),
+        )
         page_object_number = len(objects) + 1
         content_object_number = page_object_number + 1
         page_object_numbers.append(page_object_number)
@@ -203,19 +222,42 @@ def write_multipage_text_pdf(
     return output_path
 
 
-def _page_stream(lines: list[str], decorative_mark: str | None) -> bytes:
+def _page_stream(
+    lines: list[str],
+    decorative_mark: str | None,
+    footer_lines: list[str],
+    header_lines: list[str],
+    body_origin: tuple[float, float],
+) -> bytes:
     """Build one PDF page content stream."""
 
     commands: list[str] = []
     if decorative_mark:
         commands.extend(_decorative_mark_commands(decorative_mark))
+    if header_lines:
+        escaped_header = [_pdf_escape(line) for line in header_lines]
+        commands.extend(["BT", "/F1 9 Tf", "72 775 Td", "11 TL"])
+        for index, line in enumerate(escaped_header):
+            if index:
+                commands.append("T*")
+            commands.append(f"({line}) Tj")
+        commands.append("ET")
     escaped_lines = [_pdf_escape(line) for line in lines]
-    commands.extend(["BT", "/F1 12 Tf", "72 740 Td", "16 TL"])
+    body_x, body_y = body_origin
+    commands.extend(["BT", "/F1 12 Tf", f"{body_x:g} {body_y:g} Td", "16 TL"])
     for index, line in enumerate(escaped_lines):
         if index:
             commands.append("T*")
         commands.append(f"({line}) Tj")
     commands.append("ET")
+    if footer_lines:
+        escaped_footer = [_pdf_escape(line) for line in footer_lines]
+        commands.extend(["BT", "/F1 9 Tf", "72 68 Td", "12 TL"])
+        for index, line in enumerate(escaped_footer):
+            if index:
+                commands.append("T*")
+            commands.append(f"({line}) Tj")
+        commands.append("ET")
     return "\n".join(commands).encode("latin-1")
 
 
@@ -224,6 +266,8 @@ def _decorative_mark_commands(variant: str) -> list[str]:
 
     if variant == "new":
         return ["q", "0.1 0.4 0.8 rg", "420 620 95 44 re f", "Q"]
+    if variant == "small-new":
+        return ["q", "0.1 0.4 0.8 rg", "420 620 10 20 re f", "Q"]
     return ["q", "0.8 0.2 0.1 rg", "410 615 80 55 re f", "Q"]
 
 

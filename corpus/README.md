@@ -40,8 +40,19 @@ OCR 页、告警数、字符数和耗时；不含 case id、description、anchor
 ## Gold Accuracy 可量化识别率
 
 `gold_accuracy.example.json` 使用人工核对的变化事件，而不是少量“出现/不出现”锚点。
-每个事件声明类型（正文、表格、公式或视觉）、旧/新 literal、可选条款位置、预期出现
-次数、是否属于关键事实，以及它应不应该出现在 HTML/Markdown/TXT 读者层。运行：
+每个事件声明类型（正文、表格、公式或视觉）、旧/新 literal、可选位置、预期出现
+次数、是否属于关键事实，以及它应不应该出现在 HTML/Markdown/TXT 三个读者层。应显示的
+事件必须三面都出现，应隐藏的事件必须三面都不出现，任一格式单独泄漏或漏显都会失败。
+HTML 以流式可见文字解析，先丢弃图片 data URI、样式、脚本和折叠审计正文，不把 base64
+复制进内存。评估器按 JSON 中的内部 `reader_card_id` 把事实绑定到具体 C/T/F/V 卡片，并在
+每张卡内核对 occurrence 数量；另一条款出现的相同数值、同一张卡只渲染一次的重复事实，
+都不能替缺失事件作证。视觉哨兵的覆盖审计缺失或未完成时，Gold case 默认直接失败，不能用已
+命中的文字事件掩盖未执行的像素核对。仅评估正文/表格/公式识别且不声明视觉召回率时，case
+可显式设置 `visual_coverage_required: false`；summary 仍同时输出
+`visual_coverage_required=false` 和 `visual_coverage_complete=false`，不得把该结果表述为
+视觉认证。包含任何 `kind: visual` 事件的 case 禁止使用此豁免。正文的
+`location` 是报告条款位置；表格可用 `old/new titles:` 或 `old/new pages:` 片段；公式可用
+`old/new page N formula (M)` 片段，以便相同数值或表达式按来源消歧。运行：
 
 ```bash
 python3 tools/evaluate_diff_accuracy.py corpus/gold_accuracy.example.json \
@@ -52,8 +63,10 @@ python3 tools/evaluate_diff_accuracy.py corpus/gold_accuracy.example.json \
 输出包含总体 recall、关键事实 recall、视觉 recall、false-negative 数量和逐 case 状态。
 只有 `oracle_complete: true` 明确表示该版本对的实际变化已经穷举标注时，才计算
 precision；不完整 oracle 的 precision 必须为 `null`，防止把未知变化当作真阴性。
-短 literal 若命中多处会直接失败；应增加 `location` 或准确的 `occurrences`，不能任选
-一处凑成命中。summary 只保留 case/event 序号与计数，不复制 PDF 路径或技术正文。
+literal 按大小写敏感的技术 token 边界匹配，`10 mV` 不会命中 `110 mV`，`UI` 也不会
+命中 `ui`。重复 literal 必须增加上述 `location` 和准确的 `occurrences`，并由同一具体
+报告卡逐格式提供足量 occurrence，不能任选别处凑成命中。summary 只保留 case/event 序号与计数，不复制
+PDF 路径或技术正文。
 
 受控模式自建临时 corpus，不能同时传入 `--corpus-root`；传入会在参数校验阶段以退出码 2
 拒绝，避免误以为私有文件参与了受控验证。

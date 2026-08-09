@@ -11,8 +11,8 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from decimal import Decimal, InvalidOperation
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,11 +32,11 @@ from .models import (
     VisualReviewItem,
 )
 from .quality import (
+    SUPPORTED_PROFILE,
     DiffProvenance,
     DocumentQualityMetrics,
     PairAssessment,
     ReliabilityState,
-    SUPPORTED_PROFILE,
 )
 from .table_codec import decode_table_cell, split_table_cells, split_table_field
 from .text_utils import (
@@ -313,6 +313,17 @@ def write_reports(
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
     reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
+    reader_change_card_ids = {
+        _section_change_reader_identity(change): f"C{index}"
+        for index, change in enumerate(
+            (change for change in reader_changes if change.role == "technical"),
+            start=1,
+        )
+    }
+    reader_table_card_ids = {
+        _table_change_reader_identity(change): f"T{index}"
+        for index, change in enumerate(reader_table_changes, start=1)
+    }
     reader_result = replace(
         result,
         changes=reader_changes,
@@ -329,11 +340,31 @@ def write_reports(
         "new_total_pages": _source_page_count(result, "new"),
         "old_selected_pages": _selected_page_payload(result, "old"),
         "new_selected_pages": _selected_page_payload(result, "new"),
-        "changes": [_change_to_dict(change) for change in result.changes],
-        "table_changes": [_table_change_to_dict(change) for change in table_changes],
-        "formula_changes": [_formula_change_to_dict(change) for change in result.formula_changes],
+        "changes": [
+            {
+                **_change_to_dict(change),
+                "reader_card_id": reader_change_card_ids.get(
+                    _section_change_reader_identity(change)
+                ),
+            }
+            for change in result.changes
+        ],
+        "table_changes": [
+            {
+                **_table_change_to_dict(change),
+                "reader_card_id": reader_table_card_ids.get(
+                    _table_change_reader_identity(change)
+                ),
+            }
+            for change in table_changes
+        ],
+        "formula_changes": [
+            {**_formula_change_to_dict(change), "reader_card_id": f"F{index}"}
+            for index, change in enumerate(result.formula_changes, start=1)
+        ],
         "visual_review_items": [
-            _visual_review_item_to_dict(item) for item in result.visual_review_items
+            {**_visual_review_item_to_dict(item), "reader_card_id": f"V{index}"}
+            for index, item in enumerate(result.visual_review_items, start=1)
         ],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
@@ -413,6 +444,24 @@ def write_reports(
         "table_csv": table_csv_path,
         "json": json_path,
     }
+
+
+def _section_change_reader_identity(change: SectionChange) -> tuple[int, int, str]:
+    """Bind a raw section fact to its reader copy without using mutable snippets."""
+
+    return (id(change.old_section), id(change.new_section), change.role)
+
+
+def _table_change_reader_identity(
+    change: TableChange,
+) -> tuple[tuple[int, ...], tuple[int, ...], str]:
+    """Bind raw and reader-filtered table cards through their source visuals."""
+
+    return (
+        tuple(id(table) for table in change.old_tables),
+        tuple(id(table) for table in change.new_tables),
+        change.role,
+    )
 
 
 def _render_markdown(
@@ -519,7 +568,7 @@ def _render_markdown(
             [
                 "## 视觉漏检核对",
                 "",
-                "说明: 这些页面的可抽取文字一致，但源 PDF 像素存在实质变化；该证据只提示可能漏识别，不自动解释图形语义。",
+                "说明: 这些页面的可抽取文字完全一致，或只含已用逐行坐标屏蔽的引用定位编号变化，但源 PDF 仍存在未解释的实质像素变化；该证据只提示可能漏识别，不自动解释图形语义。",
                 "",
             ]
         )
@@ -842,6 +891,7 @@ def _render_html(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>{title}</title>
   <style>
     :root {{
@@ -1345,7 +1395,7 @@ def _render_change_html(
     return f"""
       <section class="change-card" id="change-{index}">
         <div class="change-head">
-          <h3 class="change-title"><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(_display_change_location(change))}</h3>
+          <h3 class="change-title"><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(_display_change_location(change))}</h3>
           <div class="pages">旧定位页 {_escape(old_pages)} · 新定位页 {_escape(new_pages)}{_escape(similarity)}</div>
         </div>
         {match_basis_html}
@@ -1386,7 +1436,7 @@ def _render_visual_review_items_html(items: list[VisualReviewItem]) -> str:
     return f"""
       <section class="table-visuals" id="visual-review-items">
         <h2>视觉漏检核对</h2>
-        <p class="change-summary">以下页面的可抽取文字一致，但源 PDF 像素存在实质变化。它们是防止漏报的人工复核证据，不会被自动解释成正文、表格或公式修改。</p>
+        <p class="change-summary">以下页面的可抽取文字完全一致，或只含已用逐行坐标屏蔽的引用定位编号变化，但源 PDF 仍存在未解释的实质像素变化。它们是防止漏报的人工复核证据，不会被自动解释成正文、表格或公式修改。</p>
         {cards}
       </section>
     """
@@ -1604,7 +1654,7 @@ def _render_formula_change_html(placement: _FormulaPlacement) -> str:
     return f"""
         <section class="inline-formula-evidence" id="formula-{placement.report_index}">
           <div class="inline-formula-head">
-            <h4><span class="badge badge-{_escape(change.change_type)}">{_escape(badge_text)}</span>{_escape(_formula_change_title(change))}</h4>
+            <h4><span class="badge badge-{_escape(change.change_type)}">{_escape(badge_text)}</span> {_escape(_formula_change_title(change))}</h4>
           </div>
           <p class="change-summary">{_escape(change.reason)}</p>
           <div class="table-shot-grid formula-shot-grid">{old_side}{new_side}</div>
@@ -2648,7 +2698,6 @@ def _table_visual_indexes_by_caption_key(
 
     grouped: dict[str, list[int]] = {}
     run_count_by_base: dict[str, int] = {}
-    current_base = ""
     current_caption = ""
     current_context = ""
     current_group_key = ""
@@ -2672,7 +2721,6 @@ def _table_visual_indexes_by_caption_key(
                 run_count = run_count_by_base.get(base_key, 0) + 1
                 run_count_by_base[base_key] = run_count
                 current_group_key = f"{base_key}\x1frun:{run_count}"
-            current_base = base_key
             current_caption = caption_key
             current_context = context_key
             current_page = table.page_number
@@ -2747,7 +2795,6 @@ def _table_visual_indexes_by_caption_key(
             current_page = table.page_number
             current_context = context_key or current_context  # 多页续表沿最新可定位章节继续验证下一页。
         else:
-            current_base = ""
             current_caption = ""
             current_context = ""
             current_group_key = ""
@@ -3313,7 +3360,7 @@ def _render_table_change_html(
     )
     return f"""
         <div class="table-visual-card" id="table-change-{index}">
-          <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span>{_escape(title)}</h3>
+          <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
           <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
           新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
           <div class="table-shot-grid">{old_shot}{new_shot}</div>
@@ -9415,6 +9462,7 @@ def _extraction_audit_to_dict(
             "block_count": page_audit.block_count,
             "comparison_text_source": page_audit.comparison_text_source,
             "layout_backend_version": page_audit.layout_backend_version,
+            "visual_noise_bbox_count": page_audit.visual_noise_bbox_count,
         }
         for page_audit in audit_pages
     ]
@@ -9426,6 +9474,7 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
     if provenance is None:
         return None
     thresholds = provenance.effective_thresholds
+    visual_audit = provenance.visual_watchdog_audit
     return {
         "package_version": provenance.package_version,
         "build_commit": provenance.build_commit,
@@ -9434,6 +9483,24 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
             "old": _input_provenance_to_dict(provenance.old_input),
             "new": _input_provenance_to_dict(provenance.new_input),
         },
+        "visual_watchdog_run": (
+            {
+                "enabled": visual_audit.enabled,
+                "attempted": visual_audit.attempted,
+                "backend_available": visual_audit.backend_available,
+                "eligible_page_pair_count": visual_audit.eligible_page_pair_count,
+                "checked_page_pair_count": visual_audit.checked_page_pair_count,
+                "failed_page_pair_count": visual_audit.failed_page_pair_count,
+                "ambiguous_page_count": visual_audit.ambiguous_page_count,
+                "excluded_region_count": visual_audit.excluded_region_count,
+                "complete": visual_audit.complete,
+                "source_hashes_match": visual_audit.source_hashes_match,
+                "old_visual_source_sha256": visual_audit.old_visual_source_sha256,
+                "new_visual_source_sha256": visual_audit.new_visual_source_sha256,
+            }
+            if visual_audit is not None
+            else None
+        ),
         "effective_thresholds": {
             "min_section_match_similarity": thresholds.min_section_match_similarity,
             "max_snippets_per_section": thresholds.max_snippets_per_section,

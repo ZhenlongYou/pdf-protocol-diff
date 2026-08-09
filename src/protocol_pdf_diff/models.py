@@ -8,10 +8,12 @@ layout parser while preserving the comparison/reporting behavior.
 
 from __future__ import annotations
 
+import math  # 配置模型用有限性检查阻止 NaN/Inf 绕过章节匹配阈值。
 from dataclasses import dataclass, field
 from enum import Enum
-import math  # 配置模型用有限性检查阻止 NaN/Inf 绕过章节匹配阈值。
-from numbers import Real  # bool 虽是 int 子类，但不能作为相似度；Real 明确公共 API 的数值契约。
+from numbers import (
+    Real,  # bool 虽是 int 子类，但不能作为相似度；Real 明确公共 API 的数值契约。
+)
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -98,6 +100,7 @@ class PageText:
     layout_backend_version: str | None = None  # 可选后端实际采用时记录版本，便于严格复现。
     page_bbox: tuple[float, float, float, float] | None = None  # 原始页边界用于证明页边内容；缺失时禁止从文字包络猜测页面尺寸。
     ambiguous_line_number_sides: tuple[str, ...] = ()  # 疑似打印行号位于 left/right；数字保留，只供章节器抑制伪标题。
+    visual_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 仅保存坐标已证明并从比较文字过滤的页脚/页边噪声区域，视觉哨兵可据此精确屏蔽。
 
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
@@ -126,6 +129,7 @@ class PageExtractionAudit:
     block_count: int  # 只记录块数量，避免 DiffResult 保留 DocumentBlock 的正文与 bbox。
     comparison_text_source: str = "native"  # native 或通过安全门的 docling，便于 JSON 重放。
     layout_backend_version: str | None = None
+    visual_noise_bbox_count: int = 0  # 只记录屏蔽区域数量，不泄漏坐标或页边文字。
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,7 @@ def snapshot_page_extraction_audit(
             block_count=len(page.blocks),
             comparison_text_source=page.comparison_text_source,
             layout_backend_version=page.layout_backend_version,
+            visual_noise_bbox_count=len(page.visual_noise_bboxes),
         )
         for page in extraction.pages
     )
@@ -232,6 +237,24 @@ class VisualReviewItem:
     old_image_data_uri: str = ""  # 旧页离线缩略图，仅供 HTML 人工复核。
     new_image_data_uri: str = ""  # 新页离线缩略图，仅供 HTML 人工复核。
     diff_image_data_uri: str = ""  # 差异掩膜预览，不伪装成语义结论。
+
+
+@dataclass(frozen=True)
+class VisualWatchdogAudit:
+    """One run's immutable visual-watchdog coverage and source binding facts."""
+
+    enabled: bool
+    attempted: bool
+    backend_available: bool | None
+    eligible_page_pair_count: int
+    checked_page_pair_count: int
+    failed_page_pair_count: int
+    ambiguous_page_count: int
+    excluded_region_count: int
+    complete: bool
+    source_hashes_match: bool | None
+    old_visual_source_sha256: str | None = None
+    new_visual_source_sha256: str | None = None
 
 
 @dataclass(frozen=True)
