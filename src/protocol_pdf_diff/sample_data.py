@@ -270,6 +270,10 @@ def _decorative_mark_commands(variant: str) -> list[str]:
         return ["q", "0.1 0.4 0.8 rg", "420 620 10 20 re f", "Q"]
     if variant == "small-inline":
         return ["q", "0.1 0.4 0.8 rg", "200 626 10 8 re f", "Q"]
+    if variant == "footer-small":
+        return ["q", "0.1 0.4 0.8 rg", "260 25 10 20 re f", "Q"]
+    if variant == "header-small":
+        return ["q", "0.1 0.4 0.8 rg", "550 760 10 20 re f", "Q"]
     return ["q", "0.8 0.2 0.1 rg", "410 615 80 55 re f", "Q"]
 
 

@@ -1885,7 +1885,7 @@ def _proven_running_footer_boxes(
     ]
     if not bottom_words:
         return ()
-    bottom_lines = _word_lines_with_bounds(bottom_words)
+    bottom_lines = _word_line_records(bottom_words)
     marker_lines = [
         line for line in bottom_lines if _looks_like_running_footer_marker(line[2])
     ]
@@ -1903,8 +1903,16 @@ def _proven_running_footer_boxes(
     if not marker_lines or not clustered_url_lines:
         return ()
 
-    footer_tops = [line[0] for line in [*marker_lines, *clustered_url_lines]]
-    return ((0.0, min(footer_tops), width, height),)
+    selected_word_ids = {
+        id(word)
+        for _top, _bottom, _text, line_words in [*marker_lines, *clustered_url_lines]
+        for word in line_words
+    }
+    return tuple(
+        _tight_word_bbox(word, width=width, height=height)
+        for word in bottom_words
+        if id(word) in selected_word_ids
+    )
 
 
 def _looks_like_running_footer_marker(line_text: str) -> bool:
@@ -1943,17 +1951,31 @@ def _proven_running_header_boxes(
         return ()
     top_words = [word for word in words if float(word.get("bottom", height + 1)) <= height * 0.18]
     boxes: list[tuple[float, float, float, float]] = []
-    for top, bottom, line_text in _word_lines_with_bounds(top_words):
+    for _top, _bottom, line_text, line_words in _word_line_records(top_words):
         if (
             "implementation agreement" in line_text
             and re.search(r"\b(?:interface|protocol|specification)\b|\bi/o\b", line_text)
         ):
-            boxes.append((0.0, top, width, bottom))
+            boxes.extend(
+                _tight_word_bbox(word, width=width, height=height)
+                for word in line_words
+            )
     return tuple(boxes)
 
 
 def _word_lines_with_bounds(words: list[dict[str, object]]) -> list[tuple[float, float, str]]:
     """Return stable visual lines with their vertical span for coordinate-only filters."""
+
+    return [
+        (top, bottom, text)
+        for top, bottom, text, _line_words in _word_line_records(words)
+    ]
+
+
+def _word_line_records(
+    words: list[dict[str, object]],
+) -> list[tuple[float, float, str, tuple[dict[str, object], ...]]]:
+    """Return visual lines together with the exact words that proved each line."""
 
     lines: list[tuple[float, list[dict[str, object]]]] = []
     for word in sorted(words, key=lambda item: (float(item["top"]), float(item["x0"]))):
@@ -1970,9 +1992,27 @@ def _word_lines_with_bounds(words: list[dict[str, object]]) -> list[tuple[float,
                 str(word.get("text", ""))
                 for word in sorted(line_words, key=lambda item: float(item["x0"]))
             ).casefold(),
+            tuple(line_words),
         )
         for top, line_words in lines
     ]
+
+
+def _tight_word_bbox(
+    word: dict[str, object],
+    *,
+    width: float,
+    height: float,
+) -> tuple[float, float, float, float]:
+    """Keep visual-noise masks on actual footer/header words, never a full band."""
+
+    padding = 0.75
+    return (
+        max(0.0, float(word["x0"]) - padding),
+        max(0.0, float(word["top"]) - padding),
+        min(width, float(word["x1"]) + padding),
+        min(height, float(word["bottom"]) + padding),
+    )
 
 
 def _layout_object_inside_any_box(

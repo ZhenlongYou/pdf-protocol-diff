@@ -8708,6 +8708,48 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
         self.assertLess(html_size, 250_000)
 
+    def test_visual_watchdog_keeps_small_graphic_below_proven_footer_words(self) -> None:
+        """Footer proof may mask its words, never the entire bottom page band."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 9)
+        ]
+        footers = {
+            index: [
+                "Copyright Protocol Working Group",
+                "www.example.test/revision/stable",
+            ]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_footer_graphic.pdf",
+                pages,
+                footer_lines=footers,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_footer_graphic.pdf",
+                pages,
+                footer_lines=footers,
+                decorative_marks={4: "footer-small"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual(1, len(result.visual_review_items))
+        self.assertEqual(4, result.visual_review_items[0].new_page_number)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
     def test_visual_watchdog_ignores_coordinate_proven_running_header_pixels(self) -> None:
         """Filtered implementation-agreement headers must not return as visual alerts."""
 
@@ -8749,6 +8791,45 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual([], result.visual_review_items)
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+
+    def test_visual_watchdog_keeps_small_graphic_beside_proven_header_words(self) -> None:
+        """Header proof may mask its words, never a full-width top band."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The receiver requirement {index}.{line} shall preserve calibrated "
+                    "voltage timing interoperability behavior for every declared mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 9)
+        ]
+        headers = {
+            index: ["OIF Implementation Agreement Protocol"]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_header_graphic.pdf",
+                pages,
+                header_lines=headers,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_header_graphic.pdf",
+                pages,
+                header_lines=headers,
+                decorative_marks={4: "header-small"},
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+
+        self.assertEqual(1, len(result.visual_review_items))
+        self.assertEqual(4, result.visual_review_items[0].new_page_number)
+        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
 
     def test_visual_watchdog_fails_closed_for_graphic_inside_locator_line(self) -> None:
         """A locator line bbox cannot hide a same-line material vector change."""

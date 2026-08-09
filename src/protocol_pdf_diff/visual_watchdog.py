@@ -495,7 +495,7 @@ def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:
             if block.kind is not DocumentBlockKind.TEXT:
                 continue
             if any(
-                _bbox_is_covered(block.bbox, noise_bbox)
+                _bboxes_intersect(block.bbox, noise_bbox)
                 for noise_bbox in page.visual_noise_bboxes
             ):
                 continue
@@ -530,19 +530,17 @@ def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:
     return True
 
 
-def _bbox_is_covered(
-    inner: tuple[float, float, float, float],
-    outer: tuple[float, float, float, float],
+def _bboxes_intersect(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
 ) -> bool:
-    """Return true when one extracted block is proven inside a noise region."""
+    """Return true when a text line contains any coordinate-proven noise word."""
 
-    inner_x0, inner_top, inner_x1, inner_bottom = inner
-    outer_x0, outer_top, outer_x1, outer_bottom = outer
+    first_x0, first_top, first_x1, first_bottom = first
+    second_x0, second_top, second_x1, second_bottom = second
     return (
-        inner_x0 >= outer_x0
-        and inner_top >= outer_top
-        and inner_x1 <= outer_x1
-        and inner_bottom <= outer_bottom
+        min(first_x1, second_x1) > max(first_x0, second_x0)
+        and min(first_bottom, second_bottom) > max(first_top, second_top)
     )
 
 
