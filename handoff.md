@@ -1,38 +1,44 @@
 # PDF Protocol Diff Handoff
 
-- task_id: `pdf-diff-citation-list-neutral-reader-20260809`
-- goal: 表格补充证据前置；纯 Section、Figure、Table、Condition 等引用编号、列表及范围变化在阅读层视为一致，原始 JSON/CSV 无损保留，工程数值、限值、单位和术语严格比较。
+- task_id: `pdf-diff-accuracy-phase1-20260810`
+- goal: 在保留可回退基线的前提下，提高疑难 PDF 的变化识别率，加入可量化 Gold 基准、视觉漏检哨兵和安全的 Docling 多解析器融合。
 - repository: `ZhenlongYou/pdf-protocol-diff`
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
-- base_main: `3374b0f8f0ae2ff49818a40e8f850785eaf08ca0`
-- recorded_commit: `fbc2b5128fa7fd45f72d10569863125be3bfb12b`
+- base_main: `67891f01dbab0aebc3e8f16cec89a495f22b028e`
+- recorded_commit: `5b6fd78d5c60dc25de87d18f342eb648e823d349`
 - status: ready
-- real_entrypoint: `.venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_引用出处中性验收_20260809/532`
-- accepted_report: `/Users/mac/Desktop/PDF对比工具_引用出处中性验收_20260809/532/protocol_diff_20260809_145011/protocol_diff_report.html`
+- real_entrypoint: `.venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_识别率一期验收_20260810/532`
+- accepted_report: `/Users/mac/Desktop/PDF对比工具_识别率一期验收_20260810/532/protocol_diff_20260810_005244/protocol_diff_report.html`
+
+## Rollback Baseline
+
+- 远端注释标签：`backup/pdf-protocol-diff-before-accuracy-phase1-20260810`
+- 标签提交：`67891f01dbab0aebc3e8f16cec89a495f22b028e`
+- 上一版报告：`/Users/mac/Desktop/PDF对比工具_引用出处中性验收_20260809/532/protocol_diff_20260809_145011/protocol_diff_report.html`
+- 安全回退步骤见 `docs/回退说明.md`；禁止用 `git reset --hard` 或强制推送覆盖历史。
 
 ## Implemented
 
-- HTML、Markdown 与侧栏的“表格补充证据（变化与复核）”位于公式视觉核对和技术正文之前。
-- 阅读层中和纯标题、caption、显式引用和可证明完整的编号列表/范围；底层 `DiffResult` 及 JSON/CSV 不改写。
-- 长引用列表被底层 diff 拆成 added/removed 卡时，仅在同角色、同位置、唯一一对一且整句中和后精确相等时从阅读副本中消除。
-- 裸整数列表只在真正句末才可忽略；点分/短横线编号必须同形且共享父编号。右括号/方括号后仍有技术内容时一律 fail-visible。
-- 编号中和后保持大小写精确比较；`mV/MV`、`UI/ui`、`CMIT-LT/cmit-lt` 等变化不会被隐藏。
-- 公式视觉证据与 MCB 伪表格防护保持原有逻辑，本轮未放宽抽取层边界。
+- 新增文字一致页的视觉漏检哨兵：单调页面配对后以低分辨率源像素核对图片、印章、矢量图和公式绘图变化；只追加截图复核证据，不猜测技术语义。
+- 视觉变化会阻止“未发现差异”结论；HTML 展示旧页、新页和差异掩膜，JSON 仅保存页码、阈值和定位元数据，避免嵌入大图。
+- Docling 仍为显式可选后端；只在原生抽取已证明为版面风险页、且候选仅重排完整唯一句子行时采用。大小写、标点、数值、单位、运算符或内容变化均回退原生结果。
+- 新增 Gold Accuracy 事件清单与生产入口评估器，可计算召回率、关键事实召回率、视觉召回率、漏检数；只有完整 oracle 才报告 precision。
+- 表格证据仍位于报告最前，公式随后，视觉漏检证据再后，最后才是技术正文。
+- 用户截图中的 Table 列表和 Section 范围引用继续从 HTML/Markdown/TXT 隐藏；新增对 `Equation ()` 抽取缺号的纯公式出处降噪，JSON/CSV 原始事实不变。
+- 工程数值、限值、单位和技术标识符继续大小写敏感地严格比较；视觉哨兵和引用降噪均不改写语义差异层。
 
 ## Acceptance Evidence
 
-- 全项目 `819` 项 unittest 通过；`compileall` 和 `git diff --check` 通过。
-- 用户截图的 Table 列表扩展和 `Sections 31.3.4 to 31.3.18 → 31.3.19` 在最终 HTML/Markdown/TXT 中不可见，在 JSON/changes.csv 中仍有完整旧/新原文。
-- 独立反例覆盖 dB、mV、UI、GBd、mVrms、mVpp、ratio、BER、lanes、taps、千位数、范围、分数、`in/by/at/with/are`、大小写以及 integer/dotted/dashed 括号语境，旧新技术事实在 HTML/MD/TXT 中全部保留。
-- 真实 532.04/532.05 报告 Markdown 顺序为表格（第 33 行）、公式（第 150 行）、技术正文（第 195 行）。
-- 最终 JSON 保留 `35` 张原始正文变化卡、`12` 张表格变化卡和 `7` 项公式视觉证据；MCB 表题误分类数为 `0`。
-- 阅读报告仍保留 `33.5 dB`、`CMIT-LT → CMIS-LT`、`53.125 GHz` 等技术事实。HTML SHA-256 为 `fb41fc0adb241e7f33b373844cc9c91c677003cf0ed2b1890b7f90d063d1e2b0`，JSON SHA-256 为 `889b3f815758ad72f9586b1b777364d1d51ff263c0938c79258ad493314507f4`。
-- 最终 `file://` 自动导航被应用内浏览器安全策略拒绝，未绕过限制；同模板早先报告已直开通过，最终文件已做可见文本、结构顺序和完整性核对。
-- 两个独立 reviewer 对 `fbc2b5128fa7fd45f72d10569863125be3bfb12b` 给出 commit-bound PASS，无 P1/P2：`019fcb67-bcc9-7270-988d-113d07697892`、`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`。协调层的旧 task 丢失 GitHub identity write lane，因此 attestation 未落盘；两份独立审查结论均已精确绑定该提交。
+- `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`：`828` 项通过，`0` 失败；`compileall`、`git diff --check` 通过。
+- 受控解析基准：`5/5 PASS`；混合 Corpus：`3 PASS / 0 FAIL / 6` 个缺少可选 PDF 的明确 skip。
+- 真实 532 Gold：`2/2` 已标注事件匹配，整体和关键事实 recall 均为 `1.0`，false negative 为 `0`；该真实清单是非完整 oracle，因此 precision 正确保持为不可用。
+- 人工构造的完整 oracle 同时覆盖 `10 mV → 12 mV` 和纯图形变化，recall、critical recall、visual recall、precision 均为 `1.0`；故意写错 `13 mV` 时测试必须失败。
+- 新版 532 报告保留 `35` 张正文审计卡、`12` 张表格卡和 `7` 项公式证据；Markdown 章节顺序为表格第 `34` 行、公式第 `151` 行、正文第 `196` 行。
+- 浏览器实际打开新版报告，控制台 `0` 错误；纯 Table/Section/异常空公式号出处句搜索不到，`28 → 53.125 GHz` 真实技术变化仍可定位并高亮。
+- `main.py --gui-smoke-test` 与普通系统入口 `python3 gui_app.py --smoke-test` 均通过真实 Tk 窗口构造检查。
 
-## Delivery
+## Delivery Policy
 
-- 已先推送持久项目分支 `project/pdf-protocol-diff`，再将 `main` 快进到同一提交并推送；两条分支均永久保留。
-- canonical checkout 最终停留在 `main`，工作树干净。
-- 本轮只保留最终验收报告 `protocol_diff_20260809_145011`；六个中间报告已移入 macOS 废纸篓，可恢复。
+- 持久项目分支 `project/pdf-protocol-diff` 必须本地和远端永久保留；交付时先推该分支，再把 `main` 快进到同一最终提交并推送。
+- 旧版协调门禁要求删除所有非 `main` 分支，与当前持久项目分支政策冲突；不得为通过旧门禁删除项目分支。
