@@ -74,6 +74,7 @@ _LINE_NUMBER_MIN_RUN = 20  # 同列还须有长连续段，零散页边数字不
 _LINE_NUMBER_COLUMN_TOLERANCE_RATIO = 0.006  # 行号按内侧边缘聚类；约 0.6% 页宽容纳字距误差但隔离正文数字。
 _DOCUMENT_LINE_NUMBER_MIN_PAGES = 3  # 单页或两页长列表仍有语义歧义；至少三页才能证明出版级重复网格。
 _DOCUMENT_LINE_NUMBER_MIN_PAGE_COVERAGE = 0.80  # 打印行号应覆盖绝大多数选定页，局部编号表不得获得全文删除权。
+_DOCUMENT_RUNNING_HEADER_MIN_PAGE_COVERAGE = 0.80  # 页眉标题必须在绝大多数选定页重复，单页封面不得获得删除权。
 _DOCUMENT_LINE_NUMBER_LAST_VALUE = 49  # 当前只识别每页重置的 1..49 印刷行网格，避免泛化到任意正文列表。
 _DOCUMENT_LINE_NUMBER_MIN_DISTINCT_VALUES = 45  # 允许 DRAFT 水印合并少量行号字形，但每页必须仍接近完整。
 _DOCUMENT_LINE_NUMBER_MIN_SINGLETON_ANCHORS = 24  # 重复技术数字不能主导网格拟合；至少半页数值需各有唯一候选。
@@ -245,6 +246,10 @@ def _extract_pdf_text_with_pdfplumber(
                 for index, evidence in coordinate_evidence.items()
             },
         )  # 只有跨页完整重置网格与空白编号基线共同成立时，才从比较面剔除窄边列。
+        header_boxes_by_page = _document_proven_running_header_boxes(
+            selected_pages,
+            {index: evidence[0] for index, evidence in coordinate_evidence.items()},
+        )  # 顶部协议标题必须先由跨页重复证据证明，单页封面标题不得删除。
         ambiguous_gutter_sides_by_page = {
             index: (
                 ()
@@ -264,10 +269,7 @@ def _extract_pdf_text_with_pdfplumber(
                         page,
                         words=coordinate_evidence[index][0],
                     ),
-                    *_proven_running_header_boxes(
-                        page,
-                        words=coordinate_evidence[index][0],
-                    ),
+                    *header_boxes_by_page.get(index, ()),
                 ]
             )  # 视觉层只屏蔽抽取层本次已用坐标证明并删除的页眉、页脚和窄边区域；禁止固定比例裁边。
             (
@@ -285,6 +287,7 @@ def _extract_pdf_text_with_pdfplumber(
                 ocr_language=ocr_language,
                 coordinate_evidence=coordinate_evidence[index],
                 gutter_boxes=gutter_boxes_by_page.get(index, ()),
+                header_boxes=header_boxes_by_page.get(index, ()),
             )
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
@@ -344,6 +347,7 @@ def _extract_pdfplumber_page_text(
         str | None,
     ] | None = None,
     gutter_boxes: tuple[tuple[float, float, float, float], ...] | None = None,
+    header_boxes: tuple[tuple[float, float, float, float], ...] | None = None,
 ) -> tuple[
     str,
     list[str],
@@ -368,10 +372,10 @@ def _extract_pdfplumber_page_text(
     )  # 只把行号状数字列作为风险证据，禁止据此删除可比较内容。
     gutter_boxes = gutter_boxes if gutter_boxes is not None else ()
     footer_boxes = _proven_running_footer_boxes(page, words=coordinate_words)
-    # A top-margin title can be cover/revision content on one page.  Header
-    # removal therefore waits for the document-wide repetition proof in
-    # sectioning instead of deleting from single-page shape alone.
-    header_boxes: tuple[tuple[float, float, float, float], ...] = ()
+    # A top-margin title can be cover/revision content on one page. Header
+    # removal is authorized only by the document-wide proof built by the main
+    # extraction entry point; independent single-page calls retain it.
+    header_boxes = header_boxes if header_boxes is not None else ()
     filtered_page = _filtered_layout_page(
         page,
         coordinate_words=coordinate_words,
@@ -1903,9 +1907,24 @@ def _proven_running_footer_boxes(
     if not marker_lines or not clustered_url_lines:
         return ()
 
+    proof_lines = [*marker_lines, *clustered_url_lines]
+    footer_start = min(line[0] for line in proof_lines)
+    footer_cluster: list[
+        tuple[float, float, str, tuple[dict[str, object], ...]]
+    ] = []
+    previous_bottom: float | None = None
+    for line in bottom_lines:
+        top, bottom, _text, _line_words = line
+        if top < footer_start - 1.5:
+            continue
+        if previous_bottom is not None and top - previous_bottom > 18.0:
+            break
+        footer_cluster.append(line)
+        previous_bottom = bottom
+
     selected_word_ids = {
         id(word)
-        for _top, _bottom, _text, line_words in [*marker_lines, *clustered_url_lines]
+        for _top, _bottom, _text, line_words in footer_cluster
         for word in line_words
     }
     return tuple(
@@ -1961,6 +1980,31 @@ def _proven_running_header_boxes(
                 for word in line_words
             )
     return tuple(boxes)
+
+
+def _document_proven_running_header_boxes(
+    pages: list[tuple[int, object]],
+    words_by_page: dict[int, list[dict[str, object]]],
+) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
+    """Authorize tight header-word removal only with document-wide repetition."""
+
+    candidates = {
+        page_number: boxes
+        for page_number, page in pages
+        if (
+            boxes := _proven_running_header_boxes(
+                page,
+                words=words_by_page.get(page_number, []),
+            )
+        )
+    }
+    required_pages = max(
+        3,
+        math.ceil(len(pages) * _DOCUMENT_RUNNING_HEADER_MIN_PAGE_COVERAGE),
+    )
+    if len(candidates) < required_pages:
+        return {}
+    return candidates
 
 
 def _word_lines_with_bounds(words: list[dict[str, object]]) -> list[tuple[float, float, str]]:

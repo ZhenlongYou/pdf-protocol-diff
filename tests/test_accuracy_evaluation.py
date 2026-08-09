@@ -84,35 +84,41 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
         self.assertIn("schema_version must be exactly 1", failures)
 
     def test_complete_gold_oracle_measures_text_and_visual_recall_and_precision(self) -> None:
-        """One critical value edit plus one graphic edit should score two exact hits."""
+        """Semantic and visual cases score two hits without overstating pixel coverage."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             write_multipage_text_pdf(
-                root / "old.pdf",
-                [
-                    ["1 Limits", "The calibrated limit shall be 10 mV."],
-                    ["2 Diagram", "The diagram below defines the signal path."],
-                ],
-                decorative_marks={2: "old"},
+                root / "old_semantic.pdf",
+                [["1 Limits", "The calibrated limit shall be 10 mV."]],
             )
             write_multipage_text_pdf(
-                root / "new.pdf",
-                [
-                    ["1 Limits", "The calibrated limit shall be 12 mV."],
-                    ["2 Diagram", "The diagram below defines the signal path."],
-                ],
-                decorative_marks={2: "new"},
+                root / "new_semantic.pdf",
+                [["1 Limits", "The calibrated limit shall be 12 mV."]],
+            )
+            diagram_pages = [
+                ["1 Diagram", "The diagram below defines the signal path."],
+            ]
+            write_multipage_text_pdf(
+                root / "old_visual.pdf",
+                diagram_pages,
+                decorative_marks={1: "old"},
+            )
+            write_multipage_text_pdf(
+                root / "new_visual.pdf",
+                diagram_pages,
+                decorative_marks={1: "new"},
             )
             manifest = {
                 "schema_version": 1,
                 "cases": [
                     {
-                        "id": "controlled-value-and-visual",
+                        "id": "controlled-value",
                         "required": True,
-                        "old": {"path": "old.pdf"},
-                        "new": {"path": "new.pdf"},
+                        "old": {"path": "old_semantic.pdf"},
+                        "new": {"path": "new_semantic.pdf"},
                         "oracle_complete": True,
+                        "visual_coverage_required": False,
                         "expected_events": [
                             {
                                 "id": "critical-limit",
@@ -121,12 +127,21 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
                                 "new": "12 mV",
                                 "critical": True,
                                 "reader_visible": True,
-                            },
+                            }
+                        ],
+                    },
+                    {
+                        "id": "controlled-visual",
+                        "required": True,
+                        "old": {"path": "old_visual.pdf"},
+                        "new": {"path": "new_visual.pdf"},
+                        "oracle_complete": True,
+                        "expected_events": [
                             {
                                 "id": "diagram-pixels",
                                 "kind": "visual",
-                                "old_page": 2,
-                                "new_page": 2,
+                                "old_page": 1,
+                                "new_page": 1,
                                 "critical": False,
                                 "reader_visible": True,
                             },

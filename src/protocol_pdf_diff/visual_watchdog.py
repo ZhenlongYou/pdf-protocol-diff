@@ -51,15 +51,29 @@ def detect_visual_review_items(
 ) -> tuple[list[VisualReviewItem], list[str], VisualWatchdogAudit]:
     """Return unexplained visual deltas, diagnostics, and coverage audit facts."""
 
-    eligible_page_pairs, ambiguous_page_count = _provable_exact_text_pairs(
+    (
+        eligible_page_pairs,
+        unmatched_old_pages,
+        unmatched_new_pages,
+    ) = _provable_exact_text_pairs(
         old_extraction,
         new_extraction,
+    )
+    covered_old_pages, covered_new_pages = (
+        _reader_visible_semantic_change_pages(semantic_result)
+        if unmatched_old_pages or unmatched_new_pages
+        else (set(), set())
+    )
+    ambiguous_page_count = sum(
+        page_number not in covered_old_pages for page_number in unmatched_old_pages
+    ) + sum(
+        page_number not in covered_new_pages for page_number in unmatched_new_pages
     )
     warnings: list[str] = []
     if ambiguous_page_count:
         warnings.append(
             "视觉漏检哨兵跳过了 "
-            f"{ambiguous_page_count} 个无法唯一配对的重复或空文字页。"
+            f"{ambiguous_page_count} 个无法用完全一致或读者等价文字安全配对的页面。"
         )
 
     if not eligible_page_pairs:
@@ -594,13 +608,14 @@ def _bboxes_share_page_geometry(
 def _provable_exact_text_pairs(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,
-) -> tuple[list[tuple[int, int, str]], int]:
+) -> tuple[list[tuple[int, int, str]], tuple[int, ...], tuple[int, ...]]:
     """Pair every uniquely identifiable exact or reader-equivalent text page.
 
     Repeated/empty pages may use same-number pairing only when both selected
-    windows have equal length and the entire page-key sequence agrees. If an
-    insertion makes identity ambiguous, those pages are skipped and the audit
-    records an incomplete check rather than fabricating modified-page evidence.
+    windows have equal length and the entire page-key sequence agrees. Every
+    unmatched page is counted as incomplete coverage: an insertion, deletion,
+    semantic edit, or extraction mismatch must never disappear behind an
+    ``eligible=0, complete=true`` audit result.
     """
 
     old_pages = list(old_extraction.pages)
@@ -647,14 +662,78 @@ def _provable_exact_text_pairs(
             matched_old_indexes.add(index)
             matched_new_indexes.add(index)
 
-    ambiguous_page_count = sum(
-        1
-        for index, key in enumerate(old_keys)
-        if index not in matched_old_indexes and (not key or old_counts[key] > 1 or new_counts[key] > 1)
-    ) + sum(
-        1
-        for index, key in enumerate(new_keys)
-        if index not in matched_new_indexes and (not key or old_counts[key] > 1 or new_counts[key] > 1)
+    unmatched_old_pages = tuple(
+        page.page_number
+        for index, page in enumerate(old_pages)
+        if index not in matched_old_indexes
+    )
+    unmatched_new_pages = tuple(
+        page.page_number
+        for index, page in enumerate(new_pages)
+        if index not in matched_new_indexes
     )
     pairs.sort(key=lambda pair: (pair[0], pair[1]))
-    return pairs, ambiguous_page_count
+    return pairs, unmatched_old_pages, unmatched_new_pages
+
+
+def _reader_visible_semantic_change_pages(
+    result: DiffResult | None,
+) -> tuple[set[int], set[int]]:
+    """Return pages already represented by material reader-facing change cards.
+
+    The pixel watchdog deliberately compares only pages with unchanged or
+    locator-equivalent reader text.  A page that is unmatched because it has a
+    visible semantic change is outside that scope and must not make every normal
+    redline look degraded.  Conversely, raw citation renumbering, metadata, and
+    other reader-suppressed facts do not count as coverage; if such a page loses
+    its reader identity, the audit remains incomplete.
+    """
+
+    if result is None:
+        return set(), set()
+    from .reporting import (
+        _build_table_changes,
+        _ordered_table_changes,
+        _paired_table_visuals,
+        _reader_changes_without_cross_card_locator_pairs,
+        _reader_section_change,
+        _reader_table_changes,
+    )
+
+    table_groups = _paired_table_visuals(
+        result.old_table_visuals,
+        result.new_table_visuals,
+        old_sections=result.old_sections,
+        new_sections=result.new_sections,
+    )
+    table_changes = _ordered_table_changes(_build_table_changes(result))
+    table_evidence = [*table_changes, *table_groups]
+    reader_changes = []
+    for change in result.changes:
+        if change.role == "document_metadata":
+            continue
+        reader_change = _reader_section_change(change, table_evidence)
+        if reader_change is not None:
+            reader_changes.append(reader_change)
+    reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
+
+    old_pages: set[int] = set()
+    new_pages: set[int] = set()
+    for change in reader_changes:
+        if change.old_section is not None:
+            old_pages.update(
+                range(change.old_section.start_page, change.old_section.end_page + 1)
+            )
+        if change.new_section is not None:
+            new_pages.update(
+                range(change.new_section.start_page, change.new_section.end_page + 1)
+            )
+    for change in _reader_table_changes(table_changes):
+        old_pages.update(table.page_number for table in change.old_tables)
+        new_pages.update(table.page_number for table in change.new_tables)
+    for change in result.formula_changes:
+        if change.old_formula is not None:
+            old_pages.add(change.old_formula.page_number)
+        if change.new_formula is not None:
+            new_pages.add(change.new_formula.page_number)
+    return old_pages, new_pages

@@ -189,7 +189,7 @@ def _assessment_with_visual_review(
                 "视觉漏检哨兵未完整覆盖可核对页面："
                 f"已核对 {audit.checked_page_pair_count}/"
                 f"{audit.eligible_page_pair_count} 对，失败 {audit.failed_page_pair_count} 对，"
-                f"歧义页 {audit.ambiguous_page_count} 个。"
+                f"未安全配对页 {audit.ambiguous_page_count} 个。"
             )
     if not reasons:
         return assessment
