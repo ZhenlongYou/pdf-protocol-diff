@@ -151,30 +151,22 @@ def detect_visual_review_items(
                     "发生整体移动、换行或重排，当前像素坐标不可直接比较。"
                 )
                 continue
-            (
-                old_locator_boxes,
-                new_locator_boxes,
-                locator_coverage_complete,
-            ) = _reader_locator_change_bboxes(
-                old_page,
-                new_page,
-            )
-            if alignment_method == "reader-equivalent-text" and not locator_coverage_complete:
+            if alignment_method == "reader-equivalent-text":
                 failed_page_pair_count += 1
                 warnings.append(
-                    "视觉漏检哨兵未能用逐行坐标完整屏蔽"
-                    f"旧第 {old_page_number} / 新第 {new_page_number} 页的纯引用编号变化。"
+                    "视觉漏检哨兵未生成像素差异卡："
+                    f"旧第 {old_page_number} / 新第 {new_page_number} 页仅含纯引用编号变化，"
+                    "但当前抽取证据只有整行边界框、没有逐字符编号坐标；为避免吞掉"
+                    "同一行内的真实小图形，本页视觉覆盖按未完成处理。"
                 )
                 continue
             old_excluded = (
                 *old_page.visual_noise_bboxes,
                 *old_evidence.get(old_page_number, ()),
-                *old_locator_boxes,
             )
             new_excluded = (
                 *new_page.visual_noise_bboxes,
                 *new_evidence.get(new_page_number, ()),
-                *new_locator_boxes,
             )
             excluded_region_count += len(old_excluded) + len(new_excluded)
             try:
@@ -480,42 +472,6 @@ def _reader_page_identity(value: str) -> str:
     from .reporting import _reader_neutralize_locator_numbers
 
     return _reader_neutralize_locator_numbers(value)
-
-
-def _reader_locator_change_bboxes(
-    old_page: PageText,
-    new_page: PageText,
-) -> tuple[
-    tuple[tuple[float, float, float, float], ...],
-    tuple[tuple[float, float, float, float], ...],
-    bool,
-]:
-    """Mask tight locator-bearing lines on a page proved reader-equivalent as a whole."""
-
-    from .reporting import (
-        _reader_neutralize_locator_numbers,
-        _reader_values_match_after_locator_renumbering,
-    )
-
-    if not _reader_values_match_after_locator_renumbering(
-        old_page.text,
-        new_page.text,
-    ):
-        return (), (), False
-
-    def locator_boxes(page: PageText) -> tuple[tuple[float, float, float, float], ...]:
-        boxes = []
-        for block in page.blocks:
-            if block.kind is not DocumentBlockKind.TEXT:
-                continue
-            compact = _normalized_page_text(block.text)
-            if compact and _reader_neutralize_locator_numbers(block.text) != compact:
-                boxes.append(block.bbox)
-        return tuple(boxes)
-
-    old_boxes = locator_boxes(old_page)
-    new_boxes = locator_boxes(new_page)
-    return old_boxes, new_boxes, bool(old_boxes and new_boxes)
 
 
 def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:

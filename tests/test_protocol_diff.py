@@ -8750,8 +8750,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
 
-    def test_visual_watchdog_checks_reader_equivalent_reference_page_for_graphics(self) -> None:
-        """Reference renumbering is ignored while a same-page vector change is retained."""
+    def test_visual_watchdog_fails_closed_for_graphic_inside_locator_line(self) -> None:
+        """A locator line bbox cannot hide a same-line material vector change."""
 
         old_pages: list[list[str]] = []
         new_pages: list[list[str]] = []
@@ -8780,7 +8780,7 @@ class ProtocolDiffTests(unittest.TestCase):
             new_pdf = write_multipage_text_pdf(
                 temp_path / "new_reference_and_vector.pdf",
                 new_pages,
-                decorative_marks={4: "small-new"},
+                decorative_marks={4: "small-inline"},
             )
             result = run_diff(old_pdf, new_pdf, DiffOptions())
             outputs = write_reports(result, temp_path / "reports", DiffOptions())
@@ -8789,17 +8789,18 @@ class ProtocolDiffTests(unittest.TestCase):
                 for key in ("html", "markdown", "text")
             }
 
-        self.assertEqual(1, len(result.visual_review_items))
-        item = result.visual_review_items[0]
-        self.assertEqual((4, 4), (item.old_page_number, item.new_page_number))
-        self.assertEqual("reader-equivalent-text", item.alignment_method)
+        audit = result.provenance.visual_watchdog_audit
+        self.assertEqual([], result.visual_review_items)
+        self.assertFalse(audit.complete)
+        self.assertEqual(1, audit.failed_page_pair_count)
         self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertTrue(any("逐字符编号坐标" in warning for warning in result.warnings))
         for reader in reader_texts.values():
             self.assertNotIn("31.3.18", reader)
             self.assertNotIn("31.3.19", reader)
 
-    def test_visual_watchdog_masks_repeated_reader_equivalent_reference_lines(self) -> None:
-        """Repeated locator-only line boxes are masked independently on both versions."""
+    def test_visual_watchdog_fails_closed_for_repeated_reference_lines(self) -> None:
+        """Repeated locator lines cannot be certified from whole-line boxes."""
 
         old_pages: list[list[str]] = []
         new_pages: list[list[str]] = []
@@ -8836,7 +8837,9 @@ class ProtocolDiffTests(unittest.TestCase):
             result = run_diff(old_pdf, new_pdf, DiffOptions())
 
         self.assertEqual([], result.visual_review_items)
-        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        self.assertFalse(result.provenance.visual_watchdog_audit.complete)
+        self.assertEqual(1, result.provenance.visual_watchdog_audit.failed_page_pair_count)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
 
     def test_visual_watchdog_marks_reflowed_page_incomplete_without_false_card(self) -> None:
         """Direct pixel subtraction must not turn a moved page into a visual change."""

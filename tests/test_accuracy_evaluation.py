@@ -866,6 +866,18 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
 
         self.assertTrue(any("visual events are expected" in failure for failure in failures))
 
+    def test_public_gold_example_explicitly_disclaims_visual_coverage(self) -> None:
+        """The documented real semantic case must not rely on an uncommitted local manifest."""
+
+        manifest = json.loads(
+            (PROJECT_ROOT / "corpus" / "gold_accuracy.example.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual([], validate_gold_accuracy_manifest(manifest))
+        self.assertFalse(manifest["cases"][0]["visual_coverage_required"])
+
     def test_gold_html_reader_stream_discards_images_and_collapsed_audit_body(self) -> None:
         """Visible HTML extraction must not retain base64 or closed-detail audit text."""
 

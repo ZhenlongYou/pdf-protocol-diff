@@ -14,6 +14,7 @@
         "layout_backend": "native"
       },
       "oracle_complete": false,
+      "visual_coverage_required": false,
       "expected_events": [
         {
           "id": "critical-frequency",
