@@ -6801,8 +6801,8 @@ class ProtocolDiffTests(unittest.TestCase):
         """长引用列表被 diff 拆成新增和删除时，读者层仍应将两句视为一致。"""
 
         # 大幅扩展列表会让底层 SequenceMatcher 拆成 added/removed，而不是 replaced pair。
-        old_sentence = "Use Tables 1 and 2 for compliance."
-        new_sentence = "Use Tables 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10 for compliance."
+        old_sentence = "Use Tables 1 and 2."
+        new_sentence = "Use Tables 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10."
         # 通过公开比较入口保留真实拆分行为，确保报告过滤覆盖这一用户可见路径。
         result = compare_extractions(
             ExtractionResult(
@@ -7048,6 +7048,30 @@ class ProtocolDiffTests(unittest.TestCase):
                 "Sections 31.4 and 54.0 to 56.25 apply.",
                 "53.125 to 56.25",
                 "54.0 to 56.25",
+            ),
+            (
+                "Figures 5 and 1 in trace length apply.",
+                "Figures 6 and 2 in trace length apply.",
+                "1 in",
+                "2 in",
+            ),
+            (
+                "Figures 5 and 1 by 2 lane arrays apply.",
+                "Figures 6 and 3 by 2 lane arrays apply.",
+                "1 by 2",
+                "3 by 2",
+            ),
+            (
+                "Figures 5 and 1 at 56 GBd apply.",
+                "Figures 6 and 2 at 56 GBd apply.",
+                "1 at 56 GBd",
+                "2 at 56 GBd",
+            ),
+            (
+                "Figures 5 and 1 with ±0.1 tolerance apply.",
+                "Figures 6 and 2 with ±0.1 tolerance apply.",
+                "1 with ±0.1",
+                "2 with ±0.1",
             ),
         ]
         # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。

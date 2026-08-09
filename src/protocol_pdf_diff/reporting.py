@@ -6493,13 +6493,28 @@ _READER_LOCATOR_PREFIXES = (
     ("equation", r"equation", r"equations"),
     ("page", r"page", r"pages"),
 )
-# 点分或短横线列表除形态一致外还必须共享父编号；整数列表则依靠完整后继门禁。
+# 句末允许任意已证明完整的裸引用列表。
+_READER_LOCATOR_LIST_SENTENCE_END_PATTERN = r"(?=\s*(?:$|[.)\]]))"
+# 共享父编号的点分/短横线列表还可以在非数值续句动词前结束。介词、系动词不在
+# 正向证明集中，因为 `1 in`/`1 by`/`1 at`/`1 with` 都可以是技术数值。
+_READER_LOCATOR_STRUCTURED_FOLLOWING_WORD_PATTERN = (
+    r"(?:apply|applies|shall|should|must|may|can|could|will|"
+    r"describe|describes|define|defines|show|shows|illustrate|illustrates|"
+    r"specify|specifies|contain|contains|provide|provides|document|documents|"
+    r"list|lists|cover|covers|govern|governs|remain|remains|require|requires)"
+)
+_READER_LOCATOR_STRUCTURED_LIST_FINAL_PATTERN = (
+    rf"(?=\s*(?:$|[.)\]]|{_READER_LOCATOR_STRUCTURED_FOLLOWING_WORD_PATTERN}\b|"
+    rf"[,;]\s+{_READER_LOCATOR_STRUCTURED_FOLLOWING_WORD_PATTERN}\b))"
+)
+# 点分或短横线列表除形态一致外还必须共享父编号；整数列表只能在句末成立。
 _READER_LOCATOR_BARE_NUMBER_FORMS = (
     (
         rf"(?P<locator_root>\d+(?:\.\d+)*)\.\d+"
         rf"(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
         rf"(?P=locator_root)\.\d+"
         rf"(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
+        _READER_LOCATOR_STRUCTURED_LIST_FINAL_PATTERN,
     ),
     (
         rf"(?P<locator_root>\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)*)"
@@ -6507,27 +6522,15 @@ _READER_LOCATOR_BARE_NUMBER_FORMS = (
         rf"(?!\s*{TABLE_NUMBER_DASH_CLASS}\s*\d)",
         rf"(?P=locator_root)\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+"
         rf"(?!\s*{TABLE_NUMBER_DASH_CLASS}\s*\d)",
+        _READER_LOCATOR_STRUCTURED_LIST_FINAL_PATTERN,
     ),
     (
         rf"\d+(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
         rf"\d+(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
+        _READER_LOCATOR_LIST_SENTENCE_END_PATTERN,
     ),
 )
-# 裸引用编号只接受句末、列表连接或普通续句词；未知 token 默认按工程值/计数保留。
-_READER_LOCATOR_SAFE_FOLLOWING_WORD_PATTERN = (
-    r"(?:apply|applies|are|is|were|was|shall|should|must|may|can|could|will|"
-    r"describe|describes|define|defines|show|shows|illustrate|illustrates|"
-    r"specify|specifies|contain|contains|provide|provides|document|documents|"
-    r"list|lists|cover|covers|govern|governs|remain|remains|require|requires|"
-    r"for|in|of|by|at|from|under|within|with|without|below|above|"
-    r"herein|respectively|collectively)"
-)
-# 整个列表只有抵达真正句末、结束标点或普通续句词才成立；连接词本身不能作为结束点。
-_READER_LOCATOR_BARE_LIST_FINAL_PATTERN = (
-    rf"(?=\s*(?:$|[.)\]]|{_READER_LOCATOR_SAFE_FOLLOWING_WORD_PATTERN}\b|"
-    rf"[,;]\s+{_READER_LOCATOR_SAFE_FOLLOWING_WORD_PATTERN}\b))"
-)
-# 复数定位词允许省略后续定位词，但所有裸编号必须同形且通过安全后继门禁。
+# 复数定位词允许省略后续定位词，但所有裸编号必须同形且到达该形态的可证明结束点。
 _READER_PLURAL_LOCATOR_REFERENCE_RES = tuple(
     (
         locator_kind,
@@ -6535,11 +6538,13 @@ _READER_PLURAL_LOCATOR_REFERENCE_RES = tuple(
             rf"(?i)\b(?:see\s+)?{plural_prefix}\s*\(?{first_number_pattern}\)?"
             rf"(?:{_READER_LOCATOR_JOIN_PATTERN}"
             rf"(?:(?:{singular_prefix}|{plural_prefix})\s*)?\(?{following_number_pattern}\)?"
-            rf")*{_READER_LOCATOR_BARE_LIST_FINAL_PATTERN}"
+            rf")*{list_final_pattern}"
         ),
     )
     for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES
-    for first_number_pattern, following_number_pattern in _READER_LOCATOR_BARE_NUMBER_FORMS
+    for first_number_pattern, following_number_pattern, list_final_pattern in (
+        _READER_LOCATOR_BARE_NUMBER_FORMS
+    )
 )
 # 单数写法及重复显式定位词列表只吞并带前缀的项，因此后续裸工程值天然保留。
 _READER_TYPED_LOCATOR_REFERENCE_RES = tuple(
