@@ -1,15 +1,15 @@
 # PDF Protocol Diff Handoff
 
 - task_id: `pdf-diff-accuracy-phase1-20260810`
-- goal: 在保留可回退基线的前提下，提高疑难 PDF 的变化识别率，加入可量化 Gold 基准、视觉漏检哨兵和安全的 Docling 多解析器融合。
+- goal: 在保留可回退基线的前提下，提高疑难 PDF 的正文、表格、公式和视觉变化识别率，并建立不可假绿的可量化验收。
 - repository: `ZhenlongYou/pdf-protocol-diff`
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `67891f01dbab0aebc3e8f16cec89a495f22b028e`
-- recorded_commit: `5b6fd78d5c60dc25de87d18f342eb648e823d349`
-- status: ready
-- real_entrypoint: `.venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_识别率一期验收_20260810/532`
-- accepted_report: `/Users/mac/Desktop/PDF对比工具_识别率一期验收_20260810/532/protocol_diff_20260810_005244/protocol_diff_report.html`
+- implementation_commit: `69857da98b0789bb364a0c53f1b7160e65af5ab4`
+- status: `accepted_ready_for_delivery`
+- real_entrypoint: `.venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/532`
+- accepted_report: `/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/532/protocol_diff_20260810_041209/protocol_diff_report.html`
 
 ## Rollback Baseline
 
@@ -20,25 +20,40 @@
 
 ## Implemented
 
-- 新增文字一致页的视觉漏检哨兵：单调页面配对后以低分辨率源像素核对图片、印章、矢量图和公式绘图变化；只追加截图复核证据，不猜测技术语义。
-- 视觉变化会阻止“未发现差异”结论；HTML 展示旧页、新页和差异掩膜，JSON 仅保存页码、阈值和定位元数据，避免嵌入大图。
-- Docling 仍为显式可选后端；只在原生抽取已证明为版面风险页、且候选仅重排完整唯一句子行时采用。大小写、标点、数值、单位、运算符或内容变化均回退原生结果。
-- 新增 Gold Accuracy 事件清单与生产入口评估器，可计算召回率、关键事实召回率、视觉召回率、漏检数；只有完整 oracle 才报告 precision。
-- 表格证据仍位于报告最前，公式随后，视觉漏检证据再后，最后才是技术正文。
-- 用户截图中的 Table 列表和 Section 范围引用继续从 HTML/Markdown/TXT 隐藏；新增对 `Equation ()` 抽取缺号的纯公式出处降噪，JSON/CSV 原始事实不变。
-- 工程数值、限值、单位和技术标识符继续大小写敏感地严格比较；视觉哨兵和引用降噪均不改写语义差异层。
+- 报告顺序保持“表格补充证据 → 公式复核 → 技术正文”；读者层继续隐藏纯 Section/Table/Figure/Condition/Equation 引用编号顺延，JSON/CSV 保留原始审计事实。
+- 工程数值、限值、单位、正负号及大小写技术标识符严格比较；编号中和只作用于可证明的定位语法，不能吞掉 `mV/MV`、`UI/ui`、`CMIT-LT/CMIS-LT` 等变化。
+- 视觉漏检哨兵绑定抽取快照 SHA，记录完整覆盖审计；屏蔽坐标已证明的页眉、页脚、页边行号和已有表格/公式证据；小型连续矢量符号仍会触发人工复核卡。
+- 页眉/页脚只屏蔽实际 word 紧框；完整页脚簇可含相邻续行，但附近独立小图形不被整带遮住。页眉还必须由同一标题覆盖至少 80% 选定页的跨页证据证明，每页不同的技术标题保留。
+- 唯一文字页可跨插页或换序配对；重复、空文字或其它未安全配对页失败关闭。多页章节只允许具体读者片段在 `page_bodies` 中的唯一精确 occurrence 覆盖所在页，禁止一张第一页正文卡替整节其它页面担保。
+- 仅引用编号不同的页当前只有整行坐标，为避免吞掉同行小图形，不屏蔽整行、不认证视觉一致。若整页发生移动、换行或重排，也不生成整页红色假差异卡；两类情况均明确记录视觉覆盖未完成并阻止 all-clear。
+- Gold Accuracy 按具体 C/T/F/V 卡片和 HTML/Markdown/TXT 三个独立读者面核对可见性、事件 occurrence 及技术 token 边界；默认要求视觉覆盖完整。仅语义 benchmark 可显式设置 `visual_coverage_required: false`，输出仍公开 `visual_coverage_complete=false`，且包含视觉事件时禁止豁免。
+- Docling 保持显式可选和快照哈希绑定，但本期只接受与原生抽取逐字符完全一致的候选。复杂多栏重排的所有者绑定仍未证明，相关增强明确延期，不能宣称已经修复。
 
 ## Acceptance Evidence
 
-- `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`：`828` 项通过，`0` 失败；`compileall`、`git diff --check` 通过。
+- `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`：`865` 项通过，`0` 失败，耗时 `413.691s`。
 - 受控解析基准：`5/5 PASS`；混合 Corpus：`3 PASS / 0 FAIL / 6` 个缺少可选 PDF 的明确 skip。
-- 真实 532 Gold：`2/2` 已标注事件匹配，整体和关键事实 recall 均为 `1.0`，false negative 为 `0`；该真实清单是非完整 oracle，因此 precision 正确保持为不可用。
-- 人工构造的完整 oracle 同时覆盖 `10 mV → 12 mV` 和纯图形变化，recall、critical recall、visual recall、precision 均为 `1.0`；故意写错 `13 mV` 时测试必须失败。
-- 新版 532 报告保留 `35` 张正文审计卡、`12` 张表格卡和 `7` 项公式证据；Markdown 章节顺序为表格第 `34` 行、公式第 `151` 行、正文第 `196` 行。
-- 浏览器实际打开新版报告，控制台 `0` 错误；纯 Table/Section/异常空公式号出处句搜索不到，`28 → 53.125 GHz` 真实技术变化仍可定位并高亮。
-- `main.py --gui-smoke-test` 与普通系统入口 `python3 gui_app.py --smoke-test` 均通过真实 Tk 窗口构造检查。
+- 真实 532 语义 Gold：`2/2` 关键事件匹配，recall 与 critical recall 均为 `1.0`，false negative 为 `0`；该 case 显式声明不认证视觉覆盖，`visual_coverage_required=false`、`visual_coverage_complete=false`、`visual_recall=null`、`precision=null`。
+- 最终 532 报告：`35` 张原始正文审计卡、`12` 张原始表格审计卡、`7` 项公式证据、`0` 张视觉变化卡；视觉审计为 `eligible=1, checked=0, failed=1, unmatched=18, complete=false`，旧 29 / 新 28 的版式回流明确失败关闭，没有伪造整页差异截图。
+- Markdown 顺序为表格第 `35` 行、公式第 `152` 行、技术正文第 `197` 行；真实 Chrome 已成功渲染最终 HTML 并保存首屏截图，首屏从表格补充证据开始。
+- 浏览器可见正文中，用户截图的 Table 列表和 Section 范围旧/新原句均不存在；`CMIS-LT` 与 `53.125 GHz` 可见，错误视觉复核区不存在。
+- `git diff --check`、修改文件 Ruff `F/E9/I`、`compileall` 均通过；`.venv/bin/python main.py --gui-smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`。
+
+## Independent Review
+
+- correctness reviewer `019fcb67-bcc9-7270-988d-113d07697892`：对 exact `69857da98b0789bb364a0c53f1b7160e65af5ab4` 给出 `PASS`，P1/P2=`0/0`，并完成 commit-bound attestation（task `accuracy-phase1-correctness-20260810`）。
+- regression reviewer：对同一 exact commit 给出 `PASS`，P1/P2=`0/0`；独立复跑跨页片段、小图形、页眉页脚、真实 532、Gold/Docling/reader 矩阵，未发现重要遗留。
+
+## User-Facing Artifacts
+
+- 最终 HTML：`/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/532/protocol_diff_20260810_041209/protocol_diff_report.html`
+- Gold summary：`/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/gold_accuracy_532_final.json`
+- 受控解析 summary：`/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/controlled_parsing_benchmark_final.json`
+- 混合 Corpus summary：`/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/corpus_summary_final.json`
+- Chrome 渲染截图：`/Users/mac/Desktop/PDF对比工具_识别率一期最终验收_20260810/最终报告浏览器截图.png`
 
 ## Delivery Policy
 
-- 持久项目分支 `project/pdf-protocol-diff` 必须本地和远端永久保留；交付时先推该分支，再把 `main` 快进到同一最终提交并推送。
-- 旧版协调门禁要求删除所有非 `main` 分支，与当前持久项目分支政策冲突；不得为通过旧门禁删除项目分支。
+- 两名 reviewer 已对 exact implementation commit 给出 `PASS` 且 P1/P2=`0/0`。
+- 交付时先推持久项目分支 `project/pdf-protocol-diff`，再把 `main` 快进到同一最终提交并推送；远端备份标签永久保留。
+- 最终远端项目分支与 `main` OID 在 GitHub 推送后由交付回复记录；本文件不写入包含自身的递归 commit OID。
