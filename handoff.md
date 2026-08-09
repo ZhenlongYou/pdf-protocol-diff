@@ -33,5 +33,6 @@
 
 ## Delivery
 
-- 最终交付应先推送持久项目分支 `project/pdf-protocol-diff`，再将 `main` 快进到同一提交并推送；两条分支均永久保留。
+- 已先推送持久项目分支 `project/pdf-protocol-diff`，再将 `main` 快进到同一提交并推送；两条分支均永久保留。
+- canonical checkout 最终停留在 `main`，工作树干净。
 - 本轮只保留最终验收报告 `protocol_diff_20260809_145011`；六个中间报告已移入 macOS 废纸篓，可恢复。
