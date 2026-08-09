@@ -6495,25 +6495,34 @@ _READER_LOCATOR_PREFIXES = (
 )
 # 裸列表编号必须保持同一种整数、点分层级或短横线编号形态，防止把异形工程量并入引用。
 _READER_LOCATOR_BARE_NUMBER_PATTERNS = (
-    r"\d+(?:\.\d+)+(?!\s*(?:\.|" + TABLE_NUMBER_DASH_CLASS + r")\s*\d)",
+    rf"\d+(?:\.\d+)+(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
     rf"\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)+(?!\s*{TABLE_NUMBER_DASH_CLASS}\s*\d)",
     rf"\d+(?!\s*(?:\.|{TABLE_NUMBER_DASH_CLASS})\s*\d)",
 )
-# 裸编号后若紧跟已知工程单位，该数字属于正文值而不是 Figure/Condition 等引用列表项。
-_READER_ENGINEERING_UNIT_PATTERN = (
-    r"(?:%|[fpnumkMGTµμ]?(?:V|A|W|F|H|Hz)|[fpnumµμ]?s|"
-    r"[kMGT]?(?:bps|b/s|bit/s|B/s|T/s|Ω)|UI(?:pp|RMS)?|"
-    r"dB(?:m|c)?|ppm|°C|ohms?|volts?|amps?|watts?|seconds?|hertz|decibels?)"
+# 裸引用编号只接受句末、列表连接或普通续句词；未知 token 默认按工程值/计数保留。
+_READER_LOCATOR_SAFE_FOLLOWING_WORD_PATTERN = (
+    r"(?:apply|applies|are|is|were|was|shall|should|must|may|can|could|will|"
+    r"describe|describes|define|defines|show|shows|illustrate|illustrates|"
+    r"specify|specifies|contain|contains|provide|provides|document|documents|"
+    r"list|lists|cover|covers|govern|governs|remain|remains|require|requires|"
+    r"for|in|of|to|by|at|from|under|within|with|without|below|above|"
+    r"herein|respectively|collectively)"
 )
-# 复数定位词允许省略后续定位词，但所有裸编号必须同形且不得紧邻工程单位。
+# 该正向后继门禁不枚举技术单位；GBd、mVrms、BER、lanes 等未知词都会 fail-visible。
+_READER_LOCATOR_BARE_NUMBER_FOLLOW_PATTERN = (
+    rf"(?=\s*(?:$|[,.;)\]]|(?:and|or|to|through)\b|"
+    rf"{_READER_LOCATOR_SAFE_FOLLOWING_WORD_PATTERN}\b))"
+)
+# 复数定位词允许省略后续定位词，但所有裸编号必须同形且通过安全后继门禁。
 _READER_PLURAL_LOCATOR_REFERENCE_RES = tuple(
     (
         locator_kind,
         re.compile(
             rf"(?i)\b(?:see\s+)?{plural_prefix}\s*\(?{number_pattern}\)?"
+            rf"{_READER_LOCATOR_BARE_NUMBER_FOLLOW_PATTERN}"
             rf"(?:{_READER_LOCATOR_JOIN_PATTERN}"
             rf"(?:(?:{singular_prefix}|{plural_prefix})\s*)?\(?{number_pattern}\)?"
-            rf"(?!\s*{_READER_ENGINEERING_UNIT_PATTERN}(?=$|[^A-Za-z0-9_])))*"
+            rf"{_READER_LOCATOR_BARE_NUMBER_FOLLOW_PATTERN})*"
         ),
     )
     for locator_kind, singular_prefix, plural_prefix in _READER_LOCATOR_PREFIXES

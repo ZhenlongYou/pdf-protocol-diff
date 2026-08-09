@@ -6959,6 +6959,60 @@ class ProtocolDiffTests(unittest.TestCase):
                 "0.023 UI",
                 "0.025 UI",
             ),
+            (
+                "Sections 31.3 and 53.125 GBd apply.",
+                "Sections 31.4 and 56.25 GBd apply.",
+                "53.125 GBd",
+                "56.25 GBd",
+            ),
+            (
+                "Figures 5 and 45 degrees of phase rotation apply.",
+                "Figures 6 and 46 degrees of phase rotation apply.",
+                "45 degrees",
+                "46 degrees",
+            ),
+            (
+                "Figures 5 and 45 deg of phase rotation apply.",
+                "Figures 6 and 46 deg of phase rotation apply.",
+                "45 deg",
+                "46 deg",
+            ),
+            (
+                "Figures 5 and 1 mVrms of residual voltage apply.",
+                "Figures 6 and 2 mVrms of residual voltage apply.",
+                "1 mVrms",
+                "2 mVrms",
+            ),
+            (
+                "Figures 5 and 1 mVpp of residual voltage apply.",
+                "Figures 6 and 2 mVpp of residual voltage apply.",
+                "1 mVpp",
+                "2 mVpp",
+            ),
+            (
+                "Figures 5 and 1:1000 ratio apply.",
+                "Figures 6 and 2:1000 ratio apply.",
+                "1:1000 ratio",
+                "2:1000 ratio",
+            ),
+            (
+                "Figures 5 and 1 BER target apply.",
+                "Figures 6 and 2 BER target apply.",
+                "1 BER",
+                "2 BER",
+            ),
+            (
+                "Figures 5 and 4 lanes are required.",
+                "Figures 6 and 8 lanes are required.",
+                "4 lanes",
+                "8 lanes",
+            ),
+            (
+                "Figures 5 and 2 taps are enabled.",
+                "Figures 6 and 3 taps are enabled.",
+                "2 taps",
+                "3 taps",
+            ),
         ]
         # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。
         for old_sentence, new_sentence, old_value, new_value in cases:
