@@ -7013,6 +7013,42 @@ class ProtocolDiffTests(unittest.TestCase):
                 "2 taps",
                 "3 taps",
             ),
+            (
+                "Figures 5 and 1,000 lanes are required.",
+                "Figures 6 and 2,000 lanes are required.",
+                "1,000 lanes",
+                "2,000 lanes",
+            ),
+            (
+                "Figures 5 and 1 to 4 lanes are required.",
+                "Figures 6 and 2 to 4 lanes are required.",
+                "1 to 4 lanes",
+                "2 to 4 lanes",
+            ),
+            (
+                "Figures 5 and 1 or 2 taps are enabled.",
+                "Figures 6 and 3 or 2 taps are enabled.",
+                "1 or 2 taps",
+                "3 or 2 taps",
+            ),
+            (
+                "Figures 5 and 1 and 1/2 UI of jitter apply.",
+                "Figures 6 and 2 and 1/2 UI of jitter apply.",
+                "1 and 1/2 UI",
+                "2 and 1/2 UI",
+            ),
+            (
+                "Sections 31.3 and 53.125 to 56.25 GBd operation apply.",
+                "Sections 31.4 and 54.0 to 56.25 GBd operation apply.",
+                "53.125 to 56.25 GBd",
+                "54.0 to 56.25 GBd",
+            ),
+            (
+                "Sections 31.3 and 53.125 to 56.25 apply.",
+                "Sections 31.4 and 54.0 to 56.25 apply.",
+                "53.125 to 56.25",
+                "54.0 to 56.25",
+            ),
         ]
         # 每个反例都从公开比较与写报告入口执行，避免私有正则单测形成假绿。
         for old_sentence, new_sentence, old_value, new_value in cases:
