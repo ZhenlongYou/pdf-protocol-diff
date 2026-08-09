@@ -1,38 +1,37 @@
 # PDF Protocol Diff Handoff
 
-- task_id: `pdf-diff-numbering-neutral-reader-20260809`
-- goal: 表格补充证据前置；纯章节、Figure、Table、Condition 等定位编号变化在阅读层视为一致，同时保持工程数值、单位、限值和术语严格比较。
+- task_id: `pdf-diff-citation-list-neutral-reader-20260809`
+- goal: 表格补充证据前置；纯 Section、Figure、Table、Condition 等引用编号、列表及范围变化在阅读层视为一致，原始 JSON/CSV 无损保留，工程数值、限值、单位和术语严格比较。
 - repository: `ZhenlongYou/pdf-protocol-diff`
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
-- base_main: `4a4dd5f779e27e50beb952b0c064ee632a563918`
-- recorded_commit: `67f9445fb8a5ba7fe6b25e7c77f370f187c55bc8`
+- base_main: `3374b0f8f0ae2ff49818a40e8f850785eaf08ca0`
+- recorded_commit: `fbc2b5128fa7fd45f72d10569863125be3bfb12b`
 - status: ready
-- real_entrypoint: `python3 main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_编号中性与表格前置验收_20260809/532`
-- accepted_report: `/Users/mac/Desktop/PDF对比工具_编号中性与表格前置验收_20260809/532/protocol_diff_20260809_020333/protocol_diff_report.html`
+- real_entrypoint: `.venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_引用出处中性验收_20260809/532`
+- accepted_report: `/Users/mac/Desktop/PDF对比工具_引用出处中性验收_20260809/532/protocol_diff_20260809_145011/protocol_diff_report.html`
 
 ## Implemented
 
-- HTML 与 Markdown 的“表格补充证据（变化与复核）”已移动到公式索引和技术正文之前，侧栏同样以表格为第一组。
-- 阅读层只在整句或整格除显式定位编号外完全一致时隐藏编号变化；JSON/CSV 继续保留原始替换事实。
-- 纯标题编号、Section/Clause/See、Figure、Table、Condition、Equation 和 page 定位编号支持编号中性。
-- 表格 caption-only 纯表号变化在阅读层隐藏；同一行若仍有 `0.023 → 0.025 UI` 等变化则继续显示。
-- 公式编号顺延继续保留源 PDF 裁剪与上下标视觉证据，但不抬高核心技术变化数。
+- HTML、Markdown 与侧栏的“表格补充证据（变化与复核）”位于公式视觉核对和技术正文之前。
+- 阅读层中和纯标题、caption、显式引用和可证明完整的编号列表/范围；底层 `DiffResult` 及 JSON/CSV 不改写。
+- 长引用列表被底层 diff 拆成 added/removed 卡时，仅在同角色、同位置、唯一一对一且整句中和后精确相等时从阅读副本中消除。
+- 裸整数列表只在真正句末才可忽略；点分/短横线编号必须同形且共享父编号。右括号/方括号后仍有技术内容时一律 fail-visible。
+- 编号中和后保持大小写精确比较；`mV/MV`、`UI/ui`、`CMIT-LT/cmit-lt` 等变化不会被隐藏。
+- 公式视觉证据与 MCB 伪表格防护保持原有逻辑，本轮未放宽抽取层边界。
 
 ## Acceptance Evidence
 
-- 全项目：`815` 项 unittest 通过。
-- 受影响报告模块：`265` 项协议测试与 `152` 项公式/阅读准确性测试通过。
-- `python3 main.py` 真实入口完成 532.04/532.05 全文比较；最终 HTML 中表格区位于公式索引和正文之前。
-- 真实阅读版未出现纯 `Figure 31-5 → 31-6`、纯 Equation/Figure/page 联合顺延或孤立 `See 31.3.11`；`CMIT-LT → CMIS-LT`、`33.5 dB` 等技术事实仍存在。
-- JSON 保留 `35` 张原始正文变化卡、`12` 张原始表格变化卡和 `7` 项公式视觉证据；MCB 表格标题误分类数为 `0`。
-- Playwright 浏览器首屏、表格截图、公式放大弹窗与 `<sub>/<sup>` 渲染通过；仅 favicon 缺失产生无功能影响的 404。
-- GUI 的项目环境与普通 `python3` 启动路径均通过真实窗口 smoke test。
-- 故障注入把过滤器故意放宽后，UI/dB 数值保护测试均失败；恢复实现后转绿。
-- 审查发现的大小写漏洞已修复：定位句、表题和章节标题均精确区分 `mV/MV`、`UI/ui` 与技术标识符大小写。
-- 两个独立 reviewer 对 `67f9445` 给出 PASS 并写入 commit-bound attestation：`019fcb67-bcc9-7270-988d-113d07697892`、`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`。
+- 全项目 `819` 项 unittest 通过；`compileall` 和 `git diff --check` 通过。
+- 用户截图的 Table 列表扩展和 `Sections 31.3.4 to 31.3.18 → 31.3.19` 在最终 HTML/Markdown/TXT 中不可见，在 JSON/changes.csv 中仍有完整旧/新原文。
+- 独立反例覆盖 dB、mV、UI、GBd、mVrms、mVpp、ratio、BER、lanes、taps、千位数、范围、分数、`in/by/at/with/are`、大小写以及 integer/dotted/dashed 括号语境，旧新技术事实在 HTML/MD/TXT 中全部保留。
+- 真实 532.04/532.05 报告 Markdown 顺序为表格（第 33 行）、公式（第 150 行）、技术正文（第 195 行）。
+- 最终 JSON 保留 `35` 张原始正文变化卡、`12` 张表格变化卡和 `7` 项公式视觉证据；MCB 表题误分类数为 `0`。
+- 阅读报告仍保留 `33.5 dB`、`CMIT-LT → CMIS-LT`、`53.125 GHz` 等技术事实。HTML SHA-256 为 `fb41fc0adb241e7f33b373844cc9c91c677003cf0ed2b1890b7f90d063d1e2b0`，JSON SHA-256 为 `889b3f815758ad72f9586b1b777364d1d51ff263c0938c79258ad493314507f4`。
+- 最终 `file://` 自动导航被应用内浏览器安全策略拒绝，未绕过限制；同模板早先报告已直开通过，最终文件已做可见文本、结构顺序和完整性核对。
+- 两个独立 reviewer 对 `fbc2b5128fa7fd45f72d10569863125be3bfb12b` 给出 commit-bound PASS，无 P1/P2：`019fcb67-bcc9-7270-988d-113d07697892`、`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`。协调层的旧 task 丢失 GitHub identity write lane，因此 attestation 未落盘；两份独立审查结论均已精确绑定该提交。
 
 ## Delivery
 
-- 已先推送持久项目分支 `project/pdf-protocol-diff`，再快进并推送 `main`；两条分支永久保留。
-- canonical checkout 最终停留在 `main`，工作树保持干净。
+- 最终交付应先推送持久项目分支 `project/pdf-protocol-diff`，再将 `main` 快进到同一提交并推送；两条分支均永久保留。
+- 本轮只保留最终验收报告 `protocol_diff_20260809_145011`；六个中间报告已移入 macOS 废纸篓，可恢复。
