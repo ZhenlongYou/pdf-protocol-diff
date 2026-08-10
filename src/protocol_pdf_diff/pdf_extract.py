@@ -3372,11 +3372,7 @@ def _table_bbox_belongs_to_captioned_figure(
         or not geometry_words
         or _looks_like_table_caption(title)
         or _looks_like_table_context_caption(title)
-        or any(
-            _looks_like_table_caption(line)
-            or _looks_like_table_context_caption(line)
-            for line in table_lines
-        )
+        or _table_rows_begin_with_explicit_caption(table_lines)
     ):
         return False
     word_lines = _word_line_records(geometry_words)
@@ -3421,6 +3417,31 @@ def _table_bbox_belongs_to_captioned_figure(
     ):
         return False  # 图题后若已进入正常句子/规范正文，不能让更远的图题删除后续小表。
     return True
+
+
+def _table_rows_begin_with_explicit_caption(table_lines: list[str]) -> bool:
+    """Return whether structured cells reconstruct a leading Table caption.
+
+    Caption words may split across adjacent cells (``Table | 4-1 ...``).  The
+    reconstructed payload must begin with the caption; a diagram cell saying
+    ``See Table 31-8`` is only a reference and cannot rescue the small grid.
+    """
+
+    for line in table_lines:
+        text = normalize_line(line)
+        if text.startswith(_TABLE_ROW_PREFIX):
+            text = text[len(_TABLE_ROW_PREFIX) :].strip()
+        text = re.sub(r"^T\d+\s*\|\s*", "", text, flags=re.I)
+        payloads: list[str] = []
+        for cell in split_table_cells(text):
+            field = split_table_field(cell)
+            payload = field[1] if field else decode_table_cell(cell)
+            if normalized := normalize_line(payload):
+                payloads.append(normalized)
+        reconstructed = normalize_line(" ".join(payloads))
+        if re.match(r"(?i)^(?:table\s+\d+(?:[-–]\d+)?\b|表\s*\d+)", reconstructed):
+            return True
+    return False
 
 
 def _table_lines_are_single_column_note_box(table_lines: list[str], *, title: str = "") -> bool:

@@ -255,6 +255,10 @@ def compare_extractions(
     )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
     old_header_section = _running_header_section(old_extraction)
     new_header_section = _running_header_section(new_extraction)
+    old_header_section, new_header_section = _ignore_trailing_header_page_only_difference(
+        old_header_section,
+        new_header_section,
+    )
     if old_header_section is not None:
         old_sections.insert(0, old_header_section)
     if new_header_section is not None:
@@ -381,6 +385,33 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
         body="\n".join(text for _page_number, text in observed),
         role="technical",
         page_bodies=tuple((page_number, text) for page_number, text in observed),
+    )
+
+
+def _ignore_trailing_header_page_only_difference(
+    old_section: Section | None,
+    new_section: Section | None,
+) -> tuple[Section | None, Section | None]:
+    """Ignore header observations that exist only on trailing unmatched pages.
+
+    If every overlapping header observation is exactly equal and one sequence
+    is only a strict prefix of the other, the extra suffix is page-count
+    furniture rather than a changed technical identifier.  Full per-page
+    observations remain in ``page_bodies`` for in-memory audit; only the body
+    consumed by semantic comparison is trimmed to the shared prefix.
+    """
+
+    if old_section is None or new_section is None:
+        return old_section, new_section
+    old_values = tuple(text for _page, text in old_section.page_bodies)
+    new_values = tuple(text for _page, text in new_section.page_bodies)
+    shared_count = min(len(old_values), len(new_values))
+    if not shared_count or old_values[:shared_count] != new_values[:shared_count]:
+        return old_section, new_section
+    shared_body = "\n".join(old_values[:shared_count])
+    return (
+        replace(old_section, body=shared_body),
+        replace(new_section, body=shared_body),
     )
 
 
@@ -2106,7 +2137,7 @@ def _structural_identity_rescue_pairs(
         for section in new_sections
         for anchor in _section_identity_anchor_keys(section.body, section.title)
     )
-    rescued: list[tuple[int, int, str]] = []
+    candidates: list[tuple[int, int, float, str]] = []
     for identity_key, old_indexes in old_by_key.items():
         new_indexes = new_by_key.get(identity_key, [])
         if len(old_indexes) != 1 or len(new_indexes) != 1:
@@ -2131,20 +2162,38 @@ def _structural_identity_rescue_pairs(
             old_anchor_counts,
             new_anchor_counts,
         )
+        candidates.append((old_index, new_index, prose_score, prose_basis))
+
+    # 先固化自身已有正文证据的配对，再让相邻边界使用这些独立证据。
+    # 只做这一层扩展，不让 bracket 结果继续链式传播，避免一串同号同题章节互相自证。
+    rescued: list[tuple[int, int, str]] = [
+        (old_index, new_index, prose_basis)
+        for old_index, new_index, prose_score, prose_basis in candidates
+        if prose_basis and prose_score >= minimum_similarity
+    ]
+    independently_matched_pairs = matched_pairs | {
+        (old_index, new_index) for old_index, new_index, _basis in rescued
+    }
+    independently_matched_old = matched_old | {
+        old_index for old_index, _new_index, _basis in rescued
+    }
+    independently_matched_new = matched_new | {
+        new_index for _old_index, new_index, _basis in rescued
+    }
+    for old_index, new_index, _prose_score, prose_basis in candidates:
+        if prose_basis and (old_index, new_index, prose_basis) in rescued:
+            continue
+        if old_index in independently_matched_old or new_index in independently_matched_new:
+            continue
         bracket_supported = _matched_adjacent_brackets_support(
             old_sections,
             new_sections,
             old_index,
             new_index,
-            matched_pairs,
+            independently_matched_pairs,
         )
-        bracket_score = _STRUCTURAL_IDENTITY_BRACKET_SCORE if bracket_supported else 0.0
-        if prose_score >= bracket_score:
-            support_score, match_basis = prose_score, prose_basis
-        else:
-            support_score, match_basis = bracket_score, "structural_adjacent_brackets"
-        if match_basis and support_score >= minimum_similarity:
-            rescued.append((old_index, new_index, match_basis))
+        if bracket_supported and _STRUCTURAL_IDENTITY_BRACKET_SCORE >= minimum_similarity:
+            rescued.append((old_index, new_index, "structural_adjacent_brackets"))
     return sorted(rescued, key=lambda item: (item[1], item[0]))
 
 

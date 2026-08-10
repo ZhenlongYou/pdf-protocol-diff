@@ -40,7 +40,7 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
         re.compile(
             r"(?i)^((?:part)\s+(?:[IVXLCDM]+|\d+))"
-            r"(?:(?:[\s:.-]+)(.{1,120}))?$"
+            r"(?:(?:[\s:.-]+)(.{0,120}))?$"
         ),
         1,
         "part",
@@ -59,7 +59,16 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
         re.compile(
             r"(?i)^((?:annex|appendix)\s+[A-Z0-9]+)"
-            r"(?:(?:[\s:.-]+)(.{1,120}))?$"
+            r"(?:(?:[\s:.-]+)(.{0,120}))?$"
+        ),
+        1,
+        "annex",
+    ),
+    (
+        re.compile(
+            rf"^(附录\s*[A-Z{_CHINESE_NUM}]+)"
+            rf"(?:(?:[\s:：.-]+)(.{{0,120}}))?$",
+            re.IGNORECASE,
         ),
         1,
         "annex",
@@ -182,6 +191,15 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
+            body_following_lines = (
+                _numbered_prose_following_lines(
+                    cleaned_pages,
+                    page_index,
+                    line_index,
+                )
+                if prose_body_candidate is not None
+                else []
+            )
             body_candidate_continues_list = bool(
                 prose_body_candidate
                 and _is_sequential_numbered_prose_item(
@@ -189,11 +207,13 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading_stack,
                     tuple(prose_list_step_numbers),
                     following_context_proves_list=_following_context_proves_numbered_prose_item(
-                        _numbered_prose_following_lines(
-                            cleaned_pages,
-                            page_index,
-                            line_index,
-                        ),
+                        body_following_lines,
+                        prose_body_candidate,
+                        heading_stack,
+                        chain_started=bool(prose_list_step_numbers),
+                    ),
+                    following_context_proves_chapter_body=_following_context_proves_numbered_chapter_body(
+                        body_following_lines,
                         prose_body_candidate,
                         heading_stack,
                         chain_started=bool(prose_list_step_numbers),
@@ -220,16 +240,27 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 heading = None
             # 普通章节下也可能出现完整的 N..M 叙述句列表。连续递增且句子形态明确时
             # 留在正文；不依赖领域词，也允许页窗/抽取从列表中段开始。
+            heading_following_lines = (
+                _numbered_prose_following_lines(
+                    cleaned_pages,
+                    page_index,
+                    line_index,
+                )
+                if heading is not None
+                else []
+            )
             if heading and _is_sequential_numbered_prose_item(
                 heading,
                 heading_stack,
                 tuple(prose_list_step_numbers),
                 following_context_proves_list=_following_context_proves_numbered_prose_item(
-                    _numbered_prose_following_lines(
-                        cleaned_pages,
-                        page_index,
-                        line_index,
-                    ),
+                    heading_following_lines,
+                    heading,
+                    heading_stack,
+                    chain_started=bool(prose_list_step_numbers),
+                ),
+                following_context_proves_chapter_body=_following_context_proves_numbered_chapter_body(
+                    heading_following_lines,
                     heading,
                     heading_stack,
                     chain_started=bool(prose_list_step_numbers),
@@ -1359,6 +1390,7 @@ def _is_sequential_numbered_prose_item(
     prose_step_numbers: tuple[int, ...] = (),
     *,
     following_context_proves_list: bool = False,
+    following_context_proves_chapter_body: bool = False,
 ) -> bool:
     """Keep a structurally proven 1..N prose list inside its numbered parent.
 
@@ -1372,6 +1404,8 @@ def _is_sequential_numbered_prose_item(
         return False
     if not any(item.number for item in heading_stack):
         return False  # 无编号父层时，候选更可能是文档真正的第一章。
+    if following_context_proves_chapter_body:
+        return False  # 普通正文或表格可能属于真章节；歧义时失败可见，绝不为减少假章节而吞掉内容。
     number = int(heading.number)
     if prose_step_numbers:
         return (
@@ -1402,10 +1436,7 @@ def _prose_list_began_with_current_top_level(
 ) -> bool:
     """Return whether a proven list restarted at its active chapter number."""
 
-    top_level = next(
-        (item for item in heading_stack if item.level == 1 and item.number.isdigit()),
-        None,
-    )
+    top_level = _active_integer_chapter_heading(heading_stack)
     return bool(
         prose_step_numbers
         and top_level
@@ -1480,27 +1511,123 @@ def _following_context_proves_numbered_prose_item(
     return False
 
 
+def _following_context_proves_numbered_chapter_body(
+    following_lines: list[tuple[str, tuple[str, ...]]],
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+    *,
+    chain_started: bool,
+) -> bool:
+    """Return whether following prose/table evidence belongs to this chapter.
+
+    A following ordinary paragraph is ambiguous without typography, so it must
+    keep the numbered candidate visible.  The sole exception is an
+    out-of-sequence list item whose paragraph is followed by the active
+    parent's real next chapter; that boundary proves the paragraph stayed in
+    the parent rather than opening the list item as a chapter.
+    """
+
+    if not heading.number.isdigit():
+        return False
+    number = int(heading.number)
+    current_sentence_closed = _numbered_prose_sentence_is_closed(heading.title)
+    heading_started_closed = current_sentence_closed
+    saw_body_evidence = False
+    saw_plain_body_evidence = False
+    for raw_following_line, ambiguous_line_number_sides in following_lines:
+        following_line = normalize_line(raw_following_line)
+        if not following_line:
+            continue
+        if _is_serialized_table_evidence_line(following_line):
+            if (
+                chain_started
+                and not heading_started_closed
+                and current_sentence_closed
+                and not saw_plain_body_evidence
+            ):
+                return False  # 已证明链的换行末项后紧接父级表格，表格不属于一个新章节。
+            saw_body_evidence = True
+            continue
+        heading_candidate = _line_without_ambiguous_margin_number(
+            following_line,
+            ambiguous_line_number_sides,
+        )
+        following_heading = detect_heading(heading_candidate)
+        if following_heading is None:
+            if current_sentence_closed:
+                saw_body_evidence = True
+                saw_plain_body_evidence = True
+            else:
+                current_sentence_closed = _numbered_prose_sentence_is_closed(
+                    following_line
+                )
+            continue
+        if not saw_body_evidence:
+            return False
+        if following_heading.number.isdigit() and "." not in following_heading.number:
+            following_number = int(following_heading.number)
+            if (
+                following_number == number + 1
+                and _looks_like_numbered_prose_sentence(
+                    following_heading.title,
+                    chain_started=True,
+                )
+            ):
+                return False  # 表格/软换行之后仍出现紧邻列表项时，不能把前一项误证成章节。
+            if (
+                _is_next_top_level_integer_heading(following_heading, heading_stack)
+                and not _is_next_top_level_integer_heading(heading, heading_stack)
+            ):
+                return False  # 页窗中段列表后的父级下一章证明其间普通段落仍属于父级。
+        if _heading_belongs_to_active_integer_chapter(
+            following_heading,
+            heading_stack,
+        ):
+            return False  # 后续 6.1/17.1 等父级子条款证明其间总结段仍属于父级列表。
+        return True
+    if chain_started and not heading_started_closed and not saw_plain_body_evidence:
+        # 已证明的编号链末项常因版面换行拆成两行，随后才出现父章节的表格。
+        # 这种尾行只是列表句的续行；整张表不能反向把该列表项“证明”为新章节。
+        return False
+    return saw_body_evidence
+
+
 def _numbered_prose_following_lines(
     pages: list[PageText],
     page_index: int,
     line_index: int,
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """Return a bounded lookahead over this page and two following pages."""
+    """Read forward until the next heading or a conservative hard line cap.
 
-    page = pages[page_index]
-    following = [
-        (line, page.ambiguous_line_number_sides)
-        for line in page.text.splitlines()[line_index + 1 :]
-    ]
-    for following_page_index in range(
-        page_index + 1,
-        min(len(pages), page_index + 3),
-    ):
-        next_page = pages[following_page_index]
-        following.extend(
-            (line, next_page.ambiguous_line_number_sides)
-            for line in next_page.text.splitlines()
-        )
+    The bound is semantic rather than a fixed number of pages: a sentence and
+    its parent-level summary may wrap across sparse pages before a descendant
+    heading proves their ownership.  The hard line cap prevents pathological
+    PDFs from causing unbounded work and fails visible when no local proof is
+    found.
+    """
+
+    following: list[tuple[str, tuple[str, ...]]] = []
+    nonempty_count = 0
+    for following_page_index in range(page_index, len(pages)):
+        page = pages[following_page_index]
+        page_lines = page.text.splitlines()
+        start = line_index + 1 if following_page_index == page_index else 0
+        for line in page_lines[start:]:
+            following.append((line, page.ambiguous_line_number_sides))
+            normalized = normalize_line(line)
+            if not normalized:
+                continue
+            nonempty_count += 1
+            if nonempty_count >= 256:
+                return following
+            if _is_serialized_table_evidence_line(normalized):
+                continue
+            heading_candidate = _line_without_ambiguous_margin_number(
+                normalized,
+                page.ambiguous_line_number_sides,
+            )
+            if detect_heading(heading_candidate) is not None:
+                return following
     return following
 
 
@@ -1530,10 +1657,7 @@ def _is_current_top_level_integer_heading(
 ) -> bool:
     """Return True when a candidate repeats the active top-level number."""
 
-    top_level = next(
-        (item for item in heading_stack if item.level == 1 and item.number.isdigit()),
-        None,
-    )
+    top_level = _active_integer_chapter_heading(heading_stack)
     return bool(top_level and int(heading.number) == int(top_level.number))
 
 
@@ -1564,13 +1688,28 @@ def _is_next_top_level_integer_heading(
 ) -> bool:
     """Return True when an integer candidate continues the active top-level sequence."""
 
-    top_level = next(
-        (item for item in heading_stack if item.level == 1 and item.number.isdigit()),
-        None,
-    )
+    top_level = _active_integer_chapter_heading(heading_stack)
     if top_level is None:
         return False
     return int(heading.number) == int(top_level.number) + 1  # 1.x 后的 2 章优先于列表措辞启发式。
+
+
+def _active_integer_chapter_heading(
+    heading_stack: list[HeadingInfo],
+) -> HeadingInfo | None:
+    """Return the active integer chapter, including one nested under Part/Annex."""
+
+    return next((item for item in heading_stack if item.number.isdigit()), None)
+
+
+def _heading_belongs_to_active_integer_chapter(
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+) -> bool:
+    """Return whether a dotted heading is a descendant of the active chapter."""
+
+    active = _active_integer_chapter_heading(heading_stack)
+    return bool(active and heading.number.startswith(f"{active.number}."))
 
 
 def _continues_procedure_step_chain(
