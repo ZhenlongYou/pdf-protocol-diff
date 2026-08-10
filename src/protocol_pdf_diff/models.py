@@ -101,6 +101,7 @@ class PageText:
     page_bbox: tuple[float, float, float, float] | None = None  # 原始页边界用于证明页边内容；缺失时禁止从文字包络猜测页面尺寸。
     ambiguous_line_number_sides: tuple[str, ...] = ()  # 疑似打印行号位于 left/right；数字保留，只供章节器抑制伪标题。
     visual_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 仅保存坐标已证明并从比较文字过滤的页脚/页边噪声区域，视觉哨兵可据此精确屏蔽。
+    running_header_texts: tuple[str, ...] = ()  # 跨页坐标证明的运行页眉从正文分离，但原文仍进入版本间结构化比较。
 
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""

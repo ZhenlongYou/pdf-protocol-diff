@@ -1968,23 +1968,17 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIn("\uf0670", csv_text)
         self.assertIn("\uf03c", csv_text)
 
-    def test_consecutive_figure_labels_are_one_folded_reader_item(self) -> None:
-        """Diagram labels remain auditable without appearing as fragmented prose."""
+    def test_consecutive_short_technical_labels_remain_visible(self) -> None:
+        """Short labels need structured provenance before any reader folding."""
 
         html = _render_single_list(
             "删除片段",
-            [
-                "图示标签：MCB",
-                "图示标签：Reference",
-                "图示标签：HCB",
-                "图示标签：Table 31-13.",
-                "图示标签：TP4a",
-            ],
+            ["MCB", "Reference", "HCB", "Table 31-13.", "TP4a"],
             "del",
         )
 
-        self.assertEqual(1, html.count("<li>"))
-        self.assertIn("图示中的短标签已合并折叠", html)
+        self.assertEqual(5, html.count("<li>"))
+        self.assertNotIn("图示中的短标签已合并折叠", html)
         for label in ("MCB", "Reference", "HCB", "Table 31-13.", "TP4a"):
             self.assertIn(label, html)
         standalone_reference = _render_single_list(
@@ -1993,10 +1987,9 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "del",
         )
         self.assertNotIn("图示中的短标签已合并折叠", standalone_reference)
-        self.assertEqual("diagram", _reader_snippet_collapse_kind("Stressed signal"))
-        self.assertEqual(
-            "diagram",
-            _reader_snippet_collapse_kind("Termination and TP1a crosstalk calibration"),
+        self.assertIsNone(_reader_snippet_collapse_kind("Stressed signal"))
+        self.assertIsNone(
+            _reader_snippet_collapse_kind("Termination and TP1a crosstalk calibration")
         )
         self.assertEqual("layout", _reader_snippet_collapse_kind("f"))
         self.assertIsNone(

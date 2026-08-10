@@ -401,12 +401,14 @@ def _document_metrics(
     fallback_section_count = sum(section.section_id.startswith("P") for section in sections)
     stable_section_count = sum(
         not section.section_id.startswith("P")
+        and section.section_id != "running-header-evidence"
         and section.role == "technical"
         and bool(section.number_path)
         for section in sections
     )
     unstructured_technical_section_count = sum(
         not section.section_id.startswith("P")
+        and section.section_id != "running-header-evidence"
         and section.role == "technical"
         and not section.number_path
         for section in sections
@@ -423,7 +425,12 @@ def _document_metrics(
     layout_risk_pages = tuple(
         page.page_number for page in extraction.pages if page.layout_risk
     )
-    technical_sections = [section for section in sections if section.role == "technical"]
+    technical_sections = [
+        section
+        for section in sections
+        if section.role == "technical"
+        and section.section_id != "running-header-evidence"
+    ]
     observed_page_numbers = {page.page_number for page in extraction.pages}
     technical_pages = {
         page_number
@@ -534,7 +541,12 @@ def _ambiguous_table_context_page_count(
 ) -> int:
     """Count pages where page-only context cannot assign unnumbered tables."""
 
-    technical_sections = [section for section in sections if section.role == "technical"]
+    technical_sections = [
+        section
+        for section in sections
+        if section.role == "technical"
+        and section.section_id != "running-header-evidence"
+    ]
     ambiguous_pages = 0
     for page in extraction.pages:
         page_sections = [

@@ -71,6 +71,7 @@ from protocol_pdf_diff.pdf_extract import (
     _geometry_compound_script_lines,  # 复合上下标候选必须双向唯一，否则整格回退。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
     _should_skip_detected_table,  # 验证 Figure/空伪表格不会进入表格截图和正文 diff。
+    _table_bbox_belongs_to_captioned_figure,  # 图中小线框只有坐标和图题共同证明时才跳过。
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
     _table_lines_from_rows_with_coverage,  # 结构化行覆盖不足时必须保留 bbox 原始比较文本。
     _table_row_bbox_matches_raw_cells,  # 行级替换必须精确覆盖实际会被删除的字符。
@@ -2114,8 +2115,8 @@ class ProtocolDiffTests(unittest.TestCase):
         """Split Note boxes are skipped without broad deletion of one-column tables."""
 
         split_note_rows = [
-            "表格行: T1 | Column 1=Note: Use a calibrated adapter. | Column 2=",
-            "表格行: T1 | Column 1=Include the fixture in the measurement. | Column 2=",
+            "表格行: T1 | Column 1= | Column 2= | Column 3=Note: Use a calibrated adapter. | Column 4=",
+            "表格行: T1 | Column 1= | Column 2= | Column 3=Include the fixture in the measurement. | Column 4=",
         ]
         title_led_note_rows = [
             "表格行: T1 | Column 1=The limit applies at the reference plane. | Column 2=",
@@ -2124,10 +2125,64 @@ class ProtocolDiffTests(unittest.TestCase):
             "表格行: T1 | Value=Calibration method A",
             "表格行: T1 | Value=Adapter type SMP",
         ]
+        sparse_real_table_rows = [
+            "表格行: T1 | Column 1=Note: required for mode A | Column 2=",
+            "表格行: T1 | Column 1= | Column 2=20 mV",
+        ]
 
         self.assertTrue(_should_skip_detected_table("", split_note_rows))
         self.assertTrue(_should_skip_detected_table("Notes", title_led_note_rows))
         self.assertFalse(_should_skip_detected_table("", real_single_column_rows))
+        self.assertFalse(_should_skip_detected_table("", sparse_real_table_rows))
+
+    def test_captioned_figure_grid_requires_intervening_label_geometry(self) -> None:
+        """A distant Figure caption can suppress only a label-filled diagram grid."""
+
+        def word(text: str, top: float, x0: float = 72.0) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x0 + max(8.0, len(text) * 5.0),
+                "top": top,
+                "bottom": top + 10.0,
+            }
+
+        figure_words = [
+            word("Figure 4-2. Receiver test setup", 80.0),
+            word("Generator", 110.0),
+            word("Stressed signal", 130.0),
+            word("Reference", 150.0),
+            word("CRU", 170.0),
+        ]
+        figure_rows = ["表格行: T1 | Column 1=Reference CRU | Column 2=DFE"]
+
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                figure_rows,
+                figure_words,
+            )
+        )
+        prose_after_figure = [
+            *figure_words[:2],
+            word("The receiver shall preserve every calibrated 20 mV limit.", 135.0),
+            word("Parameter", 165.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                ["表格行: T1 | Parameter=Mode A | Value=20 mV"],
+                prose_after_figure,
+            )
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                figure_rows,
+                figure_words,
+                title="Table 4-1. Receiver limits",
+            )
+        )
 
     def test_repeated_standalone_number_keeps_both_observed_titles(self) -> None:
         """Text shape alone cannot prove that a repeated number is page furniture."""
@@ -4932,6 +4987,19 @@ class ProtocolDiffTests(unittest.TestCase):
         new_extraction = extract_pdf_text(
             "/Users/mac/Documents/文件对比工具/oif2024.532.05.pdf",
         )
+        for extraction in (old_extraction, new_extraction):
+            self.assertFalse(
+                any(
+                    not table.title
+                    and len(table.row_texts) <= 2
+                    and any(
+                        marker in " ".join(table.row_texts)
+                        for marker in ("Reference\\nCRU", "Column 1=HCB", "mulated Host\\nChannel")
+                    )
+                    for table in extraction.table_visuals
+                ),
+                "captioned figure labels must not reappear as table screenshots",
+            )
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
         expected_bases = {
             "Steady-State Voltage and Linear Fit Pulse Peak Ratio": {"similarity_fallback"},
@@ -4940,10 +5008,12 @@ class ProtocolDiffTests(unittest.TestCase):
             "Interference Tolerance": {"structural_shift_bracketed_sentence"},
             "Test Procedure": {"structural_mapped_parent_body"},
             # Exact revision-table extraction strengthens the mapped parent;
-            # either direct similarity or mapped-parent body evidence is safe.
+            # direct similarity, mapped-parent body, or mapped-parent boundary
+            # evidence is safe when the card remains one modified pair.
             "Host and Module output parameters": {
                 "similarity_fallback",
                 "structural_mapped_parent_body",
+                "structural_mapped_parent_boundary",
             },
         }
         for title, expected_basis in expected_bases.items():
@@ -6280,8 +6350,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(predicate({"text": "O", "x0": 73, "x1": 78, "top": 681, "bottom": 690}))
         self.assertFalse(predicate({"text": "w", "x0": 73, "x1": 78, "top": 734, "bottom": 743}))
 
-    def test_oif_document_title_header_is_filtered_by_coordinates(self) -> None:
-        """A top-margin OIF document-title header must not leak into technical text."""
+    def test_single_page_header_shape_is_not_deleted_without_cross_page_proof(self) -> None:
+        """A title-looking top line needs document-wide evidence before separation."""
 
         page = mock.Mock()
         page.width = 612
@@ -6298,15 +6368,10 @@ class ProtocolDiffTests(unittest.TestCase):
             {"text": "Electrical", "x0": 306, "x1": 359, "top": 30, "bottom": 41},
             {"text": "I/O", "x0": 362, "x1": 379, "top": 30, "bottom": 41},
         ]
-        filtered = object()
-        page.filter.return_value = filtered
-
         filtered_page = _filtered_layout_page(page)
 
-        self.assertIs(filtered, filtered_page)
-        predicate = page.filter.call_args.args[0]
-        self.assertTrue(predicate({"text": "T", "x0": 73, "x1": 78, "top": 681, "bottom": 690}))
-        self.assertFalse(predicate({"text": "I", "x0": 73, "x1": 78, "top": 31, "bottom": 40}))
+        self.assertIs(page, filtered_page)
+        page.filter.assert_not_called()
 
     def test_reports_are_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8941,8 +9006,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
 
-    def test_visual_watchdog_ignores_coordinate_proven_running_header_pixels(self) -> None:
-        """Filtered implementation-agreement headers must not return as visual alerts."""
+    def test_repeated_running_header_identifier_change_remains_auditable(self) -> None:
+        """Per-document repetition cannot prove that a changed header is disposable."""
 
         pages = [
             [
@@ -8956,11 +9021,11 @@ class ProtocolDiffTests(unittest.TestCase):
             for index in range(1, 9)
         ]
         old_headers = {
-            index: ["OIF Implementation Agreement Protocol AAAAAAAAAA"]
+            index: ["Implementation Agreement Protocol ALPHA"]
             for index in range(1, 9)
         }
         new_headers = {
-            index: ["OIF Implementation Agreement Protocol BBBBBBBBBB"]
+            index: ["Implementation Agreement Protocol BETA"]
             for index in range(1, 9)
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8978,10 +9043,36 @@ class ProtocolDiffTests(unittest.TestCase):
 
             result = run_diff(old_pdf, new_pdf, DiffOptions())
 
-        self.assertEqual([], result.changes)
-        self.assertEqual([], result.visual_review_items)
-        self.assertTrue(result.assessment.allows_no_difference_conclusion)
-        self.assertTrue(result.provenance.visual_watchdog_audit.complete)
+        changed_text = "\n".join(
+            [
+                *(
+                    snippet
+                    for change in result.changes
+                    for snippet in change.added_snippets + change.removed_snippets
+                ),
+                *(
+                    snippet
+                    for change in result.changes
+                    for pair in change.replaced_snippets
+                    for snippet in (pair.old, pair.new)
+                ),
+            ]
+        )
+        self.assertIn("ALPHA", changed_text)
+        self.assertIn("BETA", changed_text)
+        header_changes = [
+            change
+            for change in result.changes
+            if change.report_location == "运行页眉（坐标证据）"
+        ]
+        self.assertEqual(1, len(header_changes))
+        with tempfile.TemporaryDirectory() as report_dir:
+            outputs = write_reports(result, report_dir, DiffOptions())
+            for surface in ("html", "markdown", "text", "json", "csv"):
+                rendered = outputs[surface].read_text(encoding="utf-8")
+                with self.subTest(surface=surface):
+                    self.assertIn("ALPHA", rendered)
+                    self.assertIn("BETA", rendered)
 
     def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
         """Per-page technical titles cannot borrow the repeated-header deletion rule."""
@@ -9645,6 +9736,172 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("1. The requester creates a message", sections[0].body)
         self.assertIn("2. The processing layer validates the message", sections[0].body)
         self.assertIn("3. The receiver returns a response", sections[0].body)
+
+    def test_ordinary_body_paragraph_ends_numbered_prose_chain(self) -> None:
+        """A distant sentence-like integer heading must not inherit an earlier list item."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("numbered-list-then-real-chapter.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "This paragraph explains the completed request independently.\n"
+                        "2. Configure the receiver for reliable operation.\n"
+                        "The configuration chapter preserves every declared limit."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["1 Overview", "2. Configure the receiver for reliable operation."],
+            [section.location for section in sections],
+        )
+
+    def test_wrapped_numbered_prose_item_keeps_immediately_continuing_chain(self) -> None:
+        """One soft-wrapped list sentence may continue before the next numbered item."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("wrapped-numbered-prose-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The processing layer validates the message: forwarding continues\n"
+                        "after every declared condition has been checked.\n"
+                        "3. The receiver returns a response to the original requester.\n"
+                        "2 Architecture\n"
+                        "The architecture chapter defines the participating components."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["1 Overview", "2 Architecture"],
+            [section.location for section in sections],
+        )
+        self.assertIn("after every declared condition has been checked.", sections[0].body)
+        self.assertIn("3. The receiver returns a response", sections[0].body)
+
+    def test_mid_list_numbered_sentences_stay_under_active_chapter(self) -> None:
+        """A selected page may begin midway through a prose list rather than at item 1."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("mid-list-numbered-prose.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Data flow\n"
+                        "The preceding page contains the first three numbered steps.\n"
+                        "4. The link layer records the message identifier before forwarding\n"
+                        "after every declared flow-control condition has been checked.\n"
+                        "5. The physical layer encodes the payload and sends it to the peer.\n"
+                        "6. The peer validates the payload and returns an acknowledgement.\n"
+                        "7. The requester associates the response with the original message.\n"
+                        "7 Transaction rules\n"
+                        "The transaction chapter defines request and completion handling."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["6 Data flow", "7 Transaction rules"],
+            [section.location for section in sections],
+        )
+        for number in range(4, 8):
+            self.assertIn(f"{number}.", sections[0].body)
+
+    def test_long_wrapped_mid_list_item_can_start_without_terminal_punctuation(self) -> None:
+        """A long out-of-sequence item can begin a list before its wrapped tail."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("wrapped-mid-list-start.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "24 Summary\n"
+                        "2. Product evolution changes encoding, training, signaling, and error protection\n"
+                        "across each supported generation.\n"
+                        "3. Field debugging maps every symptom to a layer and an observable fact.\n"
+                        "25 References\n"
+                        "The references chapter lists the source material."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["24 Summary", "25 References"],
+            [section.location for section in sections],
+        )
+        self.assertIn("2. Product evolution", sections[0].body)
+        self.assertIn("3. Field debugging", sections[0].body)
+
+    def test_numeric_reference_enumeration_does_not_become_a_section(self) -> None:
+        """A list of source fragments is body text, not a high-number chapter."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("numeric-reference-enumeration.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "24 Summary\n"
+                        "The implementation notes use source fragments below.\n"
+                        "202、234、383-387 等片段\n"
+                        "The appendix material remains traceable to the source document."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["24 Summary"], [section.location for section in sections])
+        self.assertIn("202、234、383-387 等片段", sections[0].body)
+
+    def test_out_of_sequence_single_sentence_does_not_replace_active_chapter(self) -> None:
+        """One numbered explanatory sentence can be body text even without item 1."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("single-mid-list-sentence.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "17 Signaling evolution\n"
+                        "2. Link equalization selects compensation for the active channel.\n"
+                        "18 Receiver validation\n"
+                        "The receiver chapter defines the validation procedure."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["17 Signaling evolution", "18 Receiver validation"],
+            [section.location for section in sections],
+        )
+        self.assertIn("2. Link equalization", sections[0].body)
 
     def test_integer_requirement_bullets_stay_under_numbered_parent(self) -> None:
         """OIF requirement bullets must not replace the active clause hierarchy."""

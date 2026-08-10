@@ -156,8 +156,8 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
-    def test_running_title_requires_document_wide_repetition(self) -> None:
-        """A repeated top title is furniture, while a one-page title remains content."""
+    def test_running_title_is_separate_and_changed_value_remains_auditable(self) -> None:
+        """Header evidence avoids body noise without hiding a changed identifier."""
 
         def version(name: str, revision: str, page_count: int) -> ExtractionResult:
             pages = []
@@ -171,16 +171,22 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
                 )
                 heading = f"{page_number} Requirement {page_number}"
                 body = "The receiver shall preserve every declared operating limit."
+                has_document_proof = page_count >= 3
                 pages.append(
                     PageText(
                         page_number=page_number,
-                        text="\n".join((title, heading, body)),
+                        text=(
+                            "\n".join((heading, body))
+                            if has_document_proof
+                            else "\n".join((title, heading, body))
+                        ),
                         blocks=(
                             _text_block(page_number, title, 30.0),
                             _text_block(page_number, heading, 90.0),
                             _text_block(page_number, body, 300.0),
                         ),
                         page_bbox=(0.0, 0.0, 612.0, 792.0),
+                        running_header_texts=(title,) if has_document_proof else (),
                     )
                 )
             return ExtractionResult(pdf_path=Path(name), pages=pages, total_pages=page_count)
@@ -190,13 +196,22 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             version("new.pdf", "7.0", 4),
             DiffOptions(),
         )
+        repeated_unchanged = compare_extractions(
+            version("old.pdf", "6.0", 4),
+            version("new.pdf", "6.0", 4),
+            DiffOptions(),
+        )
         single_page = compare_extractions(
             version("old.pdf", "A", 1),
             version("new.pdf", "B", 1),
             DiffOptions(),
         )
 
-        self.assertEqual([], repeated.changes)
+        self.assertEqual(1, len(repeated.changes))
+        self.assertEqual("运行页眉（坐标证据）", repeated.changes[0].report_location)
+        self.assertIn("IA-6.0", repeated.changes[0].replaced_snippets[0].old)
+        self.assertIn("IA-7.0", repeated.changes[0].replaced_snippets[0].new)
+        self.assertEqual([], repeated_unchanged.changes)
         self.assertTrue(single_page.changes)
 
     def test_repeated_body_requirement_is_not_removed_as_page_furniture(self) -> None:

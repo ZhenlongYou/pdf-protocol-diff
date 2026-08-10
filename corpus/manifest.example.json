@@ -164,7 +164,7 @@
       "kind": "pair",
       "required": false,
       "certification_required": false,
-      "description": "PCIe PHY test revisions used to guard procedure wording and appendix references.",
+      "description": "PCIe PHY test revisions guard procedure wording, appendix references, and conservative coverage for non-aligned partial windows.",
       "old": {
         "path": "PHY_Test_Spec_Rev4.0_Ver1.2_08182021.pdf",
         "start_page": 36,
@@ -176,7 +176,7 @@
         "end_page": 83
       },
       "expect": {
-        "state": "reliable",
+        "state": "degraded",
         "max_technical_section_changes": 3,
         "max_technical_table_changes": 0,
         "must_find": [

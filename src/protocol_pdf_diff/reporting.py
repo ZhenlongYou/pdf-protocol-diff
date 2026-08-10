@@ -131,15 +131,6 @@ _READER_PROSE_TAIL_START_RE = re.compile(
     r"|(?:\s+)(?=(?:where\s+port\b|editor[’']s\s+note:))"
     r"|(?:[。！？]\s*)(?=(?:本|该|此|接收机|发射机|其中|此外|对于))"
 )
-_READER_DIAGRAM_LABEL_TOKEN_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:scope|generator|calibration|terminations?|interfaces?|"
-    r"crosstalk|stressed|signal|"
-    r"sinusoidal|insertion|arrow|reference|block)(?![A-Za-z0-9])"
-)
-_READER_DIAGRAM_LABEL_SINGLE_RE = re.compile(
-    r"(?i)^(?:scope|reference|terminations?)$"
-)
-
 _INLINE_TOKEN_RE = re.compile(
     r"<=>|<->|->|<-|=>|→|←|↔|⇒|⇐|⇔|⟶|⟵"
     r"|<=|>=|!=|==|≤|≥|≠"
@@ -5986,46 +5977,13 @@ def _render_single_list(title: str, snippets: list[str], css_class: str) -> str:
 
 
 def _reader_single_list_groups(snippets: list[str]) -> list[str]:
-    """Fold adjacent diagram labels; prose is already source-grouped by compare."""
+    """Return readable snippets without guessing technical-label semantics."""
 
-    groups: list[str] = []
-    diagram_buffer: list[str] = []
-    compact_snippets = [
+    return [
         compact
         for snippet in snippets
         if (compact := compact_inline(snippet))
     ]
-
-    def flush_diagram() -> None:
-        if diagram_buffer:
-            groups.append("图示标签：" + " / ".join(diagram_buffer))
-            diagram_buffer.clear()
-
-    for index, compact in enumerate(compact_snippets):
-        diagram_context_reference = bool(
-            _reader_snippet_is_isolated_diagram_reference(compact)
-            and 0 < index < len(compact_snippets) - 1
-            and _reader_snippet_is_diagram_label(compact_snippets[index - 1])
-            and _reader_snippet_is_diagram_label(compact_snippets[index + 1])
-        )
-        if _reader_snippet_is_diagram_label(compact) or diagram_context_reference:
-            diagram_buffer.append(compact)
-            continue
-        flush_diagram()
-        groups.append(compact)
-    flush_diagram()
-    return groups
-
-
-def _reader_snippet_is_isolated_diagram_reference(value: str) -> bool:
-    """Recognize a bare numbered caption only inside proven label neighbors."""
-
-    return bool(
-        re.fullmatch(
-            rf"(?i)(?:table|figure)\s+\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?\.",
-            compact_inline(value),
-        )
-    )
 
 
 def _render_collapsible_snippet_html(
@@ -6126,8 +6084,6 @@ def _reader_snippet_collapse_kind(
             and not math_residue.strip(" ,;:()[]{}")
         ):
             return "layout"  # 比较/JSON保留短公式，读者视图折叠孤立线性化残片。
-    if _reader_snippet_is_diagram_label(compact):
-        return "diagram"
     prose_tail_stripped = False
     short_unknown_formula = _reader_has_short_unknown_pua_formula(compact)
     if _allow_prose_tail_strip:
@@ -6328,31 +6284,6 @@ def _reader_starts_with_normative_prose(value: str) -> bool:
     return len(prose_tokens) >= 2
 
 
-def _reader_snippet_is_diagram_label(value: str) -> bool:
-    """Recognize only short, non-sentence labels typical of a figure drawing."""
-
-    compact = compact_inline(value)
-    if not compact or len(compact) > 160:
-        return False
-    if compact.startswith("图示标签："):
-        return True
-    if compact.endswith((".", "!", "?", "。", "！", "？")):
-        return False
-    if re.match(r"(?i)^(?:table|figure|equation|section)\b", compact):
-        return False
-    if _READER_NORMATIVE_VERB_RE.search(compact) or _READER_PROSE_VERB_RE.search(compact):
-        return False
-    if _READER_DIAGRAM_LABEL_SINGLE_RE.fullmatch(compact):
-        return True
-    if re.fullmatch(r"(?i)(?:stressed signal|sinusoidal interface|DC block)", compact):
-        return True
-    word_count = len(re.findall(r"[A-Za-z][A-Za-z0-9-]*", compact))
-    if word_count > 12:
-        return False
-    markers = _READER_DIAGRAM_LABEL_TOKEN_RE.findall(compact)
-    return len(markers) >= 2
-
-
 def _reader_snippet_notice(
     value: str,
     kind: str,
@@ -6374,22 +6305,6 @@ def _reader_snippet_notice(
             f"疑似表格或公式的版面文字已折叠（{character_count} 字）；"
             f"开头“{preview}”；{evidence_hint}"
         )
-        if difference_hint:
-            notice += f" {difference_hint}"
-        return notice
-    if kind == "diagram":
-        compact = compact_inline(value)
-        label_count = (
-            len([part for part in compact.split("：", 1)[1].split(" / ") if part])
-            if compact.startswith("图示标签：")
-            else 1
-        )
-        evidence_hint = (
-            "可展开查看原始标签，图形内容请核对源 PDF。"
-            if expandable
-            else "原始标签见 JSON/CSV 审计文件或源 PDF。"
-        )
-        notice = f"图示中的短标签已合并折叠（{label_count} 项）；{evidence_hint}"
         if difference_hint:
             notice += f" {difference_hint}"
         return notice

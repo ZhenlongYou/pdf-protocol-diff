@@ -80,35 +80,52 @@ class ReportingGeneralityTests(unittest.TestCase):
         self.assertIn('<mark class="del">-&gt;</mark>', old_html)
         self.assertIn('<mark class="ins">&lt;-</mark>', new_html)
 
-    def test_standalone_domain_acronym_change_remains_visible_in_all_reader_reports(self) -> None:
-        """A shared reader must not fold a changed term merely because SerDes uses it."""
+    def test_standalone_technical_term_changes_remain_visible_in_all_reader_reports(self) -> None:
+        """Text shape or a terminology whitelist cannot prove a diagram label."""
 
         shared = "The interface description remains stable for every implementation. " * 10
         options = DiffOptions(visual_watchdog=False)
-        result = compare_extractions(
-            ExtractionResult(
-                pdf_path=Path("old-generic-standard.pdf"),
-                pages=[PageText(1, f"1 Interface terminology\n{shared}\nMCB")],
-            ),
-            ExtractionResult(
-                pdf_path=Path("new-generic-standard.pdf"),
-                pages=[PageText(1, f"1 Interface terminology\n{shared}\nHCB")],
-            ),
-            options,
-        )
+        for old_term, new_term in (
+            ("MCB", "HCB"),
+            ("Generator Calibration", "Reference Block"),
+            ("scope", "reference"),
+            ("Signal Generator", "Calibration Interface"),
+        ):
+            with self.subTest(old_term=old_term, new_term=new_term):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-generic-standard.pdf"),
+                        pages=[
+                            PageText(
+                                1,
+                                f"1 Interface terminology\n{shared}\n{old_term}",
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-generic-standard.pdf"),
+                        pages=[
+                            PageText(
+                                1,
+                                f"1 Interface terminology\n{shared}\n{new_term}",
+                            )
+                        ],
+                    ),
+                    options,
+                )
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            outputs = write_reports(result, temp_dir, options)
-            reader_surfaces = {
-                surface: outputs[surface].read_text(encoding="utf-8")
-                for surface in ("html", "markdown", "text")
-            }
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    outputs = write_reports(result, temp_dir, options)
+                    reader_surfaces = {
+                        surface: outputs[surface].read_text(encoding="utf-8")
+                        for surface in ("html", "markdown", "text")
+                    }
 
-        for surface, report_text in reader_surfaces.items():
-            with self.subTest(surface=surface):
-                self.assertIn("MCB", report_text)
-                self.assertIn("HCB", report_text)
-                self.assertNotIn("图示中的短标签已合并折叠", report_text)
+                for surface, report_text in reader_surfaces.items():
+                    with self.subTest(surface=surface):
+                        self.assertIn(old_term, report_text)
+                        self.assertIn(new_term, report_text)
+                        self.assertNotIn("图示中的短标签已合并折叠", report_text)
 
     def test_inline_highlight_does_not_treat_negative_inequality_as_arrow(self) -> None:
         for old_text in ("Require x < -5.", "Require x<-5."):

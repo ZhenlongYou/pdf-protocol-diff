@@ -55,6 +55,7 @@ from .table_codec import (
 from .text_utils import (
     compact_inline,
     is_known_engineering_symbol_letter_suffix,
+    normalize_for_similarity,
     normalize_line,  # 复用统一空白规整逻辑，保证提取层和比较层口径一致。
 )
 
@@ -74,7 +75,6 @@ _LINE_NUMBER_MIN_RUN = 20  # 同列还须有长连续段，零散页边数字不
 _LINE_NUMBER_COLUMN_TOLERANCE_RATIO = 0.006  # 行号按内侧边缘聚类；约 0.6% 页宽容纳字距误差但隔离正文数字。
 _DOCUMENT_LINE_NUMBER_MIN_PAGES = 3  # 单页或两页长列表仍有语义歧义；至少三页才能证明出版级重复网格。
 _DOCUMENT_LINE_NUMBER_MIN_PAGE_COVERAGE = 0.80  # 打印行号应覆盖绝大多数选定页，局部编号表不得获得全文删除权。
-_DOCUMENT_RUNNING_HEADER_MIN_PAGE_COVERAGE = 0.80  # 页眉标题必须在绝大多数选定页重复，单页封面不得获得删除权。
 _DOCUMENT_LINE_NUMBER_LAST_VALUE = 49  # 当前只识别每页重置的 1..49 印刷行网格，避免泛化到任意正文列表。
 _DOCUMENT_LINE_NUMBER_MIN_DISTINCT_VALUES = 45  # 允许 DRAFT 水印合并少量行号字形，但每页必须仍接近完整。
 _DOCUMENT_LINE_NUMBER_MIN_SINGLETON_ANCHORS = 24  # 重复技术数字不能主导网格拟合；至少半页数值需各有唯一候选。
@@ -246,10 +246,14 @@ def _extract_pdf_text_with_pdfplumber(
                 for index, evidence in coordinate_evidence.items()
             },
         )  # 只有跨页完整重置网格与空白编号基线共同成立时，才从比较面剔除窄边列。
-        header_boxes_by_page = _document_proven_running_header_boxes(
+        header_evidence_by_page = _document_running_header_evidence(
             selected_pages,
             {index: evidence[0] for index, evidence in coordinate_evidence.items()},
-        )  # 顶部协议标题必须先由跨页重复证据证明，单页封面标题不得删除。
+        )  # 只分离跨页坐标已证明的运行页眉；文字另存后仍参与两个版本的结构化比较。
+        header_boxes_by_page = {
+            page_number: evidence[0]
+            for page_number, evidence in header_evidence_by_page.items()
+        }
         ambiguous_gutter_sides_by_page = {
             index: (
                 ()
@@ -271,7 +275,7 @@ def _extract_pdf_text_with_pdfplumber(
                     ),
                     *header_boxes_by_page.get(index, ()),
                 ]
-            )  # 视觉层只屏蔽抽取层本次已用坐标证明并删除的页眉、页脚和窄边区域；禁止固定比例裁边。
+            )  # 视觉层只屏蔽抽取层本次已删除的页脚和窄边区域；版本相关页眉始终参与比较。
             (
                 text,
                 page_warnings,
@@ -316,6 +320,7 @@ def _extract_pdf_text_with_pdfplumber(
                     page_bbox=page_bounds(page),
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
+                    running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
     finally:
@@ -1403,10 +1408,7 @@ def _filtered_layout_page(
         working_page,
         words=coordinate_words,
     )
-    header_boxes = header_boxes if header_boxes is not None else _proven_running_header_boxes(
-        working_page,
-        words=coordinate_words,
-    )
+    header_boxes = header_boxes if header_boxes is not None else ()
     if not watermark_keys and not gutter_boxes and not footer_boxes and not header_boxes:
         return working_page  # 没有完整空间证据时一律保留。
     try:
@@ -1952,98 +1954,98 @@ def _looks_like_running_footer_marker(line_text: str) -> bool:
     )
 
 
-def _proven_running_header_boxes(
-    page: object,
-    *,
-    words: list[dict[str, object]] | None = None,
-) -> tuple[tuple[float, float, float, float], ...]:
-    """Return only a complete implementation-agreement title in the top margin."""
-
-    if words is None:
-        try:
-            words = page.extract_words(keep_blank_chars=False, use_text_flow=False) or []
-        except Exception:
-            return ()
-    width = float(getattr(page, "width", 0) or 0)
-    height = float(getattr(page, "height", 0) or 0)
-    if width <= 0 or height <= 0:
-        return ()
-    top_words = [word for word in words if float(word.get("bottom", height + 1)) <= height * 0.18]
-    boxes: list[tuple[float, float, float, float]] = []
-    for _top, _bottom, line_text, line_words in _word_line_records(top_words):
-        if _looks_like_running_header_title(line_text):
-            boxes.extend(
-                _tight_word_bbox(word, width=width, height=height)
-                for word in line_words
-            )
-    return tuple(boxes)
-
-
-def _document_proven_running_header_boxes(
+def _document_running_header_evidence(
     pages: list[tuple[int, object]],
     words_by_page: dict[int, list[dict[str, object]]],
-) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
-    """Authorize tight header-word removal only with stable repetition."""
+) -> dict[
+    int,
+    tuple[
+        tuple[tuple[float, float, float, float], ...],
+        tuple[str, ...],
+    ],
+]:
+    """Separate only top-margin lines repeated across almost every selected page.
+
+    Repetition and coordinates prove that a line is a running header, but do
+    not prove that its content is irrelevant.  Exact text is therefore stored
+    beside the tight word boxes and compared later across the two versions.
+    """
 
     candidates: dict[
         int,
-        tuple[str, tuple[tuple[float, float, float, float], ...]],
+        list[
+            tuple[
+                str,
+                str,
+                tuple[tuple[float, float, float, float], ...],
+            ]
+        ],
     ] = {}
+    signature_pages: dict[str, set[int]] = {}
     for page_number, page in pages:
         words = words_by_page.get(page_number, [])
         width = float(getattr(page, "width", 0) or 0)
         height = float(getattr(page, "height", 0) or 0)
         if width <= 0 or height <= 0:
             continue
-        matching_lines = [
-            (line_text, line_words)
-            for _top, _bottom, line_text, line_words in _word_line_records(
-                [
-                    word
-                    for word in words
-                    if float(word.get("bottom", height + 1)) <= height * 0.18
-                ]
+        page_candidates: list[
+            tuple[str, str, tuple[tuple[float, float, float, float], ...]]
+        ] = []
+        for _top, _bottom, _line_text, line_words in _word_line_records(
+            [
+                word
+                for word in words
+                if float(word.get("bottom", height + 1)) <= height * 0.12
+            ]
+        ):
+            display_text = normalize_line(
+                " ".join(
+                    str(word.get("text", ""))
+                    for word in sorted(line_words, key=lambda item: float(item["x0"]))
+                )
             )
-            if _looks_like_running_header_title(line_text)
-        ]
-        if len(matching_lines) != 1:
-            continue
-        line_text, line_words = matching_lines[0]
-        candidates[page_number] = (
-            normalize_line(line_text).casefold(),
-            tuple(
+            if not 2 <= len(display_text) <= 220:
+                continue
+            signature = re.sub(
+                r"(?<=[-/])0+(?=\d)",
+                "",
+                normalize_for_similarity(display_text),
+            )  # 奇偶页可能把同一页眉 ID 抽成 6.0/06.0；只用于跨页归类，原文仍逐字比较。
+            boxes = tuple(
                 _tight_word_bbox(word, width=width, height=height)
                 for word in line_words
-            ),
-        )
-    required_pages = max(
-        3,
-        math.ceil(len(pages) * _DOCUMENT_RUNNING_HEADER_MIN_PAGE_COVERAGE),
-    )
-    signature_counts = Counter(signature for signature, _boxes in candidates.values())
-    if not signature_counts:
-        return {}
-    stable_signature, stable_count = signature_counts.most_common(1)[0]
-    if stable_count < required_pages:
-        return {}
-    return {
-        page_number: boxes
-        for page_number, (signature, boxes) in candidates.items()
-        if signature == stable_signature
+            )
+            page_candidates.append((signature, display_text, boxes))
+            signature_pages.setdefault(signature, set()).add(page_number)
+        if page_candidates:
+            candidates[page_number] = page_candidates
+    required_pages = max(3, math.ceil(len(pages) * 0.80))
+    stable_signatures = {
+        signature
+        for signature, observed_pages in signature_pages.items()
+        if len(observed_pages) >= required_pages
     }
-
-
-def _looks_like_running_header_title(line_text: str) -> bool:
-    """Recognize the narrow class of OIF-style running document titles."""
-
-    candidate = normalize_line(line_text).casefold()
-    return bool(
-        "implementation agreement" in candidate
-        and re.search(
-            r"\b(?:interface|protocol|specification)\b|\bi/o\b",
-            candidate,
-        )
-    )
+    if not stable_signatures:
+        return {}
+    evidence: dict[
+        int,
+        tuple[
+            tuple[tuple[float, float, float, float], ...],
+            tuple[str, ...],
+        ],
+    ] = {}
+    for page_number, page_candidates in candidates.items():
+        stable_lines = [
+            (display_text, boxes)
+            for signature, display_text, boxes in page_candidates
+            if signature in stable_signatures
+        ]
+        if stable_lines:
+            evidence[page_number] = (
+                tuple(box for _text, boxes in stable_lines for box in boxes),
+                tuple(text for text, _boxes in stable_lines),
+            )
+    return evidence
 
 
 def _word_lines_with_bounds(words: list[dict[str, object]]) -> list[tuple[float, float, str]]:
@@ -2765,7 +2767,12 @@ def _extract_table_lines_and_visuals(
             cell_word_rows=cell_word_rows,
         )  # 有字号和坐标时先恢复视觉上下标；证据缺失则沿用纯文字保守路径。
         title = _table_title_above_bbox(page, bbox) if bbox else ""  # 表题用于过滤图形误检和生成截图标题。
-        if _should_skip_detected_table(title, table_lines):
+        if _should_skip_detected_table(title, table_lines) or _table_bbox_belongs_to_captioned_figure(
+            bbox,
+            table_lines,
+            geometry_words,
+            title=title,
+        ):
             continue  # Figure/plot 或空伪表格不进入正文 diff，也不进入表格截图区。
         lines.extend(table_lines)  # 表格行保留在抽取文本中，后续有截图表格区时正文 diff 会自动去重隐藏。
         bbox_content_fully_represented = bool(
@@ -3343,20 +3350,86 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
 
 
+def _table_bbox_belongs_to_captioned_figure(
+    bbox: tuple[float, float, float, float] | None,
+    table_lines: list[str],
+    geometry_words: list[dict[str, object]],
+    *,
+    title: str = "",
+) -> bool:
+    """Reject a tiny grid embedded in a coordinate-proven figure region.
+
+    Some diagrams contain one- or two-row boxes that pdfplumber reports as
+    tables even when the Figure caption is more than the normal 90-point table
+    caption look-back.  A distant caption alone is not enough: the intervening
+    region must contain several short, non-sentence diagram labels and no prose.
+    """
+
+    if (
+        bbox is None
+        or not table_lines
+        or len(table_lines) > 2
+        or not geometry_words
+        or _looks_like_table_caption(title)
+        or _looks_like_table_context_caption(title)
+    ):
+        return False
+    word_lines = _word_line_records(geometry_words)
+    captions = [
+        line
+        for line in word_lines
+        if line[1] <= bbox[1] + 1.0
+        and bbox[1] - line[1] <= 260.0
+        and _looks_like_figure_caption(line[2])
+    ]
+    if not captions:
+        return False
+    caption = max(captions, key=lambda line: line[1])
+    intervening = [
+        normalize_line(line[2])
+        for line in word_lines
+        if line[0] >= caption[1] - 1.0
+        and line[1] <= bbox[1] + 1.0
+        and not _looks_like_figure_caption(line[2])
+        and not re.fullmatch(r"\d{1,3}", normalize_line(line[2]))
+    ]
+    if len(intervening) < 3:
+        return False
+    if any(
+        len(value) > 80
+        or value.endswith((".", "!", "?", "。", "！", "？"))
+        or re.search(
+            r"(?i)\b(?:shall|must|should|required|prohibited|specified|applies|means)\b",
+            value,
+        )
+        for value in intervening
+    ):
+        return False  # 图题后若已进入正常句子/规范正文，不能让更远的图题删除后续小表。
+    return True
+
+
 def _table_lines_are_single_column_note_box(table_lines: list[str], *, title: str = "") -> bool:
     """Return True for one-column note/text boxes misdetected as tables."""
 
-    payloads = [_single_value_table_payload(line) for line in table_lines]  # 提取 Value= 后的可读文本。
-    if not payloads or any(payload is None for payload in payloads):
+    observations = [_single_value_table_payload(line) for line in table_lines]  # 提取唯一有内容列及其文本。
+    if not observations or any(observation is None for observation in observations):
         return False  # 只处理每行最多一个有内容单元格的候选，避免误删多列表格。
+    populated_columns = {
+        observation[0]
+        for observation in observations
+        if observation is not None and observation[1]
+    }
+    if len(populated_columns) > 1:
+        return False  # 真实多列表格可能每行恰好只填一个不同字段；只有固定单列才能证明是占位框。
+    payloads = [observation[1] for observation in observations if observation is not None]
     joined = " ".join(payload for payload in payloads if payload)  # 汇总整块说明文本，判断是否是 Note 框。
     content_starts_note = bool(re.search(r"(?i)^\s*(?:note|notes)\s*[:.]", joined))
     title_is_note = bool(re.fullmatch(r"(?i)notes?\s*[:.]?", normalize_line(title)))
     return content_starts_note or title_is_note  # Note 可在首个单元格，也可能只出现在边框上方标题。
 
 
-def _single_value_table_payload(line: str) -> str | None:
-    """Return the payload when one table row has at most one populated cell."""
+def _single_value_table_payload(line: str) -> tuple[str, str] | None:
+    """Return the populated column identity and payload for a sparse row."""
 
     text = normalize_line(line)  # 使用抽取层统一空白规则，兼容 pdfplumber 的单元格换行。
     if text.startswith(_TABLE_ROW_PREFIX):
@@ -3365,17 +3438,18 @@ def _single_value_table_payload(line: str) -> str | None:
     if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
         cells = cells[1:]  # 去掉物理表编号，避免 T1/T2 影响判断。
     cells = [cell for cell in cells if cell]
-    if not cells or len(cells) > 3:
+    if not cells:
         return None
-    payloads: list[str] = []
-    for cell in cells:
+    populated: list[tuple[str, str]] = []
+    for column_index, cell in enumerate(cells, start=1):
         field = split_table_field(cell)
+        label = normalize_line(field[0]) if field else f"unlabeled-{column_index}"
         payload = field[1].strip() if field else decode_table_cell(cell)
         if payload:
-            payloads.append(normalize_line(payload))
-    if len(payloads) > 1:
+            populated.append((label, normalize_line(payload)))
+    if len(populated) > 1:
         return None
-    return payloads[0] if payloads else ""  # 全空行也可属于被拆开的 Note 边框，但不能单独触发 Note 判断。
+    return populated[0] if populated else ("", "")  # 全空行可属于被拆开的 Note 边框，但不能单独触发判断。
 
 
 def _table_lines_are_visual_only(table_lines: list[str]) -> bool:
@@ -3396,7 +3470,13 @@ def _table_line_visual_payload(line: str) -> str:
     if text.startswith(_TABLE_ROW_PREFIX):
         text = text[len(_TABLE_ROW_PREFIX) :].strip()  # 删除“表格行:”标记，避免影响图轴规则。
     text = re.sub(r"^T\d+\s*\|\s*", "", text, flags=re.I)  # 删除物理表编号，只保留单元格内容。
-    return text.strip()
+    payloads: list[str] = []
+    for cell in split_table_cells(text):
+        field = split_table_field(cell)
+        payload = field[1] if field else decode_table_cell(cell)
+        if normalized := normalize_line(payload):
+            payloads.append(normalized)
+    return " | ".join(payloads)  # 内部 Column 1= 标签不是 PDF 内容，不能把它误判成公式/坐标轴数字。
 
 
 def _build_table_visual(

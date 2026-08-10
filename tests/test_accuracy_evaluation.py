@@ -192,9 +192,9 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
                     {
                         "id": f"same-family-{index}",
                         "family": (
-                            "serial-link-specification"
+                            "serial link specification"
                             if index == 1
-                            else "  Serial-Link-Specification  "
+                            else "  SERIAL\t  LINK   SPECIFICATION  "
                         ),
                         "required": True,
                         "old": {"path": f"old_{index}.pdf"},
@@ -230,6 +230,144 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
         )
         self.assertEqual(2, summary["counts"]["pass"])
         self.assertEqual(1, summary["counts"]["fail"])
+
+    def test_gold_family_coverage_excludes_same_source_bytes_and_page_windows(self) -> None:
+        """Self comparisons cannot certify a second document family."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_multipage_text_pdf(
+                root / "real-old.pdf",
+                [["1 Limits", "The calibrated limit shall be 10 mV."]],
+            )
+            write_multipage_text_pdf(
+                root / "real-new.pdf",
+                [["1 Limits", "The calibrated limit shall be 12 mV."]],
+            )
+            write_multipage_text_pdf(
+                root / "same-windowed.pdf",
+                [
+                    ["1 Limits", "The calibrated limit shall be 20 mV."],
+                    ["1 Limits", "The calibrated limit shall be 22 mV."],
+                ],
+            )
+            same_bytes = (root / "same-windowed.pdf").read_bytes()
+            (root / "same-copy-a.pdf").write_bytes(same_bytes)
+            (root / "same-copy-b.pdf").write_bytes(same_bytes)
+
+            def expected_event(identifier: str, old: str, new: str) -> dict[str, object]:
+                return {
+                    "id": identifier,
+                    "kind": "text",
+                    "old": old,
+                    "new": new,
+                    "critical": True,
+                    "reader_visible": True,
+                }
+
+            manifest = {
+                "schema_version": 1,
+                "minimum_distinct_families": 3,
+                "cases": [
+                    {
+                        "id": "real-version-pair",
+                        "family": "real-family",
+                        "required": True,
+                        "old": {"path": "real-old.pdf"},
+                        "new": {"path": "real-new.pdf"},
+                        "oracle_complete": False,
+                        "visual_coverage_required": False,
+                        "expected_events": [
+                            expected_event("real-limit", "10 mV", "12 mV")
+                        ],
+                    },
+                    {
+                        "id": "same-file-different-window",
+                        "family": "window-self-diff",
+                        "required": True,
+                        "old": {"path": "same-windowed.pdf", "start_page": 1, "end_page": 1},
+                        "new": {"path": "same-windowed.pdf", "start_page": 2, "end_page": 2},
+                        "oracle_complete": False,
+                        "visual_coverage_required": False,
+                        "expected_events": [
+                            expected_event("window-limit", "20 mV", "22 mV")
+                        ],
+                    },
+                    {
+                        "id": "same-bytes-different-name",
+                        "family": "copy-self-diff",
+                        "required": True,
+                        "old": {"path": "same-copy-a.pdf"},
+                        "new": {"path": "same-copy-b.pdf"},
+                        "oracle_complete": False,
+                        "visual_coverage_required": False,
+                        "expected_events": [
+                            expected_event("impossible-copy-limit", "20 mV", "21 mV")
+                        ],
+                    },
+                ],
+            }
+            manifest_path = root / "gold.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            summary = run_gold_accuracy_evaluation(manifest_path, corpus_root=root)
+
+        self.assertEqual(
+            {"required": 3, "executed": 1, "complete": False},
+            summary["family_coverage"],
+        )
+        rendered = json.dumps(summary, ensure_ascii=False)
+        self.assertNotIn("real-family", rendered)
+        self.assertNotIn("window-self-diff", rendered)
+        self.assertNotIn("copy-self-diff", rendered)
+
+    def test_duplicate_source_pair_cannot_claim_multiple_document_families(self) -> None:
+        """Repeating one real version pair under new labels contributes once."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_multipage_text_pdf(
+                root / "old.pdf",
+                [["1 Limits", "The calibrated limit shall be 10 mV."]],
+            )
+            write_multipage_text_pdf(
+                root / "new.pdf",
+                [["1 Limits", "The calibrated limit shall be 12 mV."]],
+            )
+            expected = {
+                "kind": "text",
+                "old": "10 mV",
+                "new": "12 mV",
+                "critical": True,
+                "reader_visible": True,
+            }
+            manifest = {
+                "schema_version": 1,
+                "minimum_distinct_families": 2,
+                "cases": [
+                    {
+                        "id": f"replayed-pair-{index}",
+                        "family": family,
+                        "required": True,
+                        "old": {"path": "old.pdf"},
+                        "new": {"path": "new.pdf"},
+                        "oracle_complete": False,
+                        "visual_coverage_required": False,
+                        "expected_events": [{"id": f"limit-{index}", **expected}],
+                    }
+                    for index, family in enumerate(("family-a", "family-b"), start=1)
+                ],
+            }
+            manifest_path = root / "gold.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            summary = run_gold_accuracy_evaluation(manifest_path, corpus_root=root)
+
+        self.assertEqual(
+            {"required": 2, "executed": 1, "complete": False},
+            summary["family_coverage"],
+        )
+        self.assertEqual("fail", summary["status"])
 
     def test_missing_critical_gold_event_fails_instead_of_reporting_a_false_green(self) -> None:
         """A wrong expected new unit/value must produce an explicit false negative."""

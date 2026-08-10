@@ -131,6 +131,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     deep_numeric_context: tuple[str, ...] = ()
     procedure_step_numbers: list[int] = []
     prose_list_step_numbers: list[int] = []
+    prose_list_item_open = False
     saw_heading = False
     opening_label = _opening_section_label(extraction)
 
@@ -169,16 +170,25 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
+            if heading is None and prose_list_step_numbers:
+                if prose_list_item_open:
+                    prose_list_item_open = not _numbered_prose_sentence_is_closed(line)
+                else:
+                    prose_list_step_numbers.clear()
+                # 仅允许未结束的列表句跨一个或多个软换行；普通正文段会立即结束编号链。
             if heading and _is_opening_range_body_integer(heading, saw_heading, opening_label):
                 heading = None
-            # 普通章节下也可能出现完整的 1..N 叙述句列表。只有从 1 开始、连续递增且
-            # 句子形态明确时才留在正文；不依赖 PCIe/OIF 等领域词，也不吞单独的整数标题。
+            # 普通章节下也可能出现完整的 N..M 叙述句列表。连续递增且句子形态明确时
+            # 留在正文；不依赖领域词，也允许页窗/抽取从列表中段开始。
             if heading and _is_sequential_numbered_prose_item(
                 heading,
                 heading_stack,
                 tuple(prose_list_step_numbers),
             ):
                 prose_list_step_numbers.append(int(heading.number))
+                prose_list_item_open = not _numbered_prose_sentence_is_closed(
+                    heading.title
+                )
                 heading = None
             # 已有父章节时，动词/shall 开头的整数编号更像条款列表，不应拆成新章节。
             if heading and _is_integer_list_item_under_context(
@@ -198,6 +208,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 saw_heading = True
                 procedure_step_numbers.clear()  # 新章节结束上一个 Procedure 的局部步骤序列。
                 prose_list_step_numbers.clear()  # 真章节也结束普通叙述句的局部编号链。
+                prose_list_item_open = False
                 if current:
                     sections.append(_close_section(current, len(sections) + 1))
                 heading_stack = _updated_stack(heading_stack, heading)
@@ -530,11 +541,6 @@ def _looks_like_repeated_margin_furniture(line: str) -> bool:
     if re.match(r"^(?:https?://|www\.)\S+", candidate):
         return True
     if re.fullmatch(r"with\s+.{1,48}\s+approval\.?", candidate):
-        return True
-    if (
-        "implementation agreement" in candidate
-        and re.search(r"\b(?:interface|protocol|specification)\b|\bi/o\b", candidate)
-    ):
         return True
     return (
         bool(re.search(r"\b(?:clause|chapter|section|part)\s+\d", candidate))
@@ -1153,6 +1159,8 @@ def _looks_like_numeric_fragment_title(title: str) -> bool:
     candidate = normalize_line(title)  # 数字开头可能是 400G Interfaces，也可能是 93x10-4。
     if not candidate or not candidate[:1].isdigit():
         return False
+    if re.match(r"^\d+\s*[、,，]\s*\d", candidate):
+        return True  # `202、234、383-387` 是编号/页码枚举，不是第 202 章。
     if re.match(r"^\d+\s*[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]+)+", candidate):
         return False  # 100G Ethernet / 400G Interfaces 是合法章节标题，不是小数尾巴。
     if re.match(r"(?i)^\d+(?:\.\d+)?\s*(?:x|×|e[+-]?\d|-|\+|/)", candidate):
@@ -1298,9 +1306,10 @@ def _is_sequential_numbered_prose_item(
 ) -> bool:
     """Keep a structurally proven 1..N prose list inside its numbered parent.
 
-    This is intentionally domain-neutral.  A single sentence-like integer line
-    is still allowed to be a real heading; suppression starts only at item 1
-    below an existing numbered section and continues only for an exact sequence.
+    This is intentionally domain-neutral.  A sentence-like integer line may
+    start a list at 1, or at an out-of-sequence number when a selected page
+    window begins mid-list.  The active chapter's exact next number remains a
+    real heading unless an already proven list chain reaches it.
     """
 
     if not heading_stack or not heading.number.isdigit() or "." in heading.number:
@@ -1310,11 +1319,14 @@ def _is_sequential_numbered_prose_item(
     number = int(heading.number)
     if prose_step_numbers:
         return (
-            prose_step_numbers[0] == 1
-            and number == prose_step_numbers[-1] + 1
+            number == prose_step_numbers[-1] + 1
             and _looks_like_numbered_prose_sentence(heading.title, chain_started=True)
         )
-    return number == 1 and _looks_like_numbered_prose_sentence(
+    can_start = number == 1 or not _is_next_top_level_integer_heading(
+        heading,
+        heading_stack,
+    )
+    return can_start and _looks_like_numbered_prose_sentence(
         heading.title,
         chain_started=False,
     )
@@ -1327,12 +1339,18 @@ def _looks_like_numbered_prose_sentence(title: str, *, chain_started: bool) -> b
     if not normalized:
         return False
     sentence_end = bool(re.search(r"[.!?;。！？；]$", normalized))
-    internal_clause = bool(re.search(r"[.!?;:。！？；：]", normalized))
+    internal_clause = bool(re.search(r"[,.!?;:，。！？；：]", normalized))
     if chain_started:
-        return sentence_end or (len(normalized) >= 35 and internal_clause)
-    return (sentence_end and len(normalized) >= 10) or (
+        return sentence_end or len(normalized) >= 35
+    return (sentence_end and len(normalized) >= 10) or len(normalized) >= 60 or (
         len(normalized) >= 45 and internal_clause
     )
+
+
+def _numbered_prose_sentence_is_closed(value: str) -> bool:
+    """Return whether a list sentence has visible terminal punctuation."""
+
+    return bool(re.search(r"[.!?;。！？；]$", normalize_line(value)))
 
 
 def _is_next_top_level_integer_heading(

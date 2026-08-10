@@ -253,6 +253,12 @@ def compare_extractions(
             repaired_tables=new_table_visuals,
         )
     )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
+    old_header_section = _running_header_section(old_extraction)
+    new_header_section = _running_header_section(new_extraction)
+    if old_header_section is not None:
+        old_sections.insert(0, old_header_section)
+    if new_header_section is not None:
+        new_sections.insert(0, new_header_section)
     assessment = assess_pair(old_extraction, new_extraction, old_sections, new_sections)
     provenance = build_provenance(old_extraction, new_extraction, options)
     identical_inputs = provenance_inputs_are_identical(provenance)
@@ -326,6 +332,43 @@ def compare_extractions(
         provenance=provenance,
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
+    )
+
+
+def _running_header_section(extraction: ExtractionResult) -> Section | None:
+    """Build one auditable comparison unit from coordinate-proven headers."""
+
+    observed: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for page in extraction.pages:
+        for value in page.running_header_texts:
+            compact = compact_inline(value)
+            key = compact.casefold()
+            if not compact or key in seen:
+                continue
+            seen.add(key)
+            observed.append((page.page_number, compact))
+    if not observed:
+        return None
+    start_page = min(page_number for page_number, _text in observed)
+    end_page = max(
+        page.page_number
+        for page in extraction.pages
+        if page.running_header_texts
+    )
+    heading = "运行页眉（坐标证据）"
+    return Section(
+        section_id="running-header-evidence",
+        heading=heading,
+        title=heading,
+        level=1,
+        heading_path=(heading,),
+        number_path=(),
+        start_page=start_page,
+        end_page=end_page,
+        body="\n".join(text for _page_number, text in observed),
+        role="technical",
+        page_bodies=tuple((page_number, text) for page_number, text in observed),
     )
 
 

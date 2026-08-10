@@ -20,7 +20,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .compare import run_diff
-from .models import DiffOptions
+from .models import DiffOptions, DiffResult
 from .reporting import write_reports
 
 _EVENT_KINDS = frozenset({"text", "table", "formula", "visual"})
@@ -91,11 +91,26 @@ def run_gold_accuracy_evaluation(
         for index, case in enumerate(manifest["cases"], start=1)
     ]
     minimum_distinct_families = manifest.get("minimum_distinct_families", 1)
-    executed_families = {
-        str(case.get("family", "unspecified")).strip().casefold()
-        for case, result in zip(manifest["cases"], case_results, strict=True)
-        if "metrics" in result
-    }
+    executed_families: set[str] = set()
+    counted_source_pairs: set[tuple[str, str]] = set()
+    for case, result in zip(manifest["cases"], case_results, strict=True):
+        source_pair = result.get("_family_source_pair")
+        if (
+            "metrics" not in result
+            or not isinstance(source_pair, tuple)
+            or source_pair in counted_source_pairs
+        ):
+            continue
+        counted_source_pairs.add(source_pair)
+        executed_families.add(
+            re.sub(
+                r"\s+",
+                " ",
+                str(case.get("family", "unspecified")).strip().casefold(),
+            )
+        )
+    for result in case_results:
+        result.pop("_family_source_pair", None)  # 内部 SHA 对只用于去重，不写入隐私安全 summary。
     family_coverage = {
         "required": minimum_distinct_families,
         "executed": len(executed_families),
@@ -348,6 +363,7 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
     )
     try:
         result = run_diff(old_path, new_path, options)
+        family_source_pair = _gold_source_pair_key(result)
         with TemporaryDirectory(prefix="pdf_diff_gold_") as report_root:
             outputs = write_reports(result, report_root, options)
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
@@ -408,7 +424,21 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
         "visual_coverage_required": visual_coverage_required,
         "visual_coverage_complete": visual_coverage_complete,
         "metrics": metrics,
+        "_family_source_pair": family_source_pair,
     }
+
+
+def _gold_source_pair_key(result: DiffResult) -> tuple[str, str] | None:
+    """Return an order-neutral key only for two different immutable sources."""
+
+    provenance = result.provenance
+    if provenance is None:
+        return None
+    old_sha256 = provenance.old_input.sha256
+    new_sha256 = provenance.new_input.sha256
+    if not old_sha256 or not new_sha256 or old_sha256 == new_sha256:
+        return None
+    return tuple(sorted((old_sha256, new_sha256)))
 
 
 def _actual_events(
