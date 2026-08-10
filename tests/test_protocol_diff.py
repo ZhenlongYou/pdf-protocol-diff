@@ -2212,6 +2212,17 @@ class ProtocolDiffTests(unittest.TestCase):
                 title="",
             )
         )
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                [
+                    "表格行: T1 | Column 1=MCB | Column 2=Reference",
+                    "表格行: T1 | Column 1=Table 31-8 | Column 2=Lookup",
+                ],
+                figure_words,
+                title="",
+            )
+        )
         self.assertFalse(
             _table_bbox_belongs_to_captioned_figure(
                 (300.0, 190.0, 390.0, 225.0),
@@ -9300,6 +9311,50 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_same_page_added_header_is_not_trailing_page_furniture(self) -> None:
+        """A header newly observed on a shared page remains visible and auditable."""
+
+        def extraction(name: str, page_three_header: tuple[str, ...]) -> ExtractionResult:
+            headers = {
+                1: ("Consortium Protocol ALPHA",),
+                2: ("Consortium Protocol alpha",),
+                3: page_three_header,
+            }
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=index,
+                        text=(
+                            "1 Scope\n"
+                            "The calibrated receiver shall preserve the declared voltage "
+                            "and timing behavior for every supported operating mode."
+                        ),
+                        running_header_texts=headers[index],
+                    )
+                    for index in range(1, 4)
+                ],
+            )
+
+        result = compare_extractions(
+            extraction("old-shared-page-header.pdf", ()),
+            extraction("new-shared-page-header.pdf", ("Consortium Protocol BETA",)),
+            DiffOptions(),
+        )
+
+        header_changes = [
+            change
+            for change in result.changes
+            if change.report_location == "运行页眉（坐标证据）"
+        ]
+        self.assertEqual(1, len(header_changes))
+        with tempfile.TemporaryDirectory() as report_dir:
+            outputs = write_reports(result, report_dir, DiffOptions())
+            for surface in ("html", "markdown", "text", "json", "csv"):
+                rendered = outputs[surface].read_text(encoding="utf-8")
+                with self.subTest(surface=surface):
+                    self.assertIn("BETA", rendered)
+
     def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
         """Per-page technical titles cannot borrow the repeated-header deletion rule."""
 
@@ -10289,6 +10344,35 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("This summary closes", sections[1].body)
 
+    def test_explicit_two_item_intro_keeps_both_items_in_parent(self) -> None:
+        """An exact cardinality lead-in resolves the otherwise ambiguous final item."""
+
+        for tail in (
+            "These two observations complete the request flow.",
+            "表格行: T1 | Observation=Second | Evidence=Trace",
+        ):
+            with self.subTest(tail=tail):
+                extraction = ExtractionResult(
+                    pdf_path=Path("explicit-two-item-list.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Overview\n"
+                                "This section introduces exactly two implementation observations:\n"
+                                "1. The requester records each message before forwarding it.\n"
+                                "2. The receiver returns a response to the requester.\n"
+                                f"{tail}"
+                            ),
+                        )
+                    ],
+                )
+
+                sections = section_document(extraction)
+
+                self.assertEqual(["1 Overview"], [section.location for section in sections])
+                self.assertIn("2. The receiver returns", sections[0].body)
+
     def test_real_next_chapter_after_same_numbered_item_is_not_demoted(self) -> None:
         """A chapter-1 item 1 cannot make a body-backed chapter 2 disappear."""
 
@@ -10361,6 +10445,13 @@ class ProtocolDiffTests(unittest.TestCase):
                 assert heading is not None
                 self.assertEqual(expected, heading.raw)
 
+    def test_appendix_and_annex_prose_is_not_a_bare_marker(self) -> None:
+        """Ordinary prose after Appendix/Annex cannot become a level-1 heading."""
+
+        for line in ("Appendix body.", "Appendix requirements.", "Annex material."):
+            with self.subTest(line=line):
+                self.assertIsNone(detect_heading(line))
+
     def test_chinese_appendix_heading_ends_a_wrapped_numbered_list(self) -> None:
         """A Chinese appendix is a structural boundary, not list-item body."""
 
@@ -10384,6 +10475,31 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(
             ["24 Summary", "附录 A. Reference sources"],
+            [section.location for section in section_document(extraction)],
+        )
+
+    def test_chinese_appendix_contextualizes_its_numeric_children(self) -> None:
+        """Numeric headings following a Chinese appendix stay under that container."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("chinese-appendix-child.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "附录 A. Reference sources\n"
+                        "1 General requirements\n"
+                        "The appendix requirement preserves its local numbering."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "附录 A. Reference sources",
+                "附录 A. Reference sources / 1 General requirements",
+            ],
             [section.location for section in section_document(extraction)],
         )
 

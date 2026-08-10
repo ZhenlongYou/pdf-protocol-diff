@@ -58,7 +58,8 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     ),
     (
         re.compile(
-            r"(?i)^((?:annex|appendix)\s+[A-Z0-9]+)"
+            r"^((?i:annex|appendix)\s+"
+            r"(?:[A-Z]|[A-Z]{2}|[IVXLCDM]{2,5}|\d+))"
             r"(?:(?:[\s:.-]+)(.{0,120}))?$"
         ),
         1,
@@ -146,6 +147,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     deep_numeric_context: tuple[str, ...] = ()
     procedure_step_numbers: list[int] = []
     prose_list_step_numbers: list[int] = []
+    prose_list_expected_count: int | None = None
     prose_list_item_open = False
     saw_heading = False
     opening_label = _opening_section_label(extraction)
@@ -191,6 +193,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
+            prose_list_intro_count = _numbered_list_cardinality_from_intro(
+                current.lines[-1]
+                if current is not None and current.lines
+                else ""
+            )
             body_following_lines = (
                 _numbered_prose_following_lines(
                     cleaned_pages,
@@ -218,10 +225,15 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         heading_stack,
                         chain_started=bool(prose_list_step_numbers),
                     ),
+                    explicit_list_expected_count=(
+                        prose_list_expected_count or prose_list_intro_count
+                    ),
                 )
             )
             if body_candidate_continues_list:
                 assert prose_body_candidate is not None
+                if not prose_list_step_numbers:
+                    prose_list_expected_count = prose_list_intro_count
                 prose_list_step_numbers.append(int(prose_body_candidate.number))
                 prose_list_item_open = not _numbered_prose_sentence_is_closed(
                     prose_body_candidate.title
@@ -235,6 +247,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     prose_list_item_open = not _numbered_prose_sentence_is_closed(line)
                 else:
                     prose_list_step_numbers.clear()
+                    prose_list_expected_count = None
                 # 仅允许未结束的列表句跨一个或多个软换行；普通正文段会立即结束编号链。
             if heading and _is_opening_range_body_integer(heading, saw_heading, opening_label):
                 heading = None
@@ -265,7 +278,12 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading_stack,
                     chain_started=bool(prose_list_step_numbers),
                 ),
+                explicit_list_expected_count=(
+                    prose_list_expected_count or prose_list_intro_count
+                ),
             ):
+                if not prose_list_step_numbers:
+                    prose_list_expected_count = prose_list_intro_count
                 prose_list_step_numbers.append(int(heading.number))
                 prose_list_item_open = not _numbered_prose_sentence_is_closed(
                     heading.title
@@ -289,6 +307,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 saw_heading = True
                 procedure_step_numbers.clear()  # 新章节结束上一个 Procedure 的局部步骤序列。
                 prose_list_step_numbers.clear()  # 真章节也结束普通叙述句的局部编号链。
+                prose_list_expected_count = None
                 prose_list_item_open = False
                 if current:
                     sections.append(_close_section(current, len(sections) + 1))
@@ -379,7 +398,10 @@ def _contextualize_heading(
 ) -> HeadingInfo:
     """Nest numeric headings beneath an active Part/Annex/Appendix container."""
 
-    if not stack or not re.match(r"(?i)^(?:part|annex|appendix)\b", stack[0].number):
+    if not stack or not re.match(
+        r"(?i)^(?:(?:part|annex|appendix)\b|附录)",
+        stack[0].number,
+    ):
         return heading
     if not re.match(r"(?i)^(?:(?:section|clause)\s+)?\d", heading.number):
         return heading
@@ -1391,6 +1413,7 @@ def _is_sequential_numbered_prose_item(
     *,
     following_context_proves_list: bool = False,
     following_context_proves_chapter_body: bool = False,
+    explicit_list_expected_count: int | None = None,
 ) -> bool:
     """Keep a structurally proven 1..N prose list inside its numbered parent.
 
@@ -1404,14 +1427,22 @@ def _is_sequential_numbered_prose_item(
         return False
     if not any(item.number for item in heading_stack):
         return False  # 无编号父层时，候选更可能是文档真正的第一章。
-    if following_context_proves_chapter_body:
-        return False  # 普通正文或表格可能属于真章节；歧义时失败可见，绝不为减少假章节而吞掉内容。
     number = int(heading.number)
+    explicit_list_member = bool(
+        prose_step_numbers
+        and prose_step_numbers[0] == 1
+        and explicit_list_expected_count is not None
+        and number <= explicit_list_expected_count
+    )
+    if following_context_proves_chapter_body and not explicit_list_member:
+        return False  # 普通正文或表格可能属于真章节；歧义时失败可见，绝不为减少假章节而吞掉内容。
     if prose_step_numbers:
         return (
             number == prose_step_numbers[-1] + 1
             and _looks_like_numbered_prose_sentence(heading.title, chain_started=True)
             and (
+                explicit_list_member
+                or
                 following_context_proves_list
                 or not _is_next_top_level_integer_heading(heading, heading_stack)
                 or _prose_list_began_with_current_top_level(
@@ -1428,6 +1459,64 @@ def _is_sequential_numbered_prose_item(
         heading.title,
         chain_started=False,
     ) and following_context_proves_list
+
+
+_NUMBERED_LIST_COUNT_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_CHINESE_LIST_COUNT_WORDS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+
+
+def _numbered_list_cardinality_from_intro(line: str) -> int | None:
+    """Return an explicit list count from a colon-terminated lead-in.
+
+    Exact/following cardinality is structural evidence independent of the
+    document family.  A generic sentence mentioning ``two`` without a colon or
+    without ``exactly/following`` remains ordinary prose and grants nothing.
+    """
+
+    candidate = normalize_line(line)
+    if not candidate or not re.search(r"[:：]\s*$", candidate):
+        return None
+    match = re.search(
+        r"(?i)\b(?:exactly\s+|(?:the\s+)?following\s+)"
+        r"(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b",
+        candidate,
+    )
+    if match:
+        token = match.group(1).casefold()
+        count = int(token) if token.isdigit() else _NUMBERED_LIST_COUNT_WORDS[token]
+        return count if count > 0 else None
+    chinese_match = re.search(
+        r"(?:以下|下列|如下)\s*([一二两三四五六七八九十]|\d{1,2})\s*(?:项|条|点|步|个)",
+        candidate,
+    )
+    if not chinese_match:
+        return None
+    token = chinese_match.group(1)
+    count = int(token) if token.isdigit() else _CHINESE_LIST_COUNT_WORDS[token]
+    return count if count > 0 else None
 
 
 def _prose_list_began_with_current_top_level(

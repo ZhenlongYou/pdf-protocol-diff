@@ -258,6 +258,8 @@ def compare_extractions(
     old_header_section, new_header_section = _ignore_trailing_header_page_only_difference(
         old_header_section,
         new_header_section,
+        old_extraction,
+        new_extraction,
     )
     if old_header_section is not None:
         old_sections.insert(0, old_header_section)
@@ -391,28 +393,69 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
 def _ignore_trailing_header_page_only_difference(
     old_section: Section | None,
     new_section: Section | None,
+    old_extraction: ExtractionResult,
+    new_extraction: ExtractionResult,
 ) -> tuple[Section | None, Section | None]:
     """Ignore header observations that exist only on trailing unmatched pages.
 
-    If every overlapping header observation is exactly equal and one sequence
-    is only a strict prefix of the other, the extra suffix is page-count
-    furniture rather than a changed technical identifier.  Full per-page
-    observations remain in ``page_bodies`` for in-memory audit; only the body
-    consumed by semantic comparison is trimmed to the shared prefix.
+    This is authorized only when one selected page set is a strict trailing
+    extension of the other and every overlapping page has the same exact
+    coordinate-proven header observations.  A missing or newly observed header
+    on a shared page is therefore a real auditable change, never page-count
+    furniture.
     """
 
     if old_section is None or new_section is None:
         return old_section, new_section
-    old_values = tuple(text for _page, text in old_section.page_bodies)
-    new_values = tuple(text for _page, text in new_section.page_bodies)
-    shared_count = min(len(old_values), len(new_values))
-    if not shared_count or old_values[:shared_count] != new_values[:shared_count]:
+    old_page_numbers = {page.page_number for page in old_extraction.pages}
+    new_page_numbers = {page.page_number for page in new_extraction.pages}
+    common_page_numbers = old_page_numbers & new_page_numbers
+    old_only_pages = old_page_numbers - new_page_numbers
+    new_only_pages = new_page_numbers - old_page_numbers
+    if not common_page_numbers or bool(old_only_pages) == bool(new_only_pages):
+        return old_section, new_section  # 页窗相同或两侧都不对齐时，不存在单侧尾页证明。
+    if old_only_pages and min(old_only_pages) <= max(new_page_numbers):
         return old_section, new_section
-    shared_body = "\n".join(old_values[:shared_count])
+    if new_only_pages and min(new_only_pages) <= max(old_page_numbers):
+        return old_section, new_section
+    old_observations = _running_header_observations_by_page(old_extraction)
+    new_observations = _running_header_observations_by_page(new_extraction)
+    if any(
+        old_observations.get(page_number, ())
+        != new_observations.get(page_number, ())
+        for page_number in common_page_numbers
+    ):
+        return old_section, new_section
+    shared_values = tuple(
+        text
+        for page_number, text in old_section.page_bodies
+        if page_number in common_page_numbers
+    )
+    if not shared_values:
+        return old_section, new_section
+    shared_body = "\n".join(shared_values)
     return (
         replace(old_section, body=shared_body),
         replace(new_section, body=shared_body),
     )
+
+
+def _running_header_observations_by_page(
+    extraction: ExtractionResult,
+) -> dict[int, tuple[str, ...]]:
+    """Return exact normalized header observations for every selected page."""
+
+    observations: dict[int, tuple[str, ...]] = {}
+    for page in extraction.pages:
+        seen: set[str] = set()
+        values: list[str] = []
+        for value in page.running_header_texts:
+            compact = compact_inline(value)
+            if compact and compact not in seen:
+                seen.add(compact)
+                values.append(compact)
+        observations[page.page_number] = tuple(values)
+    return observations
 
 
 def _compare_formula_visuals(

@@ -3439,8 +3439,14 @@ def _table_rows_begin_with_explicit_caption(table_lines: list[str]) -> bool:
             if normalized := normalize_line(payload):
                 payloads.append(normalized)
         reconstructed = normalize_line(" ".join(payloads))
-        if re.match(r"(?i)^(?:table\s+\d+(?:[-–]\d+)?\b|表\s*\d+)", reconstructed):
-            return True
+        if not reconstructed:
+            continue
+        return bool(
+            re.match(
+                r"(?i)^(?:table\s+\d+(?:[-–]\d+)?\b|表\s*\d+)",
+                reconstructed,
+            )
+        )  # 只有首个非空物理行能承担 bbox 内表题；后续 ``Table N`` 只是单元格内容或引用。
     return False
 
 
