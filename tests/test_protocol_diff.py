@@ -10762,6 +10762,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix A presents the calibration method",
             "Appendix B details the receiver limits",
             "Appendix C sets out the calibration procedure",
+            "Appendix A describes and defines the calibration method.",
+            "Annex B contains and explains the receiver limits.",
+            "Part II states and lists the normative requirements.",
+            "Appendix C provides and documents the calibration evidence.",
             "Appendix A shall define the calibration method.",
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Annex B contains normative requirements.",
@@ -10785,6 +10789,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 D 中的要求适用于旧设备。",
             "附录 B 中的要求适用",
             "附录 B 中规定接收机限值",
+            "附录 A 描述和定义校准方法。",
+            "附录 B 说明及规定接收机限值。",
+            "附录 C 介绍与展示校准证据。",
         ):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
@@ -10929,6 +10936,106 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("States and Transitions", sections[1].body)
         self.assertIn("0.025 UI", sections[1].body)
 
+    def test_page_break_after_container_identifier_preserves_sentence_or_title(
+        self,
+    ) -> None:
+        """The immediately adjacent next page can finish a subject or start a noun title."""
+
+        sentence_extraction = ExtractionResult(
+            pdf_path=Path("page-break-container-sentence.pdf"),
+            pages=[
+                PageText(page_number=1, text="1 Scope\nAppendix A"),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "remains normative for receiver testing.\n"
+                        "2 Verification\n"
+                        "Evidence remains visible."
+                    ),
+                ),
+            ],
+        )
+        title_extraction = ExtractionResult(
+            pdf_path=Path("page-break-container-title.pdf"),
+            pages=[
+                PageText(page_number=1, text="1 Scope\nAppendix A"),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "States and Transitions\n"
+                        "The transition tolerance is 0.025 UI.\n"
+                        "1 State definitions\n"
+                        "The state threshold is 34.0 dB."
+                    ),
+                ),
+            ],
+        )
+
+        self.assertEqual(
+            ["1 Scope", "2 Verification"],
+            [section.location for section in section_document(sentence_extraction)],
+        )
+        self.assertEqual(
+            ["1 Scope", "Appendix A", "Appendix A / 1 State definitions"],
+            [section.location for section in section_document(title_extraction)],
+        )
+
+    def test_container_delimiter_and_blank_paragraph_block_wrapped_sentence_guard(
+        self,
+    ) -> None:
+        """A strong title delimiter or blank paragraph is never joined to a predicate."""
+
+        for identifier, continuation in (
+            ("Appendix A:", "Applies to Receivers"),
+            ("Annex B.", "Remains normative for receiver testing"),
+            ("Part II:", "Sets out the calibration procedure"),
+            ("附录 B：", "中规定接收机限值"),
+        ):
+            with self.subTest(identifier=identifier):
+                extraction = ExtractionResult(
+                    pdf_path=Path("delimited-container-title.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"{identifier}\n"
+                                f"{continuation}\n"
+                                "1 Child requirements\n"
+                                "The child threshold is 0.025 UI."
+                            ),
+                        )
+                    ],
+                )
+                sections = section_document(extraction)
+                self.assertEqual(identifier, sections[1].location)
+                self.assertEqual(
+                    f"{identifier} / 1 Child requirements",
+                    sections[2].location,
+                )
+
+        blank_extraction = ExtractionResult(
+            pdf_path=Path("blank-separated-container-title.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Appendix A\n\n"
+                        "Applies to Receivers\n"
+                        "1 Child requirements\n"
+                        "The child threshold is 34.0 dB."
+                    ),
+                )
+            ],
+        )
+        blank_sections = section_document(blank_extraction)
+        self.assertEqual("Appendix A", blank_sections[1].location)
+        self.assertEqual(
+            "Appendix A / 1 Child requirements",
+            blank_sections[2].location,
+        )
+
     def test_part_and_appendix_titles_accept_compact_unicode_dashes(self) -> None:
         """En/em dashes are valid title separators even without surrounding spaces."""
 
@@ -10943,10 +11050,13 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B Lists of Tables",
             "Appendix C Covers and Enclosures",
             "Appendix E Provides and Services",
+            "Part II States and Lists of Tables",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
             "附录 C 校准数据的说明",
+            "附录 D 说明与规定",
+            "附录 E 描述与分析",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))

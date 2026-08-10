@@ -168,7 +168,12 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             next_physical_line = (
                 normalize_line(page_lines[line_index + 1])
                 if line_index + 1 < len(page_lines)
-                else ""
+                else (
+                    normalize_line(cleaned_pages[page_index + 1].text.splitlines()[0])
+                    if page_index + 1 < len(cleaned_pages)
+                    and cleaned_pages[page_index + 1].text.splitlines()
+                    else ""
+                )
             )
             if heading and _standalone_named_container_starts_wrapped_sentence(
                 heading,
@@ -867,6 +872,7 @@ def _merge_standalone_heading_lines(pages: list[PageText]) -> list[PageText]:
         while index < len(raw_lines):
             line = normalize_line(raw_lines[index])
             if not line:
+                merged_lines.append("")  # 保留物理空段，后续跨行语法不得越过段落边界。
                 index += 1
                 continue
             next_index = index + 1  # 只允许与视觉上紧邻的下一行合并，空行明确终止标题候选。
@@ -1131,6 +1137,16 @@ def _looks_like_named_container_reference_sentence(
             r"\s+(?!(?:and|or|of)\b)\S",
             title,
         )
+        or re.match(
+            r"(?i)^(?:describes?|defines?|contains?|provides?|specifies?|"
+            r"establishes?|states?|lists?|summarizes?|explains?|covers?|"
+            r"includes?|requires?|presents?|details?|documents?)\s+"
+            r"(?:and|or)\s+(?:describes?|defines?|contains?|provides?|"
+            r"specifies?|establishes?|states?|lists?|summarizes?|explains?|"
+            r"covers?|includes?|requires?|presents?|details?|documents?|"
+            r"sets?\s+out)\s+(?!(?:and|or|of)\b)\S",
+            title,
+        )
         or re.match(r"(?i)^of\s+(?:this|the)\s+document\b", title)
     )  # 还须证明宾语/补语；States and Transitions、Lists of Tables 等仍是标题。
     chinese_plain = title.rstrip("。！？").strip()
@@ -1140,6 +1156,16 @@ def _looks_like_named_container_reference_sentence(
             r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|"
             r"展示|介绍)(?![与和及或的]).+",
             chinese_plain,
+        )
+        or bool(
+            re.search(r"[。！？]\s*$", title)
+            and re.match(
+                r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|"
+                r"解释|展示|介绍)(?:与|和|及|或)(?:描述|定义|规定|说明|"
+                r"列出|给出|提供|包含|涵盖|总结|解释|展示|介绍)"
+                r"(?![与和及或的]).+",
+                chinese_plain,
+            )
         )
         or re.match(
             r"^(?:中|内)(?:明确)?(?:规定|定义|描述|说明|列出|给出|提供).+",
@@ -1168,6 +1194,9 @@ def _standalone_named_container_starts_wrapped_sentence(
 
     if heading.title or not next_line:
         return False
+    remainder = heading.raw[len(heading.number) :].lstrip()
+    if remainder.startswith((":", "：", ".", "-", "–", "—")):
+        return False  # 显式分隔符是强标题证据，不能被下一行谓语反向覆盖。
     if not re.fullmatch(
         r"(?i)(?:(?:part|annex|appendix)\s+[A-Z0-9IVXLC]+|附录\s*[A-Z0-9一二三四五六七八九十]+)",
         heading.number,
