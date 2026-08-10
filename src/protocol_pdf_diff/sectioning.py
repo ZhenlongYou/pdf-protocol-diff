@@ -1095,10 +1095,7 @@ def _looks_like_named_container_reference_sentence(
     remainder = candidate[len(number) :].lstrip()
     if remainder.startswith((":", "：", ".", "-", "–", "—")):
         return False
-    english_sentence = bool(
-        re.match(r"^[a-z]", title)
-        and re.search(r"[.!?]\s*$", title)
-    )
+    english_sentence = bool(re.match(r"^[a-z]", title))
     english_auxiliary = bool(
         re.match(
             r"(?i)^(?:shall|should|must|may|might|can|could|will|would|"
@@ -1106,13 +1103,16 @@ def _looks_like_named_container_reference_sentence(
             title,
         )
     )
+    english_letters = "".join(re.findall(r"[A-Za-z]", title))
     english_long_sentence = bool(
-        re.search(r"[.!?]\s*$", title)
+        english_letters.isupper()
+        and re.search(r"[.!?]\s*$", title)
         and len(re.findall(r"[A-Za-z][A-Za-z'-]*", title)) >= 4
-    )
+    )  # ALL-CAPS 句子失去大小写谓语线索时仍失败可见；Title Case 长标题不受影响。
     chinese_sentence = bool(
         re.search(r"[。！？]\s*$", title)
         or re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", title)
+        or re.search(r"[的了着过]", title)
     )
     return (
         english_sentence
@@ -1594,18 +1594,14 @@ def _numbered_list_cardinality_from_intro(line: str) -> int | None:
             tail,
         ):
             return None
-        if re.search(
-            r"(?i)\b(?:the|a|an|before|after|for|of|to|from|with|without|"
-            r"in|on|by|that|which|who|where|when|while|if|unless|because)\b",
-            tail,
-        ):
-            return None
         if not re.fullmatch(
-            r"(?i)\s*(?:[a-z][a-z0-9-]*\s+){0,2}"
+            r"(?i)\s*(?:(?!(?:the|a|an|before|after|for|of|to|from|with|"
+            r"without|in|on|by|that|which|who|where|when|while|if|unless|"
+            r"because)\b)[a-z][a-z0-9-]*\s+){0,2}"
             r"(?:items?|steps?|observations?|requirements?|actions?|cases?|"
             r"examples?|conditions?|criteria|tasks?|stages?|phases?|points?|"
             r"options?|rules?|procedures?|checks?|tests?|operations?|"
-            r"instructions?|recommendations?)\s*",
+            r"instructions?|recommendations?)(?:\s+[^.!?;]+)?\s*",
             tail,
         ):
             return None  # 只接受通用可枚举名词；未知名词与结构容器一律失败可见。

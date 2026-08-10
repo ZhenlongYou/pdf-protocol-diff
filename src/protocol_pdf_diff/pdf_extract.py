@@ -3814,10 +3814,10 @@ def _looks_like_non_table_caption(value: str) -> bool:
 def _page_may_contain_table(page: object, text: str) -> bool:
     """Return True when a page has textual or geometric table signals."""
 
-    if re.search(
-        r"(?i)\btable\s+\d|parameter\s+symbol|characteristic\s+symbol|表格|表\s*\d",
+    if any(_looks_like_table_caption(line) for line in text.splitlines()) or re.search(
+        r"(?i)parameter\s+symbol|characteristic\s+symbol|表格",
         text,
-    ):  # 常见协议表格标题或表头出现时，应进行结构化表格抽取。
+    ):  # 数字/字母附录表题与通用表头出现时，应进行结构化表格抽取。
         return True
     line_count = len(getattr(page, "lines", []) or [])  # 表格网格通常包含较多直线对象。
     rect_count = len(getattr(page, "rects", []) or [])  # 有些 PDF 用矩形对象组成表格边框。

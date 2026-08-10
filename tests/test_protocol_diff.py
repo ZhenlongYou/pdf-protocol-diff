@@ -2308,6 +2308,35 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_public_extraction_keeps_annex_letter_captioned_grid_tables(self) -> None:
+        """The page pre-gate must route A-1/AA.2 tables through real extraction."""
+
+        import pymupdf
+
+        for caption in ("Table A-1. Receiver limits", "Table AA.2. Receiver limits"):
+            with self.subTest(caption=caption), tempfile.TemporaryDirectory() as temp_dir:
+                pdf_path = Path(temp_dir) / "annex-grid-table.pdf"
+                document = pymupdf.open()
+                page = document.new_page(width=612, height=792)
+                page.insert_text((72, 90), caption, fontsize=11)
+                for y_position in (120, 160, 200):
+                    page.draw_line((72, y_position), (320, y_position))
+                for x_position in (72, 200, 320):
+                    page.draw_line((x_position, 120), (x_position, 200))
+                page.insert_text((82, 145), "Parameter", fontsize=10)
+                page.insert_text((210, 145), "Value", fontsize=10)
+                page.insert_text((82, 185), "Swing", fontsize=10)
+                page.insert_text((210, 185), "12 mV", fontsize=10)
+                document.save(pdf_path)
+                document.close()
+
+                extraction = extract_pdf_text(pdf_path)
+
+                self.assertTrue(extraction.table_visuals)
+                self.assertTrue(
+                    any(caption.split(".", 1)[0] in table.title for table in extraction.table_visuals)
+                )
+
     def test_repeated_standalone_number_keeps_both_observed_titles(self) -> None:
         """Text shape alone cannot prove that a repeated number is page furniture."""
 
@@ -10517,6 +10546,36 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(["1 Overview"], [section.location for section in sections])
                 self.assertIn("2. The receiver returns", sections[0].body)
 
+    def test_approved_counted_head_noun_allows_postmodifier(self) -> None:
+        """Postmodifiers remain valid only after an adjacent approved list head noun."""
+
+        for intro in (
+            "The following two steps for calibration:",
+            "This section records exactly two items of evidence:",
+            "The following two observations in this test:",
+        ):
+            with self.subTest(intro=intro):
+                extraction = ExtractionResult(
+                    pdf_path=Path("counted-list-postmodifier.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Overview\n"
+                                f"{intro}\n"
+                                "1. The requester records each message before forwarding it.\n"
+                                "2. The receiver returns a response to the requester.\n"
+                                "These two entries complete the evidence."
+                            ),
+                        )
+                    ],
+                )
+
+                self.assertEqual(
+                    ["1 Overview"],
+                    [section.location for section in section_document(extraction)],
+                )
+
     def test_wrapped_explicit_two_item_intro_keeps_both_items_in_parent(self) -> None:
         """A PDF soft line break does not destroy explicit list cardinality evidence."""
 
@@ -10699,22 +10758,56 @@ class ProtocolDiffTests(unittest.TestCase):
 
         for line in (
             "Appendix A describes the calibration method.",
+            "Appendix A describes the calibration",
             "Appendix A shall define the calibration method.",
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Annex B contains normative requirements.",
             "Annex B remains normative for receiver testing.",
+            "Annex B remains normative for receiver",
             "Part II defines the receiver architecture.",
             "Part II does not apply to legacy devices.",
+            "Part II applies to legacy devices",
             "Appendix C may be used for calibration.",
             "Annex D can provide supplemental limits.",
             "附录 A 描述了校准方法。",
+            "附录 A 描述了校准",
             "附录 B 用于说明校准流程。",
             "附录 B 应当规定接收机限值。",
             "附录 C 仍然适用于旧设备。",
             "附录 D 中的要求适用于旧设备。",
+            "附录 B 中的要求适用",
         ):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
+
+    def test_wrapped_container_reference_sentence_does_not_capture_later_sections(
+        self,
+    ) -> None:
+        """A PDF soft wrap cannot turn a container subject into a new parent."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("wrapped-container-reference.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Appendix A describes the calibration\n"
+                        "method used for all receivers.\n"
+                        "2 Verification\n"
+                        "Evidence remains visible."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["1 Scope", "2 Verification"],
+            [section.location for section in sections],
+        )
+        self.assertIn("Appendix A describes the calibration", sections[0].body)
 
     def test_part_and_appendix_titles_accept_compact_unicode_dashes(self) -> None:
         """En/em dashes are valid title separators even without surrounding spaces."""
@@ -10723,6 +10816,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "Part II–Architecture",
             "Annex B—Normative requirements",
             "Appendix C–Calibration data",
+            "Appendix E Receiver Calibration Reference Requirements.",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
