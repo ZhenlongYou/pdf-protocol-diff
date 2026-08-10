@@ -1084,10 +1084,11 @@ def _looks_like_named_container_reference_sentence(
     """Reject sentence subjects such as ``Appendix A shall define ...``.
 
     A colon, dot, or dash after the container identifier is positive heading
-    syntax.  With whitespace alone, sentence punctuation plus an English
-    lowercase predicate or Chinese sentence is safer to keep as prose.  The
-    closed modal/auxiliary class also catches extracted sentences that lost
-    their final punctuation without enumerating domain verbs.
+    syntax.  With whitespace alone, only a high-confidence predicate or
+    sentence grammar is safer to keep as prose.  Ambiguous sentence-case
+    noun phrases remain headings: individual Chinese characters such as
+    ``的/过/着`` also occur inside ordinary technical titles and therefore
+    cannot prove a sentence by themselves.
     """
 
     if not title or not candidate.startswith(number):
@@ -1095,7 +1096,6 @@ def _looks_like_named_container_reference_sentence(
     remainder = candidate[len(number) :].lstrip()
     if remainder.startswith((":", "：", ".", "-", "–", "—")):
         return False
-    english_sentence = bool(re.match(r"^[a-z]", title))
     english_auxiliary = bool(
         re.match(
             r"(?i)^(?:shall|should|must|may|might|can|could|will|would|"
@@ -1103,21 +1103,44 @@ def _looks_like_named_container_reference_sentence(
             title,
         )
     )
-    english_letters = "".join(re.findall(r"[A-Za-z]", title))
-    english_long_sentence = bool(
-        english_letters.isupper()
-        and re.search(r"[.!?]\s*$", title)
-        and len(re.findall(r"[A-Za-z][A-Za-z'-]*", title)) >= 4
-    )  # ALL-CAPS 句子失去大小写谓语线索时仍失败可见；Title Case 长标题不受影响。
+    english_reference_predicate = bool(
+        re.match(
+            r"(?i)^(?:remains?|appl(?:y|ies)|describes?|defines?|contains?|"
+            r"provides?|specifies?|establishes?|states?|lists?|summarizes?|explains?|"
+            r"covers?|includes?|requires?|refers?)\b",
+            title,
+        )
+        or re.match(r"(?i)^of\s+(?:this|the)\s+document\b", title)
+    )  # 大小写被全大写版式抹平时，仅闭合的文档谓语/引用短语能证明句子。
+    chinese_plain = title.rstrip("。！？").strip()
     chinese_sentence = bool(
-        re.search(r"[。！？]\s*$", title)
-        or re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", title)
-        or re.search(r"[的了着过]", title)
+        re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", chinese_plain)
+        or re.match(
+            r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|"
+            r"展示|介绍)(?:了|着|过).+",
+            chinese_plain,
+        )
+        or (
+            bool(re.search(r"[。！？]\s*$", title))
+            and bool(
+                re.match(
+                    r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|"
+                    r"总结|解释|展示|介绍).+",
+                    chinese_plain,
+                )
+            )
+        )
+        or bool(
+            re.match(
+                r"^(?:中|内|外)的.{1,60}(?:适用|生效|有效|执行)$|"
+                r"^(?:中|内|外)的.{1,60}(?:适用于|用于).+$",
+                chinese_plain,
+            )
+        )
     )
     return (
-        english_sentence
-        or english_auxiliary
-        or english_long_sentence
+        english_auxiliary
+        or english_reference_predicate
         or chinese_sentence
     )
 

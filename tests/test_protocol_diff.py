@@ -10769,6 +10769,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "Part II applies to legacy devices",
             "Appendix C may be used for calibration.",
             "Annex D can provide supplemental limits.",
+            "ANNEX B REMAINS NORMATIVE.",
+            "ANNEX C STATES THE RECEIVER REQUIREMENTS.",
+            "PART II APPLIES TO RECEIVERS.",
+            "APPENDIX A OF THIS DOCUMENT.",
             "附录 A 描述了校准方法。",
             "附录 A 描述了校准",
             "附录 B 用于说明校准流程。",
@@ -10779,6 +10783,50 @@ class ProtocolDiffTests(unittest.TestCase):
         ):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
+
+    def test_chinese_named_container_noun_titles_remain_structural(self) -> None:
+        """Common Chinese characters inside noun phrases are not sentence proof."""
+
+        for line in (
+            "附录 A 接收机的校准方法",
+            "附录 B 过渡响应",
+            "附录 C 附着损耗",
+            "附录 D 已完成的测试",
+            "附录 E 经过校准的接收机要求",
+        ):
+            with self.subTest(line=line):
+                heading = detect_heading(line)
+                self.assertIsNotNone(heading)
+                self.assertRegex(heading.number, r"^附录\s+[A-E]$")
+
+    def test_chinese_named_container_titles_keep_their_technical_bodies(self) -> None:
+        """A real Annex title must own its values instead of leaking into the prior chapter."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("chinese-annex-titles.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 General requirements\n"
+                        "The receiver requirements apply.\n"
+                        "附录 A 接收机的校准方法\n"
+                        "校准容差为 0.025 UI。\n"
+                        "附录 B 过渡响应\n"
+                        "响应限值为 34.0 dB。"
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["1 General requirements", "附录 A 接收机的校准方法", "附录 B 过渡响应"],
+            [section.location for section in sections],
+        )
+        self.assertIn("0.025 UI", sections[1].body)
+        self.assertIn("34.0 dB", sections[2].body)
 
     def test_wrapped_container_reference_sentence_does_not_capture_later_sections(
         self,
@@ -10817,9 +10865,12 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B—Normative requirements",
             "Appendix C–Calibration data",
             "Appendix E Receiver Calibration Reference Requirements.",
+            "Annex A normative references",
+            "Appendix A calibration data",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
+            "附录 C 校准数据的说明",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
