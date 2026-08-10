@@ -399,10 +399,11 @@ def _ignore_trailing_header_page_only_difference(
     """Ignore header observations that exist only on trailing unmatched pages.
 
     This is authorized only when one selected page set is a strict trailing
-    extension of the other and every overlapping page has the same exact
-    coordinate-proven header observations.  A missing or newly observed header
-    on a shared page is therefore a real auditable change, never page-count
-    furniture.
+    extension of the other, every overlapping page has the same exact
+    coordinate-proven observations, and every extra-page observation repeats
+    a value proven on at least two common pages.  A new exact value therefore
+    remains an auditable technical change even when it first appears on a tail
+    page.
     """
 
     if old_section is None or new_section is None:
@@ -426,6 +427,27 @@ def _ignore_trailing_header_page_only_difference(
         for page_number in common_page_numbers
     ):
         return old_section, new_section
+    common_observation_counts = Counter(
+        old_observations.get(page_number, ())
+        for page_number in common_page_numbers
+        if old_observations.get(page_number, ())
+    )
+    stable_common_observations = {
+        observation
+        for observation, count in common_observation_counts.items()
+        if count >= 2
+    }
+    extra_extraction_observations = (
+        old_observations if old_only_pages else new_observations
+    )
+    extra_page_numbers = old_only_pages or new_only_pages
+    if any(
+        observation
+        and observation not in stable_common_observations
+        for page_number in extra_page_numbers
+        if (observation := extra_extraction_observations.get(page_number, ()))
+    ):
+        return old_section, new_section  # 尾页出现新的精确技术页眉值时仍必须失败可见。
     shared_values = tuple(
         text
         for page_number, text in old_section.page_bodies

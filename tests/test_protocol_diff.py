@@ -70,6 +70,8 @@ from protocol_pdf_diff.pdf_extract import (
     _filtered_layout_page,  # 验证页面级证据不足时不会误删孤立旋转字母。
     _geometry_compound_script_lines,  # 复合上下标候选必须双向唯一，否则整格回退。
     _keep_non_watermark_object,  # 直接验证水印过滤谓词，防止大标题被误删。
+    _looks_like_figure_caption,  # 附录字母编号 Figure 也必须获得图形上下文。
+    _looks_like_table_caption,  # 附录字母编号 Table 仍是真实表题。
     _should_skip_detected_table,  # 验证 Figure/空伪表格不会进入表格截图和正文 diff。
     _table_bbox_belongs_to_captioned_figure,  # 图中小线框只有坐标和图题共同证明时才跳过。
     _table_lines_from_rows,  # 直接验证 pdfplumber 表格行格式化，覆盖无需真实 PDF 的边界场景。
@@ -2243,6 +2245,47 @@ class ProtocolDiffTests(unittest.TestCase):
                 ],
                 figure_words,
                 title="",
+            )
+        )
+
+    def test_annex_letter_captions_distinguish_figure_grids_from_real_tables(self) -> None:
+        """Annex A-2/A-1 captions use the same geometry safeguards as numeric captions."""
+
+        def word(text: str, top: float, x0: float = 72.0) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x0 + max(8.0, len(text) * 5.0),
+                "top": top,
+                "bottom": top + 10.0,
+            }
+
+        figure_words = [
+            word("Figure A-2. Receiver test setup", 80.0),
+            word("Generator", 110.0),
+            word("Stressed signal", 130.0),
+            word("Reference", 150.0),
+            word("CRU", 170.0),
+        ]
+        bbox = (300.0, 190.0, 390.0, 225.0)
+
+        self.assertTrue(_looks_like_figure_caption("Figure A-2. Receiver test setup"))
+        self.assertTrue(_looks_like_table_caption("Table A-1. Receiver limits"))
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                ["表格行: T1 | Column 1=MCB | Column 2=Reference"],
+                figure_words,
+            )
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                [
+                    "表格行: T1 | Column 1=Table | Column 2=A-1. Receiver limits",
+                    "表格行: T1 | Parameter=Mode A | Value=20 mV",
+                ],
+                figure_words,
             )
         )
 
@@ -9355,6 +9398,55 @@ class ProtocolDiffTests(unittest.TestCase):
                 with self.subTest(surface=surface):
                     self.assertIn("BETA", rendered)
 
+    def test_trailing_page_new_header_value_is_not_page_count_furniture(self) -> None:
+        """A new technical header on an added tail page remains visible everywhere."""
+
+        def extraction(name: str, headers: list[str]) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=index,
+                        text=(
+                            "1 Scope\n"
+                            "The calibrated receiver shall preserve the declared voltage "
+                            "and timing behavior for every supported operating mode."
+                        ),
+                        running_header_texts=(header,),
+                    )
+                    for index, header in enumerate(headers, start=1)
+                ],
+            )
+
+        result = compare_extractions(
+            extraction(
+                "old-tail-header.pdf",
+                ["Consortium Protocol ALPHA", "Consortium Protocol ALPHA"],
+            ),
+            extraction(
+                "new-tail-header.pdf",
+                [
+                    "Consortium Protocol ALPHA",
+                    "Consortium Protocol ALPHA",
+                    "Consortium Protocol BETA",
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        header_changes = [
+            change
+            for change in result.changes
+            if change.report_location == "运行页眉（坐标证据）"
+        ]
+        self.assertTrue(header_changes)
+        with tempfile.TemporaryDirectory() as report_dir:
+            outputs = write_reports(result, report_dir, DiffOptions())
+            for surface in ("html", "markdown", "text", "json", "csv"):
+                rendered = outputs[surface].read_text(encoding="utf-8")
+                with self.subTest(surface=surface):
+                    self.assertIn("BETA", rendered)
+
     def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
         """Per-page technical titles cannot borrow the repeated-header deletion rule."""
 
@@ -10373,6 +10465,98 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(["1 Overview"], [section.location for section in sections])
                 self.assertIn("2. The receiver returns", sections[0].body)
 
+    def test_wrapped_explicit_two_item_intro_keeps_both_items_in_parent(self) -> None:
+        """A PDF soft line break does not destroy explicit list cardinality evidence."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("wrapped-explicit-two-item-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "This section introduces exactly two implementation\n"
+                        "observations:\n"
+                        "1. The requester records each message before forwarding it.\n"
+                        "2. The receiver returns a response to the requester.\n"
+                        "These two observations complete the request flow."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["1 Overview"], [section.location for section in sections])
+        self.assertIn("2. The receiver returns", sections[0].body)
+
+    def test_structural_container_cardinality_never_authorizes_prose_list_demotion(
+        self,
+    ) -> None:
+        """Named chapters/sections/appendices stay structural despite a count lead-in."""
+
+        for intro in (
+            "This document contains exactly two chapters:",
+            "The following two sections:",
+            "The following two appendices:",
+            "以下两个章节：",
+        ):
+            with self.subTest(intro=intro):
+                extraction = ExtractionResult(
+                    pdf_path=Path("explicit-structural-containers.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Overview\n"
+                                f"{intro}\n"
+                                "1. General requirements.\n"
+                                "2. Security requirements.\n"
+                                "This summary applies to both structural containers."
+                            ),
+                        )
+                    ],
+                )
+
+                sections = section_document(extraction)
+
+                self.assertEqual(
+                    [
+                        "1 Overview",
+                        "1. General requirements.",
+                        "2. Security requirements.",
+                    ],
+                    [section.location for section in sections],
+                )
+
+    def test_unknown_counted_noun_does_not_authorize_prose_list_demotion(self) -> None:
+        """A counted technical noun alone cannot hide body-backed real chapters."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("unknown-counted-noun.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "This process contains exactly two cycles:\n"
+                        "1. General requirements.\n"
+                        "2. Security requirements.\n"
+                        "The security chapter defines independent behavior."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "1 Overview",
+                "1. General requirements.",
+                "2. Security requirements.",
+            ],
+            [section.location for section in section_document(extraction)],
+        )
+
     def test_real_next_chapter_after_same_numbered_item_is_not_demoted(self) -> None:
         """A chapter-1 item 1 cannot make a body-backed chapter 2 disappear."""
 
@@ -10451,6 +10635,31 @@ class ProtocolDiffTests(unittest.TestCase):
         for line in ("Appendix body.", "Appendix requirements.", "Annex material."):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
+
+    def test_named_appendix_reference_sentence_is_not_a_heading(self) -> None:
+        """A named appendix used as a sentence subject remains ordinary prose."""
+
+        for line in (
+            "Appendix A describes the calibration method.",
+            "Annex B contains normative requirements.",
+            "Part II defines the receiver architecture.",
+            "附录 A 描述了校准方法。",
+            "附录 B 用于说明校准流程。",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNone(detect_heading(line))
+
+    def test_part_and_appendix_titles_accept_compact_unicode_dashes(self) -> None:
+        """En/em dashes are valid title separators even without surrounding spaces."""
+
+        for line in (
+            "Part II–Architecture",
+            "Annex B—Normative requirements",
+            "Appendix C–Calibration data",
+            "附录 A—校准数据",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNotNone(detect_heading(line))
 
     def test_chinese_appendix_heading_ends_a_wrapped_numbered_list(self) -> None:
         """A Chinese appendix is a structural boundary, not list-item body."""

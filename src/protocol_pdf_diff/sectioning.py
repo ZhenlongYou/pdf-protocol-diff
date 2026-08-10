@@ -40,7 +40,7 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
         re.compile(
             r"(?i)^((?:part)\s+(?:[IVXLCDM]+|\d+))"
-            r"(?:(?:[\s:.-]+)(.{0,120}))?$"
+            r"(?:(?:[\s:.–—-]+)(.{0,120}))?$"
         ),
         1,
         "part",
@@ -60,7 +60,7 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
         re.compile(
             r"^((?i:annex|appendix)\s+"
             r"(?:[A-Z]|[A-Z]{2}|[IVXLCDM]{2,5}|\d+))"
-            r"(?:(?:[\s:.-]+)(.{0,120}))?$"
+            r"(?:(?:[\s:.–—-]+)(.{0,120}))?$"
         ),
         1,
         "annex",
@@ -68,7 +68,7 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
         re.compile(
             rf"^(附录\s*[A-Z{_CHINESE_NUM}]+)"
-            rf"(?:(?:[\s:：.-]+)(.{{0,120}}))?$",
+            rf"(?:(?:[\s:：.–—-]+)(.{{0,120}}))?$",
             re.IGNORECASE,
         ),
         1,
@@ -193,11 +193,18 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
-            prose_list_intro_count = _numbered_list_cardinality_from_intro(
-                current.lines[-1]
+            prose_list_intro_text = (
+                " ".join(current.lines[-3:])
                 if current is not None and current.lines
                 else ""
             )
+            prose_list_intro_count = _numbered_list_cardinality_from_intro(
+                prose_list_intro_text
+            )
+            prose_list_intro_blocks_demotion = bool(
+                _has_explicit_numbered_cardinality_intro(prose_list_intro_text)
+                and prose_list_intro_count is None
+            )  # 未经白名单证明的名词（尤其 chapter/section）必须失败可见为结构。
             body_following_lines = (
                 _numbered_prose_following_lines(
                     cleaned_pages,
@@ -209,6 +216,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             )
             body_candidate_continues_list = bool(
                 prose_body_candidate
+                and not prose_list_intro_blocks_demotion
                 and _is_sequential_numbered_prose_item(
                     prose_body_candidate,
                     heading_stack,
@@ -262,25 +270,29 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 if heading is not None
                 else []
             )
-            if heading and _is_sequential_numbered_prose_item(
-                heading,
-                heading_stack,
-                tuple(prose_list_step_numbers),
-                following_context_proves_list=_following_context_proves_numbered_prose_item(
-                    heading_following_lines,
+            if (
+                heading
+                and not prose_list_intro_blocks_demotion
+                and _is_sequential_numbered_prose_item(
                     heading,
                     heading_stack,
-                    chain_started=bool(prose_list_step_numbers),
-                ),
-                following_context_proves_chapter_body=_following_context_proves_numbered_chapter_body(
-                    heading_following_lines,
-                    heading,
-                    heading_stack,
-                    chain_started=bool(prose_list_step_numbers),
-                ),
-                explicit_list_expected_count=(
-                    prose_list_expected_count or prose_list_intro_count
-                ),
+                    tuple(prose_list_step_numbers),
+                    following_context_proves_list=_following_context_proves_numbered_prose_item(
+                        heading_following_lines,
+                        heading,
+                        heading_stack,
+                        chain_started=bool(prose_list_step_numbers),
+                    ),
+                    following_context_proves_chapter_body=_following_context_proves_numbered_chapter_body(
+                        heading_following_lines,
+                        heading,
+                        heading_stack,
+                        chain_started=bool(prose_list_step_numbers),
+                    ),
+                    explicit_list_expected_count=(
+                        prose_list_expected_count or prose_list_intro_count
+                    ),
+                )
             ):
                 if not prose_list_step_numbers:
                     prose_list_expected_count = prose_list_intro_count
@@ -1013,9 +1025,10 @@ def _looks_like_forbidden_heading_candidate(
     normalized_candidate = normalize_line(candidate)  # 全行用于识别公式和脚注形态。
     if kind == "paren" and _looks_like_phone_or_footnote(candidate, normalized_title):
         return True
-    if kind == "annex" and (
+    if kind in {"annex", "part"} and (
         _looks_like_appendix_sentence_continuation(normalized_title)
         or _looks_like_appendix_subreference_fragment(number, normalized_title)
+        or _looks_like_named_container_reference_sentence(normalized_title)
     ):
         return True
     numeric_kind = kind in {"numeric", "annex_numeric", "numeric_letter"}  # 混合层级沿用技术碎片防误识别规则。
@@ -1059,6 +1072,25 @@ def _looks_like_appendix_subreference_fragment(number: str, title: str) -> bool:
     """Reject a split ``Appendix 16.D`` cross-reference with no actual heading title."""
 
     return bool(re.search(r"\d$", number) and re.fullmatch(r"[A-Z]", title))
+
+
+def _looks_like_named_container_reference_sentence(title: str) -> bool:
+    """Reject ``Appendix A describes ...`` prose while keeping actual titles."""
+
+    return bool(
+        re.match(
+            r"^(?:describes?|contains?|defines?|provides?|lists?|specifies?|"
+            r"summari[sz]es?|explains?|records?|includes?|applies?|shows?|"
+            r"presents?|covers?|addresses?|identifies?|references?|introduces?|"
+            r"documents?|establishes?|requires?|is|are|was|were|has|have)\b",
+            title,
+        )
+        or re.match(
+            r"^(?:是|为|用于|描述|包含|包括|规定|定义|列出|列明|载明|说明|"
+            r"提供|适用|涉及|涵盖|展示|给出|记录|介绍|总结|概述|阐述|参见|引用|补充)",
+            title,
+        )
+    )
 
 
 def _looks_like_scope_acronym_figure_label(title: str) -> bool:
@@ -1496,27 +1528,64 @@ def _numbered_list_cardinality_from_intro(line: str) -> int | None:
     without ``exactly/following`` remains ordinary prose and grants nothing.
     """
 
-    candidate = normalize_line(line)
+    candidate = compact_inline(line)
     if not candidate or not re.search(r"[:：]\s*$", candidate):
         return None
     match = re.search(
         r"(?i)\b(?:exactly\s+|(?:the\s+)?following\s+)"
-        r"(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b",
+        r"(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b"
+        r"(?P<tail>[^.!?;]*?)[:：]\s*$",
         candidate,
     )
     if match:
+        if not re.search(
+            r"(?i)\b(?:items?|steps?|observations?|requirements?|actions?|cases?|"
+            r"examples?|conditions?|criteria|tasks?|stages?|phases?|points?|"
+            r"options?|rules?|procedures?|checks?|tests?|operations?|"
+            r"instructions?|recommendations?)\b",
+            match.group("tail"),
+        ):
+            return None  # 只接受通用可枚举名词；未知名词与结构容器一律失败可见。
         token = match.group(1).casefold()
         count = int(token) if token.isdigit() else _NUMBERED_LIST_COUNT_WORDS[token]
         return count if count > 0 else None
     chinese_match = re.search(
-        r"(?:以下|下列|如下)\s*([一二两三四五六七八九十]|\d{1,2})\s*(?:项|条|点|步|个)",
+        r"(?:以下|下列|如下)\s*([一二两三四五六七八九十]|\d{1,2})\s*"
+        r"(?P<unit>项|条|点|步|个)(?P<tail>[^。！？；]*?)[:：]\s*$",
         candidate,
     )
     if not chinese_match:
         return None
+    if chinese_match.group("unit") == "个" and not re.search(
+        r"(?:事项|步骤|观察|要求|动作|案例|示例|条件|准则|任务|阶段|要点|"
+        r"选项|规则|程序|检查|测试|操作|指令|建议)",
+        chinese_match.group("tail"),
+    ):
+        return None  # “以下两个章节/周期”未获列表授权；“以下两个步骤”仍可证明。
     token = chinese_match.group(1)
     count = int(token) if token.isdigit() else _CHINESE_LIST_COUNT_WORDS[token]
     return count if count > 0 else None
+
+
+def _has_explicit_numbered_cardinality_intro(line: str) -> bool:
+    """Return whether a colon-ended count lead-in exists, authorized or not."""
+
+    candidate = compact_inline(line)
+    if not candidate:
+        return False
+    return bool(
+        re.search(
+            r"(?i)\b(?:exactly\s+|(?:the\s+)?following\s+)"
+            r"(?:one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\b"
+            r"[^.!?;]*?[:：]\s*$",
+            candidate,
+        )
+        or re.search(
+            r"(?:以下|下列|如下)\s*(?:[一二两三四五六七八九十]|\d{1,2})\s*"
+            r"(?:项|条|点|步|个)[^。！？；]*?[:：]\s*$",
+            candidate,
+        )
+    )
 
 
 def _prose_list_began_with_current_top_level(
