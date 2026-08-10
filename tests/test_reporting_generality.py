@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
-from protocol_pdf_diff import reporting as reporting_module  # 直接验证报告层逻辑表配对，不经 JSON 渲染掩盖组结构。
+from protocol_pdf_diff import (
+    reporting as reporting_module,  # 直接验证报告层逻辑表配对，不经 JSON 渲染掩盖组结构。
+)
 from protocol_pdf_diff.compare import compare_extractions
-from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText, Section, TableVisual
-from protocol_pdf_diff.reporting import _inline_diff_html
-from protocol_pdf_diff.reporting import write_reports
+from protocol_pdf_diff.models import (
+    DiffOptions,
+    ExtractionResult,
+    PageText,
+    Section,
+    TableVisual,
+)
+from protocol_pdf_diff.reporting import _inline_diff_html, write_reports
 
 
 class ReportingGeneralityTests(unittest.TestCase):
@@ -72,6 +79,36 @@ class ReportingGeneralityTests(unittest.TestCase):
 
         self.assertIn('<mark class="del">-&gt;</mark>', old_html)
         self.assertIn('<mark class="ins">&lt;-</mark>', new_html)
+
+    def test_standalone_domain_acronym_change_remains_visible_in_all_reader_reports(self) -> None:
+        """A shared reader must not fold a changed term merely because SerDes uses it."""
+
+        shared = "The interface description remains stable for every implementation. " * 10
+        options = DiffOptions(visual_watchdog=False)
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-generic-standard.pdf"),
+                pages=[PageText(1, f"1 Interface terminology\n{shared}\nMCB")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-generic-standard.pdf"),
+                pages=[PageText(1, f"1 Interface terminology\n{shared}\nHCB")],
+            ),
+            options,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, options)
+            reader_surfaces = {
+                surface: outputs[surface].read_text(encoding="utf-8")
+                for surface in ("html", "markdown", "text")
+            }
+
+        for surface, report_text in reader_surfaces.items():
+            with self.subTest(surface=surface):
+                self.assertIn("MCB", report_text)
+                self.assertIn("HCB", report_text)
+                self.assertNotIn("图示中的短标签已合并折叠", report_text)
 
     def test_inline_highlight_does_not_treat_negative_inequality_as_arrow(self) -> None:
         for old_text in ("Require x < -5.", "Require x<-5."):

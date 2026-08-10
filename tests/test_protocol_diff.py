@@ -9617,6 +9617,35 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertNotIn("2 Configure the receiver", sections[0].body)  # 第一章正文不得包含第二章标题。
 
+    def test_sequential_numbered_sentences_stay_in_body_without_domain_keywords(self) -> None:
+        """A proven 1..N sentence chain is a prose list even under a generic parent."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("generic-numbered-prose-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "The document describes a general data exchange.\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The processing layer validates the message before forwarding it.\n"
+                        "3. The receiver returns a response to the original requester.\n"
+                        "2 Architecture\n"
+                        "The architecture chapter defines the participating components."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+        locations = [section.location for section in sections]
+
+        self.assertEqual(["1 Overview", "2 Architecture"], locations)
+        self.assertIn("1. The requester creates a message", sections[0].body)
+        self.assertIn("2. The processing layer validates the message", sections[0].body)
+        self.assertIn("3. The receiver returns a response", sections[0].body)
+
     def test_integer_requirement_bullets_stay_under_numbered_parent(self) -> None:
         """OIF requirement bullets must not replace the active clause hierarchy."""
 

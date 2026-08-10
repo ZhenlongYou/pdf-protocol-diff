@@ -24,10 +24,13 @@ from .models import DiffOptions
 from .reporting import write_reports
 
 _EVENT_KINDS = frozenset({"text", "table", "formula", "visual"})
-_TOP_LEVEL_KEYS = frozenset({"schema_version", "cases"})
+_TOP_LEVEL_KEYS = frozenset(
+    {"schema_version", "minimum_distinct_families", "cases"}
+)
 _CASE_KEYS = frozenset(
     {
         "id",
+        "family",
         "required",
         "old",
         "new",
@@ -87,6 +90,31 @@ def run_gold_accuracy_evaluation(
         _run_case(case, root, case_index=index)
         for index, case in enumerate(manifest["cases"], start=1)
     ]
+    minimum_distinct_families = manifest.get("minimum_distinct_families", 1)
+    executed_families = {
+        str(case.get("family", "unspecified")).strip().casefold()
+        for case, result in zip(manifest["cases"], case_results, strict=True)
+        if "metrics" in result
+    }
+    family_coverage = {
+        "required": minimum_distinct_families,
+        "executed": len(executed_families),
+        "complete": len(executed_families) >= minimum_distinct_families,
+    }
+    if not family_coverage["complete"]:
+        case_results.append(
+            {
+                "case_index": 0,
+                "status": "fail",
+                "failures": [
+                    (
+                        "cross-family coverage incomplete: executed "
+                        f"{family_coverage['executed']}/{family_coverage['required']} "
+                        "distinct document families"
+                    )
+                ],
+            }
+        )
     counts = {
         status: sum(case["status"] == status for case in case_results)
         for status in ("pass", "fail", "skip")
@@ -96,6 +124,7 @@ def run_gold_accuracy_evaluation(
         "schema_version": 1,
         "status": status,
         "counts": counts,
+        "family_coverage": family_coverage,
         "metrics": _aggregate_metrics(case_results),
         "cases": case_results,
     }
@@ -117,6 +146,14 @@ def validate_gold_accuracy_manifest(manifest: object) -> list[str]:
         or schema_version != 1
     ):
         failures.append("schema_version must be exactly 1")
+    minimum_distinct_families = manifest.get("minimum_distinct_families", 1)
+    if (
+        not isinstance(minimum_distinct_families, int)
+        or isinstance(minimum_distinct_families, bool)
+        or minimum_distinct_families < 1
+    ):
+        failures.append("minimum_distinct_families must be a positive integer")
+        minimum_distinct_families = 1
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         failures.append("cases must be a non-empty JSON array")
@@ -137,6 +174,15 @@ def validate_gold_accuracy_manifest(manifest: object) -> list[str]:
             failures.append(f"{location}.id duplicates an earlier case id")
         else:
             seen_case_ids.add(case_id)
+        family = case.get("family")
+        if family is not None and (
+            not isinstance(family, str) or not family.strip()
+        ):
+            failures.append(f"{location}.family must be a non-empty string")
+        if minimum_distinct_families > 1 and family is None:
+            failures.append(
+                f"{location}.family is required when minimum_distinct_families > 1"
+            )
         if not isinstance(case.get("required"), bool):
             failures.append(f"{location}.required must be a boolean")
         _validate_document(case.get("old"), f"{location}.old", failures)

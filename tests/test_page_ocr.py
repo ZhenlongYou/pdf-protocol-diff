@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from PIL import Image
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.compare import compare_extractions, run_diff
-from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageParserRoute, PageText
+from protocol_pdf_diff.models import (
+    DiffOptions,
+    ExtractionResult,
+    PageParserRoute,
+    PageText,
+)
+from protocol_pdf_diff.pdf_extract import extract_pdf_text
 
 
 class _ScannedPage:
@@ -346,7 +350,9 @@ class PageOcrTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             for index, ocr_text in enumerate(ocr_outputs):
                 pdf_path = Path(temp_dir) / f"scan-{index}.pdf"
-                pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+                pdf_path.write_bytes(
+                    f"%PDF-1.4\n% synthetic scan {index}\n%%EOF\n".encode()
+                )  # 两份模拟扫描件必须有不同快照身份；同一字节快照不可能产生真实语义修订。
                 with (
                     mock.patch(
                         "pdfplumber.open",

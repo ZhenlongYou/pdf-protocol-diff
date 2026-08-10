@@ -38,7 +38,13 @@ from .pdf_extract import (
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
-from .quality import PairAssessment, ReliabilityState, assess_pair, build_provenance
+from .quality import (
+    PairAssessment,
+    ReliabilityState,
+    assess_pair,
+    build_provenance,
+    provenance_inputs_are_identical,
+)
 from .sectioning import section_document
 from .table_codec import (
     decode_table_cell,
@@ -249,6 +255,7 @@ def compare_extractions(
     )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
     assessment = assess_pair(old_extraction, new_extraction, old_sections, new_sections)
     provenance = build_provenance(old_extraction, new_extraction, options)
+    identical_inputs = provenance_inputs_are_identical(provenance)
     old_table_visuals = _table_visuals_with_text_fallbacks(old_table_visuals, old_extraction.pages)
     new_table_visuals = _table_visuals_with_text_fallbacks(new_table_visuals, new_extraction.pages)
     (
@@ -268,17 +275,25 @@ def compare_extractions(
     new_covered_table_unit_keys = _covered_table_visual_row_keys(new_table_visuals)
     old_covered_table_unit_keys.update(old_reconciled_table_unit_keys)
     new_covered_table_unit_keys.update(new_reconciled_table_unit_keys)
-    formula_changes = _compare_formula_visuals(
-        old_extraction.formula_visuals,
-        new_extraction.formula_visuals,
+    formula_changes = (
+        []
+        if identical_inputs
+        else _compare_formula_visuals(
+            old_extraction.formula_visuals,
+            new_extraction.formula_visuals,
+        )
     )
-    changes = compare_sections(
-        old_sections,
-        new_sections,
-        options,
-        suppressed_old_table_unit_keys=old_covered_table_unit_keys,
-        suppressed_new_table_unit_keys=new_covered_table_unit_keys,
-    )  # 精确重建的原始单元只在其所属版本隐藏，禁止同文字符串跨侧或跨章节误抑制。
+    changes = (
+        []
+        if identical_inputs
+        else compare_sections(
+            old_sections,
+            new_sections,
+            options,
+            suppressed_old_table_unit_keys=old_covered_table_unit_keys,
+            suppressed_new_table_unit_keys=new_covered_table_unit_keys,
+        )
+    )  # 同一快照页窗不存在语义差异；不同输入仍只在各自版本隐藏已证明的表格原文单元。
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
     changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
     if suppressed_noise_count:

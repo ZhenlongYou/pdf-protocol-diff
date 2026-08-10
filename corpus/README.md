@@ -68,6 +68,14 @@ literal 按大小写敏感的技术 token 边界匹配，`10 mV` 不会命中 `1
 报告卡逐格式提供足量 occurrence，不能任选别处凑成命中。summary 只保留 case/event 序号与计数，不复制
 PDF 路径或技术正文。
 
+Gold manifest 还可在顶层声明 `minimum_distinct_families`，并为每个 case 写入非空
+`family`。只有实际执行并产出指标的文档族才计入覆盖数；缺文件的 skip、self-diff 名称数量
+或同一家族的多个版本对不能凑足门槛。默认门槛为 `1`，用于普通准确率回归；凡是要宣称
+“跨标准/跨文档族通用性”，必须显式设为至少 `2`，并至少包含一组非 OIF 的真实 old/new
+人工标注版本对。summary 仅输出 required/executed/complete 数量，不复制 family 名称。
+当前示例 manifest 明确是单一 `oif-serdes` 家族，因此只能证明该家族的 Gold 结果，不能单独
+认证通用性。
+
 受控模式自建临时 corpus，不能同时传入 `--corpus-root`；传入会在参数校验阶段以退出码 2
 拒绝，避免误以为私有文件参与了受控验证。
 

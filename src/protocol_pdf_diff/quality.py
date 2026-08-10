@@ -174,6 +174,21 @@ class DiffProvenance:
     visual_watchdog_audit: VisualWatchdogAudit | None = None
 
 
+def provenance_inputs_are_identical(provenance: DiffProvenance | None) -> bool:
+    """Return whether immutable source bytes and selected page windows match."""
+
+    if provenance is None:
+        return False
+    old_input = provenance.old_input
+    new_input = provenance.new_input
+    return bool(
+        old_input.sha256
+        and old_input.sha256 == new_input.sha256
+        and old_input.selected_start_page == new_input.selected_start_page
+        and old_input.selected_end_page == new_input.selected_end_page
+    )
+
+
 def assess_pair(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,

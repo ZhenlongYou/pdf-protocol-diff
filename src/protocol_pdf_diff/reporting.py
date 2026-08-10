@@ -37,6 +37,7 @@ from .quality import (
     DocumentQualityMetrics,
     PairAssessment,
     ReliabilityState,
+    provenance_inputs_are_identical,
 )
 from .table_codec import decode_table_cell, split_table_cells, split_table_field
 from .text_utils import (
@@ -131,12 +132,12 @@ _READER_PROSE_TAIL_START_RE = re.compile(
     r"|(?:[。！？]\s*)(?=(?:本|该|此|接收机|发射机|其中|此外|对于))"
 )
 _READER_DIAGRAM_LABEL_TOKEN_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:TP\d+[a-z]?|HCB|MCB|CTLE|DFE|CRU|VNA|scope|"
-    r"generator|calibration|terminations?|interfaces?|crosstalk|stressed|signal|"
+    r"(?i)(?<![A-Za-z0-9])(?:scope|generator|calibration|terminations?|interfaces?|"
+    r"crosstalk|stressed|signal|"
     r"sinusoidal|insertion|arrow|reference|block)(?![A-Za-z0-9])"
 )
 _READER_DIAGRAM_LABEL_SINGLE_RE = re.compile(
-    r"(?i)^(?:TP\d+[a-z]?|HCB|MCB|CTLE|DFE|CRU|VNA|scope|reference|terminations?)$"
+    r"(?i)^(?:scope|reference|terminations?)$"
 )
 
 _INLINE_TOKEN_RE = re.compile(
@@ -1756,6 +1757,9 @@ def _formula_change_title(change: FormulaChange) -> str:
 
 def _build_table_changes(result: DiffResult) -> list[TableChange]:
     """Pair visual tables and materialize one reusable list of changed facts."""
+
+    if provenance_inputs_are_identical(result.provenance):
+        return []  # 同一不可变字节快照和页窗不生成结构不确定性复核卡；风险仍由 assessment 说明。
 
     changes: list[TableChange] = []
     for group in _paired_table_visuals(

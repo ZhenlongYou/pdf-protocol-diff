@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 import re
 import tempfile
 import time
 import unittest
-from unittest import mock
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from protocol_pdf_diff import pdf_extract as pdf_extract_module
 from protocol_pdf_diff import reporting as reporting_module
-from protocol_pdf_diff.compare import compare_extractions
 from protocol_pdf_diff.compare import (
     _covered_table_visual_row_keys,
     _last_table_caption_line,
@@ -24,12 +23,13 @@ from protocol_pdf_diff.compare import (
     _table_serialization_candidates,
     _table_visuals_with_cross_page_captions,
     _text_contains_table_reference,
+    compare_extractions,
 )
 from protocol_pdf_diff.models import (
-    DocumentBlock,
-    DocumentBlockKind,
     DiffOptions,
     DiffResult,
+    DocumentBlock,
+    DocumentBlockKind,
     ExtractionResult,
     PageText,
     Section,
@@ -45,12 +45,12 @@ from protocol_pdf_diff.reporting import (
     _generic_boundary_merge_patterns_for_entries,
     _make_table_row_change,
     _ordered_table_row_changes,
-    _render_table_row_change,
-    _render_single_list,
-    _reader_snippet_collapse_kind,
     _reader_change_is_coordinate_proven_table_body_duplicate,
     _reader_section_change,
+    _reader_snippet_collapse_kind,
     _reader_visible_prose_tail,
+    _render_single_list,
+    _render_table_row_change,
     _table_cell_value_display,
     _table_row_changes,
     _table_structured_diff_kind,
@@ -1973,7 +1973,13 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         html = _render_single_list(
             "删除片段",
-            ["MCB", "Reference", "HCB", "Table 31-13.", "TP4a"],
+            [
+                "图示标签：MCB",
+                "图示标签：Reference",
+                "图示标签：HCB",
+                "图示标签：Table 31-13.",
+                "图示标签：TP4a",
+            ],
             "del",
         )
 

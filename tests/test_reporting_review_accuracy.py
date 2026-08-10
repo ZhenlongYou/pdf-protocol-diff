@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
+from protocol_pdf_diff import reporting
 from protocol_pdf_diff.compare import compare_extractions
 from protocol_pdf_diff.models import (
     DiffOptions,
@@ -19,7 +20,6 @@ from protocol_pdf_diff.models import (
     TableRowChange,
     TableVisual,
 )
-from protocol_pdf_diff import reporting
 
 
 class ReportingReviewAccuracyTests(unittest.TestCase):
@@ -168,6 +168,82 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertIn("表格补充证据（变化与复核）", html)
         self.assertIn("表格结构复核", table_csv)
         self.assertIn("需人工复核", table_csv)
+
+    def test_identical_snapshot_window_has_no_table_review_cards(self) -> None:
+        """Identical source bytes cannot contain a semantic table difference."""
+
+        body = "The stable protocol requirement remains unchanged. " * 12
+        rows = [
+            "表格行: T1 | Parameter=A | Value=1 | Units=UI",
+            "表格行: T1 | Parameter=B | Value=2 | Units=dB",
+        ]
+        table = TableVisual(
+            page_number=1,
+            table_number=1,
+            title="Table 1. Stable limits",
+            bbox=(10.0, 10.0, 100.0, 100.0),
+            image_data_uri="",
+            row_texts=rows,
+            grid_summary="grid",
+            content_fully_represented=True,
+            row_alignment_reliable=False,
+        )
+        source_sha256 = "a" * 64
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-copy.pdf"),
+                pages=[PageText(1, f"1 Scope\n{body}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
+                table_visuals=[table],
+                source_sha256=source_sha256,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-copy.pdf"),
+                pages=[PageText(1, f"1 Scope\n{body}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
+                table_visuals=[TableVisual(**table.__dict__)],
+                source_sha256=source_sha256,
+            ),
+            DiffOptions(visual_watchdog=False),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = reporting.write_reports(result, temp_dir, DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual([], payload["changes"])
+        self.assertEqual([], payload["table_changes"])
+        self.assertEqual([], payload["formula_changes"])
+        self.assertIn("<strong>0</strong><span>表格复核项</span>", html)
+        self.assertNotIn("表格行归属", html)
+
+        different_window_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("same-source.pdf"),
+                pages=[PageText(1, f"1 Scope\n{body}")],
+                total_pages=2,
+                selected_start_page=1,
+                selected_end_page=1,
+                table_visuals=[table],
+                source_sha256=source_sha256,
+            ),
+            ExtractionResult(
+                pdf_path=Path("same-source.pdf"),
+                pages=[PageText(2, f"1 Scope\n{body}")],
+                total_pages=2,
+                selected_start_page=2,
+                selected_end_page=2,
+                table_visuals=[TableVisual(**{**table.__dict__, "page_number": 2})],
+                source_sha256=source_sha256,
+            ),
+            DiffOptions(visual_watchdog=False),
+        )
+        self.assertEqual(1, len(reporting._build_table_changes(different_window_result)))
 
     def test_unchanged_lossless_multirow_table_keeps_compact_alignment_review(self) -> None:
         """A reader card must exist before uncertain row text can replace a body wall."""

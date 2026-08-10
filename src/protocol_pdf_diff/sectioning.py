@@ -130,6 +130,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     contents_heading_paths: set[tuple[str, ...]] = set()
     deep_numeric_context: tuple[str, ...] = ()
     procedure_step_numbers: list[int] = []
+    prose_list_step_numbers: list[int] = []
     saw_heading = False
     opening_label = _opening_section_label(extraction)
 
@@ -170,6 +171,15 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 heading = _contextualize_heading(heading, heading_stack)
             if heading and _is_opening_range_body_integer(heading, saw_heading, opening_label):
                 heading = None
+            # 普通章节下也可能出现完整的 1..N 叙述句列表。只有从 1 开始、连续递增且
+            # 句子形态明确时才留在正文；不依赖 PCIe/OIF 等领域词，也不吞单独的整数标题。
+            if heading and _is_sequential_numbered_prose_item(
+                heading,
+                heading_stack,
+                tuple(prose_list_step_numbers),
+            ):
+                prose_list_step_numbers.append(int(heading.number))
+                heading = None
             # 已有父章节时，动词/shall 开头的整数编号更像条款列表，不应拆成新章节。
             if heading and _is_integer_list_item_under_context(
                 heading,
@@ -187,6 +197,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             if heading:
                 saw_heading = True
                 procedure_step_numbers.clear()  # 新章节结束上一个 Procedure 的局部步骤序列。
+                prose_list_step_numbers.clear()  # 真章节也结束普通叙述句的局部编号链。
                 if current:
                     sections.append(_close_section(current, len(sections) + 1))
                 heading_stack = _updated_stack(heading_stack, heading)
@@ -1278,6 +1289,50 @@ def _is_integer_list_item_under_context(
         return False
     # 动词或 shall 开头的标题通常是要求/步骤正文，而不是“第 6 章”。
     return _looks_like_procedure_step_title(heading.title)
+
+
+def _is_sequential_numbered_prose_item(
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+    prose_step_numbers: tuple[int, ...] = (),
+) -> bool:
+    """Keep a structurally proven 1..N prose list inside its numbered parent.
+
+    This is intentionally domain-neutral.  A single sentence-like integer line
+    is still allowed to be a real heading; suppression starts only at item 1
+    below an existing numbered section and continues only for an exact sequence.
+    """
+
+    if not heading_stack or not heading.number.isdigit() or "." in heading.number:
+        return False
+    if not any(item.number for item in heading_stack):
+        return False  # 无编号父层时，候选更可能是文档真正的第一章。
+    number = int(heading.number)
+    if prose_step_numbers:
+        return (
+            prose_step_numbers[0] == 1
+            and number == prose_step_numbers[-1] + 1
+            and _looks_like_numbered_prose_sentence(heading.title, chain_started=True)
+        )
+    return number == 1 and _looks_like_numbered_prose_sentence(
+        heading.title,
+        chain_started=False,
+    )
+
+
+def _looks_like_numbered_prose_sentence(title: str, *, chain_started: bool) -> bool:
+    """Recognize sentence structure without technical-domain vocabulary."""
+
+    normalized = normalize_line(title)
+    if not normalized:
+        return False
+    sentence_end = bool(re.search(r"[.!?;。！？；]$", normalized))
+    internal_clause = bool(re.search(r"[.!?;:。！？；：]", normalized))
+    if chain_started:
+        return sentence_end or (len(normalized) >= 35 and internal_clause)
+    return (sentence_end and len(normalized) >= 10) or (
+        len(normalized) >= 45 and internal_clause
+    )
 
 
 def _is_next_top_level_integer_heading(

@@ -111,9 +111,11 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
             )
             manifest = {
                 "schema_version": 1,
+                "minimum_distinct_families": 2,
                 "cases": [
                     {
                         "id": "controlled-value",
+                        "family": "numbered-protocol",
                         "required": True,
                         "old": {"path": "old_semantic.pdf"},
                         "new": {"path": "new_semantic.pdf"},
@@ -132,6 +134,7 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
                     },
                     {
                         "id": "controlled-visual",
+                        "family": "technical-diagram",
                         "required": True,
                         "old": {"path": "old_visual.pdf"},
                         "new": {"path": "new_visual.pdf"},
@@ -158,11 +161,75 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
             summary = run_gold_accuracy_evaluation(manifest_path, corpus_root=root)
 
         self.assertEqual("pass", summary["status"])
+        self.assertEqual(
+            {"required": 2, "executed": 2, "complete": True},
+            summary["family_coverage"],
+        )
         self.assertEqual(1.0, summary["metrics"]["recall"])
         self.assertEqual(1.0, summary["metrics"]["critical_recall"])
         self.assertEqual(1.0, summary["metrics"]["visual_recall"])
         self.assertEqual(1.0, summary["metrics"]["precision"])
         self.assertEqual(0, summary["metrics"]["false_negative_count"])
+
+    def test_gold_generality_gate_rejects_two_cases_from_one_document_family(self) -> None:
+        """Multiple versions from one family cannot certify cross-family accuracy."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for index, (old_value, new_value) in enumerate(((10, 12), (20, 22)), start=1):
+                write_multipage_text_pdf(
+                    root / f"old_{index}.pdf",
+                    [["1 Limits", f"The calibrated limit shall be {old_value} mV."]],
+                )
+                write_multipage_text_pdf(
+                    root / f"new_{index}.pdf",
+                    [["1 Limits", f"The calibrated limit shall be {new_value} mV."]],
+                )
+            manifest = {
+                "schema_version": 1,
+                "minimum_distinct_families": 2,
+                "cases": [
+                    {
+                        "id": f"same-family-{index}",
+                        "family": (
+                            "serial-link-specification"
+                            if index == 1
+                            else "  Serial-Link-Specification  "
+                        ),
+                        "required": True,
+                        "old": {"path": f"old_{index}.pdf"},
+                        "new": {"path": f"new_{index}.pdf"},
+                        "oracle_complete": False,
+                        "visual_coverage_required": False,
+                        "expected_events": [
+                            {
+                                "id": f"limit-{index}",
+                                "kind": "text",
+                                "old": f"{old_value} mV",
+                                "new": f"{new_value} mV",
+                                "critical": True,
+                                "reader_visible": True,
+                            }
+                        ],
+                    }
+                    for index, (old_value, new_value) in enumerate(
+                        ((10, 12), (20, 22)),
+                        start=1,
+                    )
+                ],
+            }
+            manifest_path = root / "gold.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            summary = run_gold_accuracy_evaluation(manifest_path, corpus_root=root)
+
+        self.assertEqual("fail", summary["status"])
+        self.assertEqual(
+            {"required": 2, "executed": 1, "complete": False},
+            summary["family_coverage"],
+        )
+        self.assertEqual(2, summary["counts"]["pass"])
+        self.assertEqual(1, summary["counts"]["fail"])
 
     def test_missing_critical_gold_event_fails_instead_of_reporting_a_false_green(self) -> None:
         """A wrong expected new unit/value must produce an explicit false negative."""
