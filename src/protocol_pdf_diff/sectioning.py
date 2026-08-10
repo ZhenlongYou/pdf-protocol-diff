@@ -165,6 +165,16 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            next_physical_line = (
+                normalize_line(page_lines[line_index + 1])
+                if line_index + 1 < len(page_lines)
+                else ""
+            )
+            if heading and _standalone_named_container_starts_wrapped_sentence(
+                heading,
+                next_physical_line,
+            ):
+                heading = None  # 容器 ID 是跨行句子的主语，不得把后续真章节错误嵌到假容器下。
             prose_body_candidate = (
                 _numbered_prose_body_candidate(heading_candidate)
                 if heading is None
@@ -1105,30 +1115,35 @@ def _looks_like_named_container_reference_sentence(
     )
     english_reference_predicate = bool(
         re.match(
-            r"(?i)^(?:remains?|appl(?:y|ies)|describes?|defines?|contains?|"
-            r"provides?|specifies?|establishes?|states?|lists?|summarizes?|explains?|"
-            r"covers?|includes?|requires?|refers?)\b",
+            r"(?i)^(?:remains?\s+\S|appl(?:y|ies)\s+to\b|refers?\s+to\b|"
+            r"sets?\s+out\b)",
+            title,
+        )
+        or re.match(
+            r"(?i)^(?:states?|lists?)\s+(?:the|a|an|this|that|these|those|"
+            r"all|each|no|one|two|three|\d+)\b",
+            title,
+        )
+        or re.match(
+            r"(?i)^(?:describes?|defines?|contains?|provides?|specifies?|"
+            r"establishes?|summarizes?|explains?|covers?|includes?|requires?|"
+            r"presents?|details?)"
+            r"\s+(?!(?:and|or|of)\b)\S",
             title,
         )
         or re.match(r"(?i)^of\s+(?:this|the)\s+document\b", title)
-    )  # 大小写被全大写版式抹平时，仅闭合的文档谓语/引用短语能证明句子。
+    )  # 还须证明宾语/补语；States and Transitions、Lists of Tables 等仍是标题。
     chinese_plain = title.rstrip("。！？").strip()
     chinese_sentence = bool(
         re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", chinese_plain)
         or re.match(
             r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|"
-            r"展示|介绍)(?:了|着|过).+",
+            r"展示|介绍)(?![与和及或的]).+",
             chinese_plain,
         )
-        or (
-            bool(re.search(r"[。！？]\s*$", title))
-            and bool(
-                re.match(
-                    r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|"
-                    r"总结|解释|展示|介绍).+",
-                    chinese_plain,
-                )
-            )
+        or re.match(
+            r"^(?:中|内)(?:明确)?(?:规定|定义|描述|说明|列出|给出|提供).+",
+            chinese_plain,
         )
         or bool(
             re.match(
@@ -1142,6 +1157,26 @@ def _looks_like_named_container_reference_sentence(
         english_auxiliary
         or english_reference_predicate
         or chinese_sentence
+    )
+
+
+def _standalone_named_container_starts_wrapped_sentence(
+    heading: HeadingInfo,
+    next_line: str,
+) -> bool:
+    """Recognize ``Appendix A\nremains ...`` without crossing a paragraph."""
+
+    if heading.title or not next_line:
+        return False
+    if not re.fullmatch(
+        r"(?i)(?:(?:part|annex|appendix)\s+[A-Z0-9IVXLC]+|附录\s*[A-Z0-9一二三四五六七八九十]+)",
+        heading.number,
+    ):
+        return False
+    return _looks_like_named_container_reference_sentence(
+        f"{heading.number} {next_line}",
+        heading.number,
+        next_line,
     )
 
 

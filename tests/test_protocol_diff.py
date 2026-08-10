@@ -10759,6 +10759,9 @@ class ProtocolDiffTests(unittest.TestCase):
         for line in (
             "Appendix A describes the calibration method.",
             "Appendix A describes the calibration",
+            "Appendix A presents the calibration method",
+            "Appendix B details the receiver limits",
+            "Appendix C sets out the calibration procedure",
             "Appendix A shall define the calibration method.",
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Annex B contains normative requirements.",
@@ -10774,12 +10777,14 @@ class ProtocolDiffTests(unittest.TestCase):
             "PART II APPLIES TO RECEIVERS.",
             "APPENDIX A OF THIS DOCUMENT.",
             "附录 A 描述了校准方法。",
+            "附录 A 描述校准方法",
             "附录 A 描述了校准",
             "附录 B 用于说明校准流程。",
             "附录 B 应当规定接收机限值。",
             "附录 C 仍然适用于旧设备。",
             "附录 D 中的要求适用于旧设备。",
             "附录 B 中的要求适用",
+            "附录 B 中规定接收机限值",
         ):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
@@ -10857,6 +10862,73 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("Appendix A describes the calibration", sections[0].body)
 
+    def test_standalone_container_identifier_and_wrapped_predicate_stay_prose(
+        self,
+    ) -> None:
+        """A container subject split immediately after its ID is still one sentence."""
+
+        for identifier, continuation in (
+            ("Appendix A", "remains normative for receiver testing."),
+            ("APPENDIX A", "OF THIS DOCUMENT."),
+            ("附录 B", "中规定接收机限值。"),
+        ):
+            with self.subTest(identifier=identifier, continuation=continuation):
+                extraction = ExtractionResult(
+                    pdf_path=Path("wrapped-container-id-reference.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"{identifier}\n"
+                                f"{continuation}\n"
+                                "2 Verification\n"
+                                "Evidence remains visible."
+                            ),
+                        )
+                    ],
+                )
+
+                sections = section_document(extraction)
+
+                self.assertEqual(
+                    ["1 Scope", "2 Verification"],
+                    [section.location for section in sections],
+                )
+                self.assertIn(identifier, sections[0].body)
+                self.assertIn(continuation, sections[0].body)
+
+    def test_standalone_container_identifier_before_noun_title_remains_structural(
+        self,
+    ) -> None:
+        """The wrapped-line guard must not demote a real container plus noun title."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("wrapped-container-id-title.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Appendix A\n"
+                        "States and Transitions\n"
+                        "The transition tolerance is 0.025 UI.\n"
+                        "1 State definitions\n"
+                        "The state threshold is 34.0 dB."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["1 Scope", "Appendix A", "Appendix A / 1 State definitions"],
+            [section.location for section in sections],
+        )
+        self.assertIn("States and Transitions", sections[1].body)
+        self.assertIn("0.025 UI", sections[1].body)
+
     def test_part_and_appendix_titles_accept_compact_unicode_dashes(self) -> None:
         """En/em dashes are valid title separators even without surrounding spaces."""
 
@@ -10867,6 +10939,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix E Receiver Calibration Reference Requirements.",
             "Annex A normative references",
             "Appendix A calibration data",
+            "Appendix A States and Transitions",
+            "Annex B Lists of Tables",
+            "Appendix C Covers and Enclosures",
+            "Appendix E Provides and Services",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
@@ -10874,6 +10950,39 @@ class ProtocolDiffTests(unittest.TestCase):
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
+
+    def test_english_named_container_noun_titles_keep_their_technical_bodies(self) -> None:
+        """A noun title beginning with a verb-shaped word still owns its body."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("english-annex-noun-titles.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 General requirements\n"
+                        "The receiver requirements apply.\n"
+                        "Appendix A States and Transitions\n"
+                        "The transition tolerance is 0.025 UI.\n"
+                        "1 State definitions\n"
+                        "The state threshold is 34.0 dB."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            [
+                "1 General requirements",
+                "Appendix A States and Transitions",
+                "Appendix A States and Transitions / 1 State definitions",
+            ],
+            [section.location for section in sections],
+        )
+        self.assertIn("0.025 UI", sections[1].body)
+        self.assertIn("34.0 dB", sections[2].body)
 
     def test_chinese_appendix_heading_ends_a_wrapped_numbered_list(self) -> None:
         """A Chinese appendix is a structural boundary, not list-item body."""
