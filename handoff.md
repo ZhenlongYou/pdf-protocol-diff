@@ -6,12 +6,12 @@
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `86e1a26e6cc7c20abf7905fbddd3935ce6e41165`
-- implementation_commit: `9e98fd642f5f1f2ce6c14a935398f843486b99da`
+- implementation_commit: `ce9bfc802f99064127234f305370697c3f2c5a00`
 - status: `validated_pending_commit_bound_review`
-- oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=9e98fd642f5f1f2ce6c14a935398f843486b99da .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v14`
-- non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=9e98fd642f5f1f2ce6c14a935398f843486b99da .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v18`
-- accepted_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v14/protocol_diff_20260811_062526/protocol_diff_report.html`
-- accepted_non_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v18/protocol_diff_20260811_062527/protocol_diff_report.html`
+- oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=ce9bfc802f99064127234f305370697c3f2c5a00 .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v15`
+- non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=ce9bfc802f99064127234f305370697c3f2c5a00 .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v19`
+- accepted_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v15/protocol_diff_20260811_064941/protocol_diff_report.html`
+- accepted_non_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v19/protocol_diff_20260811_064942/protocol_diff_report.html`
 
 ## Rollback Baselines
 
@@ -26,7 +26,7 @@
 - 同一 SHA-256 字节快照且选择页窗相同，正文、表格和公式语义变化固定为空；解析器自身不稳定不能给同一文件制造变化卡。抽取与视觉覆盖风险仍由 assessment/provenance 保留，不能冒充可靠解析。
 - 读者层不再凭词形把 `MCB`、`HCB`、`TP4a`、`scope`、`reference`、`Generator Calibration` 等短技术文本猜成图示噪声；在取得真实图形区域归属证据前，这类标签保持可见。
 - 普通编号章节下的完整叙述句列表以“已有编号父章节、严格连续、句子形态明确、相邻后项证明”作为结构证据；前瞻按内容连续性跨页扫描到下一结构边界（最多 256 个非空片段），不再写死两页。显式数量引导只对紧邻数量、至多含两个修饰词的 `items/steps/observations/requirements` 等通用可枚举名词短语授权；跨行引导按未闭合句回溯并限制在 320 字符，而非固定行数。`chapters define requirements`、`cycles before/of tests`、普通正文、章内表格或下一真实章节均失败可见。规则不使用 OIF、PCIe 或厂商关键词。
-- Part/Annex/Appendix/附录支持紧邻的 en/em dash 标题，后续数字章节保持在该容器下；明确分隔符和 Title Case 名词短语提供标题正向证据，空格连接且以小写谓语起始的英文、modal/auxiliary 句、全大写长句或带完成句粒子的中文均保留为正文，即使 PDF 软换行暂时移除了句末标点；`附录 A 说明` 等短名词标题仍保留。该门禁依赖结构语法，而非开放式领域动词表。
+- Part/Annex/Appendix/附录支持紧邻的 en/em dash 标题，后续数字章节保持在该容器下；明确分隔符、Title Case 和 sentence-case 名词短语均提供标题正向证据。空格连接时，只有闭合的 modal/auxiliary、文档谓语、引用短语或中文谓语结构能证明正文句，即使 PDF 软换行暂时移除了句末标点；短全大写引用句也走同一语法门。`Annex A normative references`、`附录 A 接收机的校准方法`、`附录 B 过渡响应`、`附录 A 说明` 均保留为标题。单个中文 `的/了/着/过` 不能作为句法证明，避免吞掉技术名词。该门禁依赖通用结构语法，而非出版方词表。
 - 位于顶部窄区域且在绝大多数选定页重复的运行页眉从正文流分离，但原文按页作为独立比较单元保留；尾页只可忽略每个都已在至少两个共同页精确重复证明的页眉值，即使尾页只保留稳定值的子集。尾页新出现 `BETA`、共享页 `ALPHA→BETA`、`ALPHA→alpha` 或跨页分布变化仍会进入五种报告输出。
 - 带框 `Note:` 说明块只有在所有非空行稳定落在同一物理列时才退出表格路径；Figure 内小线框需要明确图题、短标签区和无正文句三项坐标证据。PCIe Note 框不再产生 11 张伪表卡，OIF 的 MCB/HCB/Reference 图示小框也不再冒充表格；Figure 与候选网格之间如有更近的明确 Table 表题，真实小表失败可见。Figure/Table caption 必须从行首开始，数字正文与 `A-2`、`AA.2` 等字母附录均支持；几何层小写 `a-2` 可识别，但裸 `for`、`See/Refer to Table A-1` 不能冒充编号或表题。页面级真实抽取前置门已复用同一表题语法，公开 `extract_pdf_text` 入口证明带网格的 `Table A-1`/`Table AA.2` 会进入结构化表格证据。
 - Gold Accuracy 新增 `minimum_distinct_families` 和 case `family`；只计算实际产出指标且两侧源 SHA 不同的版本对，同一 old/new 字节对重复申报不同 family 只计一次，family 先规整内部空白与大小写。family 名仍是经审阅 manifest 的受信声明，不自动证明出版方身份。
@@ -42,14 +42,14 @@
 
 ## Acceptance Evidence
 
-- 全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v`，`921` 项通过、`0` 失败，耗时 `328.961s`。
+- 全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`，`923` 项通过、`0` 失败，耗时 `328.464s`。
 - 目标 RED/GREEN：同一快照伪表卡、SerDes 缩写隐藏、同家族伪覆盖、通用编号叙述链均先证明旧实现失败，再由公开入口回归变绿。
 - 受控解析基准：`5 PASS / 0 FAIL / 0 SKIP`。
 - 混合 Corpus：最终代码重跑为 `8 PASS / 0 FAIL / 1 SKIP`；三组 OIF 真实版本、PCIe PHY 真实版本、JLT 论文、表单、幻灯片和 OIF 自比均通过。PCIe PHY 页窗为 `2` 个正文变化、`0` 个表格变化并因非对齐页窗诚实降级；唯一 skip 是未提供的可选扫描 PDF。运行后用于集合样本的临时 PDF 副本已删除，只保留 summary 和最终报告。
 - Gold 示例：`1 PASS / 0 FAIL / 0 SKIP`，family coverage `required=1/executed=1/complete=true`；2/2 事件命中，recall 与 critical recall 均为 `1.0`。它仍只认证单一 OIF 家族。
-- 最终 OIF 532：`35` 张原始正文审计卡、`12` 张原始表格审计卡、`7` 项公式证据、`0` 张视觉变化卡；视觉覆盖为 eligible/checked/failed/ambiguous=`1/0/1/18`，保持 incomplete 并阻止 all-clear。v14 的 HTML/Markdown/TXT 隐藏截图中的 Table/Section 纯引用原句，JSON 保留 `18` 个原始命中，`33.5 dB`、`53.125 GHz`、`CMIT-LT/CMIS-LT` 均三面可见，MCB/HCB 表题误检为 `0`；固定页眉不因 36/35 页数差制造新卡。报告 provenance.build_commit 精确绑定 `9e98fd642f5f1f2ce6c14a935398f843486b99da`；HTML/JSON SHA-256 分别为 `e890a7c6f25cedd396faef7f25546518658861305b0f28ff4666189ebc73d2ab` / `814dd6bea241911769219154d3259622d1814d8c0e97bf81b0aa0c43edc6085f`。
-- 非 OIF PCIe 技术报告：旧 `62` 页、新 `65` 页，JSON 为 `30` 个原始正文变化、`58` 个表格变化/复核组、`0` 个公式、`0` 张视觉变化卡。`4..9` 数据路径、`1..3` 总结句、`2. Link Equalization` 与 `202、234…` 均不成为假章节，只在所属正文卡中保留真实编号/内容变化。报告仍因多栏、表格归属和视觉覆盖不足明确为 degraded，没有假装全量可靠；provenance.build_commit 同样绑定 `9e98fd642f5f1f2ce6c14a935398f843486b99da`，HTML/JSON SHA-256 为 `3cab2db73850b331d58edfcb77979dd45837d2ca80ef77225929c82ae01a33ad` / `f8309d43d15a14201cfd5e1a2ba62a596f42a848abe42552ed29136fcdff61b8`。
-- 先前同一渲染器的 v3 HTML 已在应用内浏览器实测首屏表格前置、OIF h2 顺序为表格/公式/正文且 PCIe 人工复核提示可见。v14/v18 再核对 HTML h2、Markdown 章节顺序、三种读者文字和 JSON；OIF Markdown 顺序为第 35/152/197 行。应用内浏览器安全策略拒绝直接打开新的本地 `file://`，未绕过该限制，也不把静态检查冒充新的视觉验收。
+- 最终 OIF 532：`35` 张原始正文审计卡、`12` 张原始表格审计卡、`7` 项公式证据、`0` 张视觉变化卡；视觉覆盖为 eligible/checked/failed/ambiguous=`1/0/1/18`，保持 incomplete 并阻止 all-clear。v15 的 HTML/Markdown/TXT 隐藏截图中的 Table/Section 纯引用原句，JSON 保留 `18` 个原始命中，`33.5 dB`、`53.125 GHz`、`CMIT-LT/CMIS-LT` 均三面可见，MCB/HCB 表题误检为 `0`；固定页眉不因 36/35 页数差制造新卡。报告 provenance.build_commit 精确绑定 `ce9bfc802f99064127234f305370697c3f2c5a00`；HTML/JSON SHA-256 分别为 `e8afd79156dc71abb760cec740a565f8ee5aad8ac42ab5b786906c9d0ba6e636` / `c28c681639bebe569db9a82d6a191706f190d853e1ae411b411bec9789920ba2`。
+- 非 OIF PCIe 技术报告：旧 `62` 页、新 `65` 页，JSON 为 `30` 个原始正文变化、`58` 个表格变化/复核组、`0` 个公式、`0` 张视觉变化卡。`4..9` 数据路径、`1..3` 总结句、`2. Link Equalization` 与 `202、234…` 均不成为假章节，只在所属正文卡中保留真实编号/内容变化。报告仍因多栏、表格归属和视觉覆盖不足明确为 degraded，没有假装全量可靠；provenance.build_commit 同样绑定 `ce9bfc802f99064127234f305370697c3f2c5a00`，HTML/JSON SHA-256 为 `d590946f418d56b9df05f3c9672aed0865d3aadd40c87dc4b335d9d9d1cc0767` / `eacb66e1a60f53e591f0f90a52da6ad08006895da79feba6416e9a7e932a4a8d`。
+- 先前同一渲染器的 v3 HTML 已在应用内浏览器实测首屏表格前置、OIF h2 顺序为表格/公式/正文且 PCIe 人工复核提示可见。v15/v19 再核对 HTML h2、Markdown 章节顺序、三种读者文字和 JSON；OIF Markdown 顺序为第 35/152/197 行。应用内浏览器安全策略拒绝直接打开新的本地 `file://`，未绕过该限制，也不把静态检查冒充新的视觉验收。
 - `.venv/bin/python gui_app.py --smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`；本轮核心 Python 文件 Ruff `F/E9/I`、全源码 `compileall`、`git diff --check` 均通过。全仓 import 排序仍有既有格式债务，不作为本轮功能门禁。
 
 ## Remaining Evidence Boundary
@@ -63,11 +63,11 @@
 
 ## User-Facing Artifacts
 
-- OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v14/protocol_diff_20260811_062526/protocol_diff_report.html`
-- 非 OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v18/protocol_diff_20260811_062527/protocol_diff_report.html`
-- Gold summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/gold_accuracy_final_v8.json`
-- 受控解析 summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/controlled_parsing_benchmark_final_v8.json`
-- 混合 Corpus summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/corpus_summary_final_v8.json`
+- OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v15/protocol_diff_20260811_064941/protocol_diff_report.html`
+- 非 OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v19/protocol_diff_20260811_064942/protocol_diff_report.html`
+- Gold summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/gold_accuracy_final_v9.json`
+- 受控解析 summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/controlled_parsing_benchmark_final_v9.json`
+- 混合 Corpus summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/corpus_summary_final_v9.json`
 
 ## Delivery Policy
 
