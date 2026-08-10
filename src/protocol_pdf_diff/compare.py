@@ -339,14 +339,13 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
     """Build one auditable comparison unit from coordinate-proven headers."""
 
     observed: list[tuple[int, str]] = []
-    seen: set[str] = set()
+    seen_exact: set[str] = set()
     for page in extraction.pages:
         for value in page.running_header_texts:
             compact = compact_inline(value)
-            key = compact.casefold()
-            if not compact or key in seen:
+            if not compact or compact in seen_exact:
                 continue
-            seen.add(key)
+            seen_exact.add(compact)
             observed.append((page.page_number, compact))
     if not observed:
         return None

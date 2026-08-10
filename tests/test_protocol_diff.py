@@ -2183,6 +2183,24 @@ class ProtocolDiffTests(unittest.TestCase):
                 title="Table 4-1. Receiver limits",
             )
         )
+        table_after_figure = [
+            word("Figure 4-2. Receiver test setup", 20.0),
+            word("Table 4-1. Receiver limits", 80.0),
+            word("Parameter", 110.0),
+            word("Minimum", 130.0),
+            word("Maximum", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                [
+                    "表格行: T1 | Parameter=Mode A | Minimum=10 mV | Maximum=20 mV",
+                    "表格行: T1 | Parameter=Mode B | Minimum=12 mV | Maximum=24 mV",
+                ],
+                table_after_figure,
+                title="",
+            )
+        )
 
     def test_repeated_standalone_number_keeps_both_observed_titles(self) -> None:
         """Text shape alone cannot prove that a repeated number is page furniture."""
@@ -9074,6 +9092,56 @@ class ProtocolDiffTests(unittest.TestCase):
                     self.assertIn("ALPHA", rendered)
                     self.assertIn("BETA", rendered)
 
+    def test_running_header_identifier_case_change_preserves_each_observed_form(self) -> None:
+        """Header grouping may ignore case, but comparison must preserve exact IDs."""
+
+        pages = [
+            [
+                f"{index} Requirement {index}",
+                *[
+                    f"The calibrated receiver requirement {index}.{line} shall preserve "
+                    "voltage timing interoperability behavior for every operating mode."
+                    for line in range(1, 7)
+                ],
+            ]
+            for index in range(1, 9)
+        ]
+        old_headers = {
+            index: ["Consortium Protocol ID ALPHA"]
+            for index in range(1, 9)
+        }
+        new_headers = {
+            index: ["Consortium Protocol ID ALPHA" if index == 1 else "Consortium Protocol ID alpha"]
+            for index in range(1, 9)
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                temp_path / "old_header_case.pdf",
+                pages,
+                header_lines=old_headers,
+            )
+            new_pdf = write_multipage_text_pdf(
+                temp_path / "new_header_case.pdf",
+                pages,
+                header_lines=new_headers,
+            )
+
+            result = run_diff(old_pdf, new_pdf, DiffOptions())
+            outputs = write_reports(result, temp_path / "report", DiffOptions())
+
+            self.assertTrue(
+                any(
+                    change.report_location == "运行页眉（坐标证据）"
+                    for change in result.changes
+                )
+            )
+            for surface in ("html", "markdown", "text", "json", "csv"):
+                rendered = outputs[surface].read_text(encoding="utf-8")
+                with self.subTest(surface=surface):
+                    self.assertIn("ALPHA", rendered)
+                    self.assertIn("alpha", rendered)
+
     def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
         """Per-page technical titles cannot borrow the repeated-header deletion rule."""
 
@@ -9737,6 +9805,77 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("2. The processing layer validates the message", sections[0].body)
         self.assertIn("3. The receiver returns a response", sections[0].body)
 
+    def test_body_only_first_item_can_seed_a_numbered_prose_chain(self) -> None:
+        """A technical ratio in item 1 must not make item 2 a fake chapter."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("technical-numbered-prose-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "17 Encoding and adaptation\n"
+                        "The revision introduces two different improvements:\n"
+                        "1. 128b/130b 解决编码效率问题，把编码开销从 20% 降到约 1.5%。"
+                    ),
+                ),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "2. Link equalization adapts the transmitter and receiver to the channel.\n"
+                        "These improvements solve different engineering constraints.\n"
+                        "18 Verification\n"
+                        "The verification chapter defines the test evidence."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["17 Encoding and adaptation", "18 Verification"],
+            [section.location for section in sections],
+        )
+        self.assertIn("1. 128b/130b 解决编码效率问题", sections[0].body)
+        self.assertIn("2. Link equalization adapts", sections[0].body)
+
+    def test_serialized_table_evidence_does_not_break_a_cross_page_prose_list(self) -> None:
+        """Out-of-order table evidence cannot turn adjacent list items into chapters."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("table-evidence-after-numbered-item.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "17 Encoding and adaptation\n"
+                        "The revision introduces two different improvements:\n"
+                        "1. Encoding efficiency reduces the transport overhead.\n"
+                        "表格行: T1 | Dimension=Encoding | Value=128b/130b"
+                    ),
+                ),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "2. Link equalization adapts the transmitter and receiver to the channel.\n"
+                        "These improvements solve different engineering constraints.\n"
+                        "18 Verification\n"
+                        "The verification chapter defines the test evidence."
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["17 Encoding and adaptation", "18 Verification"],
+            [section.location for section in sections],
+        )
+        self.assertIn("1. Encoding efficiency", sections[0].body)
+        self.assertIn("2. Link equalization adapts", sections[0].body)
+
     def test_ordinary_body_paragraph_ends_numbered_prose_chain(self) -> None:
         """A distant sentence-like integer heading must not inherit an earlier list item."""
 
@@ -9825,6 +9964,145 @@ class ProtocolDiffTests(unittest.TestCase):
         for number in range(4, 8):
             self.assertIn(f"{number}.", sections[0].body)
 
+    def test_real_next_chapter_ends_a_mid_list_chain(self) -> None:
+        """A proven list cannot swallow a real next chapter with its own body."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("mid-list-before-real-next-chapter.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Data flow\n"
+                        "4. The link layer records the message identifier before forwarding.\n"
+                        "5. The physical layer encodes the payload and sends it to the peer.\n"
+                        "6. The peer validates the payload and returns an acknowledgement.\n"
+                        "7. Link equalization requirements for PCI Express devices.\n"
+                        "The equalization chapter defines independent device requirements."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            [
+                "6 Data flow",
+                "7. Link equalization requirements for PCI Express devices.",
+            ],
+            [section.location for section in sections],
+        )
+        self.assertIn("6. The peer validates", sections[0].body)
+
+    def test_mid_list_chain_can_be_proven_across_one_page_boundary(self) -> None:
+        """A page break between consecutive items does not create fake chapters."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("cross-page-mid-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Data flow\n"
+                        "The preceding page contains the first three numbered steps.\n"
+                        "4. The link layer records the message identifier before forwarding."
+                    ),
+                ),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "5. The physical layer encodes the payload and sends it to the peer.\n"
+                        "6. The peer validates the payload and returns an acknowledgement.\n"
+                        "7 Transaction rules\n"
+                        "The transaction chapter defines independent request handling."
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["6 Data flow", "7 Transaction rules"],
+            [section.location for section in sections],
+        )
+        for number in range(4, 7):
+            self.assertIn(f"{number}.", sections[0].body)
+
+    def test_numbered_prose_chain_final_item_stays_in_body_at_eof(self) -> None:
+        """The last item inherits a proven chain when the document ends there."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("numbered-prose-chain-at-eof.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The processing layer validates the message before forwarding it.\n"
+                        "3. The receiver returns a response to the original requester."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["1 Overview"], [section.location for section in sections])
+        self.assertIn("3. The receiver returns", sections[0].body)
+
+    def test_numbered_prose_chain_final_item_stays_in_body_before_summary(self) -> None:
+        """A normal summary paragraph after a proven nonchapter item ends the chain."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("numbered-prose-chain-before-summary.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The processing layer validates the message before forwarding it.\n"
+                        "3. The receiver returns a response to the original requester.\n"
+                        "This summary closes the complete request sequence."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["1 Overview"], [section.location for section in sections])
+        self.assertIn("This summary closes", sections[0].body)
+
+    def test_nonconsecutive_real_chapter_with_sentence_title_remains_visible(self) -> None:
+        """A legal chapter-number gap is structural when no local list chain follows."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("nonconsecutive-real-chapter.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "17 Overview\n"
+                        "The overview chapter preserves the current operating model.\n"
+                        "19. Receiver requirements are mandatory for independent devices.\n"
+                        "The receiver chapter defines the independent device behavior."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "17 Overview",
+                "19. Receiver requirements are mandatory for independent devices.",
+            ],
+            [section.location for section in section_document(extraction)],
+        )
+
     def test_long_wrapped_mid_list_item_can_start_without_terminal_punctuation(self) -> None:
         """A long out-of-sequence item can begin a list before its wrapped tail."""
 
@@ -9877,8 +10155,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(["24 Summary"], [section.location for section in sections])
         self.assertIn("202、234、383-387 等片段", sections[0].body)
 
-    def test_out_of_sequence_single_sentence_does_not_replace_active_chapter(self) -> None:
-        """One numbered explanatory sentence can be body text even without item 1."""
+    def test_out_of_sequence_single_sentence_remains_a_visible_section(self) -> None:
+        """One isolated integer sentence lacks enough evidence to become a prose list."""
 
         extraction = ExtractionResult(
             pdf_path=Path("single-mid-list-sentence.pdf"),
@@ -9898,10 +10176,65 @@ class ProtocolDiffTests(unittest.TestCase):
         sections = section_document(extraction)
 
         self.assertEqual(
-            ["17 Signaling evolution", "18 Receiver validation"],
+            [
+                "17 Signaling evolution",
+                "2. Link equalization selects compensation for the active channel.",
+                "18 Receiver validation",
+            ],
             [section.location for section in sections],
         )
-        self.assertIn("2. Link equalization", sections[0].body)
+
+    def test_skipped_chapter_number_is_not_reclassified_as_a_prose_list(self) -> None:
+        """A reserved chapter gap does not prove that the later chapter is a list item."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("reserved-chapter-gap.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Current requirements\n"
+                        "The current chapter preserves the active requirements.\n"
+                        "8. Security architecture and operational requirements.\n"
+                        "The security chapter defines a separate architecture."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "6 Current requirements",
+                "8. Security architecture and operational requirements.",
+            ],
+            [section.location for section in section_document(extraction)],
+        )
+
+    def test_new_numbering_part_restart_is_not_reclassified_as_a_prose_list(self) -> None:
+        """An isolated chapter 1 restart remains structural without a local list chain."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("new-part-numbering-restart.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Existing requirements\n"
+                        "The previous part ends with the existing requirements.\n"
+                        "1. Deployment architecture and operational requirements.\n"
+                        "The new part introduces a separate deployment architecture."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "6 Existing requirements",
+                "1. Deployment architecture and operational requirements.",
+            ],
+            [section.location for section in section_document(extraction)],
+        )
 
     def test_integer_requirement_bullets_stay_under_numbered_parent(self) -> None:
         """OIF requirement bullets must not replace the active clause hierarchy."""

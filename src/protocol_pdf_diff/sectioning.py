@@ -135,10 +135,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     saw_heading = False
     opening_label = _opening_section_label(extraction)
 
-    for page in cleaned_pages:
+    for page_index, page in enumerate(cleaned_pages):
         if _is_contents_page(page.text):
             inside_contents = True
-        for raw_line in page.text.splitlines():
+        page_lines = page.text.splitlines()
+        for line_index, raw_line in enumerate(page_lines):
             line = normalize_line(raw_line)
             if not line:
                 continue
@@ -147,6 +148,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            prose_body_candidate = (
+                _numbered_prose_body_candidate(heading_candidate)
+                if heading is None
+                else None
+            )  # 技术比值等可能触发表格保护而不成为标题，但仍可作为后续列表项的结构证据。
             if heading and inside_contents:
                 contents_heading = _contextualize_heading(heading, contents_heading_stack)
                 candidate_contents_stack = _updated_stack(
@@ -170,7 +176,35 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
-            if heading is None and prose_list_step_numbers:
+            body_candidate_continues_list = bool(
+                prose_body_candidate
+                and _is_sequential_numbered_prose_item(
+                    prose_body_candidate,
+                    heading_stack,
+                    tuple(prose_list_step_numbers),
+                    following_context_proves_list=_following_context_proves_numbered_prose_item(
+                        _numbered_prose_following_lines(
+                            cleaned_pages,
+                            page_index,
+                            line_index,
+                        ),
+                        prose_body_candidate,
+                        heading_stack,
+                        chain_started=bool(prose_list_step_numbers),
+                    ),
+                )
+            )
+            if body_candidate_continues_list:
+                assert prose_body_candidate is not None
+                prose_list_step_numbers.append(int(prose_body_candidate.number))
+                prose_list_item_open = not _numbered_prose_sentence_is_closed(
+                    prose_body_candidate.title
+                )
+            elif (
+                heading is None
+                and prose_list_step_numbers
+                and not _is_serialized_table_evidence_line(line)
+            ):
                 if prose_list_item_open:
                     prose_list_item_open = not _numbered_prose_sentence_is_closed(line)
                 else:
@@ -184,6 +218,16 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 heading,
                 heading_stack,
                 tuple(prose_list_step_numbers),
+                following_context_proves_list=_following_context_proves_numbered_prose_item(
+                    _numbered_prose_following_lines(
+                        cleaned_pages,
+                        page_index,
+                        line_index,
+                    ),
+                    heading,
+                    heading_stack,
+                    chain_started=bool(prose_list_step_numbers),
+                ),
             ):
                 prose_list_step_numbers.append(int(heading.number))
                 prose_list_item_open = not _numbered_prose_sentence_is_closed(
@@ -1303,6 +1347,8 @@ def _is_sequential_numbered_prose_item(
     heading: HeadingInfo,
     heading_stack: list[HeadingInfo],
     prose_step_numbers: tuple[int, ...] = (),
+    *,
+    following_context_proves_list: bool = False,
 ) -> bool:
     """Keep a structurally proven 1..N prose list inside its numbered parent.
 
@@ -1321,6 +1367,10 @@ def _is_sequential_numbered_prose_item(
         return (
             number == prose_step_numbers[-1] + 1
             and _looks_like_numbered_prose_sentence(heading.title, chain_started=True)
+            and (
+                following_context_proves_list
+                or not _is_next_top_level_integer_heading(heading, heading_stack)
+            )
         )
     can_start = number == 1 or not _is_next_top_level_integer_heading(
         heading,
@@ -1329,7 +1379,126 @@ def _is_sequential_numbered_prose_item(
     return can_start and _looks_like_numbered_prose_sentence(
         heading.title,
         chain_started=False,
+    ) and following_context_proves_list
+
+
+def _following_context_proves_numbered_prose_item(
+    following_lines: list[tuple[str, tuple[str, ...]]],
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+    *,
+    chain_started: bool,
+) -> bool:
+    """Require local structural evidence before demoting a heading to prose.
+
+    A sentence-shaped integer line is inherently ambiguous: it can be a list
+    item or a real chapter whose title happens to be a sentence.  We demote it
+    only when the same page proves a consecutive next item, or when an already
+    proven chain is immediately followed by an unmistakable chapter boundary.
+    A duplicate of the active top-level number is also a strong local list
+    signal (for example chapter 1 followed by item ``1. ...``).
+    """
+
+    if not heading.number.isdigit():
+        return False
+    number = int(heading.number)
+    if _is_current_top_level_integer_heading(heading, heading_stack):
+        return True
+    current_sentence_closed = _numbered_prose_sentence_is_closed(heading.title)
+    for raw_following_line, ambiguous_line_number_sides in following_lines:
+        following_line = normalize_line(raw_following_line)
+        if not following_line:
+            continue
+        if _is_serialized_table_evidence_line(following_line):
+            continue  # 坐标表格在抽取文本中统一追加，不能伪装成列表项之间的视觉正文。
+        heading_candidate = _line_without_ambiguous_margin_number(
+            following_line,
+            ambiguous_line_number_sides,
+        )
+        following_heading = detect_heading(heading_candidate)
+        if following_heading is None:
+            if current_sentence_closed:
+                return False  # 正常正文紧随其后时，当前编号句归属一个真实章节。
+            current_sentence_closed = _numbered_prose_sentence_is_closed(
+                following_line
+            )
+            continue  # 未闭合的长列表项允许有一个或多个视觉软换行。
+        if not following_heading.number.isdigit() or "." in following_heading.number:
+            return False
+        following_number = int(following_heading.number)
+        if (
+            following_number == number + 1
+            and _looks_like_numbered_prose_sentence(
+                following_heading.title,
+                chain_started=True,
+            )
+        ):
+            return True
+        return bool(
+            chain_started
+            and (
+                following_number == number
+                or _is_next_top_level_integer_heading(
+                    following_heading,
+                    heading_stack,
+                )
+            )
+        )  # 已证明列表的末项只能由紧邻的同号/下一主章边界收口。
+    return False
+
+
+def _numbered_prose_following_lines(
+    pages: list[PageText],
+    page_index: int,
+    line_index: int,
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Return a bounded lookahead over this page and the next page only."""
+
+    page = pages[page_index]
+    following = [
+        (line, page.ambiguous_line_number_sides)
+        for line in page.text.splitlines()[line_index + 1 :]
+    ]
+    if page_index + 1 < len(pages):
+        next_page = pages[page_index + 1]
+        following.extend(
+            (line, next_page.ambiguous_line_number_sides)
+            for line in next_page.text.splitlines()
+        )
+    return following
+
+
+def _numbered_prose_body_candidate(line: str) -> HeadingInfo | None:
+    """Recover only an explicit integer sentence already forced into body text."""
+
+    match = re.match(r"^(\d{1,3})[.)．]\s+(.{1,240})$", compact_inline(line))
+    if match is None:
+        return None
+    return HeadingInfo(
+        raw=compact_inline(line),
+        number=match.group(1),
+        title=match.group(2),
+        level=1,
     )
+
+
+def _is_serialized_table_evidence_line(line: str) -> bool:
+    """Return True for the extractor's explicit coordinate-table marker."""
+
+    return normalize_line(line).startswith("表格行:")
+
+
+def _is_current_top_level_integer_heading(
+    heading: HeadingInfo,
+    heading_stack: list[HeadingInfo],
+) -> bool:
+    """Return True when a candidate repeats the active top-level number."""
+
+    top_level = next(
+        (item for item in heading_stack if item.level == 1 and item.number.isdigit()),
+        None,
+    )
+    return bool(top_level and int(heading.number) == int(top_level.number))
 
 
 def _looks_like_numbered_prose_sentence(title: str, *, chain_started: bool) -> bool:

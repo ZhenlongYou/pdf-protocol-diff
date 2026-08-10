@@ -3385,6 +3385,16 @@ def _table_bbox_belongs_to_captioned_figure(
     if not captions:
         return False
     caption = max(captions, key=lambda line: line[1])
+    if any(
+        line[1] > caption[1]
+        and line[1] <= bbox[1] + 1.0
+        and (
+            _looks_like_table_caption(line[2])
+            or _looks_like_table_context_caption(line[2])
+        )
+        for line in word_lines
+    ):
+        return False  # Figure 后出现更近的明确表题时，真实小表优先于远处图题，失败可见。
     intervening = [
         normalize_line(line[2])
         for line in word_lines
