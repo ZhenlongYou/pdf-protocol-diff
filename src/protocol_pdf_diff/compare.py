@@ -427,14 +427,14 @@ def _ignore_trailing_header_page_only_difference(
         for page_number in common_page_numbers
     ):
         return old_section, new_section
-    common_observation_counts = Counter(
-        old_observations.get(page_number, ())
+    common_value_counts = Counter(
+        value
         for page_number in common_page_numbers
-        if old_observations.get(page_number, ())
+        for value in old_observations.get(page_number, ())
     )
-    stable_common_observations = {
-        observation
-        for observation, count in common_observation_counts.items()
+    stable_common_values = {
+        value
+        for value, count in common_value_counts.items()
         if count >= 2
     }
     extra_extraction_observations = (
@@ -442,10 +442,9 @@ def _ignore_trailing_header_page_only_difference(
     )
     extra_page_numbers = old_only_pages or new_only_pages
     if any(
-        observation
-        and observation not in stable_common_observations
+        value not in stable_common_values
         for page_number in extra_page_numbers
-        if (observation := extra_extraction_observations.get(page_number, ()))
+        for value in extra_extraction_observations.get(page_number, ())
     ):
         return old_section, new_section  # 尾页出现新的精确技术页眉值时仍必须失败可见。
     shared_values = tuple(

@@ -82,13 +82,17 @@ _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES = 8  # 真行号会给空白视觉行
 _DOCUMENT_LINE_NUMBER_GRID_ORIGIN_TOLERANCE = 0.006  # 跨页首行的归一化 y 位置需稳定，排除页内局部数字表。
 _DOCUMENT_LINE_NUMBER_GRID_PITCH_TOLERANCE = 0.0015  # 跨页行距允许小量 PDF 坐标抖动，但不接受不同列表节奏。
 _TABLE_ROW_PREFIX = "表格行:"  # 报告里的表格行标记，方便比较器把表格行当作独立审阅单元。
-_CAPTION_IDENTIFIER_PATTERN = r"(?:[A-Z]{1,3}|\d+)(?:[-–—.](?:[A-Z]{1,3}|\d+))*"  # 覆盖正文 31-8 与附录 A-2/AA.2，不绑定出版方。
+_CAPTION_IDENTIFIER_PATTERN = (
+    r"(?:(?:[A-Z]{1,3}|\d+)(?:[-–—.](?:[A-Z]{1,3}|\d+))*|"
+    r"(?:[a-z]{1,3}|\d+)[-–—.](?:[a-z]{1,3}|\d+)"
+    r"(?:[-–—.](?:[a-z]{1,3}|\d+))*)"
+)  # 原始 A-2/AA.2 与几何层 casefold 后的 a-2 均可识别；裸小写 ``for`` 不能冒充编号。
 _TABLE_CAPTION_RE = re.compile(
-    rf"(?i)\btable\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
+    rf"\b(?i:table)\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
     rf"表\s*{_CAPTION_IDENTIFIER_PATTERN}\b"
 )  # 识别真正表题，避免把图题当表格。
 _FIGURE_CAPTION_RE = re.compile(
-    rf"(?i)\b(?:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
+    rf"\b(?i:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
     rf"图\s*{_CAPTION_IDENTIFIER_PATTERN}\b"
 )  # 识别图题/图片块，按用户要求不做图片对比。
 _TABLE_HEADER_SCAN_ROWS = 12  # pdfplumber 有时把标题/注释放在表格开头，需要在前十余行内寻找表头。
@@ -1369,7 +1373,7 @@ def _starts_with_figure_sentence_prose(value: str) -> bool:
 
     candidate = _strip_caption_line_noise(value)  # 复用图题前置行号清理逻辑。
     match = re.match(
-        rf"(?i)^(?:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
+        rf"^(?i:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
         candidate,
     )
     return bool(match and _figure_caption_tail_starts_prose(match.group("tail")))
@@ -1380,13 +1384,13 @@ def _looks_like_figure_caption(value: str) -> bool:
 
     candidate = _strip_caption_line_noise(value)  # 先去掉页边行号，避免 `1 Figure 32-2` 漏检。
     match = re.match(
-        rf"(?i)^(?:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
+        rf"^(?i:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
         candidate,
     )
     if match:
         return not _figure_caption_tail_starts_prose(match.group("tail"))
     chinese_match = re.match(
-        rf"(?i)^图\s*{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
+        rf"^图\s*{_CAPTION_IDENTIFIER_PATTERN}\b(?P<tail>.*)$",
         candidate,
     )
     if chinese_match:
@@ -3459,7 +3463,7 @@ def _table_rows_begin_with_explicit_caption(table_lines: list[str]) -> bool:
             continue
         return bool(
             re.match(
-                rf"(?i)^(?:table\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
+                rf"^(?:(?i:table)\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
                 rf"表\s*{_CAPTION_IDENTIFIER_PATTERN}\b)",
                 reconstructed,
             )
@@ -3766,7 +3770,15 @@ def _strip_caption_line_noise(value: str) -> str:
 def _looks_like_table_caption(value: str) -> bool:
     """Return True when a caption explicitly names a table."""
 
-    return bool(_TABLE_CAPTION_RE.search(normalize_line(value)))  # 复用统一表题正则，覆盖英文 Table 和中文表。
+    candidate = _strip_caption_line_noise(value)
+    match = re.match(
+        rf"^(?:(?i:table)\s+{_CAPTION_IDENTIFIER_PATTERN}\b|"
+        rf"表\s*{_CAPTION_IDENTIFIER_PATTERN}\b)(?P<tail>.*)$",
+        candidate,
+    )
+    if not match:
+        return False  # ``See/Use Table A-1`` 是正文引用，不是位于行首的表题。
+    return not _figure_caption_tail_starts_prose(match.group("tail"))
 
 
 def _looks_like_table_context_caption(value: str) -> bool:

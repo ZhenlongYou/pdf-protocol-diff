@@ -193,10 +193,8 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
                 heading = _contextualize_heading(heading, heading_stack)
-            prose_list_intro_text = (
-                " ".join(current.lines[-3:])
-                if current is not None and current.lines
-                else ""
+            prose_list_intro_text = _numbered_list_intro_context(
+                current.lines if current is not None else []
             )
             prose_list_intro_count = _numbered_list_cardinality_from_intro(
                 prose_list_intro_text
@@ -1028,7 +1026,11 @@ def _looks_like_forbidden_heading_candidate(
     if kind in {"annex", "part"} and (
         _looks_like_appendix_sentence_continuation(normalized_title)
         or _looks_like_appendix_subreference_fragment(number, normalized_title)
-        or _looks_like_named_container_reference_sentence(normalized_title)
+        or _looks_like_named_container_reference_sentence(
+            normalized_candidate,
+            number,
+            normalized_title,
+        )
     ):
         return True
     numeric_kind = kind in {"numeric", "annex_numeric", "numeric_letter"}  # 混合层级沿用技术碎片防误识别规则。
@@ -1074,22 +1076,49 @@ def _looks_like_appendix_subreference_fragment(number: str, title: str) -> bool:
     return bool(re.search(r"\d$", number) and re.fullmatch(r"[A-Z]", title))
 
 
-def _looks_like_named_container_reference_sentence(title: str) -> bool:
-    """Reject ``Appendix A describes ...`` prose while keeping actual titles."""
+def _looks_like_named_container_reference_sentence(
+    candidate: str,
+    number: str,
+    title: str,
+) -> bool:
+    """Reject sentence subjects such as ``Appendix A shall define ...``.
 
-    return bool(
+    A colon, dot, or dash after the container identifier is positive heading
+    syntax.  With whitespace alone, sentence punctuation plus an English
+    lowercase predicate or Chinese sentence is safer to keep as prose.  The
+    closed modal/auxiliary class also catches extracted sentences that lost
+    their final punctuation without enumerating domain verbs.
+    """
+
+    if not title or not candidate.startswith(number):
+        return False
+    remainder = candidate[len(number) :].lstrip()
+    if remainder.startswith((":", "：", ".", "-", "–", "—")):
+        return False
+    english_sentence = bool(
+        re.match(r"^[a-z]", title)
+        and re.search(r"[.!?]\s*$", title)
+    )
+    english_auxiliary = bool(
         re.match(
-            r"^(?:describes?|contains?|defines?|provides?|lists?|specifies?|"
-            r"summari[sz]es?|explains?|records?|includes?|applies?|shows?|"
-            r"presents?|covers?|addresses?|identifies?|references?|introduces?|"
-            r"documents?|establishes?|requires?|is|are|was|were|has|have)\b",
+            r"(?i)^(?:shall|should|must|may|might|can|could|will|would|"
+            r"do|does|did|is|are|was|were|has|have|had)\b",
             title,
         )
-        or re.match(
-            r"^(?:是|为|用于|描述|包含|包括|规定|定义|列出|列明|载明|说明|"
-            r"提供|适用|涉及|涵盖|展示|给出|记录|介绍|总结|概述|阐述|参见|引用|补充)",
-            title,
-        )
+    )
+    english_long_sentence = bool(
+        re.search(r"[.!?]\s*$", title)
+        and len(re.findall(r"[A-Za-z][A-Za-z'-]*", title)) >= 4
+    )
+    chinese_sentence = bool(
+        re.search(r"[。！？]\s*$", title)
+        or re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", title)
+    )
+    return (
+        english_sentence
+        or english_auxiliary
+        or english_long_sentence
+        or chinese_sentence
     )
 
 
@@ -1518,6 +1547,26 @@ _CHINESE_LIST_COUNT_WORDS = {
     "九": 9,
     "十": 10,
 }
+_NUMBERED_LIST_INTRO_CONTEXT_MAX_CHARACTERS = 320
+
+
+def _numbered_list_intro_context(lines: list[str]) -> str:
+    """Join the current unterminated lead-in across arbitrary PDF soft wraps."""
+
+    reversed_parts: list[str] = []
+    character_count = 0
+    for raw_line in reversed(lines):
+        line = normalize_line(raw_line)
+        if not line:
+            break
+        if reversed_parts and re.search(r"[.!?;。！？；]\s*$", line):
+            break  # 前一个已闭合句不能与当前冒号引导跨句拼接。
+        projected_count = character_count + len(line) + bool(reversed_parts)
+        if projected_count > _NUMBERED_LIST_INTRO_CONTEXT_MAX_CHARACTERS:
+            break
+        reversed_parts.append(line)
+        character_count = projected_count
+    return " ".join(reversed(reversed_parts))
 
 
 def _numbered_list_cardinality_from_intro(line: str) -> int | None:
@@ -1538,12 +1587,26 @@ def _numbered_list_cardinality_from_intro(line: str) -> int | None:
         candidate,
     )
     if match:
-        if not re.search(
-            r"(?i)\b(?:items?|steps?|observations?|requirements?|actions?|cases?|"
+        tail = match.group("tail")
+        if re.search(
+            r"(?i)\b(?:chapters?|sections?|clauses?|parts?|"
+            r"annex(?:es)?|append(?:ix|ices))\b",
+            tail,
+        ):
+            return None
+        if re.search(
+            r"(?i)\b(?:the|a|an|before|after|for|of|to|from|with|without|"
+            r"in|on|by|that|which|who|where|when|while|if|unless|because)\b",
+            tail,
+        ):
+            return None
+        if not re.fullmatch(
+            r"(?i)\s*(?:[a-z][a-z0-9-]*\s+){0,2}"
+            r"(?:items?|steps?|observations?|requirements?|actions?|cases?|"
             r"examples?|conditions?|criteria|tasks?|stages?|phases?|points?|"
             r"options?|rules?|procedures?|checks?|tests?|operations?|"
-            r"instructions?|recommendations?)\b",
-            match.group("tail"),
+            r"instructions?|recommendations?)\s*",
+            tail,
         ):
             return None  # 只接受通用可枚举名词；未知名词与结构容器一律失败可见。
         token = match.group(1).casefold()
@@ -1556,10 +1619,13 @@ def _numbered_list_cardinality_from_intro(line: str) -> int | None:
     )
     if not chinese_match:
         return None
+    chinese_tail = chinese_match.group("tail")
+    if re.search(r"(?:章节?|条款|附录|部分|篇|编|之前|之后|前|后|中|内|外|的)", chinese_tail):
+        return None
     if chinese_match.group("unit") == "个" and not re.search(
         r"(?:事项|步骤|观察|要求|动作|案例|示例|条件|准则|任务|阶段|要点|"
         r"选项|规则|程序|检查|测试|操作|指令|建议)",
-        chinese_match.group("tail"),
+        chinese_tail,
     ):
         return None  # “以下两个章节/周期”未获列表授权；“以下两个步骤”仍可证明。
     token = chinese_match.group(1)

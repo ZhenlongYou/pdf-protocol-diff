@@ -2271,6 +2271,11 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertTrue(_looks_like_figure_caption("Figure A-2. Receiver test setup"))
         self.assertTrue(_looks_like_table_caption("Table A-1. Receiver limits"))
+        self.assertFalse(_looks_like_figure_caption("Figure for reference."))
+        self.assertFalse(_looks_like_table_caption("Use the table for receiver calibration."))
+        self.assertFalse(_looks_like_table_caption("See Table A-1"))
+        self.assertFalse(_looks_like_table_caption("Refer to Table A-1"))
+        self.assertFalse(_looks_like_table_caption("Use Table A-1 for calibration."))
         self.assertTrue(
             _table_bbox_belongs_to_captioned_figure(
                 bbox,
@@ -2286,6 +2291,20 @@ class ProtocolDiffTests(unittest.TestCase):
                     "表格行: T1 | Parameter=Mode A | Value=20 mV",
                 ],
                 figure_words,
+            )
+        )
+        figure_with_table_reference = [
+            figure_words[0],
+            word("See Table A-1", 105.0),
+            word("Generator", 125.0),
+            word("MCB", 145.0),
+            word("HCB", 165.0),
+        ]
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                ["表格行: T1 | Column 1=MCB | Column 2=Reference"],
+                figure_with_table_reference,
             )
         )
 
@@ -9398,6 +9417,39 @@ class ProtocolDiffTests(unittest.TestCase):
                 with self.subTest(surface=surface):
                     self.assertIn("BETA", rendered)
 
+    def test_trailing_page_subset_of_stable_headers_is_page_count_furniture(self) -> None:
+        """Each repeated exact header value remains stable on a subset tail page."""
+
+        def extraction(name: str, headers: list[tuple[str, ...]]) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=index,
+                        text=(
+                            "1 Scope\n"
+                            "The calibrated receiver shall preserve timing behavior."
+                        ),
+                        running_header_texts=values,
+                    )
+                    for index, values in enumerate(headers, start=1)
+                ],
+            )
+
+        common = ("Protocol ALPHA", "Confidential")
+        result = compare_extractions(
+            extraction("old-two-headers.pdf", [common, common]),
+            extraction("new-header-subset.pdf", [common, common, ("Protocol ALPHA",)]),
+            DiffOptions(),
+        )
+
+        self.assertFalse(
+            any(
+                change.report_location == "运行页眉（坐标证据）"
+                for change in result.changes
+            )
+        )
+
     def test_trailing_page_new_header_value_is_not_page_count_furniture(self) -> None:
         """A new technical header on an added tail page remains visible everywhere."""
 
@@ -10468,27 +10520,31 @@ class ProtocolDiffTests(unittest.TestCase):
     def test_wrapped_explicit_two_item_intro_keeps_both_items_in_parent(self) -> None:
         """A PDF soft line break does not destroy explicit list cardinality evidence."""
 
-        extraction = ExtractionResult(
-            pdf_path=Path("wrapped-explicit-two-item-list.pdf"),
-            pages=[
-                PageText(
-                    page_number=1,
-                    text=(
-                        "1 Overview\n"
-                        "This section introduces exactly two implementation\n"
-                        "observations:\n"
-                        "1. The requester records each message before forwarding it.\n"
-                        "2. The receiver returns a response to the requester.\n"
-                        "These two observations complete the request flow."
-                    ),
+        for intro in (
+            "This section introduces exactly two implementation\nobservations:",
+            "This section introduces exactly\ntwo\nimplementation\nobservations:",
+        ):
+            with self.subTest(intro=intro):
+                extraction = ExtractionResult(
+                    pdf_path=Path("wrapped-explicit-two-item-list.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Overview\n"
+                                f"{intro}\n"
+                                "1. The requester records each message before forwarding it.\n"
+                                "2. The receiver returns a response to the requester.\n"
+                                "These two observations complete the request flow."
+                            ),
+                        )
+                    ],
                 )
-            ],
-        )
 
-        sections = section_document(extraction)
+                sections = section_document(extraction)
 
-        self.assertEqual(["1 Overview"], [section.location for section in sections])
-        self.assertIn("2. The receiver returns", sections[0].body)
+                self.assertEqual(["1 Overview"], [section.location for section in sections])
+                self.assertIn("2. The receiver returns", sections[0].body)
 
     def test_structural_container_cardinality_never_authorizes_prose_list_demotion(
         self,
@@ -10499,6 +10555,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "This document contains exactly two chapters:",
             "The following two sections:",
             "The following two appendices:",
+            "The following two chapters define the requirements:",
+            "The following two chapters contain the steps:",
             "以下两个章节：",
         ):
             with self.subTest(intro=intro):
@@ -10539,7 +10597,7 @@ class ProtocolDiffTests(unittest.TestCase):
                     page_number=1,
                     text=(
                         "1 Overview\n"
-                        "This process contains exactly two cycles:\n"
+                        "This process contains exactly two cycles of test operations:\n"
                         "1. General requirements.\n"
                         "2. Security requirements.\n"
                         "The security chapter defines independent behavior."
@@ -10641,10 +10699,19 @@ class ProtocolDiffTests(unittest.TestCase):
 
         for line in (
             "Appendix A describes the calibration method.",
+            "Appendix A shall define the calibration method.",
+            "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Annex B contains normative requirements.",
+            "Annex B remains normative for receiver testing.",
             "Part II defines the receiver architecture.",
+            "Part II does not apply to legacy devices.",
+            "Appendix C may be used for calibration.",
+            "Annex D can provide supplemental limits.",
             "附录 A 描述了校准方法。",
             "附录 B 用于说明校准流程。",
+            "附录 B 应当规定接收机限值。",
+            "附录 C 仍然适用于旧设备。",
+            "附录 D 中的要求适用于旧设备。",
         ):
             with self.subTest(line=line):
                 self.assertIsNone(detect_heading(line))
@@ -10657,6 +10724,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B—Normative requirements",
             "Appendix C–Calibration data",
             "附录 A—校准数据",
+            "附录 A 说明",
+            "附录 B 规定",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
