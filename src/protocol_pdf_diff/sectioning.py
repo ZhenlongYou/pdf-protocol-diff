@@ -171,6 +171,8 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 else (
                     normalize_line(cleaned_pages[page_index + 1].text.splitlines()[0])
                     if page_index + 1 < len(cleaned_pages)
+                    and cleaned_pages[page_index + 1].page_number
+                    == page.page_number + 1
                     and cleaned_pages[page_index + 1].text.splitlines()
                     else ""
                 )
@@ -1092,6 +1094,90 @@ def _looks_like_appendix_subreference_fragment(number: str, title: str) -> bool:
     return bool(re.search(r"\d$", number) and re.fullmatch(r"[A-Z]", title))
 
 
+_NAMED_CONTAINER_ENGLISH_PREDICATE = (
+    r"(?:describes?|defines?|contains?|provides?|specifies?|establishes?|"
+    r"states?|lists?|summarizes?|explains?|covers?|includes?|requires?|"
+    r"presents?|details?|documents?|sets?\s+out)"
+)
+_NAMED_CONTAINER_CHINESE_PREDICATE = (
+    r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|记录)"
+)
+
+
+def _english_named_container_predicate_sentence(title: str) -> bool:
+    """Prove a document-predicate clause without confusing Title Case noun titles."""
+
+    cleaned = title.strip()
+    terminal = bool(re.search(r"[.!?]\s*$", cleaned))
+    intransitive = re.match(
+        r"(?i)^(?P<verb>remains?|appl(?:y|ies)|refers?)\b",
+        cleaned,
+    )
+    predicate = re.match(
+        rf"(?i)^(?P<verb>{_NAMED_CONTAINER_ENGLISH_PREDICATE})\b",
+        cleaned,
+    )
+    match = predicate or intransitive
+    if match is None:
+        return False
+    first_word = match.group("verb").split()[0]
+    if not (first_word.islower() or terminal):
+        # ``States the Receiver Supports`` is a plausible Title Case noun title.
+        return False
+    tail = cleaned[match.end() :]
+    if intransitive is not None:
+        compact_tail = tail.strip()
+        if compact_tail in {".", "!", "?"}:
+            return terminal
+        if re.match(r"(?i)^\s+(?:to\b|\S)", tail):
+            return True
+        return False
+
+    verb_count = 1
+    while True:
+        coordinated = re.match(
+            rf"(?i)^\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)"
+            rf"(?:(?:[a-z]+)\s+){{0,3}}"
+            rf"(?P<verb>{_NAMED_CONTAINER_ENGLISH_PREDICATE})\b",
+            tail,
+        )
+        if coordinated is None:
+            break
+        verb_count += 1
+        tail = tail[coordinated.end() :]
+    compact_tail = tail.strip()
+    if verb_count >= 2 and compact_tail in {".", "!", "?"}:
+        return terminal
+    return bool(
+        compact_tail
+        and not re.match(r"(?i)^(?:and|or|of|for)\b", compact_tail)
+    )
+
+
+def _chinese_named_container_predicate_sentence(title: str) -> bool:
+    """Recognize a Chinese predicate chain only when it owns a real complement."""
+
+    cleaned = title.rstrip("。！？").strip()
+    predicate = re.match(
+        rf"^(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
+        cleaned,
+    )
+    if predicate is None:
+        return False
+    tail = cleaned[predicate.end() :]
+    while True:
+        coordinated = re.match(
+            rf"^(?:[、，,](?:并且|以及|和|与|及|或)?|"
+            rf"(?:并且|以及|和|与|及|或))"
+            rf"(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
+            tail,
+        )
+        if coordinated is None:
+            break
+        tail = tail[coordinated.end() :]
+    return bool(tail and not re.match(r"^[与和及或的]", tail))
+
+
 def _looks_like_named_container_reference_sentence(
     candidate: str,
     number: str,
@@ -1121,52 +1207,15 @@ def _looks_like_named_container_reference_sentence(
     )
     english_reference_predicate = bool(
         re.match(
-            r"(?i)^(?:remains?\s+\S|appl(?:y|ies)\s+to\b|refers?\s+to\b|"
-            r"sets?\s+out\b)",
+            r"(?i)^of\s+(?:this|the)\s+document\b",
             title,
         )
-        or re.match(
-            r"(?i)^(?:states?|lists?)\s+(?:the|a|an|this|that|these|those|"
-            r"all|each|no|one|two|three|\d+)\b",
-            title,
-        )
-        or re.match(
-            r"(?i)^(?:describes?|defines?|contains?|provides?|specifies?|"
-            r"establishes?|summarizes?|explains?|covers?|includes?|requires?|"
-            r"presents?|details?)"
-            r"\s+(?!(?:and|or|of)\b)\S",
-            title,
-        )
-        or re.match(
-            r"(?i)^(?:describes?|defines?|contains?|provides?|specifies?|"
-            r"establishes?|states?|lists?|summarizes?|explains?|covers?|"
-            r"includes?|requires?|presents?|details?|documents?)\s+"
-            r"(?:and|or)\s+(?:describes?|defines?|contains?|provides?|"
-            r"specifies?|establishes?|states?|lists?|summarizes?|explains?|"
-            r"covers?|includes?|requires?|presents?|details?|documents?|"
-            r"sets?\s+out)\s+(?!(?:and|or|of)\b)\S",
-            title,
-        )
-        or re.match(r"(?i)^of\s+(?:this|the)\s+document\b", title)
+        or _english_named_container_predicate_sentence(title)
     )  # 还须证明宾语/补语；States and Transitions、Lists of Tables 等仍是标题。
     chinese_plain = title.rstrip("。！？").strip()
     chinese_sentence = bool(
         re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", chinese_plain)
-        or re.match(
-            r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|"
-            r"展示|介绍)(?![与和及或的]).+",
-            chinese_plain,
-        )
-        or bool(
-            re.search(r"[。！？]\s*$", title)
-            and re.match(
-                r"^(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|"
-                r"解释|展示|介绍)(?:与|和|及|或)(?:描述|定义|规定|说明|"
-                r"列出|给出|提供|包含|涵盖|总结|解释|展示|介绍)"
-                r"(?![与和及或的]).+",
-                chinese_plain,
-            )
-        )
+        or _chinese_named_container_predicate_sentence(chinese_plain)
         or re.match(
             r"^(?:中|内)(?:明确)?(?:规定|定义|描述|说明|列出|给出|提供).+",
             chinese_plain,

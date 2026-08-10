@@ -10766,6 +10766,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B contains and explains the receiver limits.",
             "Part II states and lists the normative requirements.",
             "Appendix C provides and documents the calibration evidence.",
+            "Appendix A describes, defines, and documents the calibration method.",
+            "Annex B contains and clearly explains the receiver limits.",
+            "Annex B contains and very clearly explains the receiver limits.",
             "Appendix A shall define the calibration method.",
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Annex B contains normative requirements.",
@@ -10790,6 +10793,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 B 中的要求适用",
             "附录 B 中规定接收机限值",
             "附录 A 描述和定义校准方法。",
+            "附录 A 描述和定义校准方法",
+            "附录 A 描述、定义并记录校准方法",
             "附录 B 说明及规定接收机限值。",
             "附录 C 介绍与展示校准证据。",
         ):
@@ -10839,6 +10844,56 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("0.025 UI", sections[1].body)
         self.assertIn("34.0 dB", sections[2].body)
+
+    def test_coordinated_container_predicates_do_not_capture_later_sections(
+        self,
+    ) -> None:
+        """Predicate chains with commas, adverbs, or soft-wrap punctuation stay prose."""
+
+        for reference in (
+            "Appendix A describes, defines, and documents the calibration method.",
+            "Annex B contains and clearly explains the receiver limits.",
+            "Annex B contains and very clearly explains the receiver limits.",
+            "附录 A 描述和定义校准方法",
+            "附录 A 描述、定义并记录校准方法",
+        ):
+            with self.subTest(reference=reference):
+                extraction = ExtractionResult(
+                    pdf_path=Path("coordinated-container-reference.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"{reference}\n"
+                                "2 Verification\n"
+                                "The verified threshold is 34.0 dB."
+                            ),
+                        )
+                    ],
+                )
+
+                sections = section_document(extraction)
+
+                self.assertEqual(
+                    ["1 Scope", "2 Verification"],
+                    [section.location for section in sections],
+                )
+                self.assertIn(reference, sections[0].body)
+
+    def test_complete_uppercase_container_reference_sentences_stay_prose(
+        self,
+    ) -> None:
+        """A closed all-caps predicate is prose even when its complement is short."""
+
+        for line in (
+            "ANNEX A APPLIES.",
+            "ANNEX B REMAINS.",
+            "APPENDIX C STATES REQUIREMENTS.",
+            "ANNEX D LISTS REQUIREMENTS.",
+        ):
+            with self.subTest(line=line):
+                self.assertIsNone(detect_heading(line))
 
     def test_wrapped_container_reference_sentence_does_not_capture_later_sections(
         self,
@@ -10980,6 +11035,30 @@ class ProtocolDiffTests(unittest.TestCase):
             [section.location for section in section_document(title_extraction)],
         )
 
+    def test_nonconsecutive_page_break_does_not_join_container_sentence(
+        self,
+    ) -> None:
+        """Missing physical pages make a cross-page sentence join unprovable."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("nonconsecutive-page-container.pdf"),
+            pages=[
+                PageText(page_number=1, text="1 Scope\nAppendix A"),
+                PageText(
+                    page_number=3,
+                    text=(
+                        "remains normative for receiver testing.\n"
+                        "2 Verification\n"
+                        "Evidence remains visible."
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertIn("Appendix A", [section.location for section in sections])
+
     def test_container_delimiter_and_blank_paragraph_block_wrapped_sentence_guard(
         self,
     ) -> None:
@@ -11051,6 +11130,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix C Covers and Enclosures",
             "Appendix E Provides and Services",
             "Part II States and Lists of Tables",
+            "APPENDIX A STATES AND TRANSITIONS",
+            "Appendix A States the Receiver Supports",
+            "Annex B Lists the Receiver Supports",
+            "Appendix C Covers for Test Fixtures",
+            "Appendix D Details for Calibration",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
