@@ -3372,6 +3372,11 @@ def _table_bbox_belongs_to_captioned_figure(
         or not geometry_words
         or _looks_like_table_caption(title)
         or _looks_like_table_context_caption(title)
+        or any(
+            _looks_like_table_caption(line)
+            or _looks_like_table_context_caption(line)
+            for line in table_lines
+        )
     ):
         return False
     word_lines = _word_line_records(geometry_words)

@@ -2201,6 +2201,17 @@ class ProtocolDiffTests(unittest.TestCase):
                 title="",
             )
         )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                [
+                    "表格行: T1 | Column 1=Table 4-1. Receiver limits | Column 2=",
+                    "表格行: T1 | Parameter=Mode A | Value=20 mV",
+                ],
+                figure_words,
+                title="",
+            )
+        )
 
     def test_repeated_standalone_number_keeps_both_observed_titles(self) -> None:
         """Text shape alone cannot prove that a repeated number is page furniture."""
@@ -9107,11 +9118,11 @@ class ProtocolDiffTests(unittest.TestCase):
             for index in range(1, 9)
         ]
         old_headers = {
-            index: ["Consortium Protocol ID ALPHA"]
+            index: ["Consortium Protocol ID ALPHA" if index == 1 else "Consortium Protocol ID alpha"]
             for index in range(1, 9)
         }
         new_headers = {
-            index: ["Consortium Protocol ID ALPHA" if index == 1 else "Consortium Protocol ID alpha"]
+            index: ["Consortium Protocol ID alpha" if index == 8 else "Consortium Protocol ID ALPHA"]
             for index in range(1, 9)
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -9141,6 +9152,39 @@ class ProtocolDiffTests(unittest.TestCase):
                 with self.subTest(surface=surface):
                     self.assertIn("ALPHA", rendered)
                     self.assertIn("alpha", rendered)
+
+    def test_recurring_header_count_tracks_pages_without_becoming_a_change(self) -> None:
+        """One stable header is furniture even when the revisions have different page counts."""
+
+        def extraction(name: str, page_count: int) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=index,
+                        text=(
+                            "1 Scope\n"
+                            "The calibrated receiver shall preserve the declared voltage "
+                            "and timing behavior for every supported operating mode."
+                        ),
+                        running_header_texts=("Consortium Protocol ID STABLE",),
+                    )
+                    for index in range(1, page_count + 1)
+                ],
+            )
+
+        result = compare_extractions(
+            extraction("old-stable-header.pdf", 8),
+            extraction("new-stable-header.pdf", 7),
+            DiffOptions(),
+        )
+
+        self.assertFalse(
+            any(
+                change.report_location == "运行页眉（坐标证据）"
+                for change in result.changes
+            )
+        )
 
     def test_distinct_top_protocol_titles_are_not_authorized_as_running_headers(self) -> None:
         """Per-page technical titles cannot borrow the repeated-header deletion rule."""
@@ -10076,6 +10120,155 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(["1 Overview"], [section.location for section in sections])
         self.assertIn("This summary closes", sections[0].body)
+
+    def test_two_item_numbered_prose_chain_closes_at_eof(self) -> None:
+        """A two-item chain under chapter 1 must not turn item 2 into a chapter."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("two-item-chain-at-eof.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The receiver returns a response to the requester."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["1 Overview"], [section.location for section in sections])
+        self.assertIn("2. The receiver returns", sections[0].body)
+
+    def test_two_item_numbered_prose_chain_closes_before_summary(self) -> None:
+        """A summary after a proven two-item chain remains in the parent chapter."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("two-item-chain-before-summary.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Overview\n"
+                        "1. The requester creates a message and records its identifier.\n"
+                        "2. The receiver returns a response to the requester.\n"
+                        "This summary closes the request flow."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(["1 Overview"], [section.location for section in sections])
+        self.assertIn("This summary closes", sections[0].body)
+
+    def test_bare_part_heading_resets_same_numbered_chapter_identity(self) -> None:
+        """A bare Part boundary makes its chapter 1 a new structural section."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("bare-part-numbering-restart.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Existing requirements\n"
+                        "The first part defines the existing requirements.\n"
+                        "Part II\n"
+                        "1. Deployment architecture and operational requirements.\n"
+                        "The deployment chapter belongs to the second part."
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            [
+                "1 Existing requirements",
+                "Part II",
+                "Part II / 1. Deployment architecture and operational requirements.",
+            ],
+            [section.location for section in section_document(extraction)],
+        )
+
+    def test_wrapped_mid_list_item_can_reach_the_third_page(self) -> None:
+        """One soft-wrapped item may close on page 2 before item 5 on page 3."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("three-page-wrapped-mid-list.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Data flow\n"
+                        "4. The link layer records the identifier and preserves every declared"
+                    ),
+                ),
+                PageText(
+                    page_number=2,
+                    text="condition before forwarding the request.",
+                ),
+                PageText(
+                    page_number=3,
+                    text=(
+                        "5. The receiver validates the request and returns a response.\n"
+                        "7 Transaction rules\n"
+                        "The transaction chapter defines independent request handling."
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            ["6 Data flow", "7 Transaction rules"],
+            [section.location for section in sections],
+        )
+        self.assertIn("4. The link layer", sections[0].body)
+        self.assertIn("5. The receiver validates", sections[0].body)
+
+    def test_table_only_real_chapter_ends_a_mid_list_chain(self) -> None:
+        """A real next chapter may contain only serialized table evidence."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("table-only-real-chapter.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "6 Data flow\n"
+                        "4. The link layer records the message identifier before forwarding.\n"
+                        "5. The physical layer encodes the payload and sends it to the peer.\n"
+                        "6. The peer validates the payload and returns an acknowledgement.\n"
+                        "7. Receiver limits and operating conditions.\n"
+                        "表格行: T1 | Parameter=Mode A | Value=20 mV"
+                    ),
+                ),
+                PageText(
+                    page_number=2,
+                    text=(
+                        "8 Verification requirements\n"
+                        "The verification chapter defines independent evidence."
+                    ),
+                ),
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            [
+                "6 Data flow",
+                "7. Receiver limits and operating conditions.",
+                "8 Verification requirements",
+            ],
+            [section.location for section in sections],
+        )
+        self.assertIn("Parameter=Mode A", sections[1].body)
 
     def test_nonconsecutive_real_chapter_with_sentence_title_remains_visible(self) -> None:
         """A legal chapter-number gap is structural when no local list chain follows."""

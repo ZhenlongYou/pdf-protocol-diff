@@ -38,7 +38,10 @@ _DOCUMENT_METADATA_TITLE_RE = re.compile(
 
 _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
-        re.compile(r"(?i)^((?:part)\s+(?:[IVXLCDM]+|\d+))(?:[\s:.-]+)(.{0,120})$"),
+        re.compile(
+            r"(?i)^((?:part)\s+(?:[IVXLCDM]+|\d+))"
+            r"(?:(?:[\s:.-]+)(.{1,120}))?$"
+        ),
         1,
         "part",
     ),
@@ -54,7 +57,10 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
         "numeric_letter",
     ),
     (
-        re.compile(r"(?i)^((?:annex|appendix)\s+[A-Z0-9]+)(?:[\s:.-]+)(.{0,120})$"),
+        re.compile(
+            r"(?i)^((?:annex|appendix)\s+[A-Z0-9]+)"
+            r"(?:(?:[\s:.-]+)(.{1,120}))?$"
+        ),
         1,
         "annex",
     ),
@@ -368,7 +374,11 @@ def detect_heading(line: str) -> HeadingInfo | None:
         if not match:
             continue
         number = match.group(1).strip()
-        title = match.group(2).strip() if match.lastindex and match.lastindex >= 2 else ""
+        title = (
+            (match.group(2) or "").strip()
+            if match.lastindex and match.lastindex >= 2
+            else ""
+        )
         if kind == "paren":
             number = f"({number})"
         # 三类点号编号都按完整结构标记计算层级，保留 31.A.1 的字母节点。
@@ -1370,6 +1380,10 @@ def _is_sequential_numbered_prose_item(
             and (
                 following_context_proves_list
                 or not _is_next_top_level_integer_heading(heading, heading_stack)
+                or _prose_list_began_with_current_top_level(
+                    prose_step_numbers,
+                    heading_stack,
+                )
             )
         )
     can_start = number == 1 or not _is_next_top_level_integer_heading(
@@ -1380,6 +1394,23 @@ def _is_sequential_numbered_prose_item(
         heading.title,
         chain_started=False,
     ) and following_context_proves_list
+
+
+def _prose_list_began_with_current_top_level(
+    prose_step_numbers: tuple[int, ...],
+    heading_stack: list[HeadingInfo],
+) -> bool:
+    """Return whether a proven list restarted at its active chapter number."""
+
+    top_level = next(
+        (item for item in heading_stack if item.level == 1 and item.number.isdigit()),
+        None,
+    )
+    return bool(
+        prose_step_numbers
+        and top_level
+        and prose_step_numbers[0] == int(top_level.number)
+    )
 
 
 def _following_context_proves_numbered_prose_item(
@@ -1410,7 +1441,9 @@ def _following_context_proves_numbered_prose_item(
         if not following_line:
             continue
         if _is_serialized_table_evidence_line(following_line):
-            continue  # 坐标表格在抽取文本中统一追加，不能伪装成列表项之间的视觉正文。
+            if _is_next_top_level_integer_heading(heading, heading_stack):
+                return False  # 下一主章后的表格是该章正文证据，不能跨过它寻找后续编号来吞掉真章节。
+            continue  # 其他坐标表格在抽取文本中统一追加，不能伪装成列表项之间的视觉正文。
         heading_candidate = _line_without_ambiguous_margin_number(
             following_line,
             ambiguous_line_number_sides,
@@ -1452,15 +1485,18 @@ def _numbered_prose_following_lines(
     page_index: int,
     line_index: int,
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """Return a bounded lookahead over this page and the next page only."""
+    """Return a bounded lookahead over this page and two following pages."""
 
     page = pages[page_index]
     following = [
         (line, page.ambiguous_line_number_sides)
         for line in page.text.splitlines()[line_index + 1 :]
     ]
-    if page_index + 1 < len(pages):
-        next_page = pages[page_index + 1]
+    for following_page_index in range(
+        page_index + 1,
+        min(len(pages), page_index + 3),
+    ):
+        next_page = pages[following_page_index]
         following.extend(
             (line, next_page.ambiguous_line_number_sides)
             for line in next_page.text.splitlines()

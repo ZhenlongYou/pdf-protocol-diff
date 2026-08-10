@@ -338,17 +338,30 @@ def compare_extractions(
 def _running_header_section(extraction: ExtractionResult) -> Section | None:
     """Build one auditable comparison unit from coordinate-proven headers."""
 
-    observed: list[tuple[int, str]] = []
-    seen_exact: set[str] = set()
+    page_observations: list[tuple[int, str]] = []
     for page in extraction.pages:
+        seen_on_page: set[str] = set()
         for value in page.running_header_texts:
             compact = compact_inline(value)
-            if not compact or compact in seen_exact:
+            if not compact or compact in seen_on_page:
                 continue
-            seen_exact.add(compact)
-            observed.append((page.page_number, compact))
-    if not observed:
+            seen_on_page.add(compact)
+            page_observations.append((page.page_number, compact))
+    if not page_observations:
         return None
+    header_page_count = len({page_number for page_number, _text in page_observations})
+    occurrence_counts = Counter(text for _page_number, text in page_observations)
+    emitted_full_page_values: set[str] = set()
+    observed: list[tuple[int, str]] = []
+    for page_number, text in page_observations:
+        if occurrence_counts[text] == header_page_count:
+            if text in emitted_full_page_values:
+                continue
+            emitted_full_page_values.add(text)
+        observed.append((page_number, text))
+    # 每个页眉页都相同的固定家具只保留一次，避免页数变化制造差异；只在同一
+    # 文档存在部分页采用不同精确值时保留逐页次数，从而仍能发现 ALPHA/alpha
+    # 这类技术标识符的分布变化。
     start_page = min(page_number for page_number, _text in observed)
     end_page = max(
         page.page_number
