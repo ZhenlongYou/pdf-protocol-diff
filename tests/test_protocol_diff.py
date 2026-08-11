@@ -8020,6 +8020,85 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("PAM4", reader)
             self.assertIn("NRZ", reader)
 
+    def test_repeated_count_change_is_not_fabricated_as_reordering(self) -> None:
+        """Deleting one duplicate remains a deletion when occurrence identity is ambiguous."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-repeated-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nPAM4 mode applies.\nNRZ mode applies.\n"
+                            "PAM4 mode applies."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-repeated-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Modes\nNRZ mode applies.\nPAM4 mode applies.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.replaced_snippets)
+        self.assertFalse(change.added_snippets)
+        self.assertTrue(any("PAM4" in snippet for snippet in change.removed_snippets))
+        self.assertTrue(any("PAM4" in snippet for snippet in change.audit_removed_snippets))
+
+    def test_interleaved_reordering_has_no_duplicate_add_delete_facts(self) -> None:
+        """Every inversion in an interleaved repeated sequence is covered once."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-interleaved-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Rates\nAlpha rate applies.\nAlpha rate applies.\n"
+                            "Bravo rate applies.\nCharlie rate applies."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-interleaved-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Rates\nBravo rate applies.\nAlpha rate applies.\n"
+                            "Charlie rate applies.\nAlpha rate applies."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(1, len(change.replaced_snippets))
+        self.assertFalse(change.added_snippets)
+        self.assertFalse(change.removed_snippets)
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        for token in ("Alpha", "Bravo", "Charlie"):
+            self.assertIn(token, change.replaced_snippets[0].old)
+            self.assertIn(token, change.replaced_snippets[0].new)
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 

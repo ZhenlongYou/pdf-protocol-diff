@@ -3307,7 +3307,13 @@ def _reordered_common_units_evidence(
     new_keys = [_review_unit_key(unit) for unit in new_units]
     old_counts = Counter(key for key in old_keys if key)
     new_counts = Counter(key for key in new_keys if key)
-    common_counts = old_counts & new_counts
+    common_counts = Counter(
+        {
+            key: old_count
+            for key, old_count in old_counts.items()
+            if old_count == new_counts.get(key)
+        }
+    )  # 次数不等时 occurrence 身份无法证明，必须交回普通增删逻辑。
 
     def occurrence_order(
         keys: list[str],
@@ -3331,28 +3337,29 @@ def _reordered_common_units_evidence(
     if len(old_order) < 2 or old_order == new_order:
         return None
     old_positions = {token: index for index, token in enumerate(old_order)}
-    inversion: tuple[tuple[str, int], tuple[str, int]] | None = None
+    involved_tokens: set[tuple[str, int]] = set()
     for new_index, first_token in enumerate(new_order):
         for second_token in new_order[new_index + 1 :]:
             if old_positions[first_token] > old_positions[second_token]:
-                inversion = (second_token, first_token)  # 旧顺序为 second→first，新顺序相反。
-                break
-        if inversion is not None:
-            break
-    if inversion is None:
+                involved_tokens.update((first_token, second_token))
+    if not involved_tokens:
         return None
-    involved_keys = {token[0] for token in inversion}
+    involved_keys = {token[0] for token in involved_tokens}
     covered_old_indexes = {
         index for token, index in old_indexes.items() if token[0] in involved_keys
     }
     covered_new_indexes = {
         index for token, index in new_indexes.items() if token[0] in involved_keys
     }
+    old_pair_order = [token for token in old_order if token[0] in involved_keys]
+    new_pair_order = [token for token in new_order if token[0] in involved_keys]
     return (
         SnippetPair(
-            old="\n".join(_report_unit(old_units[old_indexes[token]]) for token in inversion),
+            old="\n".join(
+                _report_unit(old_units[old_indexes[token]]) for token in old_pair_order
+            ),
             new="\n".join(
-                _report_unit(new_units[new_indexes[token]]) for token in reversed(inversion)
+                _report_unit(new_units[new_indexes[token]]) for token in new_pair_order
             ),
         ),
         covered_old_indexes,
