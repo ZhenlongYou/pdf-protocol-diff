@@ -1097,10 +1097,15 @@ def _looks_like_appendix_subreference_fragment(number: str, title: str) -> bool:
 _NAMED_CONTAINER_ENGLISH_PREDICATE = (
     r"(?:describes?|defines?|contains?|provides?|specifies?|establishes?|"
     r"states?|lists?|summarizes?|explains?|covers?|includes?|requires?|"
-    r"presents?|details?|documents?|sets?\s+out)"
+    r"presents?|details?|documents?|sets?\s+out|[a-z]{3,}(?:s|es))"
 )
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
-    r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|记录|要求)"
+    r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
+    r"记录|要求|阐述|论述|概述|载明|陈述|报告|指明|指出|表明)"
+)
+_NAMED_CONTAINER_CHINESE_ADVERB = (
+    r"(?:(?:[\u3400-\u9fff]{1,6}?地)|(?:进一步)?(?:全面|充分|完整|完全|"
+    r"明确|清晰|准确|详细|严格|系统|分别|主要|简要))"
 )
 
 
@@ -1114,7 +1119,8 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         cleaned,
     )
     predicate = re.match(
-        rf"(?i)^(?P<verb>{_NAMED_CONTAINER_ENGLISH_PREDICATE})\b",
+        rf"(?i)^(?:(?:[a-z]+ly)\s+){{0,3}}"
+        rf"(?P<verb>{_NAMED_CONTAINER_ENGLISH_PREDICATE})\b",
         cleaned,
     )
     match = predicate or intransitive
@@ -1134,11 +1140,10 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         # (``STATES THE RECEIVER SUPPORTS``).  Both remain structural.
         ambiguous_tail = re.sub(r"[.!?]\s*$", "", cleaned[match.end() :]).strip()
         ambiguous_words = ambiguous_tail.split()
-        if len(ambiguous_words) >= 2 and ambiguous_words[0].casefold() not in {
-            "the",
-            "a",
-            "an",
-        }:
+        if ambiguous_words and re.fullmatch(
+            r"(?i)\w+(?:ed|en|ing|able|ible)",
+            ambiguous_words[0],
+        ):
             return False
         if len(ambiguous_words) >= 3 and re.fullmatch(
             r"(?i)(?:supports?|implements?|uses?|defines?|requires?|provides?|"
@@ -1155,7 +1160,6 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             return True
         return False
 
-    verb_count = 1
     while True:
         coordinated = re.match(
             rf"(?i)^\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)"
@@ -1165,11 +1169,10 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         )
         if coordinated is None:
             break
-        verb_count += 1
         tail = tail[coordinated.end() :]
     compact_tail = tail.strip()
     if compact_tail in {".", "!", "?"}:
-        return terminal and verb_count == 1
+        return terminal
     return bool(
         compact_tail
         and not re.match(r"(?i)^(?:and|or|of|for)\b", compact_tail)
@@ -1179,20 +1182,20 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
 def _chinese_named_container_predicate_sentence(title: str) -> bool:
     """Recognize a Chinese predicate chain only when it owns a real complement."""
 
-    cleaned = title.rstrip("。！？").strip()
+    cleaned = re.sub(
+        r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])",
+        "",
+        title.rstrip("。！？").strip(),
+    )
     predicate = re.match(
-        rf"^(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
+        rf"^(?:{_NAMED_CONTAINER_CHINESE_ADVERB})?"
+        rf"(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
         cleaned,
     )
     if predicate is None:
         return False
     tail = cleaned[predicate.end() :]
-    terminal = bool(re.search(r"[。！？]\s*$", title))
-    modifier = (
-        r"(?:[\u3400-\u9fff]{1,6}?地|[\u3400-\u9fff]{1,6}?)?"
-        if terminal
-        else r"(?:[\u3400-\u9fff]{1,5}?地)?"
-    )
+    modifier = rf"(?:{_NAMED_CONTAINER_CHINESE_ADVERB})?"
     while True:
         coordinated = re.match(
             rf"^\s*(?:[、，,]\s*(?:并且|并|以及|和|与|及|或)?|"
@@ -1205,7 +1208,10 @@ def _chinese_named_container_predicate_sentence(title: str) -> bool:
         if coordinated is None:
             break
         tail = tail[coordinated.end() :]
-    return bool(tail and not re.match(r"^[、，,与和及或并的]", tail))
+    compact_tail = tail.strip()
+    return bool(
+        compact_tail and not re.match(r"^[、，,与和及或并的]", compact_tail)
+    )
 
 
 def _looks_like_named_container_reference_sentence(
@@ -1228,8 +1234,13 @@ def _looks_like_named_container_reference_sentence(
     remainder = candidate[len(number) :].lstrip()
     if remainder.startswith((":", "：", ".", "-", "–", "—")):
         return False
-    if re.search(r"[:：–—]", title):
-        return False  # 容器标题内部的强分隔符也不能被谓语同形词覆盖。
+    internal_delimiter = re.match(r"^(?P<prefix>\S+)\s*[:：–—]", title)
+    if internal_delimiter is not None:
+        prefix = internal_delimiter.group("prefix")
+        if (prefix.isascii() and not prefix.islower()) or (
+            not prefix.isascii() and not re.search(r"[。！？]\s*$", title)
+        ):
+            return False  # 强分隔符只有紧邻标题词且无完整句证据时优先。
     english_auxiliary = bool(
         re.match(
             r"(?i)^(?:shall|should|must|may|might|can|could|will|would|"

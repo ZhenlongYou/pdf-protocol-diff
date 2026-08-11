@@ -10773,6 +10773,17 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
             "Appendix A explains.",
             "APPENDIX A SUMMARIZES.",
+            "Appendix A explains and summarizes.",
+            "APPENDIX A EXPLAINS AND SUMMARIZES.",
+            "Appendix A outlines the calibration method.",
+            "Appendix A clearly explains the receiver limits.",
+            "Appendix A explains: the receiver limit is 20 mV.",
+            "Part II describes the transmitter—receiver interface.",
+            "APPENDIX A STATES TWO REQUIREMENTS.",
+            "ANNEX B LISTS ALL REQUIREMENTS.",
+            "APPENDIX C COVERS THREE METHODS.",
+            "APPENDIX A STATES RECEIVER REQUIREMENTS.",
+            "APPENDIX A STATES REQUIREMENTS CLEARLY.",
             "Annex B contains normative requirements.",
             "Annex B remains normative for receiver testing.",
             "Annex B remains normative for receiver",
@@ -10806,6 +10817,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 C 说明并充分定义校准方法。",
             "附录 D 说明并进一步明确规定接收机限值。",
             "附录 E 说明、要求并规定接收机限值。",
+            "附录 A 说明：接收机限值为20mV。",
+            "附录 A 阐述校准方法。",
+            "附录 A 明确规定接收机限值。",
+            "附录 A 说 明并规定接收机限值。",
             "附录 C 介绍与展示校准证据。",
         ):
             with self.subTest(line=line):
@@ -10924,6 +10939,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX A STATES THE PROTOCOL RECEIVER SUPPORTS.",
             "附录 A 说明：要求和示例",
             "附录 B 描述—定义和缩写",
+            "附录 A 说明 、 要求 和 示例",
+            "附录 B 描述 、 定义 、 缩写",
+            "附录 A 说明及适用要求范围。",
+            "附录 C 说明和接收机定义要求。",
         ):
             with self.subTest(title=title):
                 extraction = ExtractionResult(
@@ -10962,6 +10981,17 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B contains and very clearly explains the receiver limits.",
             "Appendix A explains.",
             "APPENDIX A SUMMARIZES.",
+            "Appendix A explains and summarizes.",
+            "APPENDIX A EXPLAINS AND SUMMARIZES.",
+            "Appendix A outlines the calibration method.",
+            "Appendix A clearly explains the receiver limits.",
+            "Appendix A explains: the receiver limit is 20 mV.",
+            "Part II describes the transmitter—receiver interface.",
+            "APPENDIX A STATES TWO REQUIREMENTS.",
+            "ANNEX B LISTS ALL REQUIREMENTS.",
+            "APPENDIX C COVERS THREE METHODS.",
+            "APPENDIX A STATES RECEIVER REQUIREMENTS.",
+            "APPENDIX A STATES REQUIREMENTS CLEARLY.",
             "附录 A 描述和定义校准方法",
             "附录 A 描述、定义并记录校准方法",
             "附录 B 说明及明确规定接收机限值。",
@@ -10972,6 +11002,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 C 说明并充分定义校准方法。",
             "附录 D 说明并进一步明确规定接收机限值。",
             "附录 E 说明、要求并规定接收机限值。",
+            "附录 A 说明：接收机限值为20mV。",
+            "附录 A 阐述校准方法。",
+            "附录 A 明确规定接收机限值。",
+            "附录 A 说 明并规定接收机限值。",
         ):
             with self.subTest(reference=reference):
                 extraction = ExtractionResult(
@@ -11269,6 +11303,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 B 描述、定义、缩写",
             "附录 A 说明：要求和示例",
             "附录 B 描述—定义和缩写",
+            "附录 A 说明 、 要求 和 示例",
+            "附录 B 描述 、 定义 、 缩写",
+            "附录 A 说明及适用要求范围。",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
