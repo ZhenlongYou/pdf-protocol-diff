@@ -1331,11 +1331,15 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             "billion",
         }:
             multiplier = words[:-1]
-            if multiplier == ["a"]:
+            if multiplier in (["a"], ["half", "a"]):
                 return "2"
             parsed_multiplier = parse_number_word_phrase(multiplier, 0)
             if (
-                parsed_multiplier is not None
+                not any(
+                    token in {"hundred", "thousand", "million", "billion"}
+                    for token in multiplier
+                )
+                and parsed_multiplier is not None
                 and parsed_multiplier[1] == len(multiplier)
             ):
                 return "2"
@@ -1362,9 +1366,18 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             alternatives: list[list[str]] = [[]]
             for token in body:
                 if token == "or":
-                    alternatives.append([])
+                    if alternatives[-1]:
+                        alternatives.append([])
                 else:
-                    alternatives[-1].append(token)
+                    trailing_comma = token.endswith(",") and not re.fullmatch(
+                        r"\d+(?:,\d{3})+",
+                        token,
+                    )
+                    alternatives[-1].append(token[:-1] if trailing_comma else token)
+                    if trailing_comma:
+                        alternatives.append([])
+            if alternatives and not alternatives[-1]:
+                alternatives.pop()
             if len(alternatives) >= 2 and all(alternatives):
                 parsed_alternatives = [
                     complete_count_value(alternative)
@@ -1391,13 +1404,22 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             right = body[index + 1 :]
             if complete_count_value(left) is None:
                 continue
-            if complete_count_value(right) is not None:
-                return "plural"
+            right_value = complete_count_value(right)
+            if right_value is not None:
+                return (
+                    "singular"
+                    if re.fullmatch(r"0*1(?:\.0+)?", right_value)
+                    else "plural"
+                )
         return None
 
     coordinated_number = complete_coordinated_count(numeric_phrase)
     if coordinated_number is not None:
-        if comparison or (exactness and quantity[0] == "exactly"):
+        if (
+            comparison
+            or approximation_word in {"over", "under"}
+            or (exactness and quantity[0] == "exactly")
+        ):
             return False
         return noun_agrees(coordinated_number)
     if numeric_phrase == ["a", "few"]:
