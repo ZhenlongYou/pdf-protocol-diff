@@ -630,19 +630,31 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         and start_index + 2 < len(normalized)
         and normalized[start_index + 2] in _NUMBER_WORD_SCALES
     ):
-        scaled = canonicalize_numeric_scale(
+        scale_end = start_index + 2
+        while (
+            scale_end < len(normalized)
+            and normalized[scale_end] in _NUMBER_WORD_SCALES
+        ):
+            scale_end += 1
+        scaled = canonicalize_numeric_scale_chain(
             "0.5",
-            normalized[start_index + 2],
+            normalized[start_index + 2 : scale_end],
         )
-        assert scaled is not None
-        return scaled, 3
+        if scaled is not None:
+            return scaled, scale_end - start_index
     for half_index in range(start_index + 1, len(normalized) - 3):
         if normalized[half_index : half_index + 3] != ["and", "a", "half"]:
             continue
-        scale_index = half_index + 3
-        if normalized[scale_index] not in _NUMBER_WORD_SCALES:
+        first_scale_index = half_index + 3
+        if normalized[first_scale_index] not in _NUMBER_WORD_SCALES:
             continue
-        target_scale = _NUMBER_WORD_SCALES[normalized[scale_index]]
+        scale_end = first_scale_index
+        while (
+            scale_end < len(normalized)
+            and normalized[scale_end] in _NUMBER_WORD_SCALES
+        ):
+            scale_end += 1
+        target_scale = _NUMBER_WORD_SCALES[normalized[first_scale_index]]
         prefix_scales = [
             _NUMBER_WORD_SCALES[token]
             for token in normalized[start_index:half_index]
@@ -653,12 +665,12 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         prefix = parse_number_word_phrase(tokens[start_index:half_index], 0)
         if prefix is None or prefix[1] != half_index - start_index:
             continue
-        scaled = canonicalize_numeric_scale(
+        scaled_chain = canonicalize_numeric_scale_chain(
             f"{prefix[0]}.5",
-            normalized[scale_index],
+            normalized[first_scale_index:scale_end],
         )
-        if scaled is not None:
-            return scaled, scale_index - start_index + 1
+        if scaled_chain is not None:
+            return scaled_chain, scale_end - start_index
     first_scale = next(
         (
             index
@@ -674,7 +686,30 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         and normalized[scale_end] in _NUMBER_WORD_SCALES
     ):
         scale_end += 1
-    if first_scale > start_index and scale_end - first_scale >= 2:
+    chain_is_terminal = first_scale >= 0
+    if first_scale >= 0 and scale_end < len(normalized):
+        next_token = normalized[scale_end]
+        if (
+            next_token in _NUMBER_WORD_UNITS
+            or next_token in _NUMBER_WORD_TENS
+            or next_token in {"a", "half"}
+        ):
+            chain_is_terminal = False
+        elif next_token == "and":
+            final_scale = _NUMBER_WORD_SCALES[normalized[scale_end - 1]]
+            following_scales = [
+                _NUMBER_WORD_SCALES[token]
+                for token in normalized[scale_end + 1 :]
+                if token in _NUMBER_WORD_SCALES
+            ]
+            chain_is_terminal = any(
+                scale >= final_scale for scale in following_scales
+            )
+    if (
+        first_scale > start_index
+        and scale_end - first_scale >= 2
+        and chain_is_terminal
+    ):
         multiplier = parse_number_word_phrase(tokens[start_index:first_scale], 0)
         if multiplier is not None and multiplier[1] == first_scale - start_index:
             scaled = canonicalize_numeric_scale_chain(
@@ -783,12 +818,6 @@ def canonicalize_number_word_tokens(
         canonical.append(tokens[index])
         index += 1
     return canonical
-
-
-def canonicalize_numeric_scale(number: str, scale: str) -> str | None:
-    """Return the exact product for a numeric token followed by a count scale."""
-
-    return canonicalize_numeric_scale_chain(number, [scale])
 
 
 def mark_english_cardinal_list_commas(value: str) -> str:
