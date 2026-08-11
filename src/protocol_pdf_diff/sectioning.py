@@ -1102,6 +1102,10 @@ _NAMED_CONTAINER_ENGLISH_PREDICATE = (
     r"addresses?|prescribes?|clarifies?|compares?|examines?|reviews?|maps?|"
     r"captures?|highlights?|notes?)"
 )
+_NAMED_CONTAINER_ENGLISH_NOUN_CAPABLE_PREDICATE = (
+    r"(?:states|lists|covers|details|reports|records|notes|maps|documents|"
+    r"outlines|shows|presents|addresses|reviews|highlights|captures)"
+)
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
     r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
     r"记录|要求|阐述|论述|概述|载明|陈述|报告|指明|指出|表明)"
@@ -1134,7 +1138,7 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         # ``States the Receiver Supports`` is a plausible Title Case noun title.
         return False
     if first_word.isupper() and re.match(
-        r"(?i)^(?:states|lists|covers|details)\b",
+        rf"(?i)^{_NAMED_CONTAINER_ENGLISH_NOUN_CAPABLE_PREDICATE}\b",
         cleaned,
     ):
         # ALL-CAPS loses Title Case evidence.  With no article, a multiword tail
@@ -1242,11 +1246,19 @@ def _looks_like_named_container_reference_sentence(
     remainder = candidate[len(number) :].lstrip()
     if remainder.startswith((":", "：", ".", "-", "–", "—")):
         return False
-    internal_delimiter = re.match(r"^(?P<prefix>\S+)\s*[:：–—]", title)
+    internal_delimiter = re.match(
+        r"^(?P<prefix>\S+)\s*[:：–—]\s*(?P<suffix>.+)$",
+        title,
+    )
     if internal_delimiter is not None:
         prefix = internal_delimiter.group("prefix")
+        suffix = internal_delimiter.group("suffix")
+        chinese_suffix_is_sentence = bool(
+            _chinese_named_container_predicate_sentence(suffix)
+            or re.search(r"(?:为|是|具有|必须|应当|可以|不得|需要|适用|执行|生效)", suffix)
+        )
         if (prefix.isascii() and not prefix.islower()) or (
-            not prefix.isascii() and not re.search(r"[。！？]\s*$", title)
+            not prefix.isascii() and not chinese_suffix_is_sentence
         ):
             return False  # 强分隔符只有紧邻标题词且无完整句证据时优先。
     english_auxiliary = bool(
