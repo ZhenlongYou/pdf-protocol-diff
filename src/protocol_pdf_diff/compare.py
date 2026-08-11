@@ -3046,11 +3046,13 @@ def _assignment_field_key(value: str) -> str:
     if not field_key:
         return ""
     field_words = re.findall(r"[a-z]+", field_key)
-    if field_words and all(
-        word in _NON_ASSIGNMENT_REFERENCE_WORDS or word in _REVIEW_STOP_WORDS
-        for word in field_words
+    if not field_words or len(field_words) > 3:
+        return ""
+    if (
+        field_words[0] in _NON_ASSIGNMENT_REFERENCE_WORDS
+        or field_words[0] in _REVIEW_STOP_WORDS
     ):
-        return ""  # There/They/the former 等虚主语或指代语不是字段名。
+        return ""  # This requirement/The section/Our requirement 等指代性主语不是紧凑字段标签。
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
         return ""  # it/this 类代词不是可独立证明的字段名。
     return field_key
@@ -3083,13 +3085,17 @@ _NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
         "he",
         "here",
         "hers",
+        "her",
         "herself",
+        "his",
         "him",
         "himself",
         "i",
+        "its",
         "latter",
         "last",
         "mine",
+        "my",
         "neither",
         "next",
         "ninth",
@@ -3099,6 +3105,7 @@ _NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
         "one",
         "ones",
         "other",
+        "our",
         "ours",
         "ourselves",
         "preceding",
@@ -3111,8 +3118,10 @@ _NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
         "somebody",
         "someone",
         "something",
+        "such",
         "tenth",
         "theirs",
+        "their",
         "them",
         "themselves",
         "there",
@@ -3130,6 +3139,7 @@ _NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
         "whoever",
         "whom",
         "whose",
+        "your",
         "you",
         "yours",
         "yourself",

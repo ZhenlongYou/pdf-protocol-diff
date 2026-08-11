@@ -7935,6 +7935,20 @@ class ProtocolDiffTests(unittest.TestCase):
             ("The first", "is"),
             ("The following", "is"),
             ("Elsewhere", "is"),
+            ("This requirement", "is"),
+            ("The section", "is"),
+            ("The following requirement", "is"),
+            ("Such a requirement", "is"),
+            ("That item", "is"),
+            ("The result", "is"),
+            ("This statement", "is"),
+            ("The above item", "is"),
+            ("Our requirement", "is"),
+            ("The former process", "is"),
+            ("The previous method", "is"),
+            ("Both alternatives", "are"),
+            ("What follows", "is"),
+            ("The method above", "is"),
         ):
             with self.subTest(subject=subject):
                 result = compare_extractions(
