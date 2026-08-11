@@ -2956,7 +2956,11 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
             0.90,
         )
     if len(left_units) == 1:
-        return raw_score  # 单片段同号同题仍按原始相似度配对，差异会完整显示为 modified。
+        left_field = _assignment_field_key(left_units[0])
+        right_field = _assignment_field_key(right_units[0])
+        if left_field and left_field == right_field:
+            return max(raw_score, 0.90)  # 稳定字段名可以证明 Mode/State 的值槽修改。
+        return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
     if any(
         not _review_units_share_sentence_skeleton(old_unit, new_unit)
         for old_unit, new_unit in zip(left_units, right_units)
@@ -3014,12 +3018,12 @@ def _assignment_field_key(value: str) -> str:
 
     compact = compact_inline(value).strip(".?!！？。 ")
     match = re.match(
-        r"(?i)^(.{1,80}?)\s*(?::|=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
+        r"(?i)^(.{1,80}?)\s*(?P<separator>:|=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
         compact,
     )
     if match is None:
         return ""
-    field, assigned_value = match.groups()
+    field, separator, assigned_value = match.groups()
     if not assigned_value.strip():
         return ""
     field_key = normalize_for_similarity(field)
@@ -3027,7 +3031,50 @@ def _assignment_field_key(value: str) -> str:
         return ""
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
         return ""  # it/this 类代词不是可独立证明的字段名。
+    if separator == ":" and not _colon_assignment_value_is_proven(
+        field_key,
+        assigned_value,
+    ):
+        return ""  # 冒号也可以是 Note/Warning 段落引导，只允许可证明的短技术值。
     return field_key
+
+
+_DISCOURSE_LABELS_NOT_ASSIGNMENTS = frozenset(
+    {
+        "background",
+        "description",
+        "example",
+        "guidance",
+        "note",
+        "overview",
+        "reason",
+        "remark",
+        "requirement",
+        "warning",
+    }
+)
+
+
+def _colon_assignment_value_is_proven(field_key: str, value: str) -> bool:
+    """Accept colon fields only when the right side has compact value-slot syntax."""
+
+    if field_key in _DISCOURSE_LABELS_NOT_ASSIGNMENTS:
+        return False
+    compact_value = compact_inline(value).strip(".?!！？。 ")
+    if not compact_value or len(compact_value) > 80:
+        return False
+    if len(re.findall(r"\S+", compact_value)) > 6:
+        return False
+    if re.search(r"(?<![\w.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)", compact_value):
+        return True
+    if re.search(r"\b[A-Z][A-Z0-9]{1,}(?:[-_/][A-Z0-9]+)*\b", compact_value):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?i)(?:enabled|disabled|pass|fail|passed|failed|on|off|true|false|automatic|manual|idle|active|inactive|ready)",
+            compact_value,
+        )
+    )
 
 
 def _similarity(left: str, right: str) -> float:

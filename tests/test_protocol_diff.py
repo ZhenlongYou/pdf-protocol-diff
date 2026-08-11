@@ -7921,6 +7921,64 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertNotIn("one million packets", reader)
             self.assertNotIn("1,000,000 packets", reader)
 
+    def test_single_short_field_value_change_does_not_depend_on_raw_similarity(self) -> None:
+        """A proven field/value slot remains one modified single-unit section."""
+
+        for old_body, new_body in (
+            ("Mode is PAM4.", "Mode is DISABLED."),
+            ("State: IDLE.", "State: RECOVERY."),
+        ):
+            with self.subTest(old_body=old_body, new_body=new_body):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-single-field.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Operating Mode\n{old_body}")],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-single-field.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Operating Mode\n{new_body}")],
+                    ),
+                    DiffOptions(),
+                )
+
+                self.assertEqual(1, len(result.changes))
+                self.assertEqual("modified", result.changes[0].change_type)
+                self.assertEqual(old_body, result.changes[0].replaced_snippets[0].old)
+                self.assertEqual(new_body, result.changes[0].replaced_snippets[0].new)
+
+    def test_discourse_colon_label_cannot_rescue_disjoint_exact_sections(self) -> None:
+        """A Note/Warning-style label is not a technical field identity proof."""
+
+        shared = "Capture one million packets."
+        for label in ("Note", "Warning", "Example", "Requirement", "Reason"):
+            with self.subTest(label=label):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-discourse-label.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=f"1 General\n{shared}\n{label}: PAM4.",
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-discourse-label.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=f"1 General\nCapture 1,000,000 packets.\n{label}: NRZ.",
+                            )
+                        ],
+                    ),
+                    DiffOptions(),
+                )
+
+                change_types = [change.change_type for change in result.changes]
+                self.assertNotIn("modified", change_types)
+                self.assertEqual(1, change_types.count("added"))
+                self.assertEqual(1, change_types.count("deleted"))
+
     def test_exact_section_allows_an_ordered_sentence_addition(self) -> None:
         """A preserved original sentence plus one new fact is one modified section."""
 
