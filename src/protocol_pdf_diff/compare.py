@@ -2934,12 +2934,19 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         return raw_score
     if not left_units or not right_units:
         return None  # 空容器不能仅凭占用相同编号抢配另一条有正文的章节。
-    left_review_key = _review_unit_key(left)
-    right_review_key = _review_unit_key(right)
+    left_unit_keys = [_review_unit_key(unit) for unit in left_units]
+    right_unit_keys = [_review_unit_key(unit) for unit in right_units]
+    left_review_key = " ".join(key for key in left_unit_keys if key)
+    right_review_key = " ".join(key for key in right_unit_keys if key)
     if left_review_key and left_review_key == right_review_key:
         return 1.0  # 整段语义键完全相等时，句末标点造成的分句差异不应破坏章节身份。
     if len(left_units) != len(right_units):
-        if not _review_units_have_complete_skeleton_matching(left_units, right_units):
+        if _review_unit_skeleton_match_count(
+            left_units,
+            right_units,
+            left_keys=left_unit_keys,
+            right_keys=right_unit_keys,
+        ) != min(len(left_units), len(right_units)):
             return None
         return max(
             raw_score,
@@ -2960,7 +2967,12 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         ):
             return None  # 单句冒号标签无法在无 schema provenance 时证明字段身份。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
-    matched_unit_count = _review_unit_skeleton_match_count(left_units, right_units)
+    matched_unit_count = _review_unit_skeleton_match_count(
+        left_units,
+        right_units,
+        left_keys=left_unit_keys,
+        right_keys=right_unit_keys,
+    )
     if matched_unit_count < len(left_units):
         stable_ratio = matched_unit_count / len(left_units)
         if matched_unit_count < 2 or stable_ratio < 0.75:
@@ -3041,20 +3053,92 @@ def _review_units_have_complete_skeleton_matching(
 def _review_unit_skeleton_match_count(
     left_units: list[str],
     right_units: list[str],
+    *,
+    left_keys: list[str] | None = None,
+    right_keys: list[str] | None = None,
 ) -> int:
     """Return the maximum number of one-to-one semantic unit matches."""
 
+    if left_keys is None:
+        left_keys = [_review_unit_key(unit) for unit in left_units]
+    if right_keys is None:
+        right_keys = [_review_unit_key(unit) for unit in right_units]
+    if len(left_keys) != len(left_units) or len(right_keys) != len(right_units):
+        raise ValueError("precomputed review key count must match unit count")
+    right_indexes_by_key: dict[str, list[int]] = {}
+    for index, key in enumerate(right_keys):
+        right_indexes_by_key.setdefault(key, []).append(index)
+    consumed_per_key: Counter[str] = Counter()
+    exact_left_indexes: set[int] = set()
+    exact_right_indexes: set[int] = set()
+    for left_index, key in enumerate(left_keys):
+        candidates = right_indexes_by_key.get(key, [])
+        occurrence = consumed_per_key[key]
+        if occurrence >= len(candidates):
+            continue
+        exact_left_indexes.add(left_index)
+        exact_right_indexes.add(candidates[occurrence])
+        consumed_per_key[key] += 1
+
+    residual_left = [
+        unit for index, unit in enumerate(left_units) if index not in exact_left_indexes
+    ]
+    residual_right = [
+        unit for index, unit in enumerate(right_units) if index not in exact_right_indexes
+    ]
+    exact_count = len(exact_left_indexes)
+    if not residual_left or not residual_right:
+        return exact_count
+
     shorter, longer = (
-        (left_units, right_units)
-        if len(left_units) <= len(right_units)
-        else (right_units, left_units)
+        (residual_left, residual_right)
+        if len(residual_left) <= len(residual_right)
+        else (residual_right, residual_left)
     )
+    bounded_matching = len(shorter) * len(longer) > 4096
+    longer_words = [_meaningful_review_words(unit) for unit in longer]
+    longer_fields = [_assignment_field_key(unit) for unit in longer]
+    word_indexes: dict[str, list[int]] = {}
+    field_indexes: dict[str, list[int]] = {}
+    if bounded_matching:
+        for index, words in enumerate(longer_words):
+            for word in words:
+                word_indexes.setdefault(word, []).append(index)
+        for index, field in enumerate(longer_fields):
+            if field:
+                field_indexes.setdefault(field, []).append(index)
+
     candidates: list[list[int]] = []
-    for short_unit in shorter:
+    for short_index, short_unit in enumerate(shorter):
         short_key = _review_unit_key(short_unit)
+        candidate_pool: set[int]
+        if not bounded_matching:
+            candidate_pool = set(range(len(longer)))
+        else:
+            candidate_pool = set()
+            short_field = _assignment_field_key(short_unit)
+            if short_field:
+                candidate_pool.update(field_indexes.get(short_field, ()))
+            short_words = _meaningful_review_words(short_unit)
+            for word in sorted(short_words, key=lambda item: len(word_indexes.get(item, ()))):
+                indexes = word_indexes.get(word, ())
+                if len(indexes) <= 32:
+                    candidate_pool.update(indexes)
+                if len(candidate_pool) >= 32:
+                    break
+            projected = round(
+                short_index * (len(longer) - 1) / max(len(shorter) - 1, 1)
+            )
+            candidate_pool.update(
+                range(max(0, projected - 3), min(len(longer), projected + 4))
+            )
+            candidate_pool = set(
+                sorted(candidate_pool, key=lambda index: abs(index - projected))[:32]
+            )
         indexes = [
             index
-            for index, long_unit in enumerate(longer)
+            for index in candidate_pool
+            for long_unit in (longer[index],)
             if _review_units_share_sentence_skeleton(short_unit, long_unit)
         ]
         indexes.sort(
@@ -3080,7 +3164,7 @@ def _review_unit_skeleton_match_count(
     for short_index in range(len(shorter)):
         if assign(short_index, set()):
             matched_count += 1
-    return matched_count
+    return exact_count + matched_count
 
 
 def _assignment_field_key(value: str) -> str:
@@ -3138,7 +3222,21 @@ def _sections_effectively_unchanged(
 ) -> bool:
     """Treat only conservatively normalized, exactly equal sections as unchanged."""
 
-    body_same = _review_unit_key(old_section.body) == _review_unit_key(new_section.body)
+    old_units = _paragraph_review_units(
+        old_section.body,
+        suppressed_table_unit_keys=set(),
+    )
+    new_units = _paragraph_review_units(
+        new_section.body,
+        suppressed_table_unit_keys=set(),
+    )
+    old_review_key = " ".join(
+        key for unit in old_units if (key := _review_unit_key(unit))
+    )
+    new_review_key = " ".join(
+        key for unit in new_units if (key := _review_unit_key(unit))
+    )
+    body_same = old_review_key == new_review_key
     if _section_heading_changed(old_section, new_section):
         return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
     return body_same  # 相似度不能授权猜测复数、动词变化或其他语义等价。
@@ -3416,14 +3514,20 @@ def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) 
         raw_line
         for raw_line in text.splitlines()
         if not _is_table_review_unit(raw_line)
-        and _review_unit_key(raw_line) not in suppressed_table_unit_keys
+        and (
+            not suppressed_table_unit_keys
+            or _review_unit_key(raw_line) not in suppressed_table_unit_keys
+        )
     )  # 必须先按原始结构化行整体过滤；否则 NOTES 单元格内的句号会先拆掉前缀，再冒充正文。
     units = _split_units(prose_text)  # 表格由表格证据区承载，正文卡片只切分剩余文本。
     return [
         unit
         for unit in units
         if not _is_table_review_unit(unit)
-        and _review_unit_key(unit) not in suppressed_table_unit_keys
+        and (
+            not suppressed_table_unit_keys
+            or _review_unit_key(unit) not in suppressed_table_unit_keys
+        )
     ]  # 结构化表格行及已由跨侧精确重建覆盖的原始整单元都不再进入正文卡片。
 
 

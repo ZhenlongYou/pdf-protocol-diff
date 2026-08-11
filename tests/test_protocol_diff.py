@@ -8294,6 +8294,36 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, pair.new.count("\n"))
         self.assertLess(len(pair.old) + len(pair.new), 500)
 
+        old_text = "1 Modes\n" + "\n".join(old_units)
+        new_text = "1 Modes\n" + "\n".join(new_units)
+        with mock.patch.object(
+            compare_module,
+            "_review_units_share_sentence_skeleton",
+            wraps=compare_module._review_units_share_sentence_skeleton,
+        ) as skeleton_match:
+            result = compare_extractions(
+                ExtractionResult(
+                    pdf_path=Path("old-large-order.pdf"),
+                    pages=[PageText(page_number=1, text=old_text)],
+                ),
+                ExtractionResult(
+                    pdf_path=Path("new-large-order.pdf"),
+                    pages=[PageText(page_number=1, text=new_text)],
+                ),
+                DiffOptions(max_snippets_per_section=1),
+            )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertLess(skeleton_match.call_count, 20)
+        self.assertLess(
+            sum(
+                len(pair.old) + len(pair.new)
+                for pair in result.changes[0].replaced_snippets
+            ),
+            500,
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
