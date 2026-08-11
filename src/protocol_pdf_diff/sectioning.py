@@ -20,6 +20,7 @@ from .text_utils import (
     compact_inline,
     normalize_for_similarity,
     normalize_line,
+    parse_number_word_phrase,
 )
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
@@ -1110,7 +1111,9 @@ _NAMED_CONTAINER_COUNT_NOUN = (
     r"(?:failures?|errors?|tests?|cases?|items?|events?|issues?|results?|"
     r"requirements?|methods?|modes?|devices?|pages?|sections?|clauses?|"
     r"chapters?|steps?|observations?|records?|samples?|packets?|messages?|"
-    r"transactions?|lanes?|links?|ports?|conditions?|values?|parameters?)"
+    r"transactions?|lanes?|links?|ports?|conditions?|values?|parameters?|"
+    r"warnings?|alerts?|notices?|entries?|changes?|differences?|updates?|"
+    r"findings?|anomalies?|incidents?|problems?|checks?|runs?|attempts?)"
 )
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
     r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
@@ -1120,6 +1123,66 @@ _NAMED_CONTAINER_CHINESE_ADVERB = (
     r"(?:(?:[\u3400-\u9fff]{1,6}?地)|(?:进一步)?(?:全面|充分|完整|完全|"
     r"明确|清晰|准确|详细|严格|系统|分别|主要|简要))"
 )
+
+
+def _named_container_prepositional_count_clause(value: str) -> bool:
+    """Prove a count clause without treating unknown unit tokens as nouns."""
+
+    tokens = value.split()
+    if len(tokens) < 2 or re.fullmatch(
+        _NAMED_CONTAINER_COUNT_NOUN,
+        tokens[-1],
+        re.IGNORECASE,
+    ) is None:
+        return False
+    quantity = [token.casefold() for token in tokens[:-1]]
+    if len(quantity) == 1 and quantity[0] in {
+        "a",
+        "an",
+        "all",
+        "any",
+        "both",
+        "each",
+        "either",
+        "every",
+        "neither",
+        "no",
+        "some",
+        "several",
+        "many",
+        "few",
+        "multiple",
+        "various",
+        "numerous",
+        "additional",
+        "another",
+        "enough",
+        "more",
+        "less",
+        "fewer",
+    }:
+        return True
+    if quantity in (["a", "dozen"], ["dozens", "of"], ["hundreds", "of"], ["thousands", "of"]):
+        return True
+    if len(quantity) == 2 and re.fullmatch(r"\d+(?:\.\d+)?%", quantity[0]) and quantity[1] == "of":
+        return True
+    number_start = 0
+    if len(quantity) >= 3 and quantity[:2] in (
+        ["more", "than"],
+        ["less", "than"],
+        ["fewer", "than"],
+        ["at", "least"],
+        ["at", "most"],
+    ):
+        number_start = 2
+    numeric_phrase = quantity[number_start:]
+    if len(numeric_phrase) == 1 and re.fullmatch(
+        r"\d+(?:,\d{3})*(?:\.\d+)?",
+        numeric_phrase[0],
+    ):
+        return True
+    parsed = parse_number_word_phrase(numeric_phrase, 0)
+    return parsed is not None and parsed[1] == len(numeric_phrase)
 
 
 def _english_named_container_predicate_sentence(title: str) -> bool:
@@ -1175,37 +1238,12 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             }
         )
         prepositional_complement = " ".join(ambiguous_words[1:])
-        word_quantified_clause = bool(
-            re.fullmatch(
-                r"(?i)(?:"
-                rf"(?:a|an|one|each|every|another)\s+{_NAMED_CONTAINER_COUNT_NOUN}|"
-                r"(?:all|any|both|either|neither|no|some|several|many|few|"
-                r"multiple|various|numerous|additional|enough|"
-                r"more|less|fewer|two|three|four|five|six|seven|eight|"
-                r"nine|ten|dozens?|hundreds?|thousands?)\s+"
-                rf"{_NAMED_CONTAINER_COUNT_NOUN}|"
-                r"(?:(?:more|less|fewer)\s+than|at\s+(?:least|most))\s+"
-                r"(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-                rf"{_NAMED_CONTAINER_COUNT_NOUN})",
-                prepositional_complement,
-            )
-        )
-        numeric_quantified_clause = bool(
-            re.fullmatch(
-                rf"\d+(?:,\d{{3}})*(?:\.\d+)?\s+{_NAMED_CONTAINER_COUNT_NOUN}",
-                prepositional_complement,
-                re.IGNORECASE,
-            )
-            or re.fullmatch(
-                rf"\d+(?:\.\d+)?%\s+OF\s+{_NAMED_CONTAINER_COUNT_NOUN}",
-                prepositional_complement,
-                re.IGNORECASE,
-            )
-        )
         quantified_prepositional_clause = bool(
             prepositional_title
             and len(ambiguous_words) >= 3
-            and (word_quantified_clause or numeric_quantified_clause)
+            and _named_container_prepositional_count_clause(
+                prepositional_complement
+            )
         )
         if prepositional_title and not quantified_prepositional_clause:
             # ``NOTES ON CALIBRATION`` and ``REPORTS ABOUT TESTING`` are
