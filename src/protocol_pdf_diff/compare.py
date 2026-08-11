@@ -3032,33 +3032,21 @@ def _assignment_field_key(value: str) -> str:
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
         return ""  # it/this 类代词不是可独立证明的字段名。
     if separator == ":" and not _colon_assignment_value_is_proven(
-        field_key,
+        field,
         assigned_value,
     ):
         return ""  # 冒号也可以是 Note/Warning 段落引导，只允许可证明的短技术值。
     return field_key
 
 
-_DISCOURSE_LABELS_NOT_ASSIGNMENTS = frozenset(
-    {
-        "background",
-        "description",
-        "example",
-        "guidance",
-        "note",
-        "overview",
-        "reason",
-        "remark",
-        "requirement",
-        "warning",
-    }
-)
-
-
-def _colon_assignment_value_is_proven(field_key: str, value: str) -> bool:
+def _colon_assignment_value_is_proven(field: str, value: str) -> bool:
     """Accept colon fields only when the right side has compact value-slot syntax."""
 
-    if field_key in _DISCOURSE_LABELS_NOT_ASSIGNMENTS:
+    compact_field = compact_inline(field)
+    if not re.fullmatch(
+        r"(?i)[a-z][a-z0-9]*(?:[_./-][a-z0-9]+)+",
+        compact_field,
+    ):
         return False
     compact_value = compact_inline(value).strip(".?!！？。 ")
     if not compact_value or len(compact_value) > 80:

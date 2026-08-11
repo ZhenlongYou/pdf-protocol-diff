@@ -7926,7 +7926,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         for old_body, new_body in (
             ("Mode is PAM4.", "Mode is DISABLED."),
-            ("State: IDLE.", "State: RECOVERY."),
+            ("RX_STATE: IDLE.", "RX_STATE: RECOVERY."),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):
                 result = compare_extractions(
@@ -7946,11 +7946,26 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(old_body, result.changes[0].replaced_snippets[0].old)
                 self.assertEqual(new_body, result.changes[0].replaced_snippets[0].new)
 
-    def test_discourse_colon_label_cannot_rescue_disjoint_exact_sections(self) -> None:
-        """A Note/Warning-style label is not a technical field identity proof."""
+    def test_unproven_colon_label_cannot_rescue_disjoint_exact_sections(self) -> None:
+        """A natural-language colon label is not a technical field identity proof."""
 
         shared = "Capture one million packets."
-        for label in ("Note", "Warning", "Example", "Requirement", "Reason"):
+        for label in (
+            "Note",
+            "Notes",
+            "Note 1",
+            "Warning 2",
+            "Example",
+            "Requirement",
+            "Caution",
+            "Important",
+            "Tip",
+            "Observation",
+            "Summary",
+            "Context",
+            "Rationale",
+            "State",
+        ):
             with self.subTest(label=label):
                 result = compare_extractions(
                     ExtractionResult(
