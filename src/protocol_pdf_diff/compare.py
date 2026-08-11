@@ -3043,7 +3043,11 @@ def _assignment_field_key(value: str) -> str:
     assigned_value = compact[operator_index + 1 :].lstrip()
     if not field or not assigned_value:
         return ""
-    if len(field) > 80 or re.fullmatch(r"[\w][\w ./\[\]-]*", field) is None:
+    field_token = r"\w+(?:[./-]\w+)*(?:\[[\w.-]+\])?"
+    if len(field) > 80 or re.fullmatch(
+        rf"{field_token}(?:\s+{field_token})*",
+        field,
+    ) is None:
         return ""  # 只让紧凑字段名充当身份证据；条件/匹配运算式保守保持可见。
     if re.match(r'''(?:[\w"'([{]|[+\-±]\s*\d)''', assigned_value) is None:
         return ""

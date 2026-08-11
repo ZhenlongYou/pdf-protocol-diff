@@ -7959,6 +7959,18 @@ class ProtocolDiffTests(unittest.TestCase):
                 "If mode := LEGACY, follow the optical calibration path.",
                 "If mode := RECOVERY, use the copper training method.",
             ),
+            (
+                "If margin -= 20 mV, follow the optical calibration path.",
+                "If margin -= 4 UI, use the copper training method.",
+            ),
+            (
+                "If ratio /= 2, follow the optical calibration path.",
+                "If ratio /= 4, use the copper training method.",
+            ),
+            (
+                "If mode .= LEGACY, follow the optical calibration path.",
+                "If mode .= RECOVERY, use the copper training method.",
+            ),
         ):
             with self.subTest(old_condition=old_condition):
                 result = compare_extractions(
@@ -8066,6 +8078,8 @@ class ProtocolDiffTests(unittest.TestCase):
 
         for old_body, new_body in (
             ("RX_STATE=IDLE.", "RX_STATE=RECOVERY."),
+            ("rx-state = idle.", "rx-state = recovery."),
+            ("lane[0] = idle.", "lane[0] = recovery."),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):
                 result = compare_extractions(
