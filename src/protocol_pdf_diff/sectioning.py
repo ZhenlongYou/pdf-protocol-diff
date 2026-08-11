@@ -1293,9 +1293,10 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         ),
         0,
     )
+    approximation_word = quantity[0] if quantity else ""
     approximation = bool(
         len(quantity) >= 2
-        and quantity[0]
+        and approximation_word
         in {
             "almost",
             "approximately",
@@ -1312,6 +1313,45 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     prefix_length = comparison_length or (1 if approximation or exactness else 0)
     has_prefix = comparison or approximation or exactness
     numeric_phrase = quantity[prefix_length:]
+
+    def complete_count_value(words: list[str]) -> str | None:
+        parsed = parse_number_word_phrase(words, 0)
+        if parsed is not None and parsed[1] == len(words):
+            return parsed[0]
+        if len(words) == 1 and re.fullmatch(
+            r"\d+(?:,\d{3})*(?:\.\d+)?",
+            words[0],
+        ):
+            return words[0].replace(",", "")
+        return None
+
+    def complete_coordinated_count(words: list[str]) -> bool:
+        """Recognize fully consumed alternatives/ranges, never unit tokens."""
+
+        if words[:1] == ["between"]:
+            body = words[1:]
+            connectors = {"and"}
+        elif words[:1] == ["from"]:
+            body = words[1:]
+            connectors = {"to", "through"}
+        else:
+            body = words
+            connectors = {"or", "to", "through"}
+        for index, token in enumerate(body):
+            if token not in connectors:
+                continue
+            left = body[:index]
+            right = body[index + 1 :]
+            if complete_count_value(left) is None:
+                continue
+            if complete_count_value(right) is not None:
+                return True
+            if token == "or" and right in (["more"], ["fewer"]):
+                return True
+        return False
+
+    if complete_coordinated_count(numeric_phrase):
+        return noun_agrees("plural")
     if numeric_phrase == ["a", "few"]:
         return noun_agrees("plural")
     if numeric_phrase == ["half", "of"]:
@@ -1326,14 +1366,20 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             if quantifier in {"all", "both", "several", "many", "few", "multiple", "various", "numerous", "fewer"}:
                 return noun_agrees("plural")
             return noun_agrees("either")
-        if approximation and quantifier in simple_quantifiers - {
+        approximate_quantifiers = simple_quantifiers - {
+            "all",
             "both",
+            "each",
             "either",
+            "every",
             "neither",
             "more",
             "less",
             "fewer",
-        }:
+        }
+        if approximation_word in {"almost", "nearly"}:
+            approximate_quantifiers |= {"all", "every"}
+        if approximation and quantifier in approximate_quantifiers:
             if quantifier in {"a", "an", "each", "every", "another"}:
                 if quantifier in {"a", "an"} and not article_agrees(quantifier, count_noun):
                     return False
@@ -1365,11 +1411,23 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         if exactness and quantity[0] == "only" and quantifier in {
             "a",
             "an",
+            "some",
+            "several",
+            "many",
+            "few",
+            "multiple",
+            "various",
+            "numerous",
+            "additional",
             "another",
         }:
             if quantifier in {"a", "an"} and not article_agrees(quantifier, count_noun):
                 return False
-            return noun_agrees("singular")
+            if quantifier in {"a", "an", "another"}:
+                return noun_agrees("singular")
+            if quantifier in {"several", "many", "few", "multiple", "various", "numerous"}:
+                return noun_agrees("plural")
+            return noun_agrees("either")
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
         return noun_agrees("plural")
     parsed_direct = parse_number_word_phrase(numeric_phrase, 0)
