@@ -7885,7 +7885,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         text=(
                             "1 Queue Processing\n"
                             "Capture one million packets.\n"
-                            "Mode is PAM4."
+                            "Mode = PAM4."
                         ),
                     )
                 ],
@@ -7898,7 +7898,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         text=(
                             "1 Queue Processing\n"
                             "Capture 1,000,000 packets.\n"
-                            "Mode is LEGACY_128B130B_FLIT_DISABLED."
+                            "Mode = LEGACY_128B130B_FLIT_DISABLED."
                         ),
                     )
                 ],
@@ -7921,8 +7921,8 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertNotIn("one million packets", reader)
             self.assertNotIn("1,000,000 packets", reader)
 
-    def test_referential_copula_subject_cannot_rescue_disjoint_exact_sections(self) -> None:
-        """Pronouns and deictic subjects are not stable assignment fields."""
+    def test_unproven_copula_subject_cannot_rescue_disjoint_exact_sections(self) -> None:
+        """Natural-language copula subjects are not stable assignment fields."""
 
         old_tail = "a legacy optical calibration path."
         new_tail = "a revised copper training method."
@@ -7949,6 +7949,16 @@ class ProtocolDiffTests(unittest.TestCase):
             ("Both alternatives", "are"),
             ("What follows", "is"),
             ("The method above", "is"),
+            ("Mode", "is"),
+            ("Current requirement", "is"),
+            ("Present requirement", "is"),
+            ("Selected requirement", "is"),
+            ("Applicable requirement", "is"),
+            ("Existing process", "is"),
+            ("Proposed method", "is"),
+            ("Specified method", "is"),
+            ("Defined value", "is"),
+            ("Named section", "is"),
         ):
             with self.subTest(subject=subject):
                 result = compare_extractions(
@@ -7988,7 +7998,6 @@ class ProtocolDiffTests(unittest.TestCase):
         """A proven field/value slot remains one modified single-unit section."""
 
         for old_body, new_body in (
-            ("Mode is PAM4.", "Mode is DISABLED."),
             ("RX_STATE = IDLE.", "RX_STATE = RECOVERY."),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):

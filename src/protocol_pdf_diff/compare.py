@@ -2960,14 +2960,14 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         right_field = _assignment_field_key(right_units[0])
         if left_field and left_field == right_field:
             return max(raw_score, 0.90)  # 稳定字段名可以证明 Mode/State 的值槽修改。
-        has_unproven_colon = bool(
-            re.search(r"[:：]", left_units[0]) or re.search(r"[:：]", right_units[0])
-        )
         if (
             _review_unit_key(left_units[0]) != _review_unit_key(right_units[0])
-            and has_unproven_colon
+            and (
+                _unit_has_unproven_label_syntax(left_units[0])
+                or _unit_has_unproven_label_syntax(right_units[0])
+            )
         ):
-            return None  # 单句冒号标签同样无法仅凭字符形态区分字段与话语标签。
+            return None  # 单句冒号标签无法在无 schema provenance 时证明字段身份。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
     if any(
         not _review_units_share_sentence_skeleton(old_unit, new_unit)
@@ -3011,14 +3011,14 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
 
     if _review_unit_key(left) == _review_unit_key(right):
         return True
-    if re.search(r"[:：]", left) or re.search(r"[:：]", right):
-        return False  # 无 schema provenance 时，冒号左侧既可是字段也可是 Note/Summary，不猜测身份。
+    if _unit_has_unproven_label_syntax(left) or _unit_has_unproven_label_syntax(right):
+        return False  # 无 schema provenance 时，冒号标签不猜测字段身份。
     if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
         return True  # 短数值、状态词或大小写技术标识符变化仍是同一句。
     left_field = _assignment_field_key(left)
     right_field = _assignment_field_key(right)
     if left_field and left_field == right_field:
-        return True  # Mode/Rate/未知字段名稳定时，值槽的 PAM4→NRZ 仍是同一条技术修改。
+        return True  # 显式 `=` 左值稳定时，值槽的不透明技术枚举仍是同一条修改。
     left_words = _meaningful_review_words(left)
     right_words = _meaningful_review_words(right)
     if not left_words or not right_words:
@@ -3030,11 +3030,11 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
 
 
 def _assignment_field_key(value: str) -> str:
-    """Return a stable left-hand field for short assignment/state sentences."""
+    """Return a stable left-hand field only for explicit equals assignments."""
 
     compact = compact_inline(value).strip(".?!！？。 ")
     match = re.match(
-        r"(?i)^(.{1,80}?)\s*(?:=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
+        r"^(.{1,80}?)\s*=\s*(\S.*)$",
         compact,
     )
     if match is None:
@@ -3045,107 +3045,15 @@ def _assignment_field_key(value: str) -> str:
     field_key = normalize_for_similarity(field)
     if not field_key:
         return ""
-    field_words = re.findall(r"[a-z]+", field_key)
-    if not field_words or len(field_words) > 3:
-        return ""
-    if (
-        field_words[0] in _NON_ASSIGNMENT_REFERENCE_WORDS
-        or field_words[0] in _REVIEW_STOP_WORDS
-    ):
-        return ""  # This requirement/The section/Our requirement 等指代性主语不是紧凑字段标签。
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
-        return ""  # it/this 类代词不是可独立证明的字段名。
+        return ""
     return field_key
 
 
-_NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
-    {
-        "all",
-        "above",
-        "another",
-        "any",
-        "anybody",
-        "anyone",
-        "anything",
-        "both",
-        "below",
-        "each",
-        "eighth",
-        "either",
-        "else",
-        "elsewhere",
-        "everybody",
-        "everyone",
-        "everything",
-        "fifth",
-        "first",
-        "following",
-        "former",
-        "fourth",
-        "he",
-        "here",
-        "hers",
-        "her",
-        "herself",
-        "his",
-        "him",
-        "himself",
-        "i",
-        "its",
-        "latter",
-        "last",
-        "mine",
-        "my",
-        "neither",
-        "next",
-        "ninth",
-        "nobody",
-        "none",
-        "nothing",
-        "one",
-        "ones",
-        "other",
-        "our",
-        "ours",
-        "ourselves",
-        "preceding",
-        "previous",
-        "same",
-        "second",
-        "seventh",
-        "she",
-        "sixth",
-        "somebody",
-        "someone",
-        "something",
-        "such",
-        "tenth",
-        "theirs",
-        "their",
-        "them",
-        "themselves",
-        "there",
-        "these",
-        "third",
-        "they",
-        "those",
-        "us",
-        "we",
-        "what",
-        "whatever",
-        "which",
-        "whichever",
-        "who",
-        "whoever",
-        "whom",
-        "whose",
-        "your",
-        "you",
-        "yours",
-        "yourself",
-        "yourselves",
-    }
-)
+def _unit_has_unproven_label_syntax(value: str) -> bool:
+    """Return True for changed label-like prose that lacks schema provenance."""
+
+    return bool(re.search(r"[:：]", value))
 
 
 def _similarity(left: str, right: str) -> float:
