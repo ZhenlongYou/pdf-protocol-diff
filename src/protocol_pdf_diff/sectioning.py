@@ -1100,7 +1100,7 @@ _NAMED_CONTAINER_ENGLISH_PREDICATE = (
     r"presents?|details?|documents?|sets?\s+out)"
 )
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
-    r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|记录)"
+    r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|记录|要求)"
 )
 
 
@@ -1125,14 +1125,27 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         # ``States the Receiver Supports`` is a plausible Title Case noun title.
         return False
     if first_word.isupper() and re.match(
-        r"(?i)^(?:states|lists|covers|details)\s+(?:the|a|an)\s+\S+\s+"
-        r"(?:supports?|implements?|uses?|defines?|requires?|provides?|contains?|"
-        r"describes?|covers?|lists?|details?|specifies?)[.!?]\s*$",
+        r"(?i)^(?:states|lists|covers|details)\b",
         cleaned,
     ):
-        # ALL-CAPS loses Title Case evidence.  A plural noun plus an article-led
-        # multiword phrase is still an ambiguous title, so keep it structural.
-        return False
+        # ALL-CAPS loses Title Case evidence.  With no article, a multiword tail
+        # is an ambiguous noun title (``STATES SUPPORTED BY ...``).  With an
+        # article, a final finite verb can form a relative title clause
+        # (``STATES THE RECEIVER SUPPORTS``).  Both remain structural.
+        ambiguous_tail = re.sub(r"[.!?]\s*$", "", cleaned[match.end() :]).strip()
+        ambiguous_words = ambiguous_tail.split()
+        if len(ambiguous_words) >= 2 and ambiguous_words[0].casefold() not in {
+            "the",
+            "a",
+            "an",
+        }:
+            return False
+        if len(ambiguous_words) >= 3 and re.fullmatch(
+            r"(?i)(?:supports?|implements?|uses?|defines?|requires?|provides?|"
+            r"contains?|describes?|covers?|lists?|details?|specifies?)",
+            ambiguous_words[-1],
+        ):
+            return False
     tail = cleaned[match.end() :]
     if intransitive is not None:
         compact_tail = tail.strip()
@@ -1142,6 +1155,7 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             return True
         return False
 
+    verb_count = 1
     while True:
         coordinated = re.match(
             rf"(?i)^\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)"
@@ -1151,11 +1165,13 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         )
         if coordinated is None:
             break
+        verb_count += 1
         tail = tail[coordinated.end() :]
     compact_tail = tail.strip()
+    if compact_tail in {".", "!", "?"}:
+        return terminal and verb_count == 1
     return bool(
         compact_tail
-        and compact_tail not in {".", "!", "?"}
         and not re.match(r"(?i)^(?:and|or|of|for)\b", compact_tail)
     )
 
@@ -1171,11 +1187,18 @@ def _chinese_named_container_predicate_sentence(title: str) -> bool:
     if predicate is None:
         return False
     tail = cleaned[predicate.end() :]
+    terminal = bool(re.search(r"[。！？]\s*$", title))
+    modifier = (
+        r"(?:[\u3400-\u9fff]{1,6}?地|[\u3400-\u9fff]{1,6}?)?"
+        if terminal
+        else r"(?:[\u3400-\u9fff]{1,5}?地)?"
+    )
     while True:
         coordinated = re.match(
-            rf"^(?:[、，,](?:并且|并|以及|和|与|及|或)?|"
-            rf"(?:并且|并|以及|和|与|及|或))"
-            rf"(?:明确|详细|分别|主要|简要|进一步|清楚地|明确地|详细地)?"
+            rf"^\s*(?:[、，,]\s*(?:并且|并|以及|和|与|及|或)?|"
+            rf"(?:并且|并|以及|和|与|及|或))\s*"
+            rf"{modifier}"
+            rf"\s*"
             rf"(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
             tail,
         )
@@ -1205,6 +1228,8 @@ def _looks_like_named_container_reference_sentence(
     remainder = candidate[len(number) :].lstrip()
     if remainder.startswith((":", "：", ".", "-", "–", "—")):
         return False
+    if re.search(r"[:：–—]", title):
+        return False  # 容器标题内部的强分隔符也不能被谓语同形词覆盖。
     english_auxiliary = bool(
         re.match(
             r"(?i)^(?:shall|should|must|may|might|can|could|will|would|"
@@ -1222,7 +1247,7 @@ def _looks_like_named_container_reference_sentence(
     chinese_plain = title.rstrip("。！？").strip()
     chinese_sentence = bool(
         re.match(r"^(?:应当?|必须|可以|可|不得|不应|将|仍然?|用于|适用于)", chinese_plain)
-        or _chinese_named_container_predicate_sentence(chinese_plain)
+        or _chinese_named_container_predicate_sentence(title)
         or re.match(
             r"^(?:中|内)(?:明确)?(?:规定|定义|描述|说明|列出|给出|提供).+",
             chinese_plain,

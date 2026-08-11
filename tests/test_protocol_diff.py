@@ -10771,6 +10771,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B contains and very clearly explains the receiver limits.",
             "Appendix A shall define the calibration method.",
             "APPENDIX A DESCRIBES THE CALIBRATION METHOD.",
+            "Appendix A explains.",
+            "APPENDIX A SUMMARIZES.",
             "Annex B contains normative requirements.",
             "Annex B remains normative for receiver testing.",
             "Annex B remains normative for receiver",
@@ -10797,6 +10799,13 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 A 描述、定义并记录校准方法",
             "附录 B 说明及规定接收机限值。",
             "附录 B 说明及明确规定接收机限值。",
+            "附录 B 说明及全面规定接收机限值。",
+            "附录 C 描述并准确地定义校准方法",
+            "附录 D 说明并清晰地规定接收机限值",
+            "附录 E 描述、 定义并 记录校准方法",
+            "附录 C 说明并充分定义校准方法。",
+            "附录 D 说明并进一步明确规定接收机限值。",
+            "附录 E 说明、要求并规定接收机限值。",
             "附录 C 介绍与展示校准证据。",
         ):
             with self.subTest(line=line):
@@ -10905,6 +10914,43 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("0.025 UI", sections[1].body)
 
+    def test_participial_and_delimited_container_titles_keep_their_bodies(
+        self,
+    ) -> None:
+        """Ambiguous participles and internal title delimiters fail visible."""
+
+        for title in (
+            "APPENDIX A STATES SUPPORTED BY THE RECEIVER.",
+            "APPENDIX A STATES THE PROTOCOL RECEIVER SUPPORTS.",
+            "附录 A 说明：要求和示例",
+            "附录 B 描述—定义和缩写",
+        ):
+            with self.subTest(title=title):
+                extraction = ExtractionResult(
+                    pdf_path=Path("ambiguous-container-title.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                "1 Scope\n"
+                                f"{title}\n"
+                                "The calibrated tolerance is 0.025 UI."
+                            ),
+                        )
+                    ],
+                )
+
+                sections = section_document(extraction)
+
+                self.assertIn(title, [section.location for section in sections])
+                self.assertTrue(
+                    any(
+                        "0.025 UI" in section.body
+                        for section in sections
+                        if section.location == title
+                    )
+                )
+
     def test_coordinated_container_predicates_do_not_capture_later_sections(
         self,
     ) -> None:
@@ -10914,9 +10960,18 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix A describes, defines, and documents the calibration method.",
             "Annex B contains and clearly explains the receiver limits.",
             "Annex B contains and very clearly explains the receiver limits.",
+            "Appendix A explains.",
+            "APPENDIX A SUMMARIZES.",
             "附录 A 描述和定义校准方法",
             "附录 A 描述、定义并记录校准方法",
             "附录 B 说明及明确规定接收机限值。",
+            "附录 B 说明及全面规定接收机限值。",
+            "附录 C 描述并准确地定义校准方法",
+            "附录 D 说明并清晰地规定接收机限值",
+            "附录 E 描述、 定义并 记录校准方法",
+            "附录 C 说明并充分定义校准方法。",
+            "附录 D 说明并进一步明确规定接收机限值。",
+            "附录 E 说明、要求并规定接收机限值。",
         ):
             with self.subTest(reference=reference):
                 extraction = ExtractionResult(
@@ -11195,6 +11250,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix A States the Receiver Supports",
             "Appendix A States the Receiver Supports.",
             "APPENDIX A STATES THE RECEIVER SUPPORTS.",
+            "APPENDIX A STATES SUPPORTED BY THE RECEIVER.",
+            "APPENDIX A STATES THE PROTOCOL RECEIVER SUPPORTS.",
+            "APPENDIX B LISTS SUPPORTED FEATURES.",
+            "ANNEX C STATES REQUIRED FOR CALIBRATION.",
             "Annex B Lists the Receiver Supports",
             "Annex B Lists the Receiver Supports.",
             "Appendix C Covers for Test Fixtures",
@@ -11208,6 +11267,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 E 描述与分析",
             "附录 A 说明、要求和示例",
             "附录 B 描述、定义、缩写",
+            "附录 A 说明：要求和示例",
+            "附录 B 描述—定义和缩写",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
