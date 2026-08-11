@@ -1323,10 +1323,31 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             words[0],
         ):
             return words[0].replace(",", "")
+        if len(words) >= 2 and words[-1] in {
+            "dozen",
+            "hundred",
+            "thousand",
+            "million",
+            "billion",
+        }:
+            multiplier = words[:-1]
+            if multiplier == ["a"]:
+                return "2"
+            parsed_multiplier = parse_number_word_phrase(multiplier, 0)
+            if (
+                parsed_multiplier is not None
+                and parsed_multiplier[1] == len(multiplier)
+            ):
+                return "2"
+            if len(multiplier) == 1 and re.fullmatch(
+                r"\d+(?:,\d{3})*(?:\.\d+)?",
+                multiplier[0],
+            ):
+                return "2"
         return None
 
-    def complete_coordinated_count(words: list[str]) -> bool:
-        """Recognize fully consumed alternatives/ranges, never unit tokens."""
+    def complete_coordinated_count(words: list[str]) -> str | None:
+        """Return required noun number for a fully consumed alternative/range."""
 
         if words[:1] == ["between"]:
             body = words[1:]
@@ -1337,6 +1358,32 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         else:
             body = words
             connectors = {"or", "to", "through"}
+        if "or" in connectors and "or" in body:
+            alternatives: list[list[str]] = [[]]
+            for token in body:
+                if token == "or":
+                    alternatives.append([])
+                else:
+                    alternatives[-1].append(token)
+            if len(alternatives) >= 2 and all(alternatives):
+                parsed_alternatives = [
+                    complete_count_value(alternative)
+                    for alternative in alternatives
+                ]
+                final_alternative = alternatives[-1]
+                if all(value is not None for value in parsed_alternatives):
+                    final_value = parsed_alternatives[-1]
+                    assert final_value is not None
+                    return (
+                        "singular"
+                        if re.fullmatch(r"0*1(?:\.0+)?", final_value)
+                        else "plural"
+                    )
+                if (
+                    all(value is not None for value in parsed_alternatives[:-1])
+                    and final_alternative in (["more"], ["fewer"])
+                ):
+                    return "plural"
         for index, token in enumerate(body):
             if token not in connectors:
                 continue
@@ -1345,13 +1392,14 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             if complete_count_value(left) is None:
                 continue
             if complete_count_value(right) is not None:
-                return True
-            if token == "or" and right in (["more"], ["fewer"]):
-                return True
-        return False
+                return "plural"
+        return None
 
-    if complete_coordinated_count(numeric_phrase):
-        return noun_agrees("plural")
+    coordinated_number = complete_coordinated_count(numeric_phrase)
+    if coordinated_number is not None:
+        if comparison or (exactness and quantity[0] == "exactly"):
+            return False
+        return noun_agrees(coordinated_number)
     if numeric_phrase == ["a", "few"]:
         return noun_agrees("plural")
     if numeric_phrase == ["half", "of"]:
