@@ -1161,51 +1161,46 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         "less",
         "fewer",
     }
-    comparison = bool(
-        len(quantity) >= 3
-        and quantity[:2]
-        in (
-            ["more", "than"],
-            ["less", "than"],
-            ["fewer", "than"],
-            ["at", "least"],
-            ["at", "most"],
-        )
+    comparison_prefixes = {
+        ("more", "than"),
+        ("less", "than"),
+        ("fewer", "than"),
+        ("at", "least"),
+        ("at", "most"),
+        ("no", "more", "than"),
+        ("no", "less", "than"),
+        ("no", "fewer", "than"),
+    }
+    comparison_length = next(
+        (
+            len(prefix)
+            for prefix in sorted(comparison_prefixes, key=len, reverse=True)
+            if tuple(quantity[: len(prefix)]) == prefix
+        ),
+        0,
     )
     approximation = bool(
         len(quantity) >= 2
         and quantity[0]
-        in {"approximately", "roughly", "about", "around", "over", "under", "nearly"}
+        in {
+            "almost",
+            "approximately",
+            "roughly",
+            "about",
+            "around",
+            "over",
+            "under",
+            "nearly",
+        }
     )
-    numeric_phrase = quantity[2:] if comparison else quantity[1:] if approximation else quantity
+    comparison = comparison_length > 0
+    prefix_length = comparison_length or (1 if approximation else 0)
+    numeric_phrase = quantity[prefix_length:]
     if numeric_phrase == ["a", "few"]:
         return True
-    if (
-        not (comparison or approximation)
-        and len(numeric_phrase) == 1
-        and numeric_phrase[0] in simple_quantifiers
-    ):
+    if numeric_phrase == ["half", "of"]:
         return True
-    if (comparison or approximation) and (
-        (
-            len(numeric_phrase) == 1
-            and numeric_phrase[0]
-            in {
-                "a",
-                "an",
-                "some",
-                "several",
-                "many",
-                "few",
-                "multiple",
-                "various",
-                "numerous",
-                "additional",
-                "another",
-                "enough",
-            }
-        )
-    ):
+    if len(numeric_phrase) == 1 and numeric_phrase[0] in simple_quantifiers:
         return True
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
         return True
@@ -1256,6 +1251,42 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             and parsed[1] == len(multiplier)
         )
 
+    def plural_multiplier_is_proven(multiplier: list[str]) -> bool:
+        """Require number agreement before ``pairs/millions/... of``."""
+
+        if multiplier == ["a", "few"]:
+            return True
+        if len(multiplier) == 1 and multiplier[0] in {
+            "some",
+            "several",
+            "many",
+            "few",
+            "multiple",
+            "various",
+            "numerous",
+            "additional",
+            "enough",
+            "more",
+            "fewer",
+        }:
+            return True
+        if len(multiplier) == 1 and re.fullmatch(
+            r"\d+(?:,\d{3})*(?:\.\d+)?",
+            multiplier[0],
+        ):
+            numeric = multiplier[0].replace(",", "")
+            return re.fullmatch(r"0*1(?:\.0+)?", numeric) is None
+        parsed = parse_number_word_phrase(multiplier, 0)
+        return (
+            not any(
+                token in {"hundred", "thousand", "million", "billion"}
+                for token in multiplier
+            )
+            and parsed is not None
+            and parsed[1] == len(multiplier)
+            and parsed[0] != "1"
+        )
+
     if len(numeric_phrase) >= 3 and numeric_phrase[-2:] == ["percent", "of"]:
         return multiplier_is_proven(numeric_phrase[:-2])
 
@@ -1265,7 +1296,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         multiplier = numeric_phrase[:-2]
         if not multiplier:
             return not (comparison or approximation)
-        return multiplier_is_proven(multiplier)
+        return plural_multiplier_is_proven(multiplier)
     return False
 
 
