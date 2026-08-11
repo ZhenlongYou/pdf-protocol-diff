@@ -3131,7 +3131,7 @@ def _review_unit_skeleton_match_count(
         else (residual_right, residual_left)
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
-    longer_words = [_meaningful_review_words(unit) for unit in longer]
+    longer_words = [_review_candidate_tokens(unit) for unit in longer]
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3154,7 +3154,7 @@ def _review_unit_skeleton_match_count(
             short_field = _assignment_field_key(short_unit)
             if short_field:
                 candidate_pool.update(field_indexes.get(short_field, ()))
-            short_words = _meaningful_review_words(short_unit)
+            short_words = _review_candidate_tokens(short_unit)
             for word in sorted(short_words, key=lambda item: len(word_indexes.get(item, ()))):
                 indexes = word_indexes.get(word, ())
                 if len(indexes) <= 32:
@@ -4617,7 +4617,7 @@ def _unequal_replace_delta_candidates(
         len(unmatched_old) * len(unmatched_new) > _MAX_ALL_PAIR_UNIT_MATCHES
     )
     new_words_by_index = {
-        index: _meaningful_review_words(new_units[index]) for index in unmatched_new
+        index: _review_candidate_tokens(new_units[index]) for index in unmatched_new
     }
     new_indexes_by_word: dict[str, list[int]] = {}
     if bounded_matching:
@@ -4632,7 +4632,7 @@ def _unequal_replace_delta_candidates(
             candidate_indexes = unmatched_new
         else:
             candidate_pool: set[int] = set()
-            old_words = _meaningful_review_words(old_unit)
+            old_words = _review_candidate_tokens(old_unit)
             for word in sorted(
                 old_words,
                 key=lambda item: len(new_indexes_by_word.get(item, ())),
@@ -4866,6 +4866,37 @@ def _meaningful_review_words(value: str) -> set[str]:
     normalized = normalize_for_similarity(value).replace("µ", "u").replace("μ", "u")
     words = set(re.findall(r"[a-z]+[a-z0-9]*(?:[-_/][a-z0-9]+)*", normalized))
     return {word for word in words if word not in _REVIEW_STOP_WORDS}
+
+
+def _review_candidate_tokens(value: str) -> set[str]:
+    """Return bounded-search anchors without treating them as semantic proof."""
+
+    normalized = normalize_for_similarity(value).replace("µ", "u").replace("μ", "u")
+    tokens = set(_meaningful_review_words(normalized))
+    number_pattern = r"[+\-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    tokens.update(
+        f"number:{_canonical_review_token(match.group(0))}"
+        for match in re.finditer(
+            rf"(?<![\w.]){number_pattern}(?![\w.])",
+            normalized,
+        )
+    )
+    tokens.update(
+        f"left:{match.group(1)}:{_canonical_review_token(match.group(2))}"
+        for match in re.finditer(
+            rf"\b([a-z][a-z0-9_-]*)\s+({number_pattern})(?![\w.])",
+            normalized,
+        )
+    )  # `Lane 21` 与 `is 21 mV` 的上下文不同，避免测量值碰撞掉稳定索引。
+    tokens.update(
+        f"cjk-left:{match.group(1)}:{_canonical_review_token(match.group(2))}"
+        for match in re.finditer(
+            rf"([\u4e00-\u9fff]{{1,8}})\s*({number_pattern})(?![\d.])",
+            normalized,
+        )
+    )  # `接收机通道21` 等 CJK 紧邻标识也能找回远距候选。
+    # 这些 token 只缩小候选集；最终配对仍必须通过原有语义分数门。
+    return tokens
 
 
 def _relative_position(index: int, length: int) -> float:

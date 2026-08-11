@@ -8407,6 +8407,103 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(100, len(result.changes[0].audit_replaced_snippets))
         self.assertLess(pair_score.call_count, 1000)
 
+    def test_bounded_matching_keeps_numeric_lane_identity_across_threshold(self) -> None:
+        """The 32-to-33 candidate threshold must not change technical attribution."""
+
+        for count in (32, 33):
+            old_units = [
+                f"Lane {index} voltage limit is 20 mV." for index in range(count)
+            ]
+            shift = count // 2
+            shifted_indexes = list(range(count))[shift:] + list(range(count))[:shift]
+            new_units = [
+                f"Lane {index} voltage limit is 21 mV." for index in shifted_indexes
+            ]
+            with self.subTest(count=count):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path(f"old-lanes-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(old_units),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path(f"new-lanes-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(new_units),
+                            )
+                        ],
+                    ),
+                    DiffOptions(max_snippets_per_section=count),
+                )
+
+                self.assertEqual(1, len(result.changes))
+                change = result.changes[0]
+                self.assertEqual("modified", change.change_type)
+                self.assertEqual(count, len(change.audit_replaced_snippets))
+                self.assertFalse(change.audit_added_snippets)
+                self.assertFalse(change.audit_removed_snippets)
+                self.assertTrue(
+                    all(
+                        re.search(r"Lane (\d+)", pair.old).group(1)
+                        == re.search(r"Lane (\d+)", pair.new).group(1)
+                        for pair in change.audit_replaced_snippets
+                    )
+                )
+
+    def test_bounded_matching_keeps_cjk_adjacent_numeric_identity(self) -> None:
+        """A CJK label directly joined to a number remains a remote identity anchor."""
+
+        count = 100
+        old_units = [
+            f"接收机通道{index}的电压限制为20毫伏。" for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[50:] + list(range(count))[:50]
+        new_units = [
+            f"接收机通道{index}的电压限制为21毫伏。"
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-cjk-channels.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 接收机限制\n" + "\n".join(old_units),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-cjk-channels.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 接收机限制\n" + "\n".join(new_units),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=count),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(count, len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                re.search(r"通道(\d+)", pair.old).group(1)
+                == re.search(r"通道(\d+)", pair.new).group(1)
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
