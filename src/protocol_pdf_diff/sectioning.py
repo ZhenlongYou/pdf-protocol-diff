@@ -1106,6 +1106,12 @@ _NAMED_CONTAINER_ENGLISH_NOUN_CAPABLE_PREDICATE = (
     r"(?:states|lists|covers|details|reports|records|notes|maps|documents|"
     r"outlines|shows|presents|addresses|reviews|highlights|captures)"
 )
+_NAMED_CONTAINER_COUNT_NOUN = (
+    r"(?:failures?|errors?|tests?|cases?|items?|events?|issues?|results?|"
+    r"requirements?|methods?|modes?|devices?|pages?|sections?|clauses?|"
+    r"chapters?|steps?|observations?|records?|samples?|packets?|messages?|"
+    r"transactions?|lanes?|links?|ports?|conditions?|values?|parameters?)"
+)
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
     r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
     r"记录|要求|阐述|论述|概述|载明|陈述|报告|指明|指出|表明)"
@@ -1172,26 +1178,26 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         word_quantified_clause = bool(
             re.fullmatch(
                 r"(?i)(?:"
-                r"(?:a|an|one|each|every|another)\s+[A-Z][A-Z-]{2,}|"
+                rf"(?:a|an|one|each|every|another)\s+{_NAMED_CONTAINER_COUNT_NOUN}|"
                 r"(?:all|any|both|either|neither|no|some|several|many|few|"
                 r"multiple|various|numerous|additional|enough|"
                 r"more|less|fewer|two|three|four|five|six|seven|eight|"
                 r"nine|ten|dozens?|hundreds?|thousands?)\s+"
-                r"[A-Z][A-Z-]{2,}S|"
+                rf"{_NAMED_CONTAINER_COUNT_NOUN}|"
                 r"(?:(?:more|less|fewer)\s+than|at\s+(?:least|most))\s+"
                 r"(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-                r"[A-Z][A-Z-]{2,}S)",
+                rf"{_NAMED_CONTAINER_COUNT_NOUN})",
                 prepositional_complement,
             )
         )
         numeric_quantified_clause = bool(
             re.fullmatch(
-                r"\d+(?:,\d{3})*(?:\.\d+)?\s+[A-Z][A-Z-]{2,}S",
+                rf"\d+(?:,\d{{3}})*(?:\.\d+)?\s+{_NAMED_CONTAINER_COUNT_NOUN}",
                 prepositional_complement,
                 re.IGNORECASE,
             )
             or re.fullmatch(
-                r"\d+(?:\.\d+)?%\s+OF\s+[A-Z][A-Z-]{2,}S",
+                rf"\d+(?:\.\d+)?%\s+OF\s+{_NAMED_CONTAINER_COUNT_NOUN}",
                 prepositional_complement,
                 re.IGNORECASE,
             )
