@@ -8080,6 +8080,14 @@ class ProtocolDiffTests(unittest.TestCase):
             ("RX_STATE=IDLE.", "RX_STATE=RECOVERY."),
             ("rx-state = idle.", "rx-state = recovery."),
             ("lane[0] = idle.", "lane[0] = recovery."),
+            (
+                "Threshold = .5 UI.",
+                "Threshold = .123456789012345678901234567890 UI.",
+            ),
+            (
+                "Threshold = -.5 UI.",
+                "Threshold = +.125 UI.",
+            ),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):
                 result = compare_extractions(

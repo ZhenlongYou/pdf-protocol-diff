@@ -2934,6 +2934,10 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         return raw_score
     if not left_units or not right_units:
         return None  # 空容器不能仅凭占用相同编号抢配另一条有正文的章节。
+    left_review_key = _review_unit_key(left)
+    right_review_key = _review_unit_key(right)
+    if left_review_key and left_review_key == right_review_key:
+        return 1.0  # 整段语义键完全相等时，句末标点造成的分句差异不应破坏章节身份。
     if len(left_units) != len(right_units):
         shorter, longer = (
             (left_units, right_units)
@@ -3049,7 +3053,10 @@ def _assignment_field_key(value: str) -> str:
         field,
     ) is None:
         return ""  # 只让紧凑字段名充当身份证据；条件/匹配运算式保守保持可见。
-    if re.match(r'''(?:[\w"'([{]|[+\-±]\s*\d)''', assigned_value) is None:
+    if re.match(
+        r'''(?:[\w"'([{]|[+\-−±]?\s*(?:\d+(?:\.\d*)?|\.\d+))''',
+        assigned_value,
+    ) is None:
         return ""
     field_key = normalize_for_similarity(field)
     if not field_key:
