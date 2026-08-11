@@ -1315,6 +1315,13 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     numeric_phrase = quantity[prefix_length:]
 
     def complete_count_value(words: list[str]) -> str | None:
+        scale_values = {
+            "dozen": 12,
+            "hundred": 100,
+            "thousand": 1_000,
+            "million": 1_000_000,
+            "billion": 1_000_000_000,
+        }
         parsed = parse_number_word_phrase(words, 0)
         if parsed is not None and parsed[1] == len(words):
             return parsed[0]
@@ -1323,16 +1330,18 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             words[0],
         ):
             return words[0].replace(",", "")
-        if len(words) >= 2 and words[-1] in {
-            "dozen",
-            "hundred",
-            "thousand",
-            "million",
-            "billion",
-        }:
-            multiplier = words[:-1]
-            if multiplier in (["a"], ["half", "a"], ["a", "few"]):
-                return "2"
+        first_scale = next(
+            (index for index, token in enumerate(words) if token in scale_values),
+            -1,
+        )
+        if first_scale > 0 and all(token in scale_values for token in words[first_scale:]):
+            multiplier = words[:first_scale]
+            scales = [scale_values[token] for token in words[first_scale:]]
+            multiplier_is_quantity = multiplier in (
+                ["a"],
+                ["half", "a"],
+                ["a", "few"],
+            )
             if len(multiplier) == 1 and multiplier[0] in {
                 "few",
                 "many",
@@ -1341,20 +1350,41 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 "several",
                 "various",
             }:
-                return "2"
+                multiplier_is_quantity = True
             parsed_multiplier = parse_number_word_phrase(multiplier, 0)
-            if (
-                not any(
-                    token in {"hundred", "thousand", "million", "billion"}
-                    for token in multiplier
-                )
-                and parsed_multiplier is not None
-                and parsed_multiplier[1] == len(multiplier)
-            ):
-                return "2"
+            if parsed_multiplier is not None and parsed_multiplier[1] == len(multiplier):
+                multiplier_is_quantity = True
             if len(multiplier) == 1 and re.fullmatch(
                 r"\d+(?:,\d{3})*(?:\.\d+)?",
                 multiplier[0],
+            ):
+                multiplier_is_quantity = True
+            if multiplier_is_quantity and all(
+                left < right for left, right in zip(scales, scales[1:])
+            ):
+                return "2"
+        plural_scales = {
+            "dozens": 12,
+            "hundreds": 100,
+            "thousands": 1_000,
+            "millions": 1_000_000,
+            "billions": 1_000_000_000,
+        }
+        plural_scale_words = words[:-1] if words[-1:] == ["of"] else words
+        if plural_scale_words:
+            scale_tokens = plural_scale_words[::2]
+            separators = plural_scale_words[1::2]
+            scales = [plural_scales.get(token) for token in scale_tokens]
+            if (
+                all(scale is not None for scale in scales)
+                and all(separator == "of" for separator in separators)
+                and len(separators) == len(scale_tokens) - 1
+                and (len(scale_tokens) >= 2 or words[-1:] == ["of"])
+                and all(
+                    left < right
+                    for left, right in zip(scales, scales[1:])
+                    if left is not None and right is not None
+                )
             ):
                 return "2"
         return None
@@ -1372,26 +1402,33 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         else:
             body = words
             connectors = {"or", "to", "through"}
+        if not explicit_range_prefix:
+            whole_value = complete_count_value(body)
+            if whole_value is not None:
+                # A complete scalar such as ``one hundred and five`` is not a
+                # coordinated list.  Let the scalar path below apply prefix
+                # and noun-agreement rules.
+                return None
         if not explicit_range_prefix and any(
             token.rstrip(",") in {"and", "or"} for token in body
         ):
+            list_connector = "or" if "or" in body else "and"
             alternatives: list[list[str]] = []
             separators: list[str] = []
             current: list[str] = []
             malformed = False
             for token in body:
-                if token in {"and", "or"}:
+                if token == list_connector:
                     if current:
                         alternatives.append(current)
                         separators.append(token)
                         current = []
                     elif (
-                        token in {"and", "or"}
-                        and separators
+                        separators
                         and separators[-1] == ","
                         and len(alternatives) >= 2
                     ):
-                        separators[-1] = token
+                        separators[-1] = list_connector
                     else:
                         malformed = True
                         break
@@ -1412,27 +1449,13 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 and len(separators) == len(alternatives) - 1
                 and (
                     len(set(separators)) == 1
-                    and separators[0] in {"and", "or"}
+                    and separators[0] == list_connector
                     or (
-                        separators[-1] in {"and", "or"}
+                        separators[-1] == list_connector
                         and all(separator == "," for separator in separators[:-1])
                     )
                 )
             )
-            if (
-                valid_separator_sequence
-                and separators
-                and set(separators) == {"and"}
-                and any(
-                    token in {"hundred", "thousand", "million", "billion"}
-                    for alternative in alternatives
-                    for token in alternative
-                )
-            ):
-                # Without comma evidence, ``one hundred and five`` is a
-                # cardinal phrase, not a list.  Let the strict number parser
-                # below accept it or fail visible (for example, ``... zero``).
-                valid_separator_sequence = False
             if not malformed and valid_separator_sequence:
                 parsed_alternatives = [
                     complete_count_value(alternative)
@@ -1440,6 +1463,19 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 ]
                 final_alternative = alternatives[-1]
                 if all(value is not None for value in parsed_alternatives):
+                    scale_alternatives = sum(
+                        any(
+                            token in {"hundred", "thousand", "million", "billion"}
+                            for token in alternative
+                        )
+                        for alternative in alternatives
+                    )
+                    if (
+                        list_connector == "and"
+                        and separators == ["and"] * len(separators)
+                        and scale_alternatives == 1
+                    ):
+                        return None
                     final_value = parsed_alternatives[-1]
                     assert final_value is not None
                     return (
@@ -1478,6 +1514,9 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         ):
             return False
         return noun_agrees(coordinated_number)
+    complete_value = complete_count_value(numeric_phrase)
+    if complete_value is not None:
+        return parsed_number_agrees(complete_value)
     if numeric_phrase == ["a", "few"]:
         return noun_agrees("plural")
     if numeric_phrase == ["half", "of"]:
