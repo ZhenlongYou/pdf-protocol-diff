@@ -7873,8 +7873,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("CMIS-LT", csv_text)
         self.assertIn("cmis-lt", csv_text)
 
-    def test_equivalent_count_and_short_field_value_change_remain_one_section(self) -> None:
-        """A stable unknown field identifies a short technical value replacement."""
+    def test_equivalent_count_and_long_field_value_change_remain_one_section(self) -> None:
+        """A stable unknown field identifies an opaque technical value replacement."""
 
         result = compare_extractions(
             ExtractionResult(
@@ -7898,7 +7898,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         text=(
                             "1 Queue Processing\n"
                             "Capture 1,000,000 packets.\n"
-                            "Mode is NRZ."
+                            "Mode is LEGACY_128B130B_FLIT_DISABLED."
                         ),
                     )
                 ],
@@ -7917,9 +7917,58 @@ class ProtocolDiffTests(unittest.TestCase):
             ]
         for reader in readers:
             self.assertIn("PAM4", reader)
-            self.assertIn("NRZ", reader)
+            self.assertIn("LEGACY_128B130B_FLIT_DISABLED", reader)
             self.assertNotIn("one million packets", reader)
             self.assertNotIn("1,000,000 packets", reader)
+
+    def test_referential_copula_subject_cannot_rescue_disjoint_exact_sections(self) -> None:
+        """Pronouns and deictic subjects are not stable assignment fields."""
+
+        old_tail = "a legacy optical calibration path."
+        new_tail = "a revised copper training method."
+        for subject, copula in (
+            ("There", "is"),
+            ("Here", "is"),
+            ("They", "are"),
+            ("These", "are"),
+            ("The former", "is"),
+            ("The first", "is"),
+            ("The following", "is"),
+            ("Elsewhere", "is"),
+        ):
+            with self.subTest(subject=subject):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-referential-subject.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=(
+                                    "1 General\nCapture one million packets.\n"
+                                    f"{subject} {copula} {old_tail}"
+                                ),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-referential-subject.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=(
+                                    "1 General\nCapture 1,000,000 packets.\n"
+                                    f"{subject} {copula} {new_tail}"
+                                ),
+                            )
+                        ],
+                    ),
+                    DiffOptions(),
+                )
+
+                change_types = [change.change_type for change in result.changes]
+                self.assertNotIn("modified", change_types)
+                self.assertEqual(1, change_types.count("added"))
+                self.assertEqual(1, change_types.count("deleted"))
 
     def test_single_short_field_value_change_does_not_depend_on_raw_similarity(self) -> None:
         """A proven field/value slot remains one modified single-unit section."""

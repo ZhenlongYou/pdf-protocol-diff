@@ -2974,7 +2974,11 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         for old_unit, new_unit in zip(left_units, right_units)
     ):
         return None  # 逐片段必须共享可证明的句子骨架；整体分数不能让通用句替互异正文自证。
-    return max(raw_score, _review_similarity(left_sample, right_sample))
+    return max(
+        raw_score,
+        _review_similarity(left_sample, right_sample),
+        0.90,
+    )  # 每个对应句均已通过局部骨架门，技术枚举长度不应再否决章节身份。
 
 
 def _sample_section_text(value: str) -> str:
@@ -3041,9 +3045,97 @@ def _assignment_field_key(value: str) -> str:
     field_key = normalize_for_similarity(field)
     if not field_key:
         return ""
+    field_words = re.findall(r"[a-z]+", field_key)
+    if field_words and all(
+        word in _NON_ASSIGNMENT_REFERENCE_WORDS or word in _REVIEW_STOP_WORDS
+        for word in field_words
+    ):
+        return ""  # There/They/the former 等虚主语或指代语不是字段名。
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
         return ""  # it/this 类代词不是可独立证明的字段名。
     return field_key
+
+
+_NON_ASSIGNMENT_REFERENCE_WORDS = frozenset(
+    {
+        "all",
+        "above",
+        "another",
+        "any",
+        "anybody",
+        "anyone",
+        "anything",
+        "both",
+        "below",
+        "each",
+        "eighth",
+        "either",
+        "else",
+        "elsewhere",
+        "everybody",
+        "everyone",
+        "everything",
+        "fifth",
+        "first",
+        "following",
+        "former",
+        "fourth",
+        "he",
+        "here",
+        "hers",
+        "herself",
+        "him",
+        "himself",
+        "i",
+        "latter",
+        "last",
+        "mine",
+        "neither",
+        "next",
+        "ninth",
+        "nobody",
+        "none",
+        "nothing",
+        "one",
+        "ones",
+        "other",
+        "ours",
+        "ourselves",
+        "preceding",
+        "previous",
+        "same",
+        "second",
+        "seventh",
+        "she",
+        "sixth",
+        "somebody",
+        "someone",
+        "something",
+        "tenth",
+        "theirs",
+        "them",
+        "themselves",
+        "there",
+        "these",
+        "third",
+        "they",
+        "those",
+        "us",
+        "we",
+        "what",
+        "whatever",
+        "which",
+        "whichever",
+        "who",
+        "whoever",
+        "whom",
+        "whose",
+        "you",
+        "yours",
+        "yourself",
+        "yourselves",
+    }
+)
 
 
 def _similarity(left: str, right: str) -> float:
