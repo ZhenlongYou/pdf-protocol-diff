@@ -1173,15 +1173,15 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             ambiguous_words[0],
         ):
             return False
-        if (
-            len(ambiguous_words) >= 3
-            and ambiguous_words[0].casefold()
-            in {"a", "an", "the", "this", "that", "these", "those"}
-            and re.fullmatch(r"(?i)[a-z]{3,}(?:s|es)", ambiguous_words[-1])
+        if len(ambiguous_words) >= 3 and re.fullmatch(
+            r"(?i)(?:supports?|implements?|uses?|defines?|requires?|provides?|"
+            r"contains?|describes?|covers?|lists?|details?|specifies?|generates?)",
+            ambiguous_words[-1],
         ):
             # A final finite-looking word after a determiner can be a reduced
             # relative clause in a title (``REPORTS THE RECEIVER GENERATES``).
-            # Its exact verb vocabulary is open-ended; ambiguity stays visible.
+            # Keep this audited set conservative: a generic ``s/es`` suffix
+            # would misclassify object nouns such as ``REQUIREMENTS``.
             return False
     tail = cleaned[match.end() :]
     if intransitive is not None:
