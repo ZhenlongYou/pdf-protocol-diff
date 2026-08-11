@@ -1171,10 +1171,14 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         quantified_prepositional_clause = bool(
             prepositional_title
             and len(ambiguous_words) >= 3
-            and re.fullmatch(
-                r"(?i)(?:a|an|the|all|any|each|every|no|one|two|three|four|"
-                r"five|six|seven|eight|nine|ten|\d+)",
-                ambiguous_words[1],
+            and re.match(
+                r"(?i)^(?:a|an|the|all|any|both|each|either|every|neither|no|"
+                r"some|several|many|few|multiple|various|numerous|additional|"
+                r"another|enough|more(?:\s+than)?|less(?:\s+than)?|"
+                r"fewer(?:\s+than)?|at\s+(?:least|most)|"
+                r"one|two|three|four|five|six|seven|eight|nine|ten|"
+                r"dozens?|hundreds?|thousands?|\d+(?:\.\d+)?)\b",
+                " ".join(ambiguous_words[1:]),
             )
         )
         if prepositional_title and not quantified_prepositional_clause:
@@ -1282,6 +1286,11 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     if not re.search(r"[。！？.!?]\s*$", cleaned):
         return False
     clause = cleaned.rstrip("。！？.!? ")
+    if re.search(r"的[^的\s]{1,24}$", clause) and not re.search(r"\d", clause):
+        # A relative clause closed by a nominal head is still a title phrase:
+        # ``接收机必须满足的要求`` / ``设备可以使用的校准方法``.  A concrete
+        # measured statement keeps stronger sentence evidence.
+        return False
     return bool(
         re.fullmatch(
             r"(?=.{4,160}$).{2,80}?"
