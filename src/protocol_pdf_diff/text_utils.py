@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 
 TABLE_NUMBER_DASH_CLASS = r"[\-\u2010\u2011\u2012\u2013\u2014\u2212]"
 
@@ -254,6 +254,32 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
         "warnings",
         "waveform",
         "waveforms",
+    }
+)
+_ENGLISH_COUNT_CONTEXT_VERBS = frozenset(
+    {
+        "archive",
+        "archives",
+        "capture",
+        "captures",
+        "collect",
+        "collects",
+        "count",
+        "counts",
+        "process",
+        "processes",
+        "receive",
+        "receives",
+        "record",
+        "records",
+        "repeat",
+        "repeats",
+        "retry",
+        "retries",
+        "send",
+        "sends",
+        "transmit",
+        "transmits",
     }
 )
 _ENGLISH_CARDINAL_LIST_COMMA_SENTINEL = "pdfdiffcountlistcomma"
@@ -603,12 +629,22 @@ def canonicalize_numeric_scale_chain(number: str, scales: list[str]) -> str | No
         left < right for left, right in zip(concrete_scales, concrete_scales[1:])
     ):
         return None
+    plain_number = number.replace(",", "")
     try:
-        product = Decimal(number.replace(",", ""))
+        significant_digit_budget = max(
+            1,
+            sum(character.isdigit() for character in plain_number),
+        )
+        with localcontext() as context:
+            # Decimal's process-wide default is 28 significant digits.  Count
+            # normalization must never round two observed integers into one
+            # key, so size the local context from the actual source token.
+            context.prec = max(28, significant_digit_budget + 8)
+            product = Decimal(plain_number)
+            for scale in concrete_scales:
+                product *= scale
     except InvalidOperation:
         return None
-    for scale in concrete_scales:
-        product *= scale
     fixed = format(product, "f")
     return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
 
@@ -825,7 +861,16 @@ def canonicalize_number_word_tokens(
             if (
                 previous_word in protected_previous_words
                 or next_word in protected_next_words
-                or not _has_positive_english_count_context(normalized_tokens, next_index)
+                or not (
+                    (
+                        previous_word in _ENGLISH_COUNT_CONTEXT_VERBS
+                        and next_word not in _NUMBER_WORD_SCALES
+                    )
+                    or _has_positive_english_count_context(
+                        normalized_tokens,
+                        next_index,
+                    )
+                )
             ):
                 canonical.extend(tokens[index : index + consumed])
             else:
@@ -959,6 +1004,24 @@ def is_english_count_context_noun(token: str) -> bool:
     """Return whether an observed noun safely proves ordinary count context."""
 
     return _normalize_number_word_token(token) in _ENGLISH_COUNT_CONTEXT_NOUNS
+
+
+def is_english_count_context_verb(token: str) -> bool:
+    """Return whether a preceding verb explicitly introduces a count value."""
+
+    return _normalize_number_word_token(token) in _ENGLISH_COUNT_CONTEXT_VERBS
+
+
+def is_english_cardinal_word(token: str) -> bool:
+    """Return whether one token is grammar used inside an English cardinal."""
+
+    normalized = _normalize_number_word_token(token)
+    return bool(
+        normalized in _NUMBER_WORD_UNITS
+        or normalized in _NUMBER_WORD_TENS
+        or normalized in _NUMBER_WORD_SCALES
+        or normalized in {"a", "half", "and"}
+    )
 
 
 def canonicalize_chinese_number_token(token: str) -> str | None:

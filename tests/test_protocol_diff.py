@@ -12800,6 +12800,9 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Collect one hundred thousand five hundred packets.\n"
                         "Collect one hundred million five hundred thousand packets.\n"
                         "Collect one hundred thousand and five hundred packets, then archive one million samples.\n"
+                        "Count one hundred thousand and five hundred; one million packets follow.\n"
+                        "Count one hundred thousand and five hundred: one million packets follow.\n"
+                        "Count one hundred thousand and five hundred. One million packets follow.\n"
                         "Capture one and a half million packets.\n"
                         "Compare one million and two million packets.\n"
                         "Record one hundred and two hundred failures.\n"
@@ -12842,6 +12845,9 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Collect 100,500 packets.\n"
                         "Collect 100,500,000 packets.\n"
                         "Collect 100,500 packets, then archive 1,000,000 samples.\n"
+                        "Count 100,500; 1,000,000 packets follow.\n"
+                        "Count 100,500: 1,000,000 packets follow.\n"
+                        "Count 100,500. 1,000,000 packets follow.\n"
                         "Capture 1.5 million packets.\n"
                         "Compare 1,000,000 and 2,000,000 packets.\n"
                         "Record 100 and 200 failures.\n"
@@ -12903,6 +12909,85 @@ class ProtocolDiffTests(unittest.TestCase):
                 )
 
                 self.assertTrue(result.changes)
+
+    def test_equivalent_count_spelling_does_not_break_a_changed_section_match(self) -> None:
+        """One real value change must not expose an adjacent equivalent count line."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_count_context.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Collect one hundred thousand and five hundred packets, "
+                        "then archive one million samples.\n"
+                        "The limit is 120 mVrms."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_count_context.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Collect 100,500 packets, then archive 1,000,000 samples.\n"
+                        "The limit is 121 mVrms."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual(1, len(result.changes))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, Path(temp_dir), DiffOptions())
+            for suffix in (".html", ".md", ".txt", ".csv"):
+                report = next(path for path in paths.values() if path.suffix == suffix)
+                reader = report.read_text(encoding="utf-8-sig")
+                if suffix == ".html":
+                    self.assertIn(">120</mark> mVrms", reader)
+                    self.assertIn(">121</mark> mVrms", reader)
+                else:
+                    self.assertIn("120 mVrms", reader)
+                    self.assertIn("121 mVrms", reader)
+                self.assertNotIn("one hundred thousand and five hundred", reader)
+
+    def test_large_scaled_integer_changes_do_not_round_to_one_key(self) -> None:
+        """Scaled counts beyond Decimal's default precision must remain distinct."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_large_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Count 12345678901234567890123456781 million packets."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_large_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Count 12345678901234567890123456782 million packets."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertTrue(result.changes)
 
     def test_number_word_change_with_an_added_comma_remains_visible(self) -> None:
         """Count spelling may normalize, but an observed numeric separator remains evidence."""

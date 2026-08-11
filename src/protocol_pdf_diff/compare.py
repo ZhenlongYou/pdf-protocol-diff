@@ -60,6 +60,7 @@ from .text_utils import (
     compact_inline,
     has_measurement_context,
     identifier_boundary_signatures,
+    is_english_cardinal_word,
     is_known_engineering_symbol_letter_suffix,
     mark_english_cardinal_list_commas,
     micro_identifier_signatures,
@@ -2009,7 +2010,7 @@ def _match_sections(
                     options.min_section_match_similarity,
                 ):
                     continue  # 同号同题也不能让长标题淹没两段完全无关的实际正文。
-                similarity = _section_similarity(
+                similarity = _exact_identity_similarity(
                     old_section.comparable_text,
                     new_section.comparable_text,
                 )
@@ -2135,7 +2136,8 @@ def _exact_identity_has_body_support(
     if not old_section.body.strip() or not new_section.body.strip():
         return True  # 空容器没有相反正文证据，仍由编号、标题和整体门槛确认身份。
     return (
-        _section_similarity(old_section.body, new_section.body) >= minimum_similarity
+        _exact_identity_similarity(old_section.body, new_section.body)
+        >= minimum_similarity
     )  # 两侧都有正文时，用户配置的门槛必须在正文上独立成立。
 
 
@@ -2916,6 +2918,36 @@ def _section_similarity(left: str, right: str) -> float:
     return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
 
 
+def _exact_identity_similarity(left: str, right: str) -> float:
+    """Score same-identity sections without penalizing proven spelling equivalence."""
+
+    left_sample = _sample_section_text(left)
+    right_sample = _sample_section_text(right)
+    raw_score = _similarity(left_sample, right_sample)
+    left_units = [
+        _review_unit_key(unit)
+        for unit in _paragraph_review_units(
+            left_sample,
+            suppressed_table_unit_keys=set(),
+        )
+        if _review_unit_key(unit)
+    ]
+    right_units = [
+        _review_unit_key(unit)
+        for unit in _paragraph_review_units(
+            right_sample,
+            suppressed_table_unit_keys=set(),
+        )
+        if _review_unit_key(unit)
+    ]
+    if not left_units or not right_units:
+        return raw_score
+    shared_units = sum((Counter(left_units) & Counter(right_units)).values())
+    if shared_units * 2 < max(len(left_units), len(right_units)):
+        return raw_score  # 一个通用句不能让大量互异正文借模糊分数强行配对。
+    return max(raw_score, _review_similarity(left_sample, right_sample))
+
+
 def _sample_section_text(value: str) -> str:
     """Keep representative text from long sections for cheap matching."""
 
@@ -3324,6 +3356,7 @@ _REVIEW_TOKEN_RE = re.compile(
     r"|[^\w\s.,;:?\"“”'‘’，。；：！？、]",
     flags=re.I,
 )
+_REVIEW_NUMBER_PHRASE_BOUNDARY_SENTINEL = "number-phrase-boundary-sentinel"
 _CASE_BEARING_TOKEN_RE = re.compile(
     r"(?<!\w)(?:[^\W\d_]|_)\w*(?:[-/]\w+)*(?!\w)"
 )
@@ -3439,6 +3472,11 @@ def _review_unit_key(value: str) -> str:
     normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=\d)", "", normalized)
     normalized = re.sub(r"(?<=\d)\s+(?=[\u4e00-\u9fff])", "", normalized)
     token_source = mark_english_cardinal_list_commas(normalized)
+    token_source = re.sub(
+        r"(?<!\d)[.,;:?!，。；：！？]|[.,;:?!，。；：！？](?!\d)",
+        f" {_REVIEW_NUMBER_PHRASE_BOUNDARY_SENTINEL} ",
+        token_source,
+    )
     tokens = [
         _canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(token_source)
     ]
@@ -3447,6 +3485,11 @@ def _review_unit_key(value: str) -> str:
         protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,
         protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
     )
+    canonical_tokens = [
+        token
+        for token in canonical_tokens
+        if token != _REVIEW_NUMBER_PHRASE_BOUNDARY_SENTINEL
+    ]
     return " ".join(
         [
             *canonical_tokens,
@@ -3556,6 +3599,8 @@ def _technical_case_signatures(value: str) -> list[str]:
             normalized_value,
             match,
         )
+        if token.islower() and is_english_cardinal_word(token):
+            has_explicit_technical_context = False
         if (
             "_" in token
             or has_letter_and_digit
@@ -3695,7 +3740,13 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             right_index += 1
         left = value[left_index].casefold() if left_index >= 0 else ""
         right = value[right_index].casefold() if right_index < len(value) else ""
-        if character == "." and left.isdigit() and right.isdigit():
+        if (
+            character == "."
+            and index > 0
+            and index + 1 < len(value)
+            and value[index - 1].isdigit()
+            and value[index + 1].isdigit()
+        ):
             continue  # 小数点由数字 token 自身保真，不再绑定原始 token 位置。
         if character == "," and any(
             match.start() < index < match.end() and "," in match.group(0)
@@ -3705,7 +3756,7 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
         if character in ".:,;" and left and right and (left.isalnum() or left == "_") and (right.isalnum() or right == "_"):
             kind = {".": "dot", ":": "colon", ",": "comma", ";": "semicolon"}[character]
             position = _punctuation_token_position(value, index)
-            signatures.append(f"{position}:{kind}:{left}:{right}")
+            signatures.append(f"{position}:{kind}")
         elif character == "?" and left and (left.isalnum() or left == "_"):
             position = _punctuation_token_position(value, index)
             signatures.append(f"{position}:question:{left}")
@@ -4036,7 +4087,10 @@ def _canonical_review_token(token: str) -> str:
         value = Decimal(body)
     except InvalidOperation:
         return token
-    numeric = format(value.normalize(), "f")
+    # ``normalize()`` obeys Decimal's process-wide precision and can round two
+    # long observed integers into the same key.  Fixed formatting preserves
+    # the exact coefficient while still expanding an exponent spelling.
+    numeric = format(value, "f")
     if "." in numeric:
         numeric = numeric.rstrip("0").rstrip(".")
     return f"{sign}{numeric}"
@@ -4610,8 +4664,6 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
             previous_text = line[:index].strip()
             if previous_char.isdigit() and next_char.isdigit():
                 should_split = False
-            elif previous_char.isdigit() and _next_non_space_char(line, index + 1).isdigit():
-                should_split = False
             elif (
                 re.fullmatch(r"\d{1,3}", previous_text)
                 and next_char
@@ -4639,16 +4691,6 @@ def _split_line_preserving_numbers(line: str) -> list[str]:
     if tail:
         units.append(tail)
     return units
-
-
-def _next_non_space_char(value: str, start_index: int) -> str:
-    """Return the next non-space character after a position, if any."""
-
-    for char in value[start_index:]:
-        if not char.isspace():
-            return char
-    return ""
-
 
 def _first_units(
     text: str,

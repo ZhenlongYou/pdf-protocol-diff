@@ -50,6 +50,7 @@ from .text_utils import (
     has_observable_identifier_boundary,
     identifier_boundary_signatures,
     is_english_count_context_noun,
+    is_english_count_context_verb,
     is_known_engineering_symbol_letter_suffix,
     micro_identifier_signatures,
     normalize_table_number_dashes,
@@ -8570,6 +8571,12 @@ def _number_word_phrase_has_positive_count_context(
     if next_index >= len(raw_tokens):
         return False
     first = raw_words[next_index]
+    if (
+        index > 0
+        and is_english_count_context_verb(raw_words[index - 1])
+        and first not in {"hundred", "thousand", "million", "billion"}
+    ):
+        return True
     if is_english_count_context_noun(first) or _looks_like_plural_count_noun(first):
         return True
     if first == ",":
