@@ -2933,7 +2933,7 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     if not left_units and not right_units:
         return raw_score
     if not left_units or not right_units:
-        return raw_score  # 空容器不能仅凭占用相同编号抢配另一条有正文的章节。
+        return None  # 空容器不能仅凭占用相同编号抢配另一条有正文的章节。
     if len(left_units) != len(right_units):
         shorter, longer = (
             (left_units, right_units)

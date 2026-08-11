@@ -8121,6 +8121,120 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(parent_changes))
         self.assertEqual("unchanged", parent_changes[0].change_type)  # 空正文容器仍依靠编号和标题稳定配对。
 
+    def test_empty_exact_clause_cannot_steal_a_shifted_populated_clause(self) -> None:
+        """An empty old clause must not consume a populated clause that shifted forward."""
+
+        old_text = (
+            "1 Receiver\n"
+            "1.1 Output Limit\n"
+            "1.2 Output Limit\n"
+            "The limit applies.\n"
+            "1.3 Stable Tail\n"
+            "The receiver shall preserve timing."
+        )
+        new_text = (
+            "1 Receiver\n"
+            "1.1 Output Limit\n"
+            "The limit applies.\n"
+            "1.2 Stable Tail\n"
+            "The receiver shall preserve timing."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-empty-shift.pdf"),
+                pages=[PageText(page_number=1, text=old_text)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-empty-shift.pdf"),
+                pages=[PageText(page_number=1, text=new_text)],
+            ),
+            DiffOptions(),
+        )
+
+        output_limit_changes = [
+            change
+            for change in result.changes
+            if (change.old_section and change.old_section.title == "Output Limit")
+            or (change.new_section and change.new_section.title == "Output Limit")
+        ]
+        self.assertEqual(2, len(output_limit_changes))
+        shifted = next(
+            change for change in output_limit_changes if change.change_type == "modified"
+        )
+        deleted = next(
+            change for change in output_limit_changes if change.change_type == "deleted"
+        )
+        self.assertEqual("1 Receiver / 1.2 Output Limit", shifted.old_section.location)
+        self.assertEqual("1 Receiver / 1.1 Output Limit", shifted.new_section.location)
+        self.assertEqual("The limit applies.", shifted.old_section.body)
+        self.assertEqual("The limit applies.", shifted.new_section.body)
+        self.assertEqual("1 Receiver / 1.1 Output Limit", deleted.old_section.location)
+        self.assertEqual("", deleted.old_section.body)
+
+    def test_empty_repeated_title_does_not_hide_a_shifted_technical_clause(self) -> None:
+        """A long repeated title cannot override empty-versus-populated body evidence."""
+
+        title = "Receiver Calibration and Compliance Validation"
+        old_text = (
+            "1 Receiver\n"
+            f"1.1 {title}\n"
+            "The limit shall remain 20 mV.\n"
+            f"1.2 {title}\n"
+            "1.3 Stable Tail\n"
+            "The receiver shall preserve timing."
+        )
+        new_text = (
+            "1 Receiver\n"
+            f"1.1 {title}\n"
+            "The threshold shall remain 34.0 dB.\n"
+            f"1.2 {title}\n"
+            "The limit shall remain 20 mV.\n"
+            "1.3 Stable Tail\n"
+            "The receiver shall preserve timing."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-empty-repeated-title.pdf"),
+                pages=[PageText(page_number=1, text=old_text)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-empty-repeated-title.pdf"),
+                pages=[PageText(page_number=1, text=new_text)],
+            ),
+            DiffOptions(),
+        )
+
+        moved_limit = next(
+            change
+            for change in result.changes
+            if change.old_section
+            and change.old_section.body == "The limit shall remain 20 mV."
+        )
+        new_threshold = next(
+            change
+            for change in result.changes
+            if change.new_section
+            and change.new_section.body == "The threshold shall remain 34.0 dB."
+        )
+        empty_old = next(
+            change
+            for change in result.changes
+            if change.change_type == "deleted"
+            and change.old_section
+            and change.old_section.body == ""
+        )
+        self.assertEqual(
+            "1 Receiver / 1.2 Receiver Calibration and Compliance Validation",
+            moved_limit.new_section.location,
+        )
+        self.assertEqual("similarity_fallback", moved_limit.match_basis)
+        self.assertEqual("added", new_threshold.change_type)
+        self.assertIn("34.0 dB", new_threshold.new_section.body)
+        self.assertEqual(
+            "1 Receiver / 1.2 Receiver Calibration and Compliance Validation",
+            empty_old.old_section.location,
+        )
+
     def test_inserted_section_does_not_force_same_number_mismatch(self) -> None:
         """A new clause may occupy an old number and shift the original content."""
 
