@@ -207,8 +207,12 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
         "events",
         "failure",
         "failures",
+        "finding",
+        "findings",
         "file",
         "files",
+        "issue",
+        "issues",
         "interval",
         "intervals",
         "item",
@@ -225,6 +229,8 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
         "ports",
         "record",
         "records",
+        "requirement",
+        "requirements",
         "retry",
         "retries",
         "sample",
@@ -233,11 +239,35 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
         "sections",
         "step",
         "steps",
+        "test",
+        "tests",
         "time",
         "times",
+        "transaction",
+        "transactions",
+        "update",
+        "updates",
+        "value",
+        "values",
+        "warning",
+        "warnings",
         "waveform",
         "waveforms",
     }
+)
+_ENGLISH_CARDINAL_LIST_COMMA_SENTINEL = "pdfdiffcountlistcomma"
+_ENGLISH_CARDINAL_LIST_COMMA_RE = re.compile(
+    r"(?i)(?<![\w-])"
+    r"(?P<left>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)"
+    r"\s*,\s+"
+    r"(?=(?P<right>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)(?![\w-]))"
+)
+_ENGLISH_CARDINAL_LIST_CONNECTOR_COMMA_RE = re.compile(
+    r"(?i)(?<![\w-])"
+    r"(?P<left>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)"
+    r"\s*,\s+"
+    r"(?=(?:and|or)\s+"
+    r"(?P<right>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)(?![\w-]))"
 )
 CHINESE_NUMBER_CHARS = "零〇一二两三四五六七八九十百千万"
 CHINESE_COUNT_UNITS = (
@@ -623,12 +653,69 @@ def canonicalize_number_word_tokens(
     return canonical
 
 
+def mark_english_cardinal_list_commas(value: str) -> str:
+    """Preserve commas that provably join cardinal alternatives.
+
+    The normal review tokenizer intentionally drops prose commas.  A comma in
+    ``one, two, or three failures`` is structural, however: without a marker,
+    the first alternatives cannot inherit the final count noun.  Only comma +
+    whitespace boundaries whose adjacent tokens are themselves complete
+    cardinal atoms are marked; thousands separators and ordinary prose commas
+    are untouched.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        left = match.group("left")
+        right = match.group("right")
+        left_words = left.replace("-", " ").split()
+        right_words = right.replace("-", " ").split()
+        left_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", left)) or (
+            (parsed := parse_number_word_phrase(left_words, 0)) is not None
+            and parsed[1] == len(left_words)
+        )
+        right_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", right)) or (
+            (parsed := parse_number_word_phrase(right_words, 0)) is not None
+            and parsed[1] == len(right_words)
+        )
+        if not (left_number and right_number):
+            return match.group(0)
+        return f"{left} {_ENGLISH_CARDINAL_LIST_COMMA_SENTINEL} "
+
+    marked = _ENGLISH_CARDINAL_LIST_COMMA_RE.sub(replace, value)
+
+    def remove_connector_comma(match: re.Match[str]) -> str:
+        left = match.group("left")
+        right = match.group("right")
+        left_words = left.replace("-", " ").split()
+        right_words = right.replace("-", " ").split()
+        left_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", left)) or (
+            (parsed := parse_number_word_phrase(left_words, 0)) is not None
+            and parsed[1] == len(left_words)
+        )
+        right_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", right)) or (
+            (parsed := parse_number_word_phrase(right_words, 0)) is not None
+            and parsed[1] == len(right_words)
+        )
+        return f"{left} " if left_number and right_number else match.group(0)
+
+    return _ENGLISH_CARDINAL_LIST_CONNECTOR_COMMA_RE.sub(
+        remove_connector_comma,
+        marked,
+    )
+
+
 def _has_positive_english_count_context(tokens: list[str], next_index: int) -> bool:
     """Require an observed count noun instead of guessing from a prefix blacklist."""
 
     if next_index < len(tokens) and tokens[next_index] in _ENGLISH_COUNT_CONTEXT_NOUNS:
         return True
-    if next_index < len(tokens) and tokens[next_index] in {"and", "or"}:
+    if next_index < len(tokens) and tokens[next_index] in {
+        "and",
+        "or",
+        "to",
+        "through",
+        _ENGLISH_CARDINAL_LIST_COMMA_SENTINEL,
+    }:
         following = parse_number_word_phrase(tokens, next_index + 1)
         if following is not None:
             _value, consumed = following

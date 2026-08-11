@@ -61,6 +61,7 @@ from .text_utils import (
     has_measurement_context,
     identifier_boundary_signatures,
     is_known_engineering_symbol_letter_suffix,
+    mark_english_cardinal_list_commas,
     micro_identifier_signatures,
     normalize_for_similarity,
     normalize_line,
@@ -3408,6 +3409,9 @@ def _review_unit_key(value: str) -> str:
     punctuation_signature_source = _normalize_embedded_number_list_spacing(
         normalized_list_value
     )
+    punctuation_signature_source = mark_english_cardinal_list_commas(
+        punctuation_signature_source
+    )
     punctuation_signature_source = re.sub(
         r"(?<=\d)(?![eE][+-]?\d)(?=(?:[^\W\d_]|_))",
         " ",
@@ -3434,7 +3438,10 @@ def _review_unit_key(value: str) -> str:
     normalized = _normalize_embedded_number_list_spacing(normalized)
     normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=\d)", "", normalized)
     normalized = re.sub(r"(?<=\d)\s+(?=[\u4e00-\u9fff])", "", normalized)
-    tokens = [_canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(normalized)]
+    token_source = mark_english_cardinal_list_commas(normalized)
+    tokens = [
+        _canonical_review_token(token) for token in _REVIEW_TOKEN_RE.findall(token_source)
+    ]
     canonical_tokens = canonicalize_number_word_tokens(
         tokens,
         protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,

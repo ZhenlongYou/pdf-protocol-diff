@@ -11201,6 +11201,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "PART XXXIX REPORTS ON HUNDREDS OF THOUSANDS TO MILLIONS OF PACKETS.",
             "PART XL REPORTS ON EXACTLY ONE OR TWO FAILURES.",
             "PART XLI REPORTS ON ONE AND TWO HUNDRED FAILURES.",
+            "PART XLII REPORTS ON MILLIONS OR BILLIONS OF PACKETS.",
+            "PART XLIII REPORTS ON MILLIONS AND BILLIONS OF PACKETS.",
             "附录 A 说明：接收机的限值为 20 mV。",
             "附录 B 描述—接收机的模式是 PAM4。",
             "附录 C 说明：模块的参数必须保持稳定。",
@@ -12793,7 +12795,11 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Collect one hundred and five samples.\n"
                         "Capture one and a half million packets.\n"
                         "Compare one million and two million packets.\n"
-                        "Record one hundred and two hundred failures."
+                        "Record one hundred and two hundred failures.\n"
+                        "Count one, two, or three failures.\n"
+                        "Span one million to two million packets.\n"
+                        "Exercise one million and two million tests.\n"
+                        "Check one hundred and two hundred requirements."
                     ),
                 )
             ],
@@ -12811,7 +12817,11 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Collect 105 samples.\n"
                         "Capture 1.5 million packets.\n"
                         "Compare 1,000,000 and 2,000,000 packets.\n"
-                        "Record 100 and 200 failures."
+                        "Record 100 and 200 failures.\n"
+                        "Count 1, 2, or 3 failures.\n"
+                        "Span 1,000,000 to 2,000,000 packets.\n"
+                        "Exercise 1,000,000 and 2,000,000 tests.\n"
+                        "Check 100 and 200 requirements."
                     ),
                 )
             ],
@@ -14154,6 +14164,76 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn('<mark class="ins">2,000,000</mark>', report_html)
         self.assertIn('<mark class="del">save</mark>', report_html)
         self.assertIn('<mark class="ins">archive</mark>', report_html)
+
+    def test_html_inline_highlight_deemphasizes_range_and_comma_list_counts(
+        self,
+    ) -> None:
+        """Range and comma-list endpoints inherit one final count noun safely."""
+
+        cases = (
+            (
+                "one million to two million packets",
+                "1,000,000 to 2,000,000 packets",
+                ("one million", "two million"),
+                ("1,000,000", "2,000,000"),
+            ),
+            (
+                "one, two, or three failures",
+                "1, 2, or 3 failures",
+                ("one", "two", "three"),
+                ("1", "2", "3"),
+            ),
+        )
+        for old_count, new_count, old_tokens, new_tokens in cases:
+            with self.subTest(old_count=old_count):
+                old_extraction = ExtractionResult(
+                    pdf_path=Path("old_structured_count_highlight.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                f"1 Scope\nCapture {old_count}, then save them for "
+                                "the compliance review. The receiver retains every "
+                                "accepted result."
+                            ),
+                        )
+                    ],
+                )
+                new_extraction = ExtractionResult(
+                    pdf_path=Path("new_structured_count_highlight.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text=(
+                                f"1 Scope\nCapture {new_count}, then archive them for "
+                                "the compliance review. The receiver retains every "
+                                "accepted result."
+                            ),
+                        )
+                    ],
+                )
+                result = compare_extractions(
+                    old_extraction,
+                    new_extraction,
+                    DiffOptions(),
+                )
+
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    outputs = write_reports(result, Path(temp_dir), DiffOptions())
+                    report_html = outputs["html"].read_text(encoding="utf-8")
+
+                for token in old_tokens:
+                    self.assertNotIn(
+                        f'<mark class="del">{token}</mark>',
+                        report_html,
+                    )
+                for token in new_tokens:
+                    self.assertNotIn(
+                        f'<mark class="ins">{token}</mark>',
+                        report_html,
+                    )
+                self.assertIn('<mark class="del">save</mark>', report_html)
+                self.assertIn('<mark class="ins">archive</mark>', report_html)
 
     def test_html_inline_highlight_keeps_identifier_number_words(self) -> None:
         """Protected identifier contexts should still highlight Gen seven/Gen 7."""

@@ -8495,6 +8495,7 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
                     raw_words,
                     index,
                     consumed,
+                    text,
                 )
                 and not _span_is_inside_paired_literal(text, start, phrase_end)
             ):
@@ -8526,6 +8527,7 @@ def _number_word_phrase_has_positive_count_context(
     raw_words: list[str],
     index: int,
     consumed: int,
+    text: str,
 ) -> bool:
     """Fold an English number word only when a following count noun proves it."""
 
@@ -8535,7 +8537,24 @@ def _number_word_phrase_has_positive_count_context(
     first = raw_words[next_index]
     if is_english_count_context_noun(first) or _looks_like_plural_count_noun(first):
         return True
-    if first in {"and", "or"}:
+    if first == ",":
+        following_index = next_index + 1
+        if (
+            following_index < len(raw_words)
+            and raw_words[following_index] in {"and", "or"}
+        ):
+            following_index += 1
+        following = parse_number_word_phrase(raw_words, following_index)
+        if following is not None:
+            _value, following_consumed = following
+            return _number_word_phrase_has_positive_count_context(
+                raw_tokens,
+                raw_words,
+                following_index,
+                following_consumed,
+                text,
+            )
+    if first in {"and", "or", "to", "through"}:
         following = parse_number_word_phrase(raw_words, next_index + 1)
         if following is not None:
             _value, following_consumed = following
@@ -8544,6 +8563,20 @@ def _number_word_phrase_has_positive_count_context(
                 raw_words,
                 next_index + 1,
                 following_consumed,
+                text,
+            )
+    following = parse_number_word_phrase(raw_words, next_index)
+    if following is not None:
+        previous_end = raw_tokens[next_index - 1][2]
+        following_start = raw_tokens[next_index][1]
+        if "," in text[previous_end:following_start]:
+            _value, following_consumed = following
+            return _number_word_phrase_has_positive_count_context(
+                raw_tokens,
+                raw_words,
+                next_index,
+                following_consumed,
+                text,
             )
     second_index = next_index + 1
     if (

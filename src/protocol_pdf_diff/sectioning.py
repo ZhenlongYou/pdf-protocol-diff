@@ -1385,7 +1385,11 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 all(scale is not None for scale in scales)
                 and all(separator == "of" for separator in separators)
                 and len(separators) == len(scale_tokens) - 1
-                and (len(scale_tokens) >= 2 or has_trailing_partitive)
+                and (
+                    len(scale_tokens) >= 2
+                    or has_trailing_partitive
+                    or allow_implicit_partitive
+                )
                 and (has_trailing_partitive or allow_implicit_partitive)
                 and (allow_trailing_partitive or not has_trailing_partitive)
                 and all(
