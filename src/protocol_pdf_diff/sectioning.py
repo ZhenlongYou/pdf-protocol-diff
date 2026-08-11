@@ -1147,26 +1147,41 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         # (``STATES THE RECEIVER SUPPORTS``).  Both remain structural.
         ambiguous_tail = re.sub(r"[.!?]\s*$", "", cleaned[match.end() :]).strip()
         ambiguous_words = ambiguous_tail.split()
-        if ambiguous_words and ambiguous_words[0].casefold() in {
-            "about",
-            "across",
-            "among",
-            "between",
-            "by",
-            "for",
-            "from",
-            "in",
-            "of",
-            "on",
-            "over",
-            "to",
-            "under",
-            "with",
-            "without",
-        }:
+        prepositional_title = bool(
+            ambiguous_words
+            and ambiguous_words[0].casefold()
+            in {
+                "about",
+                "across",
+                "among",
+                "between",
+                "by",
+                "for",
+                "from",
+                "in",
+                "of",
+                "on",
+                "over",
+                "to",
+                "under",
+                "with",
+                "without",
+            }
+        )
+        quantified_prepositional_clause = bool(
+            prepositional_title
+            and len(ambiguous_words) >= 3
+            and re.fullmatch(
+                r"(?i)(?:a|an|the|all|any|each|every|no|one|two|three|four|"
+                r"five|six|seven|eight|nine|ten|\d+)",
+                ambiguous_words[1],
+            )
+        )
+        if prepositional_title and not quantified_prepositional_clause:
             # ``NOTES ON CALIBRATION`` and ``REPORTS ABOUT TESTING`` are
             # ordinary noun titles.  ALL-CAPS removes the part-of-speech
-            # evidence, so a prepositional complement must fail visible.
+            # evidence, so an unquantified prepositional complement must fail
+            # visible.  ``REPORTS ON TWO FAILURES`` has stronger clause syntax.
             return False
         if ambiguous_words and re.fullmatch(
             r"(?i)\w+(?:ed|en|ing|able|ible)",
