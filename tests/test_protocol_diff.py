@@ -7873,6 +7873,54 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("CMIS-LT", csv_text)
         self.assertIn("cmis-lt", csv_text)
 
+    def test_equivalent_count_and_short_field_value_change_remain_one_section(self) -> None:
+        """A stable unknown field identifies a short technical value replacement."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-mixed-count-mode.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Queue Processing\n"
+                            "Capture one million packets.\n"
+                            "Mode is PAM4."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-mixed-count-mode.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Queue Processing\n"
+                            "Capture 1,000,000 packets.\n"
+                            "Mode is NRZ."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            readers = [
+                outputs["html"].read_text(encoding="utf-8"),
+                outputs["markdown"].read_text(encoding="utf-8"),
+                outputs["text"].read_text(encoding="utf-8"),
+            ]
+        for reader in readers:
+            self.assertIn("PAM4", reader)
+            self.assertIn("NRZ", reader)
+            self.assertNotIn("one million packets", reader)
+            self.assertNotIn("1,000,000 packets", reader)
+
     def test_exact_section_allows_an_ordered_sentence_addition(self) -> None:
         """A preserved original sentence plus one new fact is one modified section."""
 

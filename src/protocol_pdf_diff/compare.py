@@ -2995,6 +2995,10 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
 
     if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
         return True  # 短数值、状态词或大小写技术标识符变化仍是同一句。
+    left_field = _assignment_field_key(left)
+    right_field = _assignment_field_key(right)
+    if left_field and left_field == right_field:
+        return True  # Mode/Rate/未知字段名稳定时，值槽的 PAM4→NRZ 仍是同一条技术修改。
     left_words = _meaningful_review_words(left)
     right_words = _meaningful_review_words(right)
     if not left_words or not right_words:
@@ -3003,6 +3007,27 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
     return len(shared_words) >= 2 and len(shared_words) / min(
         len(left_words), len(right_words)
     ) >= 0.60  # 要求大部分实质词不变，拒绝只共享 defines/requirements 类套话的互异正文。
+
+
+def _assignment_field_key(value: str) -> str:
+    """Return a stable left-hand field for short assignment/state sentences."""
+
+    compact = compact_inline(value).strip(".?!！？。 ")
+    match = re.match(
+        r"(?i)^(.{1,80}?)\s*(?::|=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
+        compact,
+    )
+    if match is None:
+        return ""
+    field, assigned_value = match.groups()
+    if not assigned_value.strip():
+        return ""
+    field_key = normalize_for_similarity(field)
+    if not field_key:
+        return ""
+    if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
+        return ""  # it/this 类代词不是可独立证明的字段名。
+    return field_key
 
 
 def _similarity(left: str, right: str) -> float:
