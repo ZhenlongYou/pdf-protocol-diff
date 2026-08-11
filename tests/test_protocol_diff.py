@@ -7926,7 +7926,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         for old_body, new_body in (
             ("Mode is PAM4.", "Mode is DISABLED."),
-            ("RX_STATE: IDLE.", "RX_STATE: RECOVERY."),
+            ("RX_STATE = IDLE.", "RX_STATE = RECOVERY."),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):
                 result = compare_extractions(
@@ -7954,14 +7954,22 @@ class ProtocolDiffTests(unittest.TestCase):
             "Note",
             "Notes",
             "Note 1",
+            "Note-1",
             "Warning 2",
+            "Warning-2",
             "Example",
+            "Example-1",
             "Requirement",
+            "Requirement-id",
             "Caution",
+            "Caution-warning",
             "Important",
             "Tip",
             "Observation",
             "Summary",
+            "Summary.note",
+            "Background_info",
+            "See-also",
             "Context",
             "Rationale",
             "State",

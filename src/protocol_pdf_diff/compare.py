@@ -2960,6 +2960,14 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         right_field = _assignment_field_key(right_units[0])
         if left_field and left_field == right_field:
             return max(raw_score, 0.90)  # 稳定字段名可以证明 Mode/State 的值槽修改。
+        has_unproven_colon = bool(
+            re.search(r"[:：]", left_units[0]) or re.search(r"[:：]", right_units[0])
+        )
+        if (
+            _review_unit_key(left_units[0]) != _review_unit_key(right_units[0])
+            and has_unproven_colon
+        ):
+            return None  # 单句冒号标签同样无法仅凭字符形态区分字段与话语标签。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
     if any(
         not _review_units_share_sentence_skeleton(old_unit, new_unit)
@@ -2997,6 +3005,10 @@ def _review_similarity(left: str, right: str) -> float:
 def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
     """Require local lexical continuity without treating a technical edit as disjoint prose."""
 
+    if _review_unit_key(left) == _review_unit_key(right):
+        return True
+    if re.search(r"[:：]", left) or re.search(r"[:：]", right):
+        return False  # 无 schema provenance 时，冒号左侧既可是字段也可是 Note/Summary，不猜测身份。
     if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
         return True  # 短数值、状态词或大小写技术标识符变化仍是同一句。
     left_field = _assignment_field_key(left)
@@ -3018,12 +3030,12 @@ def _assignment_field_key(value: str) -> str:
 
     compact = compact_inline(value).strip(".?!！？。 ")
     match = re.match(
-        r"(?i)^(.{1,80}?)\s*(?P<separator>:|=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
+        r"(?i)^(.{1,80}?)\s*(?:=|\b(?:is|are|was|were|shall\s+be|must\s+be)\b)\s*(\S.*)$",
         compact,
     )
     if match is None:
         return ""
-    field, separator, assigned_value = match.groups()
+    field, assigned_value = match.groups()
     if not assigned_value.strip():
         return ""
     field_key = normalize_for_similarity(field)
@@ -3031,38 +3043,7 @@ def _assignment_field_key(value: str) -> str:
         return ""
     if not _meaningful_review_words(field) and not re.search(r"[\u4e00-\u9fff]", field):
         return ""  # it/this 类代词不是可独立证明的字段名。
-    if separator == ":" and not _colon_assignment_value_is_proven(
-        field,
-        assigned_value,
-    ):
-        return ""  # 冒号也可以是 Note/Warning 段落引导，只允许可证明的短技术值。
     return field_key
-
-
-def _colon_assignment_value_is_proven(field: str, value: str) -> bool:
-    """Accept colon fields only when the right side has compact value-slot syntax."""
-
-    compact_field = compact_inline(field)
-    if not re.fullmatch(
-        r"(?i)[a-z][a-z0-9]*(?:[_./-][a-z0-9]+)+",
-        compact_field,
-    ):
-        return False
-    compact_value = compact_inline(value).strip(".?!！？。 ")
-    if not compact_value or len(compact_value) > 80:
-        return False
-    if len(re.findall(r"\S+", compact_value)) > 6:
-        return False
-    if re.search(r"(?<![\w.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)", compact_value):
-        return True
-    if re.search(r"\b[A-Z][A-Z0-9]{1,}(?:[-_/][A-Z0-9]+)*\b", compact_value):
-        return True
-    return bool(
-        re.fullmatch(
-            r"(?i)(?:enabled|disabled|pass|fail|passed|failed|on|off|true|false|automatic|manual|idle|active|inactive|ready)",
-            compact_value,
-        )
-    )
 
 
 def _similarity(left: str, right: str) -> float:
