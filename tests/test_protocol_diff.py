@@ -7784,6 +7784,36 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(1, change_types.count("added"))
                 self.assertEqual(1, change_types.count("deleted"))
 
+    def test_one_of_two_generic_units_cannot_rescue_disjoint_exact_sections(self) -> None:
+        """A matching boilerplate sentence cannot override a disjoint technical unit."""
+
+        shared = "The device shall comply with all applicable IEEE 802.3 requirements."
+        old_body = (
+            f"{shared}\n"
+            "Legacy alpha beta gamma behavior defines the old implementation."
+        )
+        new_body = (
+            f"{shared}\n"
+            "Revised voltage current impedance procedure defines the new implementation."
+        )
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-two-unit-generic.pdf"),
+                pages=[PageText(page_number=1, text=f"1 General\n{old_body}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-two-unit-generic.pdf"),
+                pages=[PageText(page_number=1, text=f"1 General\n{new_body}")],
+            ),
+            DiffOptions(),
+        )
+
+        change_types = [change.change_type for change in result.changes]
+        self.assertNotIn("modified", change_types)
+        self.assertEqual(1, change_types.count("added"))
+        self.assertEqual(1, change_types.count("deleted"))
+
     def test_structural_anchor_rescue_respects_a_stricter_configured_threshold(self) -> None:
         """A technical anchor may help at the default floor but cannot ignore a 0.99 request."""
 

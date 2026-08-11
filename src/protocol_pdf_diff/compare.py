@@ -1996,6 +1996,7 @@ def _match_sections(
 
     matched_old: set[int] = set()
     matched_new: set[int] = set()
+    rejected_exact_pairs: set[tuple[int, int]] = set()
     matches: list[tuple[int | None, int | None, float, str]] = []
 
     exact_candidates: list[tuple[float, int, int]] = []
@@ -2004,15 +2005,25 @@ def _match_sections(
             for new_index in exact_new_by_key.get(identity_key, []):
                 old_section = old_sections[old_index]
                 new_section = new_sections[new_index]
-                if not _exact_identity_has_body_support(
-                    old_section,
-                    new_section,
-                    options.min_section_match_similarity,
+                body_similarity = _exact_identity_similarity(
+                    old_section.body,
+                    new_section.body,
+                )
+                if body_similarity is None:
+                    rejected_exact_pairs.add((old_index, new_index))
+                    continue
+                if (
+                    old_section.body.strip()
+                    and new_section.body.strip()
+                    and body_similarity < options.min_section_match_similarity
                 ):
                     continue  # 同号同题也不能让长标题淹没两段完全无关的实际正文。
-                similarity = _exact_identity_similarity(
-                    old_section.comparable_text,
-                    new_section.comparable_text,
+                similarity = max(
+                    _section_similarity(
+                        old_section.comparable_text,
+                        new_section.comparable_text,
+                    ),
+                    body_similarity,
                 )
                 if similarity >= options.min_section_match_similarity:
                     exact_candidates.append((similarity, old_index, new_index))
@@ -2035,6 +2046,8 @@ def _match_sections(
             continue
         for old_index, old_section in enumerate(old_sections):
             if old_index in matched_old:
+                continue
+            if (old_index, new_index) in rejected_exact_pairs:
                 continue
             body_similarity = _section_similarity(
                 old_section.body,
@@ -2080,6 +2093,8 @@ def _match_sections(
         },
         options.min_section_match_similarity,
     ):
+        if (old_index, new_index) in rejected_exact_pairs:
+            continue
         matched_old.add(old_index)
         matched_new.add(new_index)
         matches.append(
@@ -2124,21 +2139,6 @@ def _match_sections(
         if old_index not in matched_old:
             matches.append((old_index, None, 0.0, "unmatched"))
     return matches
-
-
-def _exact_identity_has_body_support(
-    old_section: Section,
-    new_section: Section,
-    minimum_similarity: float,
-) -> bool:
-    """Require independent body evidence when both exact-key sections have body text."""
-
-    if not old_section.body.strip() or not new_section.body.strip():
-        return True  # 空容器没有相反正文证据，仍由编号、标题和整体门槛确认身份。
-    return (
-        _exact_identity_similarity(old_section.body, new_section.body)
-        >= minimum_similarity
-    )  # 两侧都有正文时，用户配置的门槛必须在正文上独立成立。
 
 
 _SECTION_IDENTITY_ANCHOR_MIN_CHARS = 80
@@ -2918,27 +2918,31 @@ def _section_similarity(left: str, right: str) -> float:
     return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
 
 
-def _exact_identity_similarity(left: str, right: str) -> float:
+def _exact_identity_similarity(left: str, right: str) -> float | None:
     """Score same-identity sections without penalizing proven spelling equivalence."""
 
     left_sample = _sample_section_text(left)
     right_sample = _sample_section_text(right)
     raw_score = _similarity(left_sample, right_sample)
     left_units = _paragraph_review_units(
-        left_sample,
+        left,
         suppressed_table_unit_keys=set(),
     )
     right_units = _paragraph_review_units(
-        right_sample,
+        right,
         suppressed_table_unit_keys=set(),
     )
-    if not left_units or len(left_units) != len(right_units):
+    if not left_units and not right_units:
         return raw_score
+    if not left_units or len(left_units) != len(right_units):
+        return None
+    if len(left_units) == 1:
+        return raw_score  # 单片段同号同题仍按原始相似度配对，差异会完整显示为 modified。
     if any(
         _review_similarity(old_unit, new_unit) < 0.90
         for old_unit, new_unit in zip(left_units, right_units)
     ):
-        return raw_score  # 每个对应片段都必须近似；一个通用句不能替大量互异正文自证。
+        return None  # 逐片段门禁是硬条件；整体相似度不能让通用句替互异正文自证。
     return max(raw_score, _review_similarity(left_sample, right_sample))
 
 
