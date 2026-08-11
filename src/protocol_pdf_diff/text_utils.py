@@ -179,6 +179,12 @@ _NUMBER_WORD_TENS = {
     "eighty": 80,
     "ninety": 90,
 }
+_NUMBER_WORD_SCALES = {
+    "hundred": 100,
+    "thousand": 1_000,
+    "million": 1_000_000,
+    "billion": 1_000_000_000,
+}
 _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
     {
         "attempt",
@@ -524,40 +530,47 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
     """Parse a short English cardinal phrase from a token stream.
 
     Returns ``(canonical_digit_string, consumed_token_count)``. The parser is
-    deliberately small: it covers common protocol counts from zero through 999,
-    including ``twenty one`` and ``one hundred and five``, while ignoring
-    ordinals and domain-specific identifiers.
+    accepts composable cardinal scales through billions, including ``twenty
+    one``, ``one hundred and five`` and ``two thousand five hundred``. It still
+    ignores ordinals and domain-specific identifiers.
     """
 
     if start_index >= len(tokens):
         return None
     normalized = [_normalize_number_word_token(token) for token in tokens]
-    first = normalized[start_index]
-
-    if first in _NUMBER_WORD_UNITS and _NUMBER_WORD_UNITS[first] > 0:
-        next_index = start_index + 1
-        if next_index < len(normalized) and normalized[next_index] == "hundred":
-            value = _NUMBER_WORD_UNITS[first] * 100
-            consumed = 2
-            tail_index = start_index + consumed
-            if tail_index < len(normalized) and normalized[tail_index] == "and":
-                tail_index += 1
-                consumed += 1
-            tail = _parse_under_hundred(normalized, tail_index)
-            if tail:
-                tail_value, tail_consumed = tail
-                value += tail_value
-                consumed += tail_consumed
-            return str(value), consumed
-
-    under_hundred = _parse_under_hundred(normalized, start_index)
-    if under_hundred:
-        value, consumed = under_hundred
-        return str(value), consumed
-    compact_value = _compact_number_word_value(first)
-    if compact_value is not None:
-        return str(compact_value), 1
-    return None
+    total = 0
+    current = 0
+    consumed = 0
+    saw_number = False
+    index = start_index
+    while index < len(normalized):
+        token = normalized[index]
+        if token == "and" and saw_number:
+            index += 1
+            consumed += 1
+            continue
+        if token in _NUMBER_WORD_UNITS:
+            current += _NUMBER_WORD_UNITS[token]
+        elif token in _NUMBER_WORD_TENS:
+            current += _NUMBER_WORD_TENS[token]
+        else:
+            compact_value = _compact_number_word_value(token)
+            if compact_value is not None:
+                current += compact_value
+            elif token == "hundred":
+                current = max(current, 1) * 100
+            elif token in {"thousand", "million", "billion"}:
+                scale = _NUMBER_WORD_SCALES[token]
+                total += max(current, 1) * scale
+                current = 0
+            else:
+                break
+        saw_number = True
+        index += 1
+        consumed += 1
+    if not saw_number:
+        return None
+    return str(total + current), consumed
 
 
 def canonicalize_number_word_tokens(

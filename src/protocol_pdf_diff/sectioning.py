@@ -1136,7 +1136,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     ) is None:
         return False
     quantity = [token.casefold() for token in tokens[:-1]]
-    if len(quantity) == 1 and quantity[0] in {
+    simple_quantifiers = {
         "a",
         "an",
         "all",
@@ -1160,72 +1160,71 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         "more",
         "less",
         "fewer",
-    }:
+    }
+    comparison = bool(
+        len(quantity) >= 3
+        and quantity[:2]
+        in (
+            ["more", "than"],
+            ["less", "than"],
+            ["fewer", "than"],
+            ["at", "least"],
+            ["at", "most"],
+        )
+    )
+    numeric_phrase = quantity[2:] if comparison else quantity
+    if not comparison and len(numeric_phrase) == 1 and numeric_phrase[0] in simple_quantifiers:
         return True
-    number_start = 0
-    if len(quantity) >= 3 and quantity[:2] in (
-        ["more", "than"],
-        ["less", "than"],
-        ["fewer", "than"],
-        ["at", "least"],
-        ["at", "most"],
-    ):
-        number_start = 2
-    numeric_phrase = quantity[number_start:]
-    if numeric_phrase in (
-        ["a", "dozen"],
-        ["dozens", "of"],
-        ["hundreds", "of"],
-        ["thousands", "of"],
-        ["millions", "of"],
-        ["billions", "of"],
-        ["a", "couple", "of"],
-        ["a", "pair", "of"],
-        ["couples", "of"],
-        ["pairs", "of"],
-    ):
+    if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
         return True
-    if len(numeric_phrase) >= 2 and numeric_phrase[-1] in {
-        "dozen",
-        "hundred",
-        "thousand",
-        "million",
-        "billion",
-    }:
-        multiplier = numeric_phrase[:-1]
-        if multiplier == ["a"] or (
-            len(multiplier) == 1
-            and (
-                re.fullmatch(r"\d+(?:,\d{3})*", multiplier[0])
-                or multiplier[0]
-                in {
-                    "some",
-                    "several",
-                    "many",
-                    "few",
-                    "multiple",
-                    "various",
-                    "numerous",
-                }
-            )
-        ):
-            return True
-        parsed_multiplier = parse_number_word_phrase(multiplier, 0)
-        if parsed_multiplier is not None and parsed_multiplier[1] == len(multiplier):
-            return True
-    if (
-        len(numeric_phrase) == 2
-        and re.fullmatch(r"\d+(?:\.\d+)?%", numeric_phrase[0])
-        and numeric_phrase[1] == "of"
-    ):
+    parsed_direct = parse_number_word_phrase(numeric_phrase, 0)
+    if parsed_direct is not None and parsed_direct[1] == len(numeric_phrase):
         return True
     if len(numeric_phrase) == 1 and re.fullmatch(
         r"\d+(?:,\d{3})*(?:\.\d+)?",
         numeric_phrase[0],
     ):
         return True
-    parsed = parse_number_word_phrase(numeric_phrase, 0)
-    return parsed is not None and parsed[1] == len(numeric_phrase)
+    if (
+        len(numeric_phrase) == 2
+        and re.fullmatch(r"\d+(?:\.\d+)?%", numeric_phrase[0])
+        and numeric_phrase[1] == "of"
+    ):
+        return True
+
+    singular_scales = {"dozen", "hundred", "thousand", "million", "billion"}
+    plural_partitives = {
+        "tens",
+        "dozens",
+        "hundreds",
+        "thousands",
+        "millions",
+        "billions",
+        "couples",
+        "pairs",
+    }
+
+    def multiplier_is_proven(multiplier: list[str]) -> bool:
+        if multiplier in (["a"], ["half", "a"], ["a", "few"]):
+            return True
+        if len(multiplier) == 1 and multiplier[0] in simple_quantifiers:
+            return True
+        if len(multiplier) == 1 and re.fullmatch(
+            r"\d+(?:,\d{3})*(?:\.\d+)?",
+            multiplier[0],
+        ):
+            return True
+        parsed = parse_number_word_phrase(multiplier, 0)
+        return parsed is not None and parsed[1] == len(multiplier)
+
+    if len(numeric_phrase) >= 2 and numeric_phrase[-1] in singular_scales:
+        return multiplier_is_proven(numeric_phrase[:-1])
+    if len(numeric_phrase) >= 2 and numeric_phrase[-1] == "of" and numeric_phrase[-2] in plural_partitives:
+        multiplier = numeric_phrase[:-2]
+        if not multiplier:
+            return not comparison
+        return multiplier_is_proven(multiplier)
+    return False
 
 
 def _english_named_container_predicate_sentence(title: str) -> bool:
