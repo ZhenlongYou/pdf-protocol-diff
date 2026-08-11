@@ -7939,6 +7939,26 @@ class ProtocolDiffTests(unittest.TestCase):
                 "If margin <= 20 mV, follow the optical calibration path.",
                 "If margin <= 4 UI, use the copper training method.",
             ),
+            (
+                "If mode ~= LEGACY, follow the optical calibration path.",
+                "If mode ~= RECOVERY, use the copper training method.",
+            ),
+            (
+                "If mode =~ LEGACY, follow the optical calibration path.",
+                "If mode =~ RECOVERY, use the copper training method.",
+            ),
+            (
+                "If mode != LEGACY, follow the optical calibration path.",
+                "If mode != RECOVERY, use the copper training method.",
+            ),
+            (
+                "If margin += 20 mV, follow the optical calibration path.",
+                "If margin += 4 UI, use the copper training method.",
+            ),
+            (
+                "If mode := LEGACY, follow the optical calibration path.",
+                "If mode := RECOVERY, use the copper training method.",
+            ),
         ):
             with self.subTest(old_condition=old_condition):
                 result = compare_extractions(

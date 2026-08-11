@@ -3043,9 +3043,9 @@ def _assignment_field_key(value: str) -> str:
     assigned_value = compact[operator_index + 1 :].lstrip()
     if not field or not assigned_value:
         return ""
-    if field[-1] in "<>=!:+-*/%&|^" or assigned_value[0] in "<>=!":
-        return ""  # ==/>=/<=/!=/复合运算符不是可用作章节身份证据的字段赋值。
-    if len(field) > 80:
+    if len(field) > 80 or re.fullmatch(r"[\w][\w ./\[\]-]*", field) is None:
+        return ""  # 只让紧凑字段名充当身份证据；条件/匹配运算式保守保持可见。
+    if re.match(r'''(?:[\w"'([{]|[+\-±]\s*\d)''', assigned_value) is None:
         return ""
     field_key = normalize_for_similarity(field)
     if not field_key:
