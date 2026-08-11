@@ -1180,7 +1180,17 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
                 prepositional_complement,
             )
         )
-        numeric_quantified_clause = bool(
+        numeric_unit = re.match(
+            r"^\d+(?:,\d{3})*(?:\.\d+)?\s+(?P<unit>\S+)",
+            prepositional_complement,
+        )
+        spaced_engineering_value = bool(
+            numeric_unit is not None
+            and _looks_like_unit_only_heading(
+                numeric_unit.group("unit").rstrip(".,;:!?")
+            )
+        )
+        numeric_quantified_clause = not spaced_engineering_value and bool(
             re.match(r"^\d+(?:\.\d+)?(?=\s+(?!%))", prepositional_complement)
             or re.match(
                 r"^\d{1,3}(?:,\d{3})+(?=\s)",
@@ -1302,7 +1312,19 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     if not re.search(r"[。！？.!?]\s*$", cleaned):
         return False
     clause = cleaned.rstrip("。！？.!? ")
-    if re.search(r"的\s*.{1,24}$", clause):
+    final_nominalizer = clause.rfind("的")
+    nominal_head = clause[final_nominalizer + 1 :].strip()
+    has_post_nominalizer_predicate = bool(
+        re.search(
+            r"(?:为|是|具有|必须|应当|可以|不得|需要|适用于|用于)",
+            nominal_head,
+        )
+    )
+    if (
+        final_nominalizer >= 0
+        and 0 < len(nominal_head) <= 24
+        and not has_post_nominalizer_predicate
+    ):
         # ``必须满足的要求`` and ``必须满足协议要求的条件`` can both be
         # complete noun titles.  A single extracted line cannot prove whether
         # the final nominalizer belongs to an object inside a prose sentence.
