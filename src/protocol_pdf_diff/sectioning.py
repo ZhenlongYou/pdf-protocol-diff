@@ -1316,7 +1316,7 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     nominal_head = clause[final_nominalizer + 1 :].strip()
     has_post_nominalizer_predicate = bool(
         re.fullmatch(
-            r".{2,20}?"
+            r".{1,20}?"
             r"(?:(?<![行作因以但])为|(?<!但)是|具有|必须|应当|可以|不得|需要|"
             r"适用于|用于)"
             r".{1,80}",
