@@ -7923,6 +7923,53 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertNotIn("one million packets", reader)
             self.assertNotIn("1,000,000 packets", reader)
 
+    def test_reordered_technical_sentences_remain_visible(self) -> None:
+        """Moving unchanged technical sentences must remain visible in every reader."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-technical-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Modes\nPAM4 mode applies.\nNRZ mode applies.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-technical-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Modes\nNRZ mode applies\nPAM4 mode applies",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertTrue(
+            any(
+                "PAM4" in pair.old
+                and "NRZ" in pair.old
+                and "PAM4" in pair.new
+                and "NRZ" in pair.new
+                for pair in result.changes[0].replaced_snippets
+            )
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            readers = [
+                outputs["html"].read_text(encoding="utf-8"),
+                outputs["markdown"].read_text(encoding="utf-8"),
+                outputs["text"].read_text(encoding="utf-8"),
+            ]
+        for reader in readers:
+            self.assertIn("PAM4", reader)
+            self.assertIn("NRZ", reader)
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 

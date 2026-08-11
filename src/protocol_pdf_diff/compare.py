@@ -2939,24 +2939,8 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     if left_review_key and left_review_key == right_review_key:
         return 1.0  # 整段语义键完全相等时，句末标点造成的分句差异不应破坏章节身份。
     if len(left_units) != len(right_units):
-        shorter, longer = (
-            (left_units, right_units)
-            if len(left_units) < len(right_units)
-            else (right_units, left_units)
-        )
-        longer_index = 0
-        for short_unit in shorter:
-            while (
-                longer_index < len(longer)
-                and not _review_units_share_sentence_skeleton(
-                    short_unit,
-                    longer[longer_index],
-                )
-            ):
-                longer_index += 1
-            if longer_index >= len(longer):
-                return None
-            longer_index += 1
+        if not _review_units_have_complete_skeleton_matching(left_units, right_units):
+            return None
         return max(
             raw_score,
             _review_similarity(left_sample, right_sample),
@@ -2976,11 +2960,13 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         ):
             return None  # 单句冒号标签无法在无 schema provenance 时证明字段身份。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
-    if any(
-        not _review_units_share_sentence_skeleton(old_unit, new_unit)
-        for old_unit, new_unit in zip(left_units, right_units)
-    ):
-        return None  # 逐片段必须共享可证明的句子骨架；整体分数不能让通用句替互异正文自证。
+    matched_unit_count = _review_unit_skeleton_match_count(left_units, right_units)
+    if matched_unit_count < len(left_units):
+        stable_ratio = matched_unit_count / len(left_units)
+        if matched_unit_count < 2 or stable_ratio < 0.75:
+            return None  # 少量通用句不能替互异正文自证章节身份。
+        return max(raw_score, _review_similarity(left_sample, right_sample))
+        # 大多数独立片段稳定时保留同章，剩余互异片段仍按增删显示且不伪造 0.90 分。
     return max(
         raw_score,
         _review_similarity(left_sample, right_sample),
@@ -3034,6 +3020,62 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
     return len(shared_words) >= 2 and len(shared_words) / min(
         len(left_words), len(right_words)
     ) >= 0.60  # 要求大部分实质词不变，拒绝只共享 defines/requirements 类套话的互异正文。
+
+
+def _review_units_have_complete_skeleton_matching(
+    left_units: list[str],
+    right_units: list[str],
+) -> bool:
+    """Prove every unit on the shorter side has one distinct semantic peer."""
+
+    return _review_unit_skeleton_match_count(left_units, right_units) == min(
+        len(left_units), len(right_units)
+    )
+
+
+def _review_unit_skeleton_match_count(
+    left_units: list[str],
+    right_units: list[str],
+) -> int:
+    """Return the maximum number of one-to-one semantic unit matches."""
+
+    shorter, longer = (
+        (left_units, right_units)
+        if len(left_units) <= len(right_units)
+        else (right_units, left_units)
+    )
+    candidates: list[list[int]] = []
+    for short_unit in shorter:
+        short_key = _review_unit_key(short_unit)
+        indexes = [
+            index
+            for index, long_unit in enumerate(longer)
+            if _review_units_share_sentence_skeleton(short_unit, long_unit)
+        ]
+        indexes.sort(
+            key=lambda index: _review_unit_key(longer[index]) == short_key,
+            reverse=True,
+        )  # 先占用完全相等的同句，再用骨架配对真实字段/数值修改。
+        candidates.append(indexes)
+
+    matched_short_by_long: dict[int, int] = {}
+
+    def assign(short_index: int, visited_long: set[int]) -> bool:
+        for long_index in candidates[short_index]:
+            if long_index in visited_long:
+                continue
+            visited_long.add(long_index)
+            previous_short = matched_short_by_long.get(long_index)
+            if previous_short is None or assign(previous_short, visited_long):
+                matched_short_by_long[long_index] = short_index
+                return True
+        return False
+
+    matched_count = 0
+    for short_index in range(len(shorter)):
+        if assign(short_index, set()):
+            matched_count += 1
+    return matched_count
 
 
 def _assignment_field_key(value: str) -> str:
@@ -3190,6 +3232,14 @@ def _summarize_text_delta(
             priority_values=(leading_replacement.old, leading_replacement.new),
         )
 
+    reordered_pair = _reordered_common_units_pair(old_units, new_units)
+    if reordered_pair is not None:
+        add_candidate(
+            "replaced",
+            pair=reordered_pair,
+            priority_values=(reordered_pair.old, reordered_pair.new),
+        )  # 句子搬移是可见语义变化，不能让 SequenceMatcher 只剩标点噪声。
+
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
         if tag == "equal":
             continue
@@ -3226,6 +3276,46 @@ def _summarize_text_delta(
                 )  # 等长和不等长块统一经过语义锚点与最低分门槛，禁止按位置强配。
 
     return _materialize_delta_candidates(candidates, max_snippets)
+
+
+def _reordered_common_units_pair(
+    old_units: list[str],
+    new_units: list[str],
+) -> SnippetPair | None:
+    """Return explicit evidence when unique unchanged units changed order."""
+
+    old_keys = [_review_unit_key(unit) for unit in old_units]
+    new_keys = [_review_unit_key(unit) for unit in new_units]
+    old_counts = Counter(key for key in old_keys if key)
+    new_counts = Counter(key for key in new_keys if key)
+    unique_common = {
+        key
+        for key, count in old_counts.items()
+        if count == 1 and new_counts.get(key) == 1
+    }
+    old_order = [key for key in old_keys if key in unique_common]
+    new_order = [key for key in new_keys if key in unique_common]
+    if len(old_order) < 2 or old_order == new_order:
+        return None
+    old_positions = {key: index for index, key in enumerate(old_order)}
+    inversion: tuple[str, str] | None = None
+    for new_index, first_key in enumerate(new_order):
+        for second_key in new_order[new_index + 1 :]:
+            if old_positions[first_key] > old_positions[second_key]:
+                inversion = (second_key, first_key)  # 旧顺序为 second→first，新顺序相反。
+                break
+        if inversion is not None:
+            break
+    if inversion is None:
+        return None
+    old_by_key = {key: unit for key, unit in zip(old_keys, old_units) if key in unique_common}
+    new_by_key = {key: unit for key, unit in zip(new_keys, new_units) if key in unique_common}
+    old_pair_order = list(inversion)
+    new_pair_order = list(reversed(inversion))
+    return SnippetPair(
+        old="\n".join(_report_unit(old_by_key[key]) for key in old_pair_order),
+        new="\n".join(_report_unit(new_by_key[key]) for key in new_pair_order),
+    )
 
 
 def _coherent_delta_unit_groups(
