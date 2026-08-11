@@ -12797,6 +12797,8 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Compare one million and two million packets.\n"
                         "Record one hundred and two hundred failures.\n"
                         "Count one, two, or three failures.\n"
+                        "Count one hundred, two hundred, or three hundred failures.\n"
+                        "Count one million, two million, or three million packets.\n"
                         "Span one million to two million packets.\n"
                         "Exercise one million and two million tests.\n"
                         "Check one hundred and two hundred requirements."
@@ -12819,6 +12821,8 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Compare 1,000,000 and 2,000,000 packets.\n"
                         "Record 100 and 200 failures.\n"
                         "Count 1, 2, or 3 failures.\n"
+                        "Count 100, 200, or 300 failures.\n"
+                        "Count 1,000,000, 2,000,000, or 3,000,000 packets.\n"
                         "Span 1,000,000 to 2,000,000 packets.\n"
                         "Exercise 1,000,000 and 2,000,000 tests.\n"
                         "Check 100 and 200 requirements."
@@ -14182,6 +14186,12 @@ class ProtocolDiffTests(unittest.TestCase):
                 "1, 2, or 3 failures",
                 ("one", "two", "three"),
                 ("1", "2", "3"),
+            ),
+            (
+                "one hundred, two hundred, or three hundred failures",
+                "100, 200, or 300 failures",
+                ("one hundred", "two hundred", "three hundred"),
+                ("100", "200", "300"),
             ),
         )
         for old_count, new_count, old_tokens, new_tokens in cases:

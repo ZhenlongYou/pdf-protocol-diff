@@ -256,18 +256,43 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
     }
 )
 _ENGLISH_CARDINAL_LIST_COMMA_SENTINEL = "pdfdiffcountlistcomma"
+_ENGLISH_CARDINAL_LIST_WORD_PATTERN = "(?:" + "|".join(
+    sorted(
+        {
+            *_NUMBER_WORD_UNITS,
+            *_NUMBER_WORD_TENS,
+            *_NUMBER_WORD_SCALES,
+            "a",
+            "and",
+            "half",
+        },
+        key=len,
+        reverse=True,
+    )
+) + ")"
+_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN = (
+    r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+)
+_ENGLISH_CARDINAL_LIST_PHRASE_PATTERN = (
+    rf"(?:{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}|"
+    rf"{_ENGLISH_CARDINAL_LIST_WORD_PATTERN}"
+    rf"(?:[\s-]+{_ENGLISH_CARDINAL_LIST_WORD_PATTERN})*)"
+)
+_ENGLISH_CARDINAL_LIST_DIGIT_RE = re.compile(
+    rf"^{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}$"
+)
 _ENGLISH_CARDINAL_LIST_COMMA_RE = re.compile(
     r"(?i)(?<![\w-])"
-    r"(?P<left>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)"
+    rf"(?P<left>{_ENGLISH_CARDINAL_LIST_PHRASE_PATTERN})"
     r"\s*,\s+"
-    r"(?=(?P<right>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)(?![\w-]))"
+    rf"(?=(?P<right>{_ENGLISH_CARDINAL_LIST_PHRASE_PATTERN})(?![\w-]))"
 )
 _ENGLISH_CARDINAL_LIST_CONNECTOR_COMMA_RE = re.compile(
     r"(?i)(?<![\w-])"
-    r"(?P<left>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)"
+    rf"(?P<left>{_ENGLISH_CARDINAL_LIST_PHRASE_PATTERN})"
     r"\s*,\s+"
     r"(?=(?:and|or)\s+"
-    r"(?P<right>[a-z]+(?:-[a-z]+)*|\d+(?:\.\d+)?)(?![\w-]))"
+    rf"(?P<right>{_ENGLISH_CARDINAL_LIST_PHRASE_PATTERN})(?![\w-]))"
 )
 CHINESE_NUMBER_CHARS = "零〇一二两三四五六七八九十百千万"
 CHINESE_COUNT_UNITS = (
@@ -664,19 +689,18 @@ def mark_english_cardinal_list_commas(value: str) -> str:
     are untouched.
     """
 
+    def is_complete_cardinal(phrase: str) -> bool:
+        words = phrase.replace("-", " ").split()
+        return bool(_ENGLISH_CARDINAL_LIST_DIGIT_RE.fullmatch(phrase)) or (
+            (parsed := parse_number_word_phrase(words, 0)) is not None
+            and parsed[1] == len(words)
+        )
+
     def replace(match: re.Match[str]) -> str:
         left = match.group("left")
         right = match.group("right")
-        left_words = left.replace("-", " ").split()
-        right_words = right.replace("-", " ").split()
-        left_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", left)) or (
-            (parsed := parse_number_word_phrase(left_words, 0)) is not None
-            and parsed[1] == len(left_words)
-        )
-        right_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", right)) or (
-            (parsed := parse_number_word_phrase(right_words, 0)) is not None
-            and parsed[1] == len(right_words)
-        )
+        left_number = is_complete_cardinal(left)
+        right_number = is_complete_cardinal(right)
         if not (left_number and right_number):
             return match.group(0)
         return f"{left} {_ENGLISH_CARDINAL_LIST_COMMA_SENTINEL} "
@@ -686,16 +710,8 @@ def mark_english_cardinal_list_commas(value: str) -> str:
     def remove_connector_comma(match: re.Match[str]) -> str:
         left = match.group("left")
         right = match.group("right")
-        left_words = left.replace("-", " ").split()
-        right_words = right.replace("-", " ").split()
-        left_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", left)) or (
-            (parsed := parse_number_word_phrase(left_words, 0)) is not None
-            and parsed[1] == len(left_words)
-        )
-        right_number = bool(re.fullmatch(r"\d+(?:\.\d+)?", right)) or (
-            (parsed := parse_number_word_phrase(right_words, 0)) is not None
-            and parsed[1] == len(right_words)
-        )
+        left_number = is_complete_cardinal(left)
+        right_number = is_complete_cardinal(right)
         return f"{left} " if left_number and right_number else match.group(0)
 
     return _ENGLISH_CARDINAL_LIST_CONNECTOR_COMMA_RE.sub(
