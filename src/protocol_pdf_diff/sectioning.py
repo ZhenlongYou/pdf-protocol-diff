@@ -1107,13 +1107,60 @@ _NAMED_CONTAINER_ENGLISH_NOUN_CAPABLE_PREDICATE = (
     r"(?:states|lists|covers|details|reports|records|notes|maps|documents|"
     r"outlines|shows|presents|addresses|reviews|highlights|captures)"
 )
-_NAMED_CONTAINER_COUNT_NOUN = (
-    r"(?:failures?|errors?|tests?|cases?|items?|events?|issues?|results?|"
-    r"requirements?|methods?|modes?|devices?|pages?|sections?|clauses?|"
-    r"chapters?|steps?|observations?|records?|samples?|packets?|messages?|"
-    r"transactions?|lanes?|links?|ports?|conditions?|values?|parameters?|"
-    r"warnings?|alerts?|notices?|entries?|changes?|differences?|updates?|"
-    r"findings?|anomalies?|incidents?|problems?|checks?|runs?|attempts?)"
+_NAMED_CONTAINER_COUNT_NOUN_SINGULAR = frozenset(
+    {
+        "alert",
+        "anomaly",
+        "attempt",
+        "case",
+        "change",
+        "chapter",
+        "check",
+        "clause",
+        "condition",
+        "device",
+        "difference",
+        "entry",
+        "error",
+        "event",
+        "failure",
+        "finding",
+        "incident",
+        "issue",
+        "item",
+        "lane",
+        "link",
+        "message",
+        "method",
+        "mode",
+        "notice",
+        "observation",
+        "packet",
+        "page",
+        "parameter",
+        "port",
+        "problem",
+        "record",
+        "requirement",
+        "result",
+        "run",
+        "sample",
+        "section",
+        "step",
+        "test",
+        "transaction",
+        "update",
+        "value",
+        "warning",
+    }
+)
+_NAMED_CONTAINER_COUNT_NOUN_PLURAL = frozenset(
+    {
+        *(f"{noun}s" for noun in _NAMED_CONTAINER_COUNT_NOUN_SINGULAR),
+        "anomalies",
+        "entries",
+    }
+    - {"anomalys", "entrys"}
 )
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
     r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
@@ -1129,12 +1176,21 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     """Prove a count clause without treating unknown unit tokens as nouns."""
 
     tokens = value.split()
-    if len(tokens) < 2 or re.fullmatch(
-        _NAMED_CONTAINER_COUNT_NOUN,
-        tokens[-1],
-        re.IGNORECASE,
-    ) is None:
+    if len(tokens) < 2:
         return False
+    count_noun = tokens[-1].casefold()
+    if count_noun in _NAMED_CONTAINER_COUNT_NOUN_SINGULAR:
+        count_noun_number = "singular"
+    elif count_noun in _NAMED_CONTAINER_COUNT_NOUN_PLURAL:
+        count_noun_number = "plural"
+    else:
+        return False
+
+    def noun_agrees(required: str) -> bool:
+        return required == "either" or required == count_noun_number
+
+    def parsed_number_agrees(value: str) -> bool:
+        return noun_agrees("singular" if value == "1" else "plural")
     quantity = [token.casefold() for token in tokens[:-1]]
     simple_quantifiers = {
         "a",
@@ -1197,15 +1253,29 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     prefix_length = comparison_length or (1 if approximation else 0)
     numeric_phrase = quantity[prefix_length:]
     if numeric_phrase == ["a", "few"]:
-        return True
+        return noun_agrees("plural")
     if numeric_phrase == ["half", "of"]:
-        return True
+        return noun_agrees("plural")
     if len(numeric_phrase) == 1:
         quantifier = numeric_phrase[0]
         if not (comparison or approximation) and quantifier in simple_quantifiers:
-            return True
-        if approximation and quantifier in simple_quantifiers - {"either", "neither"}:
-            return True
+            if quantifier in {"a", "an", "each", "either", "every", "neither", "another"}:
+                return noun_agrees("singular")
+            if quantifier in {"all", "both", "several", "many", "few", "multiple", "various", "numerous", "fewer"}:
+                return noun_agrees("plural")
+            return noun_agrees("either")
+        if approximation and quantifier in simple_quantifiers - {
+            "either",
+            "neither",
+            "more",
+            "less",
+            "fewer",
+        }:
+            if quantifier in {"a", "an", "each", "every", "another"}:
+                return noun_agrees("singular")
+            if quantifier in {"all", "both", "several", "many", "few", "multiple", "various", "numerous"}:
+                return noun_agrees("plural")
+            return noun_agrees("either")
         if comparison and quantifier in {
             "a",
             "an",
@@ -1220,23 +1290,30 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             "another",
             "enough",
         }:
-            return True
+            if quantifier in {"a", "an", "another"}:
+                return noun_agrees("singular")
+            if quantifier in {"several", "many", "few", "multiple", "various", "numerous"}:
+                return noun_agrees("plural")
+            return noun_agrees("either")
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
-        return True
+        return noun_agrees("plural")
     parsed_direct = parse_number_word_phrase(numeric_phrase, 0)
     if parsed_direct is not None and parsed_direct[1] == len(numeric_phrase):
-        return True
+        return parsed_number_agrees(parsed_direct[0])
     if len(numeric_phrase) == 1 and re.fullmatch(
         r"\d+(?:,\d{3})*(?:\.\d+)?",
         numeric_phrase[0],
     ):
-        return True
+        numeric = numeric_phrase[0].replace(",", "")
+        return noun_agrees(
+            "singular" if re.fullmatch(r"0*1(?:\.0+)?", numeric) else "plural"
+        )
     if (
         len(numeric_phrase) == 2
         and re.fullmatch(r"\d+(?:\.\d+)?%", numeric_phrase[0])
         and numeric_phrase[1] == "of"
     ):
-        return True
+        return noun_agrees("plural")
 
     singular_scales = {"dozen", "hundred", "thousand", "million", "billion"}
     plural_partitives = {
@@ -1358,21 +1435,21 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         return parsed is not None and parsed[1] == len(multiplier) and parsed[0] == "1"
 
     if len(numeric_phrase) >= 3 and numeric_phrase[-2:] == ["percent", "of"]:
-        return multiplier_is_proven(numeric_phrase[:-2])
+        return noun_agrees("plural") and multiplier_is_proven(numeric_phrase[:-2])
 
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] in singular_scales:
-        return multiplier_is_proven(numeric_phrase[:-1])
+        return noun_agrees("plural") and multiplier_is_proven(numeric_phrase[:-1])
     if (
         len(numeric_phrase) >= 3
         and numeric_phrase[-1] == "of"
         and numeric_phrase[-2] in singular_partitives
     ):
-        return singular_multiplier_is_proven(numeric_phrase[:-2])
+        return noun_agrees("plural") and singular_multiplier_is_proven(numeric_phrase[:-2])
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] == "of" and numeric_phrase[-2] in plural_partitives:
         multiplier = numeric_phrase[:-2]
         if not multiplier:
-            return not (comparison or approximation)
-        return plural_multiplier_is_proven(multiplier)
+            return noun_agrees("plural") and not (comparison or approximation)
+        return noun_agrees("plural") and plural_multiplier_is_proven(multiplier)
     return False
 
 
