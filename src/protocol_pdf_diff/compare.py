@@ -3232,11 +3232,10 @@ def _summarize_text_delta(
             priority_values=(leading_replacement.old, leading_replacement.new),
         )
 
-    reordered_evidence = _reordered_common_units_evidence(old_units, new_units)
-    reordered_old_indexes: set[int] = set()
-    reordered_new_indexes: set[int] = set()
-    if reordered_evidence is not None:
-        reordered_pair, reordered_old_indexes, reordered_new_indexes = reordered_evidence
+    reordered_pair, reordered_old_indexes, reordered_new_indexes = (
+        _common_unit_occurrence_evidence(old_units, new_units)
+    )
+    if reordered_pair is not None:
         add_candidate(
             "replaced",
             pair=reordered_pair,
@@ -3297,73 +3296,94 @@ def _summarize_text_delta(
     return _materialize_delta_candidates(candidates, max_snippets)
 
 
-def _reordered_common_units_evidence(
+def _common_unit_occurrence_evidence(
     old_units: list[str],
     new_units: list[str],
-) -> tuple[SnippetPair, set[int], set[int]] | None:
-    """Return compact order evidence and the exact occurrences it covers."""
+) -> tuple[SnippetPair | None, set[int], set[int]]:
+    """Separate exact common occurrences, true extras, and proven reordering."""
 
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
     old_counts = Counter(key for key in old_keys if key)
     new_counts = Counter(key for key in new_keys if key)
-    common_counts = Counter(
-        {
-            key: old_count
-            for key, old_count in old_counts.items()
-            if old_count == new_counts.get(key)
-        }
-    )  # 次数不等时 occurrence 身份无法证明，必须交回普通增删逻辑。
+    common_counts = old_counts & new_counts
+    if not common_counts:
+        return None, set(), set()
 
-    def occurrence_order(
+    old_length = len(old_keys)
+    new_length = len(new_keys)
+    lcs_lengths = [
+        [0] * (new_length + 1)
+        for _old_index in range(old_length + 1)
+    ]
+    for old_index in range(old_length - 1, -1, -1):
+        for new_index in range(new_length - 1, -1, -1):
+            if old_keys[old_index] and old_keys[old_index] == new_keys[new_index]:
+                lcs_lengths[old_index][new_index] = (
+                    1 + lcs_lengths[old_index + 1][new_index + 1]
+                )
+            else:
+                lcs_lengths[old_index][new_index] = max(
+                    lcs_lengths[old_index + 1][new_index],
+                    lcs_lengths[old_index][new_index + 1],
+                )
+
+    matched_old_indexes: set[int] = set()
+    matched_new_indexes: set[int] = set()
+    matched_counts: Counter[str] = Counter()
+    old_index = 0
+    new_index = 0
+    while old_index < old_length and new_index < new_length:
+        if (
+            old_keys[old_index]
+            and old_keys[old_index] == new_keys[new_index]
+            and lcs_lengths[old_index][new_index]
+            == 1 + lcs_lengths[old_index + 1][new_index + 1]
+        ):
+            matched_old_indexes.add(old_index)
+            matched_new_indexes.add(new_index)
+            matched_counts[old_keys[old_index]] += 1
+            old_index += 1
+            new_index += 1
+        elif lcs_lengths[old_index + 1][new_index] >= lcs_lengths[old_index][new_index + 1]:
+            old_index += 1
+        else:
+            new_index += 1
+
+    moved_counts = common_counts - matched_counts
+
+    def select_moved_indexes(
         keys: list[str],
-    ) -> tuple[list[tuple[str, int]], dict[tuple[str, int], int]]:
-        seen: Counter[str] = Counter()
-        order: list[tuple[str, int]] = []
-        indexes: dict[tuple[str, int], int] = {}
+        matched_indexes: set[int],
+    ) -> set[int]:
+        remaining = moved_counts.copy()
+        selected: set[int] = set()
         for index, key in enumerate(keys):
-            if not key or key not in common_counts:
+            if index in matched_indexes or remaining.get(key, 0) <= 0:
                 continue
-            seen[key] += 1
-            if seen[key] > common_counts[key]:
-                continue
-            token = (key, seen[key])
-            order.append(token)
-            indexes[token] = index
-        return order, indexes
+            selected.add(index)
+            remaining[key] -= 1
+        return selected
 
-    old_order, old_indexes = occurrence_order(old_keys)
-    new_order, new_indexes = occurrence_order(new_keys)
-    if len(old_order) < 2 or old_order == new_order:
-        return None
-    old_positions = {token: index for index, token in enumerate(old_order)}
-    involved_tokens: set[tuple[str, int]] = set()
-    for new_index, first_token in enumerate(new_order):
-        for second_token in new_order[new_index + 1 :]:
-            if old_positions[first_token] > old_positions[second_token]:
-                involved_tokens.update((first_token, second_token))
-    if not involved_tokens:
-        return None
-    involved_keys = {token[0] for token in involved_tokens}
-    covered_old_indexes = {
-        index for token, index in old_indexes.items() if token[0] in involved_keys
-    }
-    covered_new_indexes = {
-        index for token, index in new_indexes.items() if token[0] in involved_keys
-    }
-    old_pair_order = [token for token in old_order if token[0] in involved_keys]
-    new_pair_order = [token for token in new_order if token[0] in involved_keys]
+    moved_old_indexes = select_moved_indexes(old_keys, matched_old_indexes)
+    moved_new_indexes = select_moved_indexes(new_keys, matched_new_indexes)
+    common_old_indexes = matched_old_indexes | moved_old_indexes
+    common_new_indexes = matched_new_indexes | moved_new_indexes
+    common_old_order = [old_keys[index] for index in sorted(common_old_indexes)]
+    common_new_order = [new_keys[index] for index in sorted(common_new_indexes)]
+    if common_old_order == common_new_order:
+        return None, common_old_indexes, common_new_indexes
     return (
         SnippetPair(
             old="\n".join(
-                _report_unit(old_units[old_indexes[token]]) for token in old_pair_order
+                _report_unit(old_units[index]) for index in sorted(common_old_indexes)
             ),
             new="\n".join(
-                _report_unit(new_units[new_indexes[token]]) for token in new_pair_order
+                _report_unit(new_units[index]) for index in sorted(common_new_indexes)
             ),
         ),
-        covered_old_indexes,
-        covered_new_indexes,
+        common_old_indexes,
+        common_new_indexes,
     )
 
 

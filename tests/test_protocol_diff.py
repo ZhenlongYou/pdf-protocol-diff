@@ -8099,6 +8099,83 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(token, change.replaced_snippets[0].old)
             self.assertIn(token, change.replaced_snippets[0].new)
 
+    def test_reordering_with_an_extra_duplicate_reports_both_facts(self) -> None:
+        """Multiset excess is reported separately from the common units' reordering."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-order-plus-extra.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Modes\nPAM4 mode applies.\nNRZ mode applies.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-order-plus-extra.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nNRZ mode applies.\nPAM4 mode applies.\n"
+                            "PAM4 mode applies."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(1, len(change.replaced_snippets))
+        self.assertEqual(["PAM4 mode applies."], change.added_snippets)
+        self.assertFalse(change.removed_snippets)
+        self.assertEqual(["PAM4 mode applies."], change.audit_added_snippets)
+
+    def test_local_swap_with_peripheral_duplicates_has_no_false_add_delete(self) -> None:
+        """All common occurrences are removed from opcode noise after a local swap."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-local-swap.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nAlpha mode applies.\nBravo mode applies.\n"
+                            "Charlie mode applies.\nAlpha mode applies.\nBravo mode applies."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-local-swap.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nAlpha mode applies.\nCharlie mode applies.\n"
+                            "Bravo mode applies.\nAlpha mode applies.\nBravo mode applies."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=1),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(1, len(change.replaced_snippets))
+        self.assertFalse(change.added_snippets)
+        self.assertFalse(change.removed_snippets)
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertEqual(0, change.omitted_snippet_count)
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
