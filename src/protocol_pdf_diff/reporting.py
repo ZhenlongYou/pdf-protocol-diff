@@ -48,6 +48,7 @@ from .text_utils import (
     compact_inline,
     has_observable_identifier_boundary,
     identifier_boundary_signatures,
+    is_english_count_context_noun,
     is_known_engineering_symbol_letter_suffix,
     micro_identifier_signatures,
     normalize_table_number_dashes,
@@ -8532,8 +8533,18 @@ def _number_word_phrase_has_positive_count_context(
     if next_index >= len(raw_tokens):
         return False
     first = raw_words[next_index]
-    if _looks_like_plural_count_noun(first):
+    if is_english_count_context_noun(first) or _looks_like_plural_count_noun(first):
         return True
+    if first in {"and", "or"}:
+        following = parse_number_word_phrase(raw_words, next_index + 1)
+        if following is not None:
+            _value, following_consumed = following
+            return _number_word_phrase_has_positive_count_context(
+                raw_tokens,
+                raw_words,
+                next_index + 1,
+                following_consumed,
+            )
     second_index = next_index + 1
     if (
         _looks_like_english_noun_modifier(first)

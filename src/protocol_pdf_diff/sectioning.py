@@ -1314,7 +1314,12 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     has_prefix = comparison or approximation or exactness
     numeric_phrase = quantity[prefix_length:]
 
-    def complete_count_value(words: list[str]) -> str | None:
+    def complete_count_value(
+        words: list[str],
+        *,
+        allow_implicit_partitive: bool = False,
+        allow_trailing_partitive: bool = True,
+    ) -> str | None:
         scale_values = {
             "dozen": 12,
             "hundred": 100,
@@ -1361,7 +1366,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 multiplier_is_quantity = True
             if multiplier_is_quantity and all(
                 left < right for left, right in zip(scales, scales[1:])
-            ):
+            ) and not (len(scales) > 1 and scales[0] == scale_values["dozen"]):
                 return "2"
         plural_scales = {
             "dozens": 12,
@@ -1370,7 +1375,8 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             "millions": 1_000_000,
             "billions": 1_000_000_000,
         }
-        plural_scale_words = words[:-1] if words[-1:] == ["of"] else words
+        has_trailing_partitive = words[-1:] == ["of"]
+        plural_scale_words = words[:-1] if has_trailing_partitive else words
         if plural_scale_words:
             scale_tokens = plural_scale_words[::2]
             separators = plural_scale_words[1::2]
@@ -1379,7 +1385,9 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 all(scale is not None for scale in scales)
                 and all(separator == "of" for separator in separators)
                 and len(separators) == len(scale_tokens) - 1
-                and (len(scale_tokens) >= 2 or words[-1:] == ["of"])
+                and (len(scale_tokens) >= 2 or has_trailing_partitive)
+                and (has_trailing_partitive or allow_implicit_partitive)
+                and (allow_trailing_partitive or not has_trailing_partitive)
                 and all(
                     left < right
                     for left, right in zip(scales, scales[1:])
@@ -1458,8 +1466,12 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             )
             if not malformed and valid_separator_sequence:
                 parsed_alternatives = [
-                    complete_count_value(alternative)
-                    for alternative in alternatives
+                    complete_count_value(
+                        alternative,
+                        allow_implicit_partitive=index < len(alternatives) - 1,
+                        allow_trailing_partitive=index == len(alternatives) - 1,
+                    )
+                    for index, alternative in enumerate(alternatives)
                 ]
                 final_alternative = alternatives[-1]
                 if all(value is not None for value in parsed_alternatives):
@@ -1470,10 +1482,19 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                         )
                         for alternative in alternatives
                     )
+                    scale_alternative_indexes = [
+                        index
+                        for index, alternative in enumerate(alternatives)
+                        if any(
+                            token in {"hundred", "thousand", "million", "billion"}
+                            for token in alternative
+                        )
+                    ]
                     if (
                         list_connector == "and"
                         and separators == ["and"] * len(separators)
                         and scale_alternatives == 1
+                        and scale_alternative_indexes[0] != len(alternatives) - 1
                     ):
                         return None
                     final_value = parsed_alternatives[-1]
@@ -1494,7 +1515,11 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 continue
             left = body[:index]
             right = body[index + 1 :]
-            if complete_count_value(left) is None:
+            if complete_count_value(
+                left,
+                allow_implicit_partitive=True,
+                allow_trailing_partitive=False,
+            ) is None:
                 continue
             right_value = complete_count_value(right)
             if right_value is not None:
@@ -1510,7 +1535,11 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         if (
             comparison
             or approximation_word in {"over", "under"}
-            or (exactness and quantity[0] == "exactly")
+            or (
+                exactness
+                and quantity[0] == "exactly"
+                and "or" not in numeric_phrase
+            )
         ):
             return False
         return noun_agrees(coordinated_number)

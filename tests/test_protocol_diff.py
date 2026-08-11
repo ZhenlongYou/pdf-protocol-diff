@@ -11017,6 +11017,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX BO REPORTS ON ONE OR OR TWO FAILURES.",
             "APPENDIX BP REPORTS ON ONE, OR OR TWO FAILURES.",
             "APPENDIX BQ REPORTS ON ONE OR TWO, THREE FAILURES.",
+            "APPENDIX BR REPORTS ON ONE DOZEN HUNDRED FAILURES.",
+            "APPENDIX BS REPORTS ON SEVERAL DOZEN HUNDRED THOUSAND FAILURES.",
+            "APPENDIX BT REPORTS ON HUNDREDS OF THOUSANDS PACKETS.",
+            "APPENDIX BU REPORTS ON HUNDREDS OF THOUSANDS OF TO MILLIONS OF PACKETS.",
             "ANNEX B RECORDS SUPPORTED BY THE RECEIVER.",
             "APPENDIX C NOTES APPLICABLE TO TEST FIXTURES.",
             "PART II MAPS USED FOR VERIFICATION.",
@@ -11195,6 +11199,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "PART XXXVII REPORTS ON A FEW HUNDRED THOUSAND PACKETS.",
             "PART XXXVIII REPORTS ON SEVERAL HUNDRED THOUSAND TO ONE MILLION PACKETS.",
             "PART XXXIX REPORTS ON HUNDREDS OF THOUSANDS TO MILLIONS OF PACKETS.",
+            "PART XL REPORTS ON EXACTLY ONE OR TWO FAILURES.",
+            "PART XLI REPORTS ON ONE AND TWO HUNDRED FAILURES.",
             "附录 A 说明：接收机的限值为 20 mV。",
             "附录 B 描述—接收机的模式是 PAM4。",
             "附录 C 说明：模块的参数必须保持稳定。",
@@ -12785,7 +12791,9 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Repeat the measurement twenty-one times.\n"
                         "Retry after twenty one idle intervals.\n"
                         "Collect one hundred and five samples.\n"
-                        "Capture one and a half million packets."
+                        "Capture one and a half million packets.\n"
+                        "Compare one million and two million packets.\n"
+                        "Record one hundred and two hundred failures."
                     ),
                 )
             ],
@@ -12801,7 +12809,9 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Repeat the measurement 21 times.\n"
                         "Retry after 21 idle intervals.\n"
                         "Collect 105 samples.\n"
-                        "Capture 1.5 million packets."
+                        "Capture 1.5 million packets.\n"
+                        "Compare 1,000,000 and 2,000,000 packets.\n"
+                        "Record 100 and 200 failures."
                     ),
                 )
             ],
@@ -14100,6 +14110,48 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertNotIn('<mark class="del">seven</mark>', report_html)
         self.assertNotIn('<mark class="ins">7</mark>', report_html)
+        self.assertIn('<mark class="del">save</mark>', report_html)
+        self.assertIn('<mark class="ins">archive</mark>', report_html)
+
+    def test_html_inline_highlight_deemphasizes_coordinated_number_words(self) -> None:
+        """Every endpoint inherits the final observed count-noun context."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_coordinated_number_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\nCapture one million and two million packets, "
+                        "then save them. The receiver records this result for "
+                        "the compliance review."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_coordinated_number_highlight.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\nCapture 1,000,000 and 2,000,000 packets, "
+                        "then archive them. The receiver records this result for "
+                        "the compliance review."
+                    ),
+                )
+            ],
+        )
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            report_html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertNotIn('<mark class="del">one million</mark>', report_html)
+        self.assertNotIn('<mark class="del">two million</mark>', report_html)
+        self.assertNotIn('<mark class="ins">1,000,000</mark>', report_html)
+        self.assertNotIn('<mark class="ins">2,000,000</mark>', report_html)
         self.assertIn('<mark class="del">save</mark>', report_html)
         self.assertIn('<mark class="ins">archive</mark>', report_html)
 

@@ -205,6 +205,8 @@ _ENGLISH_COUNT_CONTEXT_NOUNS = frozenset(
         "errors",
         "event",
         "events",
+        "failure",
+        "failures",
         "file",
         "files",
         "interval",
@@ -543,18 +545,18 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
     last_scale = 1_000_000_001
     index = start_index
     while index < len(normalized):
+        segment_index = index
         if normalized[index] == "and" and consumed:
             if _parse_under_thousand(normalized, index + 1) is None:
                 break
-            index += 1
-            consumed += 1
-        segment = _parse_under_thousand(normalized, index)
+            segment_index = index + 1
+        segment = _parse_under_thousand(normalized, segment_index)
         if segment is None:
             break
         segment_value, segment_consumed = segment
         if segment_value == 0 and consumed:
             break
-        scale_index = index + segment_consumed
+        scale_index = segment_index + segment_consumed
         if scale_index < len(normalized) and normalized[scale_index] in {
             "thousand",
             "million",
@@ -626,11 +628,25 @@ def _has_positive_english_count_context(tokens: list[str], next_index: int) -> b
 
     if next_index < len(tokens) and tokens[next_index] in _ENGLISH_COUNT_CONTEXT_NOUNS:
         return True
+    if next_index < len(tokens) and tokens[next_index] in {"and", "or"}:
+        following = parse_number_word_phrase(tokens, next_index + 1)
+        if following is not None:
+            _value, consumed = following
+            return _has_positive_english_count_context(
+                tokens,
+                next_index + 1 + consumed,
+            )
     return bool(
         next_index + 1 < len(tokens)
         and re.fullmatch(r"[a-z][a-z-]*", tokens[next_index])
         and tokens[next_index + 1] in _ENGLISH_COUNT_CONTEXT_NOUNS
     )  # `twenty one idle intervals` 允许一个可见修饰词；公式/函数/枚举不会误折叠。
+
+
+def is_english_count_context_noun(token: str) -> bool:
+    """Return whether an observed noun safely proves ordinary count context."""
+
+    return _normalize_number_word_token(token) in _ENGLISH_COUNT_CONTEXT_NOUNS
 
 
 def canonicalize_chinese_number_token(token: str) -> str | None:
@@ -746,6 +762,12 @@ def _parse_under_thousand(tokens: list[str], start_index: int) -> tuple[int, int
             if tail is None or tail[0] == 0:
                 return value, consumed
             tail_value, tail_consumed = tail
+            tail_end = tail_index + 1 + tail_consumed
+            if tail_end < len(tokens) and tokens[tail_end] == "hundred":
+                # ``one hundred and two hundred`` is a coordinated list,
+                # not the malformed scalar ``102 hundred``.  Leave the
+                # connector for the count-context lookahead.
+                return value, consumed
             return value + tail_value, consumed + 1 + tail_consumed
         tail = _parse_under_hundred(tokens, tail_index)
         if tail is not None and tail[0] > 0:
