@@ -1121,8 +1121,17 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
     if match is None:
         return False
     first_word = match.group("verb").split()[0]
-    if not (first_word.islower() or terminal):
+    if not (first_word.islower() or (first_word.isupper() and terminal)):
         # ``States the Receiver Supports`` is a plausible Title Case noun title.
+        return False
+    if first_word.isupper() and re.match(
+        r"(?i)^(?:states|lists|covers|details)\s+(?:the|a|an)\s+\S+\s+"
+        r"(?:supports?|implements?|uses?|defines?|requires?|provides?|contains?|"
+        r"describes?|covers?|lists?|details?|specifies?)[.!?]\s*$",
+        cleaned,
+    ):
+        # ALL-CAPS loses Title Case evidence.  A plural noun plus an article-led
+        # multiword phrase is still an ambiguous title, so keep it structural.
         return False
     tail = cleaned[match.end() :]
     if intransitive is not None:
@@ -1133,7 +1142,6 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             return True
         return False
 
-    verb_count = 1
     while True:
         coordinated = re.match(
             rf"(?i)^\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)"
@@ -1143,13 +1151,11 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         )
         if coordinated is None:
             break
-        verb_count += 1
         tail = tail[coordinated.end() :]
     compact_tail = tail.strip()
-    if verb_count >= 2 and compact_tail in {".", "!", "?"}:
-        return terminal
     return bool(
         compact_tail
+        and compact_tail not in {".", "!", "?"}
         and not re.match(r"(?i)^(?:and|or|of|for)\b", compact_tail)
     )
 
@@ -1167,15 +1173,16 @@ def _chinese_named_container_predicate_sentence(title: str) -> bool:
     tail = cleaned[predicate.end() :]
     while True:
         coordinated = re.match(
-            rf"^(?:[、，,](?:并且|以及|和|与|及|或)?|"
-            rf"(?:并且|以及|和|与|及|或))"
+            rf"^(?:[、，,](?:并且|并|以及|和|与|及|或)?|"
+            rf"(?:并且|并|以及|和|与|及|或))"
+            rf"(?:明确|详细|分别|主要|简要|进一步|清楚地|明确地|详细地)?"
             rf"(?P<verb>{_NAMED_CONTAINER_CHINESE_PREDICATE})",
             tail,
         )
         if coordinated is None:
             break
         tail = tail[coordinated.end() :]
-    return bool(tail and not re.match(r"^[与和及或的]", tail))
+    return bool(tail and not re.match(r"^[、，,与和及或并的]", tail))
 
 
 def _looks_like_named_container_reference_sentence(

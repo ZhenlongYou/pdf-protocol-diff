@@ -10796,6 +10796,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 A 描述和定义校准方法",
             "附录 A 描述、定义并记录校准方法",
             "附录 B 说明及规定接收机限值。",
+            "附录 B 说明及明确规定接收机限值。",
             "附录 C 介绍与展示校准证据。",
         ):
             with self.subTest(line=line):
@@ -10845,6 +10846,65 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("0.025 UI", sections[1].body)
         self.assertIn("34.0 dB", sections[2].body)
 
+    def test_chinese_predicate_shaped_enumeration_title_keeps_technical_body(
+        self,
+    ) -> None:
+        """A noun enumeration after a verb-shaped word remains an Annex title."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("chinese-enumeration-annex-title.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 范围\n"
+                        "附录 A 说明、要求和示例\n"
+                        "校准容差为 0.025 UI。\n"
+                        "2 验证\n"
+                        "验证限值为 34.0 dB。"
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertIn("附录 A 说明、要求和示例", [section.location for section in sections])
+        self.assertTrue(
+            any("0.025 UI" in section.body for section in sections if "附录 A" in section.location)
+        )
+
+    def test_terminal_period_preserves_ambiguous_container_noun_title(self) -> None:
+        """Adding normal title punctuation cannot demote a noun title to prose."""
+
+        extraction = ExtractionResult(
+            pdf_path=Path("period-terminated-container-title.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "Appendix A States the Receiver Supports.\n"
+                        "The transition tolerance is 0.025 UI.\n"
+                        "1 Child requirements\n"
+                        "The child threshold is 34.0 dB."
+                    ),
+                )
+            ],
+        )
+
+        sections = section_document(extraction)
+
+        self.assertEqual(
+            [
+                "1 Scope",
+                "Appendix A States the Receiver Supports.",
+                "Appendix A States the Receiver Supports. / 1 Child requirements",
+            ],
+            [section.location for section in sections],
+        )
+        self.assertIn("0.025 UI", sections[1].body)
+
     def test_coordinated_container_predicates_do_not_capture_later_sections(
         self,
     ) -> None:
@@ -10856,6 +10916,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "Annex B contains and very clearly explains the receiver limits.",
             "附录 A 描述和定义校准方法",
             "附录 A 描述、定义并记录校准方法",
+            "附录 B 说明及明确规定接收机限值。",
         ):
             with self.subTest(reference=reference):
                 extraction = ExtractionResult(
@@ -11132,15 +11193,21 @@ class ProtocolDiffTests(unittest.TestCase):
             "Part II States and Lists of Tables",
             "APPENDIX A STATES AND TRANSITIONS",
             "Appendix A States the Receiver Supports",
+            "Appendix A States the Receiver Supports.",
+            "APPENDIX A STATES THE RECEIVER SUPPORTS.",
             "Annex B Lists the Receiver Supports",
+            "Annex B Lists the Receiver Supports.",
             "Appendix C Covers for Test Fixtures",
             "Appendix D Details for Calibration",
+            "Appendix B Describes, Defines, and Documents.",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
             "附录 C 校准数据的说明",
             "附录 D 说明与规定",
             "附录 E 描述与分析",
+            "附录 A 说明、要求和示例",
+            "附录 B 描述、定义、缩写",
         ):
             with self.subTest(line=line):
                 self.assertIsNotNone(detect_heading(line))
