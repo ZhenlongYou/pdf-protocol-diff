@@ -279,7 +279,7 @@ _ENGLISH_CARDINAL_LIST_SCALE_PATTERN = "(?:" + "|".join(
 ) + ")"
 _ENGLISH_CARDINAL_LIST_SCALED_DIGIT_PATTERN = (
     rf"{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}"
-    rf"(?:\s+{_ENGLISH_CARDINAL_LIST_SCALE_PATTERN})?"
+    rf"(?:\s+{_ENGLISH_CARDINAL_LIST_SCALE_PATTERN})*"
 )
 _ENGLISH_CARDINAL_LIST_PHRASE_PATTERN = (
     rf"(?:{_ENGLISH_CARDINAL_LIST_SCALED_DIGIT_PATTERN}|"
@@ -591,6 +591,28 @@ def canonicalize_number_word_token(token: str) -> str | None:
     return str(value) if value is not None else None
 
 
+def canonicalize_numeric_scale_chain(number: str, scales: list[str]) -> str | None:
+    """Return an exact product for one numeric value and a strict scale chain."""
+
+    normalized_scales = [_normalize_number_word_token(scale) for scale in scales]
+    scale_values = [_NUMBER_WORD_SCALES.get(scale) for scale in normalized_scales]
+    if not scale_values or any(value is None for value in scale_values):
+        return None
+    concrete_scales = [value for value in scale_values if value is not None]
+    if not all(
+        left < right for left, right in zip(concrete_scales, concrete_scales[1:])
+    ):
+        return None
+    try:
+        product = Decimal(number.replace(",", ""))
+    except InvalidOperation:
+        return None
+    for scale in concrete_scales:
+        product *= scale
+    fixed = format(product, "f")
+    return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
+
+
 def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, int] | None:
     """Parse a short English cardinal phrase from a token stream.
 
@@ -637,6 +659,30 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         )
         if scaled is not None:
             return scaled, scale_index - start_index + 1
+    first_scale = next(
+        (
+            index
+            for index in range(start_index, len(normalized))
+            if normalized[index] in _NUMBER_WORD_SCALES
+        ),
+        -1,
+    )
+    scale_end = first_scale
+    while (
+        scale_end >= 0
+        and scale_end < len(normalized)
+        and normalized[scale_end] in _NUMBER_WORD_SCALES
+    ):
+        scale_end += 1
+    if first_scale > start_index and scale_end - first_scale >= 2:
+        multiplier = parse_number_word_phrase(tokens[start_index:first_scale], 0)
+        if multiplier is not None and multiplier[1] == first_scale - start_index:
+            scaled = canonicalize_numeric_scale_chain(
+                multiplier[0],
+                normalized[first_scale:scale_end],
+            )
+            if scaled is not None:
+                return scaled, scale_end - start_index
     total = 0
     consumed = 0
     last_scale = 1_000_000_001
@@ -701,17 +747,23 @@ def canonicalize_number_word_tokens(
     while index < len(tokens):
         previous_word = normalized_tokens[index - 1] if index > 0 else ""
         if index + 1 < len(tokens):
-            scaled_digit = canonicalize_numeric_scale(
+            scale_end = index + 1
+            while (
+                scale_end < len(tokens)
+                and normalized_tokens[scale_end] in _NUMBER_WORD_SCALES
+            ):
+                scale_end += 1
+            scaled_digit = canonicalize_numeric_scale_chain(
                 tokens[index],
-                normalized_tokens[index + 1],
+                normalized_tokens[index + 1 : scale_end],
             )
             if (
                 scaled_digit is not None
                 and previous_word not in protected_previous_words
-                and _has_positive_english_count_context(normalized_tokens, index + 2)
+                and _has_positive_english_count_context(normalized_tokens, scale_end)
             ):
                 canonical.append(scaled_digit)
-                index += 2
+                index = scale_end
                 continue
         parsed = parse_number_word_phrase(tokens, index)
         if parsed:
@@ -736,16 +788,7 @@ def canonicalize_number_word_tokens(
 def canonicalize_numeric_scale(number: str, scale: str) -> str | None:
     """Return the exact product for a numeric token followed by a count scale."""
 
-    normalized_scale = _normalize_number_word_token(scale)
-    multiplier = _NUMBER_WORD_SCALES.get(normalized_scale)
-    if multiplier is None:
-        return None
-    try:
-        product = Decimal(number.replace(",", "")) * multiplier
-    except InvalidOperation:
-        return None
-    fixed = format(product, "f")
-    return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
+    return canonicalize_numeric_scale_chain(number, [scale])
 
 
 def mark_english_cardinal_list_commas(value: str) -> str:
@@ -762,7 +805,20 @@ def mark_english_cardinal_list_commas(value: str) -> str:
     def is_complete_cardinal(phrase: str) -> bool:
         words = phrase.replace("-", " ").split()
         if _ENGLISH_CARDINAL_LIST_DIGIT_RE.fullmatch(phrase):
-            return True
+            scale_start = next(
+                (
+                    index
+                    for index, word in enumerate(words)
+                    if _normalize_number_word_token(word) in _NUMBER_WORD_SCALES
+                ),
+                len(words),
+            )
+            if scale_start == len(words):
+                return True
+            return canonicalize_numeric_scale_chain(
+                words[0],
+                words[scale_start:],
+            ) is not None
         parsed = parse_number_word_phrase(words, 0)
         if parsed is None:
             return False
@@ -834,12 +890,22 @@ def _english_count_value_consumed(tokens: list[str], start_index: int) -> int | 
         tokens[start_index],
     ):
         return None
-    if (
-        start_index + 1 < len(tokens)
-        and _normalize_number_word_token(tokens[start_index + 1])
-        in _NUMBER_WORD_SCALES
+    scale_end = start_index + 1
+    while (
+        scale_end < len(tokens)
+        and _normalize_number_word_token(tokens[scale_end]) in _NUMBER_WORD_SCALES
     ):
-        return 2
+        scale_end += 1
+    if scale_end > start_index + 1:
+        return (
+            scale_end - start_index
+            if canonicalize_numeric_scale_chain(
+                tokens[start_index],
+                tokens[start_index + 1 : scale_end],
+            )
+            is not None
+            else None
+        )
     return 1
 
 

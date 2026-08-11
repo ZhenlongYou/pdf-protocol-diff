@@ -45,7 +45,7 @@ from .text_utils import (
     CHINESE_NUMBER_CHARS,
     TABLE_NUMBER_DASH_CLASS,
     canonicalize_chinese_number_token,
-    canonicalize_numeric_scale,
+    canonicalize_numeric_scale_chain,
     compact_inline,
     has_observable_identifier_boundary,
     identifier_boundary_signatures,
@@ -8487,17 +8487,24 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
     while index < len(raw_tokens):
         raw, start, end = raw_tokens[index]
         if index + 1 < len(raw_tokens):
-            scaled_digit = canonicalize_numeric_scale(
+            scale_end_index = index + 1
+            while (
+                scale_end_index < len(raw_tokens)
+                and raw_words[scale_end_index]
+                in {"hundred", "thousand", "million", "billion"}
+            ):
+                scale_end_index += 1
+            scaled_digit = canonicalize_numeric_scale_chain(
                 raw_words[index],
-                raw_words[index + 1],
+                raw_words[index + 1 : scale_end_index],
             )
-            scaled_end = raw_tokens[index + 1][2]
+            scaled_end = raw_tokens[scale_end_index - 1][2]
             if (
                 scaled_digit is not None
                 and _number_word_phrase_has_positive_count_context(
                     raw_tokens,
                     raw_words,
-                    index + 1,
+                    scale_end_index - 1,
                     1,
                     text,
                 )
@@ -8511,7 +8518,7 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
                         key=scaled_digit,
                     )
                 )
-                index += 2
+                index = scale_end_index
                 continue
         parsed = parse_number_word_phrase(raw_words, index)
         if parsed:
@@ -8648,15 +8655,22 @@ def _inline_count_value_consumed(raw_words: list[str], start_index: int) -> int 
         raw_words[start_index]
     ):
         return None
-    if (
-        start_index + 1 < len(raw_words)
-        and canonicalize_numeric_scale(
-            raw_words[start_index],
-            raw_words[start_index + 1],
-        )
-        is not None
+    scale_end = start_index + 1
+    while (
+        scale_end < len(raw_words)
+        and raw_words[scale_end] in {"hundred", "thousand", "million", "billion"}
     ):
-        return 2
+        scale_end += 1
+    if scale_end > start_index + 1:
+        return (
+            scale_end - start_index
+            if canonicalize_numeric_scale_chain(
+                raw_words[start_index],
+                raw_words[start_index + 1 : scale_end],
+            )
+            is not None
+            else None
+        )
     return 1
 
 

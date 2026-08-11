@@ -12801,8 +12801,12 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Count one million, two million, or three million packets.\n"
                         "Count one and a half million, two million, or three million packets.\n"
                         "Count one hundred and a half million packets.\n"
+                        "Count one thousand million packets.\n"
+                        "Count one million billion packets.\n"
+                        "Count one thousand million, two thousand million, or three thousand million packets.\n"
                         "Count half a million, one million, or two million packets.\n"
                         "Span one million to two million packets.\n"
+                        "Span one thousand million to two thousand million packets.\n"
                         "Exercise one million and two million tests.\n"
                         "Check one hundred and two hundred requirements."
                     ),
@@ -12828,8 +12832,12 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Count 1,000,000, 2,000,000, or 3,000,000 packets.\n"
                         "Count 1.5 million, 2 million, or 3 million packets.\n"
                         "Count 100.5 million packets.\n"
+                        "Count 1 thousand million packets.\n"
+                        "Count 1 million billion packets.\n"
+                        "Count 1 thousand million, 2 thousand million, or 3 thousand million packets.\n"
                         "Count 500,000, 1,000,000, or 2,000,000 packets.\n"
                         "Span 1,000,000 to 2,000,000 packets.\n"
+                        "Span 1 thousand million to 2 thousand million packets.\n"
                         "Exercise 1,000,000 and 2,000,000 tests.\n"
                         "Check 100 and 200 requirements."
                     ),
@@ -14243,6 +14251,16 @@ class ProtocolDiffTests(unittest.TestCase):
                 "500,000, 1,000,000, or 2,000,000 packets",
                 ("half a", "one", "two"),
                 ("500,000", "1,000,000", "2,000,000"),
+            ),
+            (
+                "one thousand million, two thousand million, or three thousand million packets",
+                "1 thousand million, 2 thousand million, or 3 thousand million packets",
+                (
+                    "one thousand million",
+                    "two thousand million",
+                    "three thousand million",
+                ),
+                ("1 thousand million", "2 thousand million", "3 thousand million"),
             ),
         )
         for old_count, new_count, old_tokens, new_tokens in cases:
