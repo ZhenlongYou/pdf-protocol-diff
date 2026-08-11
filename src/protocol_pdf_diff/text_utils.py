@@ -529,7 +529,7 @@ def canonicalize_number_word_token(token: str) -> str | None:
 def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, int] | None:
     """Parse a short English cardinal phrase from a token stream.
 
-    Returns ``(canonical_digit_string, consumed_token_count)``. The parser is
+    Returns ``(canonical_digit_string, consumed_token_count)``. The parser
     accepts composable cardinal scales through billions, including ``twenty
     one``, ``one hundred and five`` and ``two thousand five hundred``. It still
     ignores ordinals and domain-specific identifiers.
@@ -552,6 +552,8 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         if segment is None:
             break
         segment_value, segment_consumed = segment
+        if segment_value == 0 and consumed:
+            break
         scale_index = index + segment_consumed
         if scale_index < len(normalized) and normalized[scale_index] in {
             "thousand",
@@ -571,6 +573,9 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         break
     if not consumed:
         return None
+    fraction_start = start_index + consumed
+    if normalized[fraction_start : fraction_start + 3] == ["and", "a", "half"]:
+        return f"{total + 0.5:g}", consumed + 3
     return str(total), consumed
 
 
@@ -735,12 +740,12 @@ def _parse_under_thousand(tokens: list[str], start_index: int) -> tuple[int, int
         tail_index = start_index + consumed
         if tail_index < len(tokens) and tokens[tail_index] == "and":
             tail = _parse_under_hundred(tokens, tail_index + 1)
-            if tail is None:
+            if tail is None or tail[0] == 0:
                 return value, consumed
             tail_value, tail_consumed = tail
             return value + tail_value, consumed + 1 + tail_consumed
         tail = _parse_under_hundred(tokens, tail_index)
-        if tail is not None:
+        if tail is not None and tail[0] > 0:
             tail_value, tail_consumed = tail
             return value + tail_value, consumed + tail_consumed
         return value, consumed

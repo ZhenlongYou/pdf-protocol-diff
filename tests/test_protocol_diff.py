@@ -10980,6 +10980,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX AD REPORTS ON ONE AND AND TWO FAILURES.",
             "APPENDIX AE REPORTS ON TWENTY THIRTY FAILURES.",
             "APPENDIX AF REPORTS ON ONE AND FAILURES.",
+            "APPENDIX AG REPORTS ON ONE HUNDRED ZERO FAILURES.",
+            "APPENDIX AH REPORTS ON ONE HUNDRED AND ZERO FAILURES.",
+            "APPENDIX AI REPORTS ON ONE BILLION ZERO MILLION EVENTS.",
+            "APPENDIX AJ REPORTS ON ONE THOUSAND AND ZERO CASES.",
             "ANNEX B RECORDS SUPPORTED BY THE RECEIVER.",
             "APPENDIX C NOTES APPLICABLE TO TEST FIXTURES.",
             "PART II MAPS USED FOR VERIFICATION.",
@@ -11096,6 +11100,15 @@ class ProtocolDiffTests(unittest.TestCase):
             "ANNEX A REPORTS ON TWO PAIRS OF ERRORS.",
             "ANNEX B REPORTS ON SEVERAL MILLIONS OF PACKETS.",
             "ANNEX C REPORTS ON TENS OF FAILURES.",
+            "ANNEX D REPORTS ON MORE THAN A FEW FAILURES.",
+            "ANNEX E REPORTS ON AT LEAST SEVERAL WARNINGS.",
+            "ANNEX F REPORTS ON AT LEAST ANOTHER WARNING.",
+            "ANNEX G REPORTS ON ONE AND A HALF MILLION FAILURES.",
+            "ANNEX H REPORTS ON TWO AND A HALF DOZEN FAILURES.",
+            "ANNEX I REPORTS ON 25 PERCENT OF TESTS.",
+            "ANNEX J REPORTS ON TWENTY-FIVE PERCENT OF TESTS.",
+            "ANNEX K REPORTS ON APPROXIMATELY ONE HUNDRED FAILURES.",
+            "ANNEX L REPORTS ON OVER ONE HUNDRED FAILURES.",
             "附录 A 说明：接收机的限值为 20 mV。",
             "附录 B 描述—接收机的模式是 PAM4。",
             "附录 C 说明：模块的参数必须保持稳定。",
@@ -11437,6 +11450,10 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX AD REPORTS ON ONE AND AND TWO FAILURES.",
             "APPENDIX AE REPORTS ON TWENTY THIRTY FAILURES.",
             "APPENDIX AF REPORTS ON ONE AND FAILURES.",
+            "APPENDIX AG REPORTS ON ONE HUNDRED ZERO FAILURES.",
+            "APPENDIX AH REPORTS ON ONE HUNDRED AND ZERO FAILURES.",
+            "APPENDIX AI REPORTS ON ONE BILLION ZERO MILLION EVENTS.",
+            "APPENDIX AJ REPORTS ON ONE THOUSAND AND ZERO CASES.",
             "ANNEX B RECORDS SUPPORTED BY THE RECEIVER.",
             "APPENDIX C NOTES APPLICABLE TO TEST FIXTURES.",
             "PART II MAPS USED FOR VERIFICATION.",
@@ -12681,7 +12698,8 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Capture seven waveforms and save them.\n"
                         "Repeat the measurement twenty-one times.\n"
                         "Retry after twenty one idle intervals.\n"
-                        "Collect one hundred and five samples."
+                        "Collect one hundred and five samples.\n"
+                        "Capture one and a half million packets."
                     ),
                 )
             ],
@@ -12696,7 +12714,8 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Capture 7 waveforms and save them.\n"
                         "Repeat the measurement 21 times.\n"
                         "Retry after 21 idle intervals.\n"
-                        "Collect 105 samples."
+                        "Collect 105 samples.\n"
+                        "Capture 1.5 million packets."
                     ),
                 )
             ],

@@ -1172,8 +1172,35 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             ["at", "most"],
         )
     )
-    numeric_phrase = quantity[2:] if comparison else quantity
+    approximation = bool(
+        len(quantity) >= 2
+        and quantity[0]
+        in {"approximately", "roughly", "about", "around", "over", "under", "nearly"}
+    )
+    numeric_phrase = quantity[2:] if comparison else quantity[1:] if approximation else quantity
     if not comparison and len(numeric_phrase) == 1 and numeric_phrase[0] in simple_quantifiers:
+        return True
+    if comparison and (
+        (
+            len(numeric_phrase) == 1
+            and numeric_phrase[0]
+            in {
+                "a",
+                "an",
+                "some",
+                "several",
+                "many",
+                "few",
+                "multiple",
+                "various",
+                "numerous",
+                "additional",
+                "another",
+                "enough",
+            }
+        )
+        or numeric_phrase == ["a", "few"]
+    ):
         return True
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
         return True
@@ -1224,12 +1251,15 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             and parsed[1] == len(multiplier)
         )
 
+    if len(numeric_phrase) >= 3 and numeric_phrase[-2:] == ["percent", "of"]:
+        return multiplier_is_proven(numeric_phrase[:-2])
+
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] in singular_scales:
         return multiplier_is_proven(numeric_phrase[:-1])
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] == "of" and numeric_phrase[-2] in plural_partitives:
         multiplier = numeric_phrase[:-2]
         if not multiplier:
-            return not comparison
+            return not (comparison or approximation)
         return multiplier_is_proven(multiplier)
     return False
 
