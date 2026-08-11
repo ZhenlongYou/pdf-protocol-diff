@@ -1170,34 +1170,28 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         )
         prepositional_complement = " ".join(ambiguous_words[1:])
         word_quantified_clause = bool(
-            re.match(
-                r"(?i)^(?:a|an|the|all|any|both|each|either|every|neither|no|"
-                r"some|several|many|few|multiple|various|numerous|additional|"
-                r"another|enough|more(?:\s+than)?|less(?:\s+than)?|"
-                r"fewer(?:\s+than)?|at\s+(?:least|most)|"
-                r"one|two|three|four|five|six|seven|eight|nine|ten|"
-                r"dozens?|hundreds?|thousands?)(?=\s|$)",
+            re.fullmatch(
+                r"(?i)(?:"
+                r"(?:a|an|one|each|every|another)\s+[A-Z][A-Z-]{2,}|"
+                r"(?:all|any|both|either|neither|no|some|several|many|few|"
+                r"multiple|various|numerous|additional|enough|"
+                r"more|less|fewer|two|three|four|five|six|seven|eight|"
+                r"nine|ten|dozens?|hundreds?|thousands?)\s+"
+                r"[A-Z][A-Z-]{2,}S|"
+                r"(?:(?:more|less|fewer)\s+than|at\s+(?:least|most))\s+"
+                r"(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
+                r"[A-Z][A-Z-]{2,}S)",
                 prepositional_complement,
             )
         )
-        numeric_unit = re.match(
-            r"^\d+(?:,\d{3})*(?:\.\d+)?\s+(?P<unit>\S+)",
-            prepositional_complement,
-        )
-        spaced_engineering_value = bool(
-            numeric_unit is not None
-            and _looks_like_unit_only_heading(
-                numeric_unit.group("unit").rstrip(".,;:!?")
-            )
-        )
-        numeric_quantified_clause = not spaced_engineering_value and bool(
-            re.match(r"^\d+(?:\.\d+)?(?=\s+(?!%))", prepositional_complement)
-            or re.match(
-                r"^\d{1,3}(?:,\d{3})+(?=\s)",
+        numeric_quantified_clause = bool(
+            re.fullmatch(
+                r"\d+(?:,\d{3})*(?:\.\d+)?\s+[A-Z][A-Z-]{2,}S",
                 prepositional_complement,
+                re.IGNORECASE,
             )
-            or re.match(
-                r"^\d+(?:\.\d+)?%\s+OF\b",
+            or re.fullmatch(
+                r"\d+(?:\.\d+)?%\s+OF\s+[A-Z][A-Z-]{2,}S",
                 prepositional_complement,
                 re.IGNORECASE,
             )
