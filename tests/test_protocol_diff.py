@@ -11109,6 +11109,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "ANNEX J REPORTS ON TWENTY-FIVE PERCENT OF TESTS.",
             "ANNEX K REPORTS ON APPROXIMATELY ONE HUNDRED FAILURES.",
             "ANNEX L REPORTS ON OVER ONE HUNDRED FAILURES.",
+            "ANNEX M REPORTS ON OVER A FEW FAILURES.",
+            "ANNEX N REPORTS ON APPROXIMATELY A FEW WARNINGS.",
+            "ANNEX O REPORTS ABOUT A FEW ERRORS.",
             "附录 A 说明：接收机的限值为 20 mV。",
             "附录 B 描述—接收机的模式是 PAM4。",
             "附录 C 说明：模块的参数必须保持稳定。",
@@ -12783,6 +12786,39 @@ class ProtocolDiffTests(unittest.TestCase):
                 with self.subTest(surface=key):
                     self.assertIn("zero million", surface)
                     self.assertIn("one million", surface)
+
+    def test_large_half_count_change_remains_visible_in_reader_reports(self) -> None:
+        """Half-unit cardinal keys retain exact precision above six digits."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_large_half_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture one million and a half cycles.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_large_half_count.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 Scope\nCapture one million one and a half cycles.",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertTrue(result.changes)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, Path(temp_dir), DiffOptions())
+            for key in ("html", "markdown", "text", "csv"):
+                surface = paths[key].read_text(encoding="utf-8")
+                with self.subTest(surface=key):
+                    self.assertIn("one million and a half", surface)
+                    self.assertIn("one million one and a half", surface)
 
     def test_pcie_capture_real_wording_change_survives_number_word_noise(self) -> None:
         """Mixed PCIe sentence changes should highlight wording, not seven/7."""

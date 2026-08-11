@@ -575,7 +575,10 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         return None
     fraction_start = start_index + consumed
     if normalized[fraction_start : fraction_start + 3] == ["and", "a", "half"]:
-        return f"{total + 0.5:g}", consumed + 3
+        # ``total`` is an integer, so spell the half-unit exactly.  Floating
+        # formatting (notably ``:g``) rounds large counts and can collapse
+        # 1,000,000.5 and 1,000,001.5 into the same comparison key.
+        return f"{total}.5", consumed + 3
     return str(total), consumed
 
 

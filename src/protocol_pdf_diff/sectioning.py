@@ -1178,9 +1178,15 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         in {"approximately", "roughly", "about", "around", "over", "under", "nearly"}
     )
     numeric_phrase = quantity[2:] if comparison else quantity[1:] if approximation else quantity
-    if not comparison and len(numeric_phrase) == 1 and numeric_phrase[0] in simple_quantifiers:
+    if numeric_phrase == ["a", "few"]:
         return True
-    if comparison and (
+    if (
+        not (comparison or approximation)
+        and len(numeric_phrase) == 1
+        and numeric_phrase[0] in simple_quantifiers
+    ):
+        return True
+    if (comparison or approximation) and (
         (
             len(numeric_phrase) == 1
             and numeric_phrase[0]
@@ -1199,7 +1205,6 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 "enough",
             }
         )
-        or numeric_phrase == ["a", "few"]
     ):
         return True
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
