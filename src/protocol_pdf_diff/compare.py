@@ -2906,6 +2906,7 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
 
 
 _SECTION_MATCH_SAMPLE_CHARS = 1200  # 长章节匹配采样代表性文本，避免反复对整章做昂贵相似度计算。
+_MAX_ALL_PAIR_UNIT_MATCHES = 1024  # 32×32 以内可穷举；更长章节必须走有界候选索引。
 
 
 def _section_similarity(left: str, right: str) -> float:
@@ -3086,16 +3087,50 @@ def _review_unit_skeleton_match_count(
     residual_right = [
         unit for index, unit in enumerate(right_units) if index not in exact_right_indexes
     ]
-    exact_count = len(exact_left_indexes)
+    proven_count = len(exact_left_indexes)
     if not residual_left or not residual_right:
-        return exact_count
+        return proven_count
+
+    right_indexes_by_field: dict[str, list[int]] = {}
+    for index, unit in enumerate(residual_right):
+        field = _assignment_field_key(unit)
+        if field:
+            right_indexes_by_field.setdefault(field, []).append(index)
+    consumed_per_field: Counter[str] = Counter()
+    field_left_indexes: set[int] = set()
+    field_right_indexes: set[int] = set()
+    for left_index, unit in enumerate(residual_left):
+        field = _assignment_field_key(unit)
+        if not field:
+            continue
+        candidates = right_indexes_by_field.get(field, [])
+        occurrence = consumed_per_field[field]
+        if occurrence >= len(candidates):
+            continue
+        field_left_indexes.add(left_index)
+        field_right_indexes.add(candidates[occurrence])
+        consumed_per_field[field] += 1
+    if field_left_indexes:
+        residual_left = [
+            unit
+            for index, unit in enumerate(residual_left)
+            if index not in field_left_indexes
+        ]
+        residual_right = [
+            unit
+            for index, unit in enumerate(residual_right)
+            if index not in field_right_indexes
+        ]
+        proven_count += len(field_left_indexes)
+        if not residual_left or not residual_right:
+            return proven_count
 
     shorter, longer = (
         (residual_left, residual_right)
         if len(residual_left) <= len(residual_right)
         else (residual_right, residual_left)
     )
-    bounded_matching = len(shorter) * len(longer) > 4096
+    bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_meaningful_review_words(unit) for unit in longer]
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
@@ -3164,7 +3199,7 @@ def _review_unit_skeleton_match_count(
     for short_index in range(len(shorter)):
         if assign(short_index, set()):
             matched_count += 1
-    return exact_count + matched_count
+    return proven_count + matched_count
 
 
 def _assignment_field_key(value: str) -> str:
@@ -4518,8 +4553,10 @@ def _unequal_replace_delta_candidates(
     side-by-side replacement.
     """
 
-    old_source_indexes = old_source_indexes or list(range(len(old_units)))
-    new_source_indexes = new_source_indexes or list(range(len(new_units)))
+    if old_source_indexes is None:
+        old_source_indexes = list(range(len(old_units)))
+    if new_source_indexes is None:
+        new_source_indexes = list(range(len(new_units)))
     if len(old_source_indexes) != len(old_units) or len(new_source_indexes) != len(new_units):
         raise ValueError("source index count must match residual unit count")
 
@@ -4527,25 +4564,103 @@ def _unequal_replace_delta_candidates(
     new_keys = [_review_unit_key(unit) for unit in new_units]
     matched_old: set[int] = set()
     matched_new: set[int] = set()
+    paired_indexes: list[tuple[int, int]] = []
 
-    for old_index, old_key in enumerate(old_keys):
-        if not old_key:
-            continue
-        for new_index, new_key in enumerate(new_keys):
-            if new_index in matched_new:
+    def match_identity_occurrences(
+        old_identities: list[str],
+        new_identities: list[str],
+        *,
+        report_replacements: bool,
+    ) -> None:
+        """Lock one-to-one identities before any bounded fuzzy candidate search."""
+
+        new_indexes_by_identity: dict[str, list[int]] = {}
+        for new_index, identity in enumerate(new_identities):
+            if identity and new_index not in matched_new:
+                new_indexes_by_identity.setdefault(identity, []).append(new_index)
+        consumed: Counter[str] = Counter()
+        for old_index, identity in enumerate(old_identities):
+            if not identity or old_index in matched_old:
                 continue
-            if old_key == new_key:
-                matched_old.add(old_index)
-                matched_new.add(new_index)
-                break
+            candidates = new_indexes_by_identity.get(identity, [])
+            occurrence = consumed[identity]
+            if occurrence >= len(candidates):
+                continue
+            new_index = candidates[occurrence]
+            consumed[identity] += 1
+            matched_old.add(old_index)
+            matched_new.add(new_index)
+            if report_replacements and old_keys[old_index] != new_keys[new_index]:
+                paired_indexes.append((old_index, new_index))
+
+    match_identity_occurrences(old_keys, new_keys, report_replacements=False)
+    match_identity_occurrences(
+        [_assignment_field_key(unit) for unit in old_units],
+        [_assignment_field_key(unit) for unit in new_units],
+        report_replacements=True,
+    )
+    match_identity_occurrences(
+        [
+            _table_row_identity(unit) if _is_table_review_unit(unit) else ""
+            for unit in old_units
+        ],
+        [
+            _table_row_identity(unit) if _is_table_review_unit(unit) else ""
+            for unit in new_units
+        ],
+        report_replacements=True,
+    )
+
+    unmatched_old = [index for index in range(len(old_units)) if index not in matched_old]
+    unmatched_new = [index for index in range(len(new_units)) if index not in matched_new]
+    bounded_matching = (
+        len(unmatched_old) * len(unmatched_new) > _MAX_ALL_PAIR_UNIT_MATCHES
+    )
+    new_words_by_index = {
+        index: _meaningful_review_words(new_units[index]) for index in unmatched_new
+    }
+    new_indexes_by_word: dict[str, list[int]] = {}
+    if bounded_matching:
+        for new_index, words in new_words_by_index.items():
+            for word in words:
+                new_indexes_by_word.setdefault(word, []).append(new_index)
 
     pair_scores: list[tuple[float, float, int, int]] = []
-    for old_index, old_unit in enumerate(old_units):
-        if old_index in matched_old:
-            continue
-        for new_index, new_unit in enumerate(new_units):
-            if new_index in matched_new:
-                continue
+    for old_position, old_index in enumerate(unmatched_old):
+        old_unit = old_units[old_index]
+        if not bounded_matching:
+            candidate_indexes = unmatched_new
+        else:
+            candidate_pool: set[int] = set()
+            old_words = _meaningful_review_words(old_unit)
+            for word in sorted(
+                old_words,
+                key=lambda item: len(new_indexes_by_word.get(item, ())),
+            ):
+                indexes = new_indexes_by_word.get(word, ())
+                if len(indexes) <= 32:
+                    candidate_pool.update(indexes)
+                if len(candidate_pool) >= 32:
+                    break
+            projected_position = round(
+                old_position * (len(unmatched_new) - 1) / max(len(unmatched_old) - 1, 1)
+            )
+            candidate_pool.update(
+                unmatched_new[
+                    max(0, projected_position - 3) : min(
+                        len(unmatched_new), projected_position + 4
+                    )
+                ]
+            )
+            candidate_indexes = sorted(
+                candidate_pool,
+                key=lambda index: abs(
+                    _relative_position(old_index, len(old_units))
+                    - _relative_position(index, len(new_units))
+                ),
+            )[:32]
+        for new_index in candidate_indexes:
+            new_unit = new_units[new_index]
             score = _unit_pair_score(old_unit, new_unit)
             if score >= _MIN_UNEQUAL_REPLACE_PAIR_SCORE:
                 position_gap = abs(
@@ -4554,7 +4669,6 @@ def _unequal_replace_delta_candidates(
                 )
                 pair_scores.append((score, -position_gap, old_index, new_index))
 
-    paired_indexes: list[tuple[int, int]] = []
     for _score, _position_gap, old_index, new_index in sorted(pair_scores, reverse=True):
         if old_index in matched_old or new_index in matched_new:
             continue

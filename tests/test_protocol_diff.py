@@ -8324,6 +8324,89 @@ class ProtocolDiffTests(unittest.TestCase):
             500,
         )
 
+    def test_large_remote_assignment_reorder_keeps_exact_field_identity(self) -> None:
+        """Stable explicit fields must survive bounded matching at any distance."""
+
+        first_words = ("Alpha", "Bravo", "Charlie", "Delta", "Echo")
+        second_words = ("Red", "Blue", "Green", "White", "Black")
+        third_words = ("Circle", "Square", "Triangle", "Diamond", "Hexagon")
+        fields = [
+            f"{first} {second} {third}"
+            for first in first_words
+            for second in second_words
+            for third in third_words
+        ]
+        old_units = [f"{field} = LEGACY." for field in fields]
+        shifted_fields = fields[62:] + fields[:62]
+        new_units = [f"{field} = RECOVERY." for field in shifted_fields]
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-large-fields.pdf"),
+                pages=[
+                    PageText(page_number=1, text="1 Settings\n" + "\n".join(old_units))
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-large-fields.pdf"),
+                pages=[
+                    PageText(page_number=1, text="1 Settings\n" + "\n".join(new_units))
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=2),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(125, len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                pair.old.partition("=")[0].strip()
+                == pair.new.partition("=")[0].strip()
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
+    def test_large_residual_pairing_uses_bounded_candidates(self) -> None:
+        """A long rewritten section must not score every old/new unit pair."""
+
+        old_units = [f"Channel {index} mode uses legacy path." for index in range(100)]
+        new_units = [f"Channel {index} mode uses revised route." for index in range(100)]
+        with mock.patch.object(
+            compare_module,
+            "_unit_pair_score",
+            wraps=compare_module._unit_pair_score,
+        ) as pair_score:
+            result = compare_extractions(
+                ExtractionResult(
+                    pdf_path=Path("old-large-residual.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text="1 Settings\n" + "\n".join(old_units),
+                        )
+                    ],
+                ),
+                ExtractionResult(
+                    pdf_path=Path("new-large-residual.pdf"),
+                    pages=[
+                        PageText(
+                            page_number=1,
+                            text="1 Settings\n" + "\n".join(new_units),
+                        )
+                    ],
+                ),
+                DiffOptions(max_snippets_per_section=2),
+            )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertEqual(100, len(result.changes[0].audit_replaced_snippets))
+        self.assertLess(pair_score.call_count, 1000)
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
