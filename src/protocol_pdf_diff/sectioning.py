@@ -1147,16 +1147,41 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         # (``STATES THE RECEIVER SUPPORTS``).  Both remain structural.
         ambiguous_tail = re.sub(r"[.!?]\s*$", "", cleaned[match.end() :]).strip()
         ambiguous_words = ambiguous_tail.split()
+        if ambiguous_words and ambiguous_words[0].casefold() in {
+            "about",
+            "across",
+            "among",
+            "between",
+            "by",
+            "for",
+            "from",
+            "in",
+            "of",
+            "on",
+            "over",
+            "to",
+            "under",
+            "with",
+            "without",
+        }:
+            # ``NOTES ON CALIBRATION`` and ``REPORTS ABOUT TESTING`` are
+            # ordinary noun titles.  ALL-CAPS removes the part-of-speech
+            # evidence, so a prepositional complement must fail visible.
+            return False
         if ambiguous_words and re.fullmatch(
             r"(?i)\w+(?:ed|en|ing|able|ible)",
             ambiguous_words[0],
         ):
             return False
-        if len(ambiguous_words) >= 3 and re.fullmatch(
-            r"(?i)(?:supports?|implements?|uses?|defines?|requires?|provides?|"
-            r"contains?|describes?|covers?|lists?|details?|specifies?)",
-            ambiguous_words[-1],
+        if (
+            len(ambiguous_words) >= 3
+            and ambiguous_words[0].casefold()
+            in {"a", "an", "the", "this", "that", "these", "those"}
+            and re.fullmatch(r"(?i)[a-z]{3,}(?:s|es)", ambiguous_words[-1])
         ):
+            # A final finite-looking word after a determiner can be a reduced
+            # relative clause in a title (``REPORTS THE RECEIVER GENERATES``).
+            # Its exact verb vocabulary is open-ended; ambiguity stays visible.
             return False
     tail = cleaned[match.end() :]
     if intransitive is not None:
@@ -1255,7 +1280,10 @@ def _looks_like_named_container_reference_sentence(
         suffix = internal_delimiter.group("suffix")
         chinese_suffix_is_sentence = bool(
             _chinese_named_container_predicate_sentence(suffix)
-            or re.search(r"(?:为|是|具有|必须|应当|可以|不得|需要|适用|执行|生效)", suffix)
+            or re.search(
+                r"(?:为|是|具有|必须|应当|可以|不得|需要|适用于|用于)",
+                suffix,
+            )
         )
         if (prefix.isascii() and not prefix.islower()) or (
             not prefix.isascii() and not chinese_suffix_is_sentence
