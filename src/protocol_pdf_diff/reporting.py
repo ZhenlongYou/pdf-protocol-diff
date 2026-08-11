@@ -45,6 +45,7 @@ from .text_utils import (
     CHINESE_NUMBER_CHARS,
     TABLE_NUMBER_DASH_CLASS,
     canonicalize_chinese_number_token,
+    canonicalize_numeric_scale,
     compact_inline,
     has_observable_identifier_boundary,
     identifier_boundary_signatures,
@@ -8485,6 +8486,33 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
     index = 0
     while index < len(raw_tokens):
         raw, start, end = raw_tokens[index]
+        if index + 1 < len(raw_tokens):
+            scaled_digit = canonicalize_numeric_scale(
+                raw_words[index],
+                raw_words[index + 1],
+            )
+            scaled_end = raw_tokens[index + 1][2]
+            if (
+                scaled_digit is not None
+                and _number_word_phrase_has_positive_count_context(
+                    raw_tokens,
+                    raw_words,
+                    index + 1,
+                    1,
+                    text,
+                )
+                and not _span_is_inside_paired_literal(text, start, scaled_end)
+            ):
+                tokens.append(
+                    _InlineToken(
+                        text=text[start:scaled_end],
+                        start=start,
+                        end=scaled_end,
+                        key=scaled_digit,
+                    )
+                )
+                index += 2
+                continue
         parsed = parse_number_word_phrase(raw_words, index)
         if parsed:
             number_key, consumed = parsed
@@ -8544,9 +8572,11 @@ def _number_word_phrase_has_positive_count_context(
             and raw_words[following_index] in {"and", "or"}
         ):
             following_index += 1
-        following = parse_number_word_phrase(raw_words, following_index)
-        if following is not None:
-            _value, following_consumed = following
+        following_consumed = _inline_count_value_consumed(
+            raw_words,
+            following_index,
+        )
+        if following_consumed is not None:
             return _number_word_phrase_has_positive_count_context(
                 raw_tokens,
                 raw_words,
@@ -8555,9 +8585,11 @@ def _number_word_phrase_has_positive_count_context(
                 text,
             )
     if first in {"and", "or", "to", "through"}:
-        following = parse_number_word_phrase(raw_words, next_index + 1)
-        if following is not None:
-            _value, following_consumed = following
+        following_consumed = _inline_count_value_consumed(
+            raw_words,
+            next_index + 1,
+        )
+        if following_consumed is not None:
             return _number_word_phrase_has_positive_count_context(
                 raw_tokens,
                 raw_words,
@@ -8565,12 +8597,19 @@ def _number_word_phrase_has_positive_count_context(
                 following_consumed,
                 text,
             )
-    following = parse_number_word_phrase(raw_words, next_index)
-    if following is not None:
+    if first in {"hundred", "thousand", "million", "billion"}:
+        return _number_word_phrase_has_positive_count_context(
+            raw_tokens,
+            raw_words,
+            next_index,
+            1,
+            text,
+        )
+    following_consumed = _inline_count_value_consumed(raw_words, next_index)
+    if following_consumed is not None:
         previous_end = raw_tokens[next_index - 1][2]
         following_start = raw_tokens[next_index][1]
         if "," in text[previous_end:following_start]:
-            _value, following_consumed = following
             return _number_word_phrase_has_positive_count_context(
                 raw_tokens,
                 raw_words,
@@ -8604,6 +8643,28 @@ def _number_word_phrase_has_positive_count_context(
         and _looks_like_english_noun_modifier(raw_words[modifier_index])
         and _looks_like_plural_count_noun(raw_words[noun_index])
     )
+
+
+def _inline_count_value_consumed(raw_words: list[str], start_index: int) -> int | None:
+    """Return one complete number-word or numeric-scale endpoint length."""
+
+    parsed = parse_number_word_phrase(raw_words, start_index)
+    if parsed is not None:
+        return parsed[1]
+    if start_index >= len(raw_words) or not _INLINE_NUMBER_RE.fullmatch(
+        raw_words[start_index]
+    ):
+        return None
+    if (
+        start_index + 1 < len(raw_words)
+        and canonicalize_numeric_scale(
+            raw_words[start_index],
+            raw_words[start_index + 1],
+        )
+        is not None
+    ):
+        return 2
+    return 1
 
 
 def _looks_like_english_noun_modifier(token: str) -> bool:

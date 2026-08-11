@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation
 
 TABLE_NUMBER_DASH_CLASS = r"[\-\u2010\u2011\u2012\u2013\u2014\u2212]"
 
@@ -273,13 +274,20 @@ _ENGLISH_CARDINAL_LIST_WORD_PATTERN = "(?:" + "|".join(
 _ENGLISH_CARDINAL_LIST_DIGIT_PATTERN = (
     r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
 )
+_ENGLISH_CARDINAL_LIST_SCALE_PATTERN = "(?:" + "|".join(
+    sorted(_NUMBER_WORD_SCALES, key=len, reverse=True)
+) + ")"
+_ENGLISH_CARDINAL_LIST_SCALED_DIGIT_PATTERN = (
+    rf"{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}"
+    rf"(?:\s+{_ENGLISH_CARDINAL_LIST_SCALE_PATTERN})?"
+)
 _ENGLISH_CARDINAL_LIST_PHRASE_PATTERN = (
-    rf"(?:{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}|"
+    rf"(?:{_ENGLISH_CARDINAL_LIST_SCALED_DIGIT_PATTERN}|"
     rf"{_ENGLISH_CARDINAL_LIST_WORD_PATTERN}"
     rf"(?:[\s-]+{_ENGLISH_CARDINAL_LIST_WORD_PATTERN})*)"
 )
 _ENGLISH_CARDINAL_LIST_DIGIT_RE = re.compile(
-    rf"^{_ENGLISH_CARDINAL_LIST_DIGIT_PATTERN}$"
+    rf"^{_ENGLISH_CARDINAL_LIST_SCALED_DIGIT_PATTERN}$"
 )
 _ENGLISH_CARDINAL_LIST_COMMA_RE = re.compile(
     r"(?i)(?<![\w-])"
@@ -595,6 +603,32 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
     if start_index >= len(tokens):
         return None
     normalized = [_normalize_number_word_token(token) for token in tokens]
+    if (
+        normalized[start_index : start_index + 2] == ["half", "a"]
+        and start_index + 2 < len(normalized)
+        and normalized[start_index + 2] in _NUMBER_WORD_SCALES
+    ):
+        scaled = canonicalize_numeric_scale(
+            "0.5",
+            normalized[start_index + 2],
+        )
+        assert scaled is not None
+        return scaled, 3
+    for half_index in range(start_index + 1, len(normalized) - 3):
+        if normalized[half_index : half_index + 3] != ["and", "a", "half"]:
+            continue
+        scale_index = half_index + 3
+        if normalized[scale_index] not in _NUMBER_WORD_SCALES:
+            continue
+        prefix = parse_number_word_phrase(tokens[start_index:half_index], 0)
+        if prefix is None or prefix[1] != half_index - start_index:
+            continue
+        scaled = canonicalize_numeric_scale(
+            f"{prefix[0]}.5",
+            normalized[scale_index],
+        )
+        if scaled is not None:
+            return scaled, scale_index - start_index + 1
     total = 0
     consumed = 0
     last_scale = 1_000_000_001
@@ -657,10 +691,23 @@ def canonicalize_number_word_tokens(
     index = 0
     normalized_tokens = [_normalize_number_word_token(token) for token in tokens]
     while index < len(tokens):
+        previous_word = normalized_tokens[index - 1] if index > 0 else ""
+        if index + 1 < len(tokens):
+            scaled_digit = canonicalize_numeric_scale(
+                tokens[index],
+                normalized_tokens[index + 1],
+            )
+            if (
+                scaled_digit is not None
+                and previous_word not in protected_previous_words
+                and _has_positive_english_count_context(normalized_tokens, index + 2)
+            ):
+                canonical.append(scaled_digit)
+                index += 2
+                continue
         parsed = parse_number_word_phrase(tokens, index)
         if parsed:
             value, consumed = parsed
-            previous_word = normalized_tokens[index - 1] if index > 0 else ""
             next_index = index + consumed
             next_word = normalized_tokens[next_index] if next_index < len(tokens) else ""
             if (
@@ -678,6 +725,21 @@ def canonicalize_number_word_tokens(
     return canonical
 
 
+def canonicalize_numeric_scale(number: str, scale: str) -> str | None:
+    """Return the exact product for a numeric token followed by a count scale."""
+
+    normalized_scale = _normalize_number_word_token(scale)
+    multiplier = _NUMBER_WORD_SCALES.get(normalized_scale)
+    if multiplier is None:
+        return None
+    try:
+        product = Decimal(number.replace(",", "")) * multiplier
+    except InvalidOperation:
+        return None
+    fixed = format(product, "f")
+    return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
+
+
 def mark_english_cardinal_list_commas(value: str) -> str:
     """Preserve commas that provably join cardinal alternatives.
 
@@ -691,9 +753,16 @@ def mark_english_cardinal_list_commas(value: str) -> str:
 
     def is_complete_cardinal(phrase: str) -> bool:
         words = phrase.replace("-", " ").split()
-        return bool(_ENGLISH_CARDINAL_LIST_DIGIT_RE.fullmatch(phrase)) or (
-            (parsed := parse_number_word_phrase(words, 0)) is not None
-            and parsed[1] == len(words)
+        if _ENGLISH_CARDINAL_LIST_DIGIT_RE.fullmatch(phrase):
+            return True
+        parsed = parse_number_word_phrase(words, 0)
+        if parsed is None:
+            return False
+        value, consumed = parsed
+        return consumed == len(words) or bool(
+            consumed == len(words) - 1
+            and words[-1] in _NUMBER_WORD_SCALES
+            and value.endswith(".5")
         )
 
     def replace(match: re.Match[str]) -> str:
@@ -732,18 +801,42 @@ def _has_positive_english_count_context(tokens: list[str], next_index: int) -> b
         "through",
         _ENGLISH_CARDINAL_LIST_COMMA_SENTINEL,
     }:
-        following = parse_number_word_phrase(tokens, next_index + 1)
-        if following is not None:
-            _value, consumed = following
+        consumed = _english_count_value_consumed(tokens, next_index + 1)
+        if consumed is not None:
             return _has_positive_english_count_context(
                 tokens,
                 next_index + 1 + consumed,
             )
+    if (
+        next_index < len(tokens)
+        and tokens[next_index] in _NUMBER_WORD_SCALES
+    ):
+        return _has_positive_english_count_context(tokens, next_index + 1)
     return bool(
         next_index + 1 < len(tokens)
         and re.fullmatch(r"[a-z][a-z-]*", tokens[next_index])
         and tokens[next_index + 1] in _ENGLISH_COUNT_CONTEXT_NOUNS
     )  # `twenty one idle intervals` 允许一个可见修饰词；公式/函数/枚举不会误折叠。
+
+
+def _english_count_value_consumed(tokens: list[str], start_index: int) -> int | None:
+    """Return a fully observed count endpoint length after a list connector."""
+
+    parsed = parse_number_word_phrase(tokens, start_index)
+    if parsed is not None:
+        return parsed[1]
+    if start_index >= len(tokens) or not re.fullmatch(
+        r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?",
+        tokens[start_index],
+    ):
+        return None
+    if (
+        start_index + 1 < len(tokens)
+        and _normalize_number_word_token(tokens[start_index + 1])
+        in _NUMBER_WORD_SCALES
+    ):
+        return 2
+    return 1
 
 
 def is_english_count_context_noun(token: str) -> bool:
