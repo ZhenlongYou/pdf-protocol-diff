@@ -1097,7 +1097,10 @@ def _looks_like_appendix_subreference_fragment(number: str, title: str) -> bool:
 _NAMED_CONTAINER_ENGLISH_PREDICATE = (
     r"(?:describes?|defines?|contains?|provides?|specifies?|establishes?|"
     r"states?|lists?|summarizes?|explains?|covers?|includes?|requires?|"
-    r"presents?|details?|documents?|sets?\s+out|[a-z]{3,}(?:s|es))"
+    r"presents?|details?|documents?|sets?\s+out|outlines?|discusses?|"
+    r"identifies?|enumerates?|records?|reports?|indicates?|shows?|introduces?|"
+    r"addresses?|prescribes?|clarifies?|compares?|examines?|reviews?|maps?|"
+    r"captures?|highlights?|notes?)"
 )
 _NAMED_CONTAINER_CHINESE_PREDICATE = (
     r"(?:描述|定义|规定|说明|列出|给出|提供|包含|涵盖|总结|解释|展示|介绍|"
@@ -1160,6 +1163,7 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
             return True
         return False
 
+    predicate_verbs = [match.group("verb").casefold()]
     while True:
         coordinated = re.match(
             rf"(?i)^\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)"
@@ -1169,10 +1173,14 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
         )
         if coordinated is None:
             break
+        predicate_verbs.append(coordinated.group("verb").casefold())
         tail = tail[coordinated.end() :]
     compact_tail = tail.strip()
     if compact_tail in {".", "!", "?"}:
-        return terminal
+        return terminal and all(
+            re.fullmatch(r"(?:explains?|summarizes?|clarifies?)", verb)
+            for verb in predicate_verbs
+        )
     return bool(
         compact_tail
         and not re.match(r"(?i)^(?:and|or|of|for)\b", compact_tail)

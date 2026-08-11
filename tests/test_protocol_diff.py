@@ -10943,6 +10943,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 B 描述 、 定义 、 缩写",
             "附录 A 说明及适用要求范围。",
             "附录 C 说明和接收机定义要求。",
+            "APPENDIX A SYSTEMS AND INTERFACES.",
+            "ANNEX B REQUIREMENTS AND EXAMPLES.",
+            "Appendix A systems and interfaces.",
+            "Annex B processes and procedures.",
+            "Appendix C analysis methods.",
         ):
             with self.subTest(title=title):
                 extraction = ExtractionResult(
@@ -11293,6 +11298,14 @@ class ProtocolDiffTests(unittest.TestCase):
             "Appendix C Covers for Test Fixtures",
             "Appendix D Details for Calibration",
             "Appendix B Describes, Defines, and Documents.",
+            "APPENDIX A SYSTEMS AND INTERFACES.",
+            "ANNEX B REQUIREMENTS AND EXAMPLES.",
+            "PART II METHODS AND RESULTS.",
+            "Appendix A systems and interfaces.",
+            "Annex B requirements and examples.",
+            "Annex B processes and procedures.",
+            "Appendix C analysis methods.",
+            "APPENDIX A INTERFACES AND PROTOCOLS.",
             "附录 A—校准数据",
             "附录 A 说明",
             "附录 B 规定",
