@@ -539,38 +539,39 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         return None
     normalized = [_normalize_number_word_token(token) for token in tokens]
     total = 0
-    current = 0
     consumed = 0
-    saw_number = False
+    last_scale = 1_000_000_001
     index = start_index
     while index < len(normalized):
-        token = normalized[index]
-        if token == "and" and saw_number:
+        if normalized[index] == "and" and consumed:
+            if _parse_under_thousand(normalized, index + 1) is None:
+                break
             index += 1
             consumed += 1
-            continue
-        if token in _NUMBER_WORD_UNITS:
-            current += _NUMBER_WORD_UNITS[token]
-        elif token in _NUMBER_WORD_TENS:
-            current += _NUMBER_WORD_TENS[token]
-        else:
-            compact_value = _compact_number_word_value(token)
-            if compact_value is not None:
-                current += compact_value
-            elif token == "hundred":
-                current = max(current, 1) * 100
-            elif token in {"thousand", "million", "billion"}:
-                scale = _NUMBER_WORD_SCALES[token]
-                total += max(current, 1) * scale
-                current = 0
-            else:
+        segment = _parse_under_thousand(normalized, index)
+        if segment is None:
+            break
+        segment_value, segment_consumed = segment
+        scale_index = index + segment_consumed
+        if scale_index < len(normalized) and normalized[scale_index] in {
+            "thousand",
+            "million",
+            "billion",
+        }:
+            scale = _NUMBER_WORD_SCALES[normalized[scale_index]]
+            if scale >= last_scale:
                 break
-        saw_number = True
-        index += 1
-        consumed += 1
-    if not saw_number:
+            total += segment_value * scale
+            last_scale = scale
+            index = scale_index + 1
+            consumed = index - start_index
+            continue
+        total += segment_value
+        consumed = scale_index - start_index
+        break
+    if not consumed:
         return None
-    return str(total + current), consumed
+    return str(total), consumed
 
 
 def canonicalize_number_word_tokens(
@@ -713,6 +714,41 @@ def _parse_under_hundred(tokens: list[str], start_index: int) -> tuple[int, int]
             return _NUMBER_WORD_TENS[token] + next_value, 2
     compact_value = _compact_number_word_value(token)
     if compact_value is not None and compact_value < 100:
+        return compact_value, 1
+    return None
+
+
+def _parse_under_thousand(tokens: list[str], start_index: int) -> tuple[int, int] | None:
+    """Parse one strict 0..999 segment without consuming a scale word."""
+
+    if start_index >= len(tokens):
+        return None
+    first_value = _NUMBER_WORD_UNITS.get(tokens[start_index])
+    if (
+        first_value is not None
+        and 0 < first_value < 10
+        and start_index + 1 < len(tokens)
+        and tokens[start_index + 1] == "hundred"
+    ):
+        value = first_value * 100
+        consumed = 2
+        tail_index = start_index + consumed
+        if tail_index < len(tokens) and tokens[tail_index] == "and":
+            tail = _parse_under_hundred(tokens, tail_index + 1)
+            if tail is None:
+                return value, consumed
+            tail_value, tail_consumed = tail
+            return value + tail_value, consumed + 1 + tail_consumed
+        tail = _parse_under_hundred(tokens, tail_index)
+        if tail is not None:
+            tail_value, tail_consumed = tail
+            return value + tail_value, consumed + tail_consumed
+        return value, consumed
+    under_hundred = _parse_under_hundred(tokens, start_index)
+    if under_hundred is not None:
+        return under_hundred
+    compact_value = _compact_number_word_value(tokens[start_index])
+    if compact_value is not None and compact_value < 1_000:
         return compact_value, 1
     return None
 

@@ -1215,7 +1215,14 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         ):
             return True
         parsed = parse_number_word_phrase(multiplier, 0)
-        return parsed is not None and parsed[1] == len(multiplier)
+        return (
+            not any(
+                token in {"hundred", "thousand", "million", "billion"}
+                for token in multiplier
+            )
+            and parsed is not None
+            and parsed[1] == len(multiplier)
+        )
 
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] in singular_scales:
         return multiplier_is_proven(numeric_phrase[:-1])

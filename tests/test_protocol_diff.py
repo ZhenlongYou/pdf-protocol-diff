@@ -10975,6 +10975,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX O REPORTS ON 25 GBPS.",
             "APPENDIX P NOTES ON TWO mVrms.",
             "APPENDIX AA REPORTS ON AT LEAST PAIRS OF ERRORS.",
+            "APPENDIX AB REPORTS ON ONE MILLION THOUSAND FAILURES.",
+            "APPENDIX AC REPORTS ON ONE HUNDRED HUNDRED FAILURES.",
+            "APPENDIX AD REPORTS ON ONE AND AND TWO FAILURES.",
+            "APPENDIX AE REPORTS ON TWENTY THIRTY FAILURES.",
+            "APPENDIX AF REPORTS ON ONE AND FAILURES.",
             "ANNEX B RECORDS SUPPORTED BY THE RECEIVER.",
             "APPENDIX C NOTES APPLICABLE TO TEST FIXTURES.",
             "PART II MAPS USED FOR VERIFICATION.",
@@ -11427,6 +11432,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "APPENDIX O REPORTS ON 25 GBPS.",
             "APPENDIX P NOTES ON TWO mVrms.",
             "APPENDIX AA REPORTS ON AT LEAST PAIRS OF ERRORS.",
+            "APPENDIX AB REPORTS ON ONE MILLION THOUSAND FAILURES.",
+            "APPENDIX AC REPORTS ON ONE HUNDRED HUNDRED FAILURES.",
+            "APPENDIX AD REPORTS ON ONE AND AND TWO FAILURES.",
+            "APPENDIX AE REPORTS ON TWENTY THIRTY FAILURES.",
+            "APPENDIX AF REPORTS ON ONE AND FAILURES.",
             "ANNEX B RECORDS SUPPORTED BY THE RECEIVER.",
             "APPENDIX C NOTES APPLICABLE TO TEST FIXTURES.",
             "PART II MAPS USED FOR VERIFICATION.",
@@ -12731,6 +12741,29 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
         self.assertTrue(result.changes)
+
+    def test_zero_scaled_count_change_remains_visible_in_reader_reports(self) -> None:
+        """Explicit zero is never treated as an omitted one before a scale."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_zero_scaled_count.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCapture zero million packets.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_one_scaled_count.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nCapture one million packets.")],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertTrue(result.changes)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, Path(temp_dir), DiffOptions())
+            for key in ("html", "markdown", "text", "csv"):
+                surface = paths[key].read_text(encoding="utf-8")
+                with self.subTest(surface=key):
+                    self.assertIn("zero million", surface)
+                    self.assertIn("one million", surface)
 
     def test_pcie_capture_real_wording_change_survives_number_word_noise(self) -> None:
         """Mixed PCIe sentence changes should highlight wording, not seven/7."""
