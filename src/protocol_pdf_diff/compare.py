@@ -2924,27 +2924,21 @@ def _exact_identity_similarity(left: str, right: str) -> float:
     left_sample = _sample_section_text(left)
     right_sample = _sample_section_text(right)
     raw_score = _similarity(left_sample, right_sample)
-    left_units = [
-        _review_unit_key(unit)
-        for unit in _paragraph_review_units(
-            left_sample,
-            suppressed_table_unit_keys=set(),
-        )
-        if _review_unit_key(unit)
-    ]
-    right_units = [
-        _review_unit_key(unit)
-        for unit in _paragraph_review_units(
-            right_sample,
-            suppressed_table_unit_keys=set(),
-        )
-        if _review_unit_key(unit)
-    ]
-    if not left_units or not right_units:
+    left_units = _paragraph_review_units(
+        left_sample,
+        suppressed_table_unit_keys=set(),
+    )
+    right_units = _paragraph_review_units(
+        right_sample,
+        suppressed_table_unit_keys=set(),
+    )
+    if not left_units or len(left_units) != len(right_units):
         return raw_score
-    shared_units = sum((Counter(left_units) & Counter(right_units)).values())
-    if shared_units * 2 < max(len(left_units), len(right_units)):
-        return raw_score  # 一个通用句不能让大量互异正文借模糊分数强行配对。
+    if any(
+        _review_similarity(old_unit, new_unit) < 0.90
+        for old_unit, new_unit in zip(left_units, right_units)
+    ):
+        return raw_score  # 每个对应片段都必须近似；一个通用句不能替大量互异正文自证。
     return max(raw_score, _review_similarity(left_sample, right_sample))
 
 
