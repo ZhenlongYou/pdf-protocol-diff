@@ -8174,6 +8174,65 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(["The limit is 20 mV."], change.added_snippets)
         self.assertFalse(change.removed_snippets)
 
+    def test_global_residual_pairing_respects_assignment_field_identity(self) -> None:
+        """Shared values cannot cross-pair two moved explicit assignment fields."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-cross-field.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Settings\nMode = ALPHA_ALPHA_ALPHA.\n"
+                            "Capture path remains stable.\nState = BETA."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-cross-field.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Settings\nState = ALPHA_ALPHA_ALPHA.\n"
+                            "Capture path remains stable.\nMode = BETA."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        pairs = result.changes[0].replaced_snippets
+        self.assertEqual(2, len(pairs))
+        self.assertTrue(
+            any(
+                pair.old.startswith("Mode =") and pair.new.startswith("Mode =")
+                for pair in pairs
+            )
+        )
+        self.assertTrue(
+            any(
+                pair.old.startswith("State =") and pair.new.startswith("State =")
+                for pair in pairs
+            )
+        )
+        self.assertFalse(
+            any(
+                pair.old.startswith("Mode =") and pair.new.startswith("State =")
+                for pair in pairs
+            )
+        )
+        self.assertFalse(
+            any(
+                pair.old.startswith("State =") and pair.new.startswith("Mode =")
+                for pair in pairs
+            )
+        )
+
     def test_local_swap_with_peripheral_duplicates_has_no_false_add_delete(self) -> None:
         """All common occurrences are removed from opcode noise after a local swap."""
 

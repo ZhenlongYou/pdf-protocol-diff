@@ -4529,6 +4529,11 @@ def _unit_pair_score(old_unit: str, new_unit: str) -> float:
     table_score = _table_unit_pair_score(old_unit, new_unit)  # 表格行先按参数身份配对，避免相邻行错配造成噪声。
     if table_score is not None:
         return table_score
+    old_field = _assignment_field_key(old_unit)
+    new_field = _assignment_field_key(new_unit)
+    if old_field or new_field:
+        # 显式字段身份压过相同值文本；Mode 绝不能因 ALPHA 相同而错配给 State。
+        return 1.0 if old_field and old_field == new_field else 0.0
 
     old_words = _meaningful_review_words(old_unit)
     new_words = _meaningful_review_words(new_unit)
