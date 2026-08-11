@@ -2944,7 +2944,10 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         for short_unit in shorter:
             while (
                 longer_index < len(longer)
-                and _review_similarity(short_unit, longer[longer_index]) < 0.90
+                and not _review_units_share_sentence_skeleton(
+                    short_unit,
+                    longer[longer_index],
+                )
             ):
                 longer_index += 1
             if longer_index >= len(longer):
@@ -3033,14 +3036,16 @@ def _assignment_field_key(value: str) -> str:
     """Return a stable left-hand field only for explicit equals assignments."""
 
     compact = compact_inline(value).strip(".?!！？。 ")
-    match = re.match(
-        r"^(.{1,80}?)\s*=\s*(\S.*)$",
-        compact,
-    )
-    if match is None:
+    if compact.count("=") != 1:
         return ""
-    field, assigned_value = match.groups()
-    if not assigned_value.strip():
+    operator_index = compact.index("=")
+    field = compact[:operator_index].rstrip()
+    assigned_value = compact[operator_index + 1 :].lstrip()
+    if not field or not assigned_value:
+        return ""
+    if field[-1] in "<>=!:+-*/%&|^" or assigned_value[0] in "<>=!":
+        return ""  # ==/>=/<=/!=/复合运算符不是可用作章节身份证据的字段赋值。
+    if len(field) > 80:
         return ""
     field_key = normalize_for_similarity(field)
     if not field_key:

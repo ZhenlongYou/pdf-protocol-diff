@@ -7898,7 +7898,8 @@ class ProtocolDiffTests(unittest.TestCase):
                         text=(
                             "1 Queue Processing\n"
                             "Capture 1,000,000 packets.\n"
-                            "Mode = LEGACY_128B130B_FLIT_DISABLED."
+                            "Mode = LEGACY_128B130B_FLIT_DISABLED.\n"
+                            "The limit is 20 mV."
                         ),
                     )
                 ],
@@ -7918,8 +7919,54 @@ class ProtocolDiffTests(unittest.TestCase):
         for reader in readers:
             self.assertIn("PAM4", reader)
             self.assertIn("LEGACY_128B130B_FLIT_DISABLED", reader)
+            self.assertIn("The limit is 20 mV.", reader)
             self.assertNotIn("one million packets", reader)
             self.assertNotIn("1,000,000 packets", reader)
+
+    def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
+        """Comparison operators must not bypass the disjoint-unit hard gate."""
+
+        for old_condition, new_condition in (
+            (
+                "If mode == LEGACY, follow the optical calibration path.",
+                "If mode == RECOVERY, use the copper training method.",
+            ),
+            (
+                "If margin >= 20 mV, follow the optical calibration path.",
+                "If margin >= 4 UI, use the copper training method.",
+            ),
+            (
+                "If margin <= 20 mV, follow the optical calibration path.",
+                "If margin <= 4 UI, use the copper training method.",
+            ),
+        ):
+            with self.subTest(old_condition=old_condition):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-comparison-operator.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=f"1 General\nCapture one million packets.\n{old_condition}",
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-comparison-operator.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=f"1 General\nCapture 1,000,000 packets.\n{new_condition}",
+                            )
+                        ],
+                    ),
+                    DiffOptions(),
+                )
+
+                change_types = [change.change_type for change in result.changes]
+                self.assertNotIn("modified", change_types)
+                self.assertEqual(1, change_types.count("added"))
+                self.assertEqual(1, change_types.count("deleted"))
 
     def test_unproven_copula_subject_cannot_rescue_disjoint_exact_sections(self) -> None:
         """Natural-language copula subjects are not stable assignment fields."""
@@ -7998,7 +8045,7 @@ class ProtocolDiffTests(unittest.TestCase):
         """A proven field/value slot remains one modified single-unit section."""
 
         for old_body, new_body in (
-            ("RX_STATE = IDLE.", "RX_STATE = RECOVERY."),
+            ("RX_STATE=IDLE.", "RX_STATE=RECOVERY."),
         ):
             with self.subTest(old_body=old_body, new_body=new_body):
                 result = compare_extractions(
