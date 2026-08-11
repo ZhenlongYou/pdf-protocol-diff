@@ -15,12 +15,17 @@ from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
 
+import jieba
+from jieba import posseg as jieba_posseg
+
 from .models import ExtractionResult, HeadingInfo, PageText, Section
 from .text_utils import (
     compact_inline,
     normalize_for_similarity,
     normalize_line,
 )
+
+jieba.setLogLevel(40)
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
 _DOCUMENT_METADATA_TITLE_RE = re.compile(
@@ -1168,18 +1173,34 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
                 "without",
             }
         )
-        quantified_prepositional_clause = bool(
-            prepositional_title
-            and len(ambiguous_words) >= 3
-            and re.match(
+        prepositional_complement = " ".join(ambiguous_words[1:])
+        word_quantified_clause = bool(
+            re.match(
                 r"(?i)^(?:a|an|the|all|any|both|each|either|every|neither|no|"
                 r"some|several|many|few|multiple|various|numerous|additional|"
                 r"another|enough|more(?:\s+than)?|less(?:\s+than)?|"
                 r"fewer(?:\s+than)?|at\s+(?:least|most)|"
                 r"one|two|three|four|five|six|seven|eight|nine|ten|"
-                r"dozens?|hundreds?|thousands?|\d+(?:\.\d+)?)(?=\s|$)",
-                " ".join(ambiguous_words[1:]),
+                r"dozens?|hundreds?|thousands?)(?=\s|$)",
+                prepositional_complement,
             )
+        )
+        numeric_quantified_clause = bool(
+            re.match(r"^\d+(?:\.\d+)?(?=\s+(?!%))", prepositional_complement)
+            or re.match(
+                r"^\d{1,3}(?:,\d{3})+(?=\s)",
+                prepositional_complement,
+            )
+            or re.match(
+                r"^\d+(?:\.\d+)?%\s+OF\b",
+                prepositional_complement,
+                re.IGNORECASE,
+            )
+        )
+        quantified_prepositional_clause = bool(
+            prepositional_title
+            and len(ambiguous_words) >= 3
+            and (word_quantified_clause or numeric_quantified_clause)
         )
         if prepositional_title and not quantified_prepositional_clause:
             # ``NOTES ON CALIBRATION`` and ``REPORTS ABOUT TESTING`` are
@@ -1298,16 +1319,17 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
         and 0 < len(clause[final_nominalizer + 1 :].strip()) <= 24
     ):
         relative_tail = clause[predicate.end() : final_nominalizer].strip()
-        relative_tail = re.sub(
-            rf"^(?:{_NAMED_CONTAINER_CHINESE_ADVERB})",
-            "",
-            relative_tail,
-        ).strip()
-        if len(relative_tail) <= 3:
+        tail_tokens = tuple(jieba_posseg.cut(relative_tail, HMM=False))
+        has_object_evidence = any(
+            token.flag == "eng"
+            or token.flag.startswith(("m", "n", "q"))
+            for token in tail_tokens
+        )
+        if not has_object_evidence:
             # ``必须满足的要求`` is a nominal title, while ``必须满足所有规定的
-            # 要求`` already has an object before the final nominalizer and is
-            # an independent clause.  This structural boundary also handles a
-            # measured object without relying on a digit-specific exception.
+            # 要求`` contains a noun object before the final nominalizer and is
+            # an independent clause.  POS evidence keeps the modifier vocabulary
+            # open instead of enumerating adverbs or relying on character counts.
             return False
     return bool(
         re.fullmatch(
