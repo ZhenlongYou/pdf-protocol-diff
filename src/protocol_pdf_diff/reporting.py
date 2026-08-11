@@ -8597,14 +8597,6 @@ def _number_word_phrase_has_positive_count_context(
                 following_consumed,
                 text,
             )
-    if first in {"hundred", "thousand", "million", "billion"}:
-        return _number_word_phrase_has_positive_count_context(
-            raw_tokens,
-            raw_words,
-            next_index,
-            1,
-            text,
-        )
     following_consumed = _inline_count_value_consumed(raw_words, next_index)
     if following_consumed is not None:
         previous_end = raw_tokens[next_index - 1][2]
@@ -8619,7 +8611,8 @@ def _number_word_phrase_has_positive_count_context(
             )
     second_index = next_index + 1
     if (
-        _looks_like_english_noun_modifier(first)
+        first not in {"hundred", "thousand", "million", "billion"}
+        and _looks_like_english_noun_modifier(first)
         and second_index < len(raw_words)
         and _looks_like_plural_count_noun(raw_words[second_index])
     ):

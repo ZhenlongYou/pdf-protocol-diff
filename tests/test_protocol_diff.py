@@ -12800,6 +12800,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Count one hundred, two hundred, or three hundred failures.\n"
                         "Count one million, two million, or three million packets.\n"
                         "Count one and a half million, two million, or three million packets.\n"
+                        "Count one hundred and a half million packets.\n"
                         "Count half a million, one million, or two million packets.\n"
                         "Span one million to two million packets.\n"
                         "Exercise one million and two million tests.\n"
@@ -12826,6 +12827,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         "Count 100, 200, or 300 failures.\n"
                         "Count 1,000,000, 2,000,000, or 3,000,000 packets.\n"
                         "Count 1.5 million, 2 million, or 3 million packets.\n"
+                        "Count 100.5 million packets.\n"
                         "Count 500,000, 1,000,000, or 2,000,000 packets.\n"
                         "Span 1,000,000 to 2,000,000 packets.\n"
                         "Exercise 1,000,000 and 2,000,000 tests.\n"
@@ -12838,6 +12840,39 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
         self.assertEqual([], result.changes)
+
+    def test_invalid_repeated_or_descending_scale_chain_stays_visible(self) -> None:
+        """A valid prefix must not authorize an invalid trailing count scale."""
+
+        for old_count, new_count in (
+            ("one million thousand packets", "1 million thousand packets"),
+            ("one million million packets", "1 million million packets"),
+            (
+                "one and a half million thousand packets",
+                "1.5 million thousand packets",
+            ),
+            (
+                "one million and a half million packets",
+                "1,000,000,500,000 packets",
+            ),
+        ):
+            with self.subTest(old_count=old_count):
+                old_extraction = ExtractionResult(
+                    pdf_path=Path("old_invalid_scale_chain.pdf"),
+                    pages=[PageText(page_number=1, text=f"1 Scope\nCount {old_count}.")],
+                )
+                new_extraction = ExtractionResult(
+                    pdf_path=Path("new_invalid_scale_chain.pdf"),
+                    pages=[PageText(page_number=1, text=f"1 Scope\nCount {new_count}.")],
+                )
+
+                result = compare_extractions(
+                    old_extraction,
+                    new_extraction,
+                    DiffOptions(),
+                )
+
+                self.assertTrue(result.changes)
 
     def test_number_word_change_with_an_added_comma_remains_visible(self) -> None:
         """Count spelling may normalize, but an observed numeric separator remains evidence."""

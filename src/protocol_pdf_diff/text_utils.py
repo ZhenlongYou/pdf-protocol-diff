@@ -620,6 +620,14 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         scale_index = half_index + 3
         if normalized[scale_index] not in _NUMBER_WORD_SCALES:
             continue
+        target_scale = _NUMBER_WORD_SCALES[normalized[scale_index]]
+        prefix_scales = [
+            _NUMBER_WORD_SCALES[token]
+            for token in normalized[start_index:half_index]
+            if token in _NUMBER_WORD_SCALES
+        ]
+        if any(scale >= target_scale for scale in prefix_scales):
+            continue  # Repeated/descending scale chains are not one atomic count.
         prefix = parse_number_word_phrase(tokens[start_index:half_index], 0)
         if prefix is None or prefix[1] != half_index - start_index:
             continue
@@ -807,13 +815,9 @@ def _has_positive_english_count_context(tokens: list[str], next_index: int) -> b
                 tokens,
                 next_index + 1 + consumed,
             )
-    if (
-        next_index < len(tokens)
-        and tokens[next_index] in _NUMBER_WORD_SCALES
-    ):
-        return _has_positive_english_count_context(tokens, next_index + 1)
     return bool(
         next_index + 1 < len(tokens)
+        and tokens[next_index] not in _NUMBER_WORD_SCALES
         and re.fullmatch(r"[a-z][a-z-]*", tokens[next_index])
         and tokens[next_index + 1] in _ENGLISH_COUNT_CONTEXT_NOUNS
     )  # `twenty one idle intervals` 允许一个可见修饰词；公式/函数/枚举不会误折叠。
