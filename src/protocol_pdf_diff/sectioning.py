@@ -1162,10 +1162,6 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         "fewer",
     }:
         return True
-    if quantity in (["a", "dozen"], ["dozens", "of"], ["hundreds", "of"], ["thousands", "of"]):
-        return True
-    if len(quantity) == 2 and re.fullmatch(r"\d+(?:\.\d+)?%", quantity[0]) and quantity[1] == "of":
-        return True
     number_start = 0
     if len(quantity) >= 3 and quantity[:2] in (
         ["more", "than"],
@@ -1176,6 +1172,34 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     ):
         number_start = 2
     numeric_phrase = quantity[number_start:]
+    if numeric_phrase in (
+        ["a", "dozen"],
+        ["dozens", "of"],
+        ["hundreds", "of"],
+        ["thousands", "of"],
+        ["a", "couple", "of"],
+        ["a", "pair", "of"],
+    ):
+        return True
+    if len(numeric_phrase) >= 2 and numeric_phrase[-1] in {
+        "dozen",
+        "hundred",
+        "thousand",
+        "million",
+        "billion",
+    }:
+        multiplier = numeric_phrase[:-1]
+        if multiplier == ["a"]:
+            return True
+        parsed_multiplier = parse_number_word_phrase(multiplier, 0)
+        if parsed_multiplier is not None and parsed_multiplier[1] == len(multiplier):
+            return True
+    if (
+        len(numeric_phrase) == 2
+        and re.fullmatch(r"\d+(?:\.\d+)?%", numeric_phrase[0])
+        and numeric_phrase[1] == "of"
+    ):
+        return True
     if len(numeric_phrase) == 1 and re.fullmatch(
         r"\d+(?:,\d{3})*(?:\.\d+)?",
         numeric_phrase[0],
