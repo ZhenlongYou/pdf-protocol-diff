@@ -1315,8 +1315,11 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     final_nominalizer = clause.rfind("的")
     nominal_head = clause[final_nominalizer + 1 :].strip()
     has_post_nominalizer_predicate = bool(
-        re.search(
-            r"(?:为|是|具有|必须|应当|可以|不得|需要|适用于|用于)",
+        re.fullmatch(
+            r".{2,20}?"
+            r"(?:(?<![行作因以但])为|(?<!但)是|具有|必须|应当|可以|不得|需要|"
+            r"适用于|用于)"
+            r".{1,80}",
             nominal_head,
         )
     )
