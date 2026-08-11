@@ -2093,8 +2093,6 @@ def _match_sections(
         },
         options.min_section_match_similarity,
     ):
-        if (old_index, new_index) in rejected_exact_pairs:
-            continue
         matched_old.add(old_index)
         matched_new.add(new_index)
         matches.append(
@@ -2934,8 +2932,29 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     )
     if not left_units and not right_units:
         return raw_score
-    if not left_units or len(left_units) != len(right_units):
-        return None
+    if not left_units or not right_units:
+        return raw_score  # 空容器不能仅凭占用相同编号抢配另一条有正文的章节。
+    if len(left_units) != len(right_units):
+        shorter, longer = (
+            (left_units, right_units)
+            if len(left_units) < len(right_units)
+            else (right_units, left_units)
+        )
+        longer_index = 0
+        for short_unit in shorter:
+            while (
+                longer_index < len(longer)
+                and _review_similarity(short_unit, longer[longer_index]) < 0.90
+            ):
+                longer_index += 1
+            if longer_index >= len(longer):
+                return None
+            longer_index += 1
+        return max(
+            raw_score,
+            _review_similarity(left_sample, right_sample),
+            0.90,
+        )
     if len(left_units) == 1:
         return raw_score  # 单片段同号同题仍按原始相似度配对，差异会完整显示为 modified。
     if any(

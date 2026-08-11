@@ -7814,6 +7814,42 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, change_types.count("added"))
         self.assertEqual(1, change_types.count("deleted"))
 
+    def test_exact_section_allows_an_ordered_sentence_addition(self) -> None:
+        """A preserved original sentence plus one new fact is one modified section."""
+
+        shared = (
+            "The receiver shall support PAM4 operation across every declared lane "
+            "and operating mode."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-ordered-addition.pdf"),
+                pages=[PageText(page_number=1, text=f"1 General\n{shared}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-ordered-addition.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=f"1 General\n{shared}\nThe limit is 0.025 UI.",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertEqual(["The limit is 0.025 UI."], result.changes[0].added_snippets)
+        self.assertEqual([], result.changes[0].removed_snippets)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, Path(temp_dir), DiffOptions())
+            for suffix in (".md", ".txt"):
+                report = next(path for path in paths.values() if path.suffix == suffix)
+                reader = report.read_text(encoding="utf-8-sig")
+                self.assertIn("The limit is 0.025 UI.", reader)
+                self.assertNotIn(shared, reader)
+
     def test_structural_anchor_rescue_respects_a_stricter_configured_threshold(self) -> None:
         """A technical anchor may help at the default floor but cannot ignore a 0.99 request."""
 
