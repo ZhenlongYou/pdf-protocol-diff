@@ -1251,6 +1251,33 @@ def _chinese_named_container_predicate_sentence(title: str) -> bool:
     )
 
 
+def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
+    """Prove a complete clause after an internal title delimiter.
+
+    Single-character substring checks are unsafe in Chinese: ``为`` is part of
+    the noun ``行为``, while leading ``用于/需要/适用于`` commonly introduces
+    a nominal modifier.  Require terminal sentence punctuation plus a real
+    subject before the predicate and a complement after it.  Uncertain suffixes
+    remain visible as structural titles.
+    """
+
+    if _chinese_named_container_predicate_sentence(suffix):
+        return True
+    cleaned = suffix.strip()
+    if not re.search(r"[。！？.!?]\s*$", cleaned):
+        return False
+    clause = cleaned.rstrip("。！？.!? ")
+    return bool(
+        re.fullmatch(
+            r"(?=.{4,160}$).{2,80}?"
+            r"(?:(?<![行作因以但])为|(?<!但)是|具有|必须|应当|可以|不得|需要|"
+            r"适用于|用于)"
+            r".{1,80}",
+            clause,
+        )
+    )
+
+
 def _looks_like_named_container_reference_sentence(
     candidate: str,
     number: str,
@@ -1278,13 +1305,7 @@ def _looks_like_named_container_reference_sentence(
     if internal_delimiter is not None:
         prefix = internal_delimiter.group("prefix")
         suffix = internal_delimiter.group("suffix")
-        chinese_suffix_is_sentence = bool(
-            _chinese_named_container_predicate_sentence(suffix)
-            or re.search(
-                r"(?:为|是|具有|必须|应当|可以|不得|需要|适用于|用于)",
-                suffix,
-            )
-        )
+        chinese_suffix_is_sentence = _chinese_delimited_suffix_is_sentence(suffix)
         if (prefix.isascii() and not prefix.islower()) or (
             not prefix.isascii() and not chinese_suffix_is_sentence
         ):

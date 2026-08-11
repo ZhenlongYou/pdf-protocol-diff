@@ -10960,6 +10960,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "PART II MAPS USED FOR VERIFICATION.",
             "附录 A 说明：适用要求和示例。",
             "附录 B 描述—适用要求范围！",
+            "附录 A 说明：行为要求和示例。",
+            "附录 B 描述—用于校准的设备。",
+            "附录 C 说明：需要说明的事项。",
+            "附录 D 说明：适用于 PAM4 的要求。",
+            "附录 E 说明：是非判断规则。",
         ):
             with self.subTest(title=title):
                 extraction = ExtractionResult(
@@ -11337,9 +11342,14 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 A 说明：要求和示例",
             "附录 A 说明：要求和示例。",
             "附录 A 说明：适用要求和示例。",
+            "附录 A 说明：行为要求和示例。",
             "附录 B 描述—定义和缩写",
             "附录 B 描述—定义和缩写！",
             "附录 B 描述—适用要求范围！",
+            "附录 B 描述—用于校准的设备。",
+            "附录 C 说明：需要说明的事项。",
+            "附录 D 说明：适用于 PAM4 的要求。",
+            "附录 E 说明：是非判断规则。",
             "附录 A 说明 、 要求 和 示例",
             "附录 B 描述 、 定义 、 缩写",
             "附录 A 说明及适用要求范围。",
