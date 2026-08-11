@@ -15,17 +15,12 @@ from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
 
-import jieba
-from jieba import posseg as jieba_posseg
-
 from .models import ExtractionResult, HeadingInfo, PageText, Section
 from .text_utils import (
     compact_inline,
     normalize_for_similarity,
     normalize_line,
 )
-
-jieba.setLogLevel(40)
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
 _DOCUMENT_METADATA_TITLE_RE = re.compile(
@@ -1307,30 +1302,13 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     if not re.search(r"[。！？.!?]\s*$", cleaned):
         return False
     clause = cleaned.rstrip("。！？.!? ")
-    final_nominalizer = clause.rfind("的")
-    predicate = re.search(
-        r"(?:(?<![行作因以但])为|(?<!但)是|具有|必须|应当|可以|不得|需要|"
-        r"适用于|用于)",
-        clause,
-    )
-    if (
-        predicate is not None
-        and final_nominalizer >= predicate.end()
-        and 0 < len(clause[final_nominalizer + 1 :].strip()) <= 24
-    ):
-        relative_tail = clause[predicate.end() : final_nominalizer].strip()
-        tail_tokens = tuple(jieba_posseg.cut(relative_tail, HMM=False))
-        has_object_evidence = any(
-            token.flag == "eng"
-            or token.flag.startswith(("m", "n", "q"))
-            for token in tail_tokens
-        )
-        if not has_object_evidence:
-            # ``必须满足的要求`` is a nominal title, while ``必须满足所有规定的
-            # 要求`` contains a noun object before the final nominalizer and is
-            # an independent clause.  POS evidence keeps the modifier vocabulary
-            # open instead of enumerating adverbs or relying on character counts.
-            return False
+    if re.search(r"的\s*.{1,24}$", clause):
+        # ``必须满足的要求`` and ``必须满足协议要求的条件`` can both be
+        # complete noun titles.  A single extracted line cannot prove whether
+        # the final nominalizer belongs to an object inside a prose sentence.
+        # Preserve that ambiguity as structure so technical ownership remains
+        # visible instead of silently attaching it to the preceding chapter.
+        return False
     return bool(
         re.fullmatch(
             r"(?=.{4,160}$).{2,80}?"
