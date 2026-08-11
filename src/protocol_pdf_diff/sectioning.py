@@ -1200,8 +1200,27 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         return True
     if numeric_phrase == ["half", "of"]:
         return True
-    if len(numeric_phrase) == 1 and numeric_phrase[0] in simple_quantifiers:
-        return True
+    if len(numeric_phrase) == 1:
+        quantifier = numeric_phrase[0]
+        if not (comparison or approximation) and quantifier in simple_quantifiers:
+            return True
+        if approximation and quantifier in simple_quantifiers - {"either", "neither"}:
+            return True
+        if comparison and quantifier in {
+            "a",
+            "an",
+            "some",
+            "several",
+            "many",
+            "few",
+            "multiple",
+            "various",
+            "numerous",
+            "additional",
+            "another",
+            "enough",
+        }:
+            return True
     if numeric_phrase in (["half", "a", "dozen"], ["a", "couple", "of"], ["a", "pair", "of"]):
         return True
     parsed_direct = parse_number_word_phrase(numeric_phrase, 0)
@@ -1230,6 +1249,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         "couples",
         "pairs",
     }
+    singular_partitives = {"couple", "pair"}
 
     def multiplier_is_proven(multiplier: list[str]) -> bool:
         if multiplier in (["a"], ["half", "a"], ["a", "few"]):
@@ -1256,20 +1276,41 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
 
         if multiplier == ["a", "few"]:
             return True
-        if len(multiplier) == 1 and multiplier[0] in {
-            "some",
-            "several",
-            "many",
-            "few",
-            "multiple",
-            "various",
-            "numerous",
-            "additional",
-            "enough",
-            "more",
-            "fewer",
-        }:
-            return True
+        if len(multiplier) == 1:
+            quantifier = multiplier[0]
+            plural_quantifiers = {
+                "all",
+                "any",
+                "both",
+                "no",
+                "some",
+                "several",
+                "many",
+                "few",
+                "multiple",
+                "various",
+                "numerous",
+                "additional",
+                "enough",
+                "more",
+                "fewer",
+            }
+            if not (comparison or approximation) and quantifier in plural_quantifiers:
+                return True
+            if approximation and quantifier in plural_quantifiers:
+                return True
+            if comparison and quantifier in {
+                "some",
+                "several",
+                "many",
+                "few",
+                "multiple",
+                "various",
+                "numerous",
+                "additional",
+                "enough",
+            }:
+                return True
         if len(multiplier) == 1 and re.fullmatch(
             r"\d+(?:,\d{3})*(?:\.\d+)?",
             multiplier[0],
@@ -1278,20 +1319,55 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             return re.fullmatch(r"0*1(?:\.0+)?", numeric) is None
         parsed = parse_number_word_phrase(multiplier, 0)
         return (
-            not any(
-                token in {"hundred", "thousand", "million", "billion"}
-                for token in multiplier
-            )
-            and parsed is not None
+            parsed is not None
             and parsed[1] == len(multiplier)
             and parsed[0] != "1"
         )
+
+    def singular_multiplier_is_proven(multiplier: list[str]) -> bool:
+        if len(multiplier) == 1:
+            quantifier = multiplier[0]
+            if not (comparison or approximation) and quantifier in {
+                "a",
+                "an",
+                "one",
+                "each",
+                "every",
+                "either",
+                "neither",
+                "another",
+                "no",
+            }:
+                return True
+            if approximation and quantifier in {
+                "a",
+                "an",
+                "one",
+                "each",
+                "every",
+                "another",
+                "no",
+            }:
+                return True
+            if comparison and quantifier in {"a", "an", "one", "another"}:
+                return True
+            if re.fullmatch(r"\d+(?:,\d{3})*(?:\.\d+)?", quantifier):
+                numeric = quantifier.replace(",", "")
+                return re.fullmatch(r"0*1(?:\.0+)?", numeric) is not None
+        parsed = parse_number_word_phrase(multiplier, 0)
+        return parsed is not None and parsed[1] == len(multiplier) and parsed[0] == "1"
 
     if len(numeric_phrase) >= 3 and numeric_phrase[-2:] == ["percent", "of"]:
         return multiplier_is_proven(numeric_phrase[:-2])
 
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] in singular_scales:
         return multiplier_is_proven(numeric_phrase[:-1])
+    if (
+        len(numeric_phrase) >= 3
+        and numeric_phrase[-1] == "of"
+        and numeric_phrase[-2] in singular_partitives
+    ):
+        return singular_multiplier_is_proven(numeric_phrase[:-2])
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] == "of" and numeric_phrase[-2] in plural_partitives:
         multiplier = numeric_phrase[:-2]
         if not multiplier:
