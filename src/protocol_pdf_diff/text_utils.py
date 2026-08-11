@@ -626,6 +626,16 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         return None
     normalized = [_normalize_number_word_token(token) for token in tokens]
     if (
+        normalized[start_index] == "a"
+        and start_index + 1 < len(normalized)
+        and normalized[start_index + 1] in _NUMBER_WORD_SCALES
+    ):
+        # ``a hundred`` and ``a million`` are ordinary cardinal phrases.  Keep
+        # the substitution local to a following scale so an article in prose
+        # can never become a count on its own.
+        normalized[start_index] = "one"
+        return parse_number_word_phrase(normalized, start_index)
+    if (
         normalized[start_index : start_index + 2] == ["half", "a"]
         and start_index + 2 < len(normalized)
         and normalized[start_index + 2] in _NUMBER_WORD_SCALES
@@ -697,11 +707,18 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
             chain_is_terminal = False
         elif next_token == "and":
             final_scale = _NUMBER_WORD_SCALES[normalized[scale_end - 1]]
-            following_scales = [
-                _NUMBER_WORD_SCALES[token]
-                for token in normalized[scale_end + 1 :]
-                if token in _NUMBER_WORD_SCALES
-            ]
+            following_scales: list[int] = []
+            for token in normalized[scale_end + 1 :]:
+                if token in _NUMBER_WORD_SCALES:
+                    following_scales.append(_NUMBER_WORD_SCALES[token])
+                    continue
+                if (
+                    token in _NUMBER_WORD_UNITS
+                    or token in _NUMBER_WORD_TENS
+                    or token in {"a", "half", "and"}
+                ):
+                    continue
+                break
             chain_is_terminal = any(
                 scale >= final_scale for scale in following_scales
             )

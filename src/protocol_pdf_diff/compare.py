@@ -3679,7 +3679,7 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
     signatures: list[str] = []
     punctuation_run_ranges: set[int] = set()
     for match in re.finditer(r"[.,;:?!]{2,}", value):
-        position = _semantic_token_position(value, match.start())
+        position = _punctuation_token_position(value, match.start())
         signatures.append(f"{position}:run:{match.group(0)}")
         punctuation_run_ranges.update(range(match.start(), match.end()))
     for index, character in enumerate(value):
@@ -3704,10 +3704,10 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             continue  # 合法千分位逗号由完整数字 token 归一，不能误当列表分隔符。
         if character in ".:,;" and left and right and (left.isalnum() or left == "_") and (right.isalnum() or right == "_"):
             kind = {".": "dot", ":": "colon", ",": "comma", ";": "semicolon"}[character]
-            position = _semantic_token_position(value, index)
+            position = _punctuation_token_position(value, index)
             signatures.append(f"{position}:{kind}:{left}:{right}")
         elif character == "?" and left and (left.isalnum() or left == "_"):
-            position = _semantic_token_position(value, index)
+            position = _punctuation_token_position(value, index)
             signatures.append(f"{position}:question:{left}")
     stack: list[str] = []
     matching = {")": "(", "]": "[", "}": "{"}
@@ -3723,19 +3723,19 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             continue
         left = value[index - 1].casefold() if index > 0 else ""
         right = value[index + 1].casefold() if index + 1 < len(value) else ""
-        position = _semantic_token_position(value, index)
+        position = _punctuation_token_position(value, index)
         signatures.append(f"{position}:group-{ord(character)}:{left}:{right}")
     for match in re.finditer(
         r"([\"“'‘])(?P<literal>[^\"”'’\n]+)([\"”'’])",
         value,
         flags=re.UNICODE,
     ):
-        position = _semantic_token_position(value, match.start())
+        position = _punctuation_token_position(value, match.start())
         signatures.append(
             f"{position}:quoted:{normalize_line(match.group('literal'))}"
         )
     for match in re.finditer(r"`(?P<literal>[^`\n]+)`", value):
-        position = _semantic_token_position(value, match.start())
+        position = _punctuation_token_position(value, match.start())
         signatures.append(
             f"{position}:backtick:{normalize_line(match.group('literal'))}"
         )
@@ -3878,6 +3878,22 @@ def _semantic_token_position(value: str, character_index: int) -> int:
     """Return a whitespace-insensitive word/number occurrence position."""
 
     return sum(1 for _ in re.finditer(r"\w+", value[:character_index], flags=re.UNICODE))
+
+
+def _punctuation_token_position(value: str, character_index: int) -> int:
+    """Return a number-spelling-invariant position for structural punctuation."""
+
+    prefix_tokens = [
+        _canonical_review_token(token)
+        for token in _REVIEW_TOKEN_RE.findall(value[:character_index])
+    ]
+    return len(
+        canonicalize_number_word_tokens(
+            prefix_tokens,
+            protected_previous_words=_PROTECTED_NUMBER_WORD_PREFIXES,
+            protected_next_words=_PROTECTED_NUMBER_WORD_SUFFIXES,
+        )
+    )
 
 
 def _normalize_directional_symbols(value: str) -> str:
