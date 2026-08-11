@@ -1177,7 +1177,7 @@ def _english_named_container_predicate_sentence(title: str) -> bool:
                 r"another|enough|more(?:\s+than)?|less(?:\s+than)?|"
                 r"fewer(?:\s+than)?|at\s+(?:least|most)|"
                 r"one|two|three|four|five|six|seven|eight|nine|ten|"
-                r"dozens?|hundreds?|thousands?|\d+(?:\.\d+)?)\b",
+                r"dozens?|hundreds?|thousands?|\d+(?:\.\d+)?)(?=\s|$)",
                 " ".join(ambiguous_words[1:]),
             )
         )
@@ -1286,17 +1286,28 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     if not re.search(r"[。！？.!?]\s*$", cleaned):
         return False
     clause = cleaned.rstrip("。！？.!? ")
-    nominal_head = re.search(r"的\s*.{1,24}$", clause)
-    if nominal_head is not None:
-        first_measurement = re.search(r"\d", clause)
-        measurement_precedes_head = bool(
-            first_measurement is not None and first_measurement.start() < nominal_head.start()
-        )
-        if not measurement_precedes_head:
-            # A relative clause closed by a nominal head is still a title phrase:
-            # ``接收机必须满足的要求`` / ``设备可以使用的校准方法``.  A
-            # concrete measurement before ``的`` gives the independent clause
-            # stronger evidence; a value inside the nominal head does not.
+    final_nominalizer = clause.rfind("的")
+    predicate = re.search(
+        r"(?:(?<![行作因以但])为|(?<!但)是|具有|必须|应当|可以|不得|需要|"
+        r"适用于|用于)",
+        clause,
+    )
+    if (
+        predicate is not None
+        and final_nominalizer >= predicate.end()
+        and 0 < len(clause[final_nominalizer + 1 :].strip()) <= 24
+    ):
+        relative_tail = clause[predicate.end() : final_nominalizer].strip()
+        relative_tail = re.sub(
+            rf"^(?:{_NAMED_CONTAINER_CHINESE_ADVERB})",
+            "",
+            relative_tail,
+        ).strip()
+        if len(relative_tail) <= 3:
+            # ``必须满足的要求`` is a nominal title, while ``必须满足所有规定的
+            # 要求`` already has an object before the final nominalizer and is
+            # an independent clause.  This structural boundary also handles a
+            # measured object without relying on a digit-specific exception.
             return False
     return bool(
         re.fullmatch(
