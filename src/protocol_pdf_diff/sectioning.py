@@ -1331,7 +1331,16 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
             "billion",
         }:
             multiplier = words[:-1]
-            if multiplier in (["a"], ["half", "a"]):
+            if multiplier in (["a"], ["half", "a"], ["a", "few"]):
+                return "2"
+            if len(multiplier) == 1 and multiplier[0] in {
+                "few",
+                "many",
+                "multiple",
+                "numerous",
+                "several",
+                "various",
+            }:
                 return "2"
             parsed_multiplier = parse_number_word_phrase(multiplier, 0)
             if (
@@ -1353,6 +1362,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
     def complete_coordinated_count(words: list[str]) -> str | None:
         """Return required noun number for a fully consumed alternative/range."""
 
+        explicit_range_prefix = words[:1] in (["between"], ["from"])
         if words[:1] == ["between"]:
             body = words[1:]
             connectors = {"and"}
@@ -1362,23 +1372,68 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         else:
             body = words
             connectors = {"or", "to", "through"}
-        if "or" in connectors and "or" in body:
-            alternatives: list[list[str]] = [[]]
+        if not explicit_range_prefix and any(
+            token.rstrip(",") in {"and", "or"} for token in body
+        ):
+            alternatives: list[list[str]] = []
+            separators: list[str] = []
+            current: list[str] = []
+            malformed = False
             for token in body:
-                if token == "or":
-                    if alternatives[-1]:
-                        alternatives.append([])
-                else:
-                    trailing_comma = token.endswith(",") and not re.fullmatch(
-                        r"\d+(?:,\d{3})+",
-                        token,
+                if token in {"and", "or"}:
+                    if current:
+                        alternatives.append(current)
+                        separators.append(token)
+                        current = []
+                    elif (
+                        token in {"and", "or"}
+                        and separators
+                        and separators[-1] == ","
+                        and len(alternatives) >= 2
+                    ):
+                        separators[-1] = token
+                    else:
+                        malformed = True
+                        break
+                    continue
+                trailing_comma = token.endswith(",") and not re.fullmatch(
+                    r"\d+(?:,\d{3})+",
+                    token,
+                )
+                current.append(token[:-1] if trailing_comma else token)
+                if trailing_comma:
+                    alternatives.append(current)
+                    separators.append(",")
+                    current = []
+            if not malformed and current:
+                alternatives.append(current)
+            valid_separator_sequence = bool(
+                len(alternatives) >= 2
+                and len(separators) == len(alternatives) - 1
+                and (
+                    len(set(separators)) == 1
+                    and separators[0] in {"and", "or"}
+                    or (
+                        separators[-1] in {"and", "or"}
+                        and all(separator == "," for separator in separators[:-1])
                     )
-                    alternatives[-1].append(token[:-1] if trailing_comma else token)
-                    if trailing_comma:
-                        alternatives.append([])
-            if alternatives and not alternatives[-1]:
-                alternatives.pop()
-            if len(alternatives) >= 2 and all(alternatives):
+                )
+            )
+            if (
+                valid_separator_sequence
+                and separators
+                and set(separators) == {"and"}
+                and any(
+                    token in {"hundred", "thousand", "million", "billion"}
+                    for alternative in alternatives
+                    for token in alternative
+                )
+            ):
+                # Without comma evidence, ``one hundred and five`` is a
+                # cardinal phrase, not a list.  Let the strict number parser
+                # below accept it or fail visible (for example, ``... zero``).
+                valid_separator_sequence = False
+            if not malformed and valid_separator_sequence:
                 parsed_alternatives = [
                     complete_count_value(alternative)
                     for alternative in alternatives
@@ -1395,6 +1450,7 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
                 if (
                     all(value is not None for value in parsed_alternatives[:-1])
                     and final_alternative in (["more"], ["fewer"])
+                    and separators[-1] == "or"
                 ):
                     return "plural"
         for index, token in enumerate(body):
