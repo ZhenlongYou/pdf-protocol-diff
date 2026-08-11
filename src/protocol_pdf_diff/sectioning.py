@@ -1177,8 +1177,12 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         ["dozens", "of"],
         ["hundreds", "of"],
         ["thousands", "of"],
+        ["millions", "of"],
+        ["billions", "of"],
         ["a", "couple", "of"],
         ["a", "pair", "of"],
+        ["couples", "of"],
+        ["pairs", "of"],
     ):
         return True
     if len(numeric_phrase) >= 2 and numeric_phrase[-1] in {
@@ -1189,7 +1193,22 @@ def _named_container_prepositional_count_clause(value: str) -> bool:
         "billion",
     }:
         multiplier = numeric_phrase[:-1]
-        if multiplier == ["a"]:
+        if multiplier == ["a"] or (
+            len(multiplier) == 1
+            and (
+                re.fullmatch(r"\d+(?:,\d{3})*", multiplier[0])
+                or multiplier[0]
+                in {
+                    "some",
+                    "several",
+                    "many",
+                    "few",
+                    "multiple",
+                    "various",
+                    "numerous",
+                }
+            )
+        ):
             return True
         parsed_multiplier = parse_number_word_phrase(multiplier, 0)
         if parsed_multiplier is not None and parsed_multiplier[1] == len(multiplier):
