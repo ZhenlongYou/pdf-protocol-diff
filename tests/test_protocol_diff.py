@@ -10973,6 +10973,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 C 说明：接收机具有的功能。",
             "附录 D 描述：设备可以使用的校准方法。",
             "附录 E 说明：模块不得超过的限值。",
+            "附录 F 说明：接收机必须满足的 34.0 dB 要求。",
         ):
             with self.subTest(title=title):
                 extraction = ExtractionResult(
@@ -11366,6 +11367,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "附录 C 说明：接收机具有的功能。",
             "附录 D 描述：设备可以使用的校准方法。",
             "附录 E 说明：模块不得超过的限值。",
+            "附录 F 说明：接收机必须满足的 34.0 dB 要求。",
             "附录 A 说明 、 要求 和 示例",
             "附录 B 描述 、 定义 、 缩写",
             "附录 A 说明及适用要求范围。",

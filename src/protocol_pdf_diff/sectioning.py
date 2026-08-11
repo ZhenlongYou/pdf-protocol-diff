@@ -1286,11 +1286,18 @@ def _chinese_delimited_suffix_is_sentence(suffix: str) -> bool:
     if not re.search(r"[。！？.!?]\s*$", cleaned):
         return False
     clause = cleaned.rstrip("。！？.!? ")
-    if re.search(r"的[^的\s]{1,24}$", clause) and not re.search(r"\d", clause):
-        # A relative clause closed by a nominal head is still a title phrase:
-        # ``接收机必须满足的要求`` / ``设备可以使用的校准方法``.  A concrete
-        # measured statement keeps stronger sentence evidence.
-        return False
+    nominal_head = re.search(r"的\s*.{1,24}$", clause)
+    if nominal_head is not None:
+        first_measurement = re.search(r"\d", clause)
+        measurement_precedes_head = bool(
+            first_measurement is not None and first_measurement.start() < nominal_head.start()
+        )
+        if not measurement_precedes_head:
+            # A relative clause closed by a nominal head is still a title phrase:
+            # ``接收机必须满足的要求`` / ``设备可以使用的校准方法``.  A
+            # concrete measurement before ``的`` gives the independent clause
+            # stronger evidence; a value inside the nominal head does not.
+            return False
     return bool(
         re.fullmatch(
             r"(?=.{4,160}$).{2,80}?"
