@@ -7814,6 +7814,65 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, change_types.count("added"))
         self.assertEqual(1, change_types.count("deleted"))
 
+    def test_equivalent_count_and_identifier_case_change_remain_one_section(self) -> None:
+        """A real technical-token edit must not expose an equivalent count spelling."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-mixed-count-id.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Queue Processing\n"
+                            "Capture one million packets.\n"
+                            "Profile CMIS-LT is selected.\n"
+                            "The limit is 20 mV."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-mixed-count-id.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Queue Processing\n"
+                            "Capture 1,000,000 packets.\n"
+                            "Profile cmis-lt is selected.\n"
+                            "The limit is 21 mV."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            html = outputs["html"].read_text(encoding="utf-8")
+            markdown = outputs["markdown"].read_text(encoding="utf-8")
+            text_report = outputs["text"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            csv_text = outputs["csv"].read_text(encoding="utf-8-sig")
+        for reader in (markdown, text_report):
+            self.assertIn("CMIS-LT", reader)
+            self.assertIn("cmis-lt", reader)
+            self.assertIn("20 mV", reader)
+            self.assertIn("21 mV", reader)
+            self.assertNotIn("one million packets", reader)
+            self.assertNotIn("1,000,000 packets", reader)
+        for visible_token in ("CMIS-LT", "cmis-lt", "20", "21", "mV"):
+            self.assertIn(visible_token, html)
+        self.assertNotIn("one million packets", html)
+        self.assertNotIn("1,000,000 packets", html)
+        self.assertEqual(1, len(payload["changes"]))
+        self.assertIn("CMIS-LT", csv_text)
+        self.assertIn("cmis-lt", csv_text)
+
     def test_exact_section_allows_an_ordered_sentence_addition(self) -> None:
         """A preserved original sentence plus one new fact is one modified section."""
 

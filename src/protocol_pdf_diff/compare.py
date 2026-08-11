@@ -2958,10 +2958,10 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     if len(left_units) == 1:
         return raw_score  # 单片段同号同题仍按原始相似度配对，差异会完整显示为 modified。
     if any(
-        _review_similarity(old_unit, new_unit) < 0.90
+        not _review_units_share_sentence_skeleton(old_unit, new_unit)
         for old_unit, new_unit in zip(left_units, right_units)
     ):
-        return None  # 逐片段门禁是硬条件；整体相似度不能让通用句替互异正文自证。
+        return None  # 逐片段必须共享可证明的句子骨架；整体分数不能让通用句替互异正文自证。
     return max(raw_score, _review_similarity(left_sample, right_sample))
 
 
@@ -2988,6 +2988,21 @@ def _review_similarity(left: str, right: str) -> float:
     if not left_norm or not right_norm:
         return 0.0
     return difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
+
+
+def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
+    """Require local lexical continuity without treating a technical edit as disjoint prose."""
+
+    if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
+        return True  # 短数值、状态词或大小写技术标识符变化仍是同一句。
+    left_words = _meaningful_review_words(left)
+    right_words = _meaningful_review_words(right)
+    if not left_words or not right_words:
+        return False
+    shared_words = left_words & right_words
+    return len(shared_words) >= 2 and len(shared_words) / min(
+        len(left_words), len(right_words)
+    ) >= 0.60  # 要求大部分实质词不变，拒绝只共享 defines/requirements 类套话的互异正文。
 
 
 def _similarity(left: str, right: str) -> float:
