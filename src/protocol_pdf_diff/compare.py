@@ -3232,8 +3232,11 @@ def _summarize_text_delta(
             priority_values=(leading_replacement.old, leading_replacement.new),
         )
 
-    reordered_pair = _reordered_common_units_pair(old_units, new_units)
-    if reordered_pair is not None:
+    reordered_evidence = _reordered_common_units_evidence(old_units, new_units)
+    reordered_old_indexes: set[int] = set()
+    reordered_new_indexes: set[int] = set()
+    if reordered_evidence is not None:
+        reordered_pair, reordered_old_indexes, reordered_new_indexes = reordered_evidence
         add_candidate(
             "replaced",
             pair=reordered_pair,
@@ -3245,7 +3248,11 @@ def _summarize_text_delta(
             continue
         if tag == "insert":
             for _index, text, source_units in _coherent_delta_unit_groups(
-                list(enumerate(new_units[new_start:new_end], start=new_start))
+                [
+                    (index, new_units[index])
+                    for index in range(new_start, new_end)
+                    if index not in reordered_new_indexes
+                ]
             ):
                 add_candidate(
                     "added",
@@ -3254,7 +3261,11 @@ def _summarize_text_delta(
                 )
         elif tag == "delete":
             for _index, text, source_units in _coherent_delta_unit_groups(
-                list(enumerate(old_units[old_start:old_end], start=old_start))
+                [
+                    (index, old_units[index])
+                    for index in range(old_start, old_end)
+                    if index not in reordered_old_indexes
+                ]
             ):
                 add_candidate(
                     "removed",
@@ -3262,8 +3273,16 @@ def _summarize_text_delta(
                     priority_values=source_units,
                 )
         elif tag == "replace":
-            old_block_units = old_units[old_start:old_end]
-            new_block_units = new_units[new_start:new_end]
+            old_block_units = [
+                old_units[index]
+                for index in range(old_start, old_end)
+                if index not in reordered_old_indexes
+            ]
+            new_block_units = [
+                new_units[index]
+                for index in range(new_start, new_end)
+                if index not in reordered_new_indexes
+            ]
             for candidate in _unequal_replace_delta_candidates(
                 old_block_units,
                 new_block_units,
@@ -3278,43 +3297,66 @@ def _summarize_text_delta(
     return _materialize_delta_candidates(candidates, max_snippets)
 
 
-def _reordered_common_units_pair(
+def _reordered_common_units_evidence(
     old_units: list[str],
     new_units: list[str],
-) -> SnippetPair | None:
-    """Return explicit evidence when unique unchanged units changed order."""
+) -> tuple[SnippetPair, set[int], set[int]] | None:
+    """Return compact order evidence and the exact occurrences it covers."""
 
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
     old_counts = Counter(key for key in old_keys if key)
     new_counts = Counter(key for key in new_keys if key)
-    unique_common = {
-        key
-        for key, count in old_counts.items()
-        if count == 1 and new_counts.get(key) == 1
-    }
-    old_order = [key for key in old_keys if key in unique_common]
-    new_order = [key for key in new_keys if key in unique_common]
+    common_counts = old_counts & new_counts
+
+    def occurrence_order(
+        keys: list[str],
+    ) -> tuple[list[tuple[str, int]], dict[tuple[str, int], int]]:
+        seen: Counter[str] = Counter()
+        order: list[tuple[str, int]] = []
+        indexes: dict[tuple[str, int], int] = {}
+        for index, key in enumerate(keys):
+            if not key or key not in common_counts:
+                continue
+            seen[key] += 1
+            if seen[key] > common_counts[key]:
+                continue
+            token = (key, seen[key])
+            order.append(token)
+            indexes[token] = index
+        return order, indexes
+
+    old_order, old_indexes = occurrence_order(old_keys)
+    new_order, new_indexes = occurrence_order(new_keys)
     if len(old_order) < 2 or old_order == new_order:
         return None
-    old_positions = {key: index for index, key in enumerate(old_order)}
-    inversion: tuple[str, str] | None = None
-    for new_index, first_key in enumerate(new_order):
-        for second_key in new_order[new_index + 1 :]:
-            if old_positions[first_key] > old_positions[second_key]:
-                inversion = (second_key, first_key)  # 旧顺序为 second→first，新顺序相反。
+    old_positions = {token: index for index, token in enumerate(old_order)}
+    inversion: tuple[tuple[str, int], tuple[str, int]] | None = None
+    for new_index, first_token in enumerate(new_order):
+        for second_token in new_order[new_index + 1 :]:
+            if old_positions[first_token] > old_positions[second_token]:
+                inversion = (second_token, first_token)  # 旧顺序为 second→first，新顺序相反。
                 break
         if inversion is not None:
             break
     if inversion is None:
         return None
-    old_by_key = {key: unit for key, unit in zip(old_keys, old_units) if key in unique_common}
-    new_by_key = {key: unit for key, unit in zip(new_keys, new_units) if key in unique_common}
-    old_pair_order = list(inversion)
-    new_pair_order = list(reversed(inversion))
-    return SnippetPair(
-        old="\n".join(_report_unit(old_by_key[key]) for key in old_pair_order),
-        new="\n".join(_report_unit(new_by_key[key]) for key in new_pair_order),
+    involved_keys = {token[0] for token in inversion}
+    covered_old_indexes = {
+        index for token, index in old_indexes.items() if token[0] in involved_keys
+    }
+    covered_new_indexes = {
+        index for token, index in new_indexes.items() if token[0] in involved_keys
+    }
+    return (
+        SnippetPair(
+            old="\n".join(_report_unit(old_units[old_indexes[token]]) for token in inversion),
+            new="\n".join(
+                _report_unit(new_units[new_indexes[token]]) for token in reversed(inversion)
+            ),
+        ),
+        covered_old_indexes,
+        covered_new_indexes,
     )
 
 

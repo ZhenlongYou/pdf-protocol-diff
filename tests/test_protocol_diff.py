@@ -7950,6 +7950,8 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(1, len(result.changes))
         self.assertEqual("modified", result.changes[0].change_type)
+        self.assertFalse(result.changes[0].added_snippets)
+        self.assertFalse(result.changes[0].removed_snippets)
         self.assertTrue(
             any(
                 "PAM4" in pair.old
@@ -7959,6 +7961,54 @@ class ProtocolDiffTests(unittest.TestCase):
                 for pair in result.changes[0].replaced_snippets
             )
         )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            readers = [
+                outputs["html"].read_text(encoding="utf-8"),
+                outputs["markdown"].read_text(encoding="utf-8"),
+                outputs["text"].read_text(encoding="utf-8"),
+            ]
+        for reader in readers:
+            self.assertIn("PAM4", reader)
+            self.assertIn("NRZ", reader)
+
+    def test_reordered_repeated_technical_blocks_remain_visible_once(self) -> None:
+        """Repeated A,A,B,B blocks still provide one compact order-change fact."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-repeated-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nPAM4 mode applies.\nPAM4 mode applies.\n"
+                            "NRZ mode applies.\nNRZ mode applies."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-repeated-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nNRZ mode applies\nNRZ mode applies\n"
+                            "PAM4 mode applies\nPAM4 mode applies"
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(1, len(change.replaced_snippets))
+        self.assertFalse(change.added_snippets)
+        self.assertFalse(change.removed_snippets)
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, DiffOptions())
             readers = [
