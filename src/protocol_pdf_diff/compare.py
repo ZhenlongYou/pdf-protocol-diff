@@ -3004,6 +3004,11 @@ def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
 
     if _review_unit_key(left) == _review_unit_key(right):
         return True
+    if (
+        _standalone_table_reference_number(left)
+        and _standalone_table_reference_number(right)
+    ):
+        return True  # 完整表引用是通用结构定位语法，编号变化不应拆散同一章节。
     if _unit_has_unproven_label_syntax(left) or _unit_has_unproven_label_syntax(right):
         return False  # 无 schema provenance 时，冒号标签不猜测字段身份。
     if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
@@ -3199,10 +3204,6 @@ def _summarize_text_delta(
         new_text,
         suppressed_table_unit_keys=suppressed_new_table_unit_keys or set(),
     )  # 表格证据按版本分别承载，不能用另一侧字符串集合过滤本侧正文。
-    old_keys = [_review_unit_key(unit) for unit in old_units]
-    new_keys = [_review_unit_key(unit) for unit in new_units]
-    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
-
     candidates: list[_DeltaCandidate] = []
     candidate_order = 0
 
@@ -3242,56 +3243,24 @@ def _summarize_text_delta(
             priority_values=(reordered_pair.old, reordered_pair.new),
         )  # 句子搬移是可见语义变化，不能让 SequenceMatcher 只剩标点噪声。
 
-    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        if tag == "insert":
-            for _index, text, source_units in _coherent_delta_unit_groups(
-                [
-                    (index, new_units[index])
-                    for index in range(new_start, new_end)
-                    if index not in reordered_new_indexes
-                ]
-            ):
-                add_candidate(
-                    "added",
-                    text=text,
-                    priority_values=source_units,
-                )
-        elif tag == "delete":
-            for _index, text, source_units in _coherent_delta_unit_groups(
-                [
-                    (index, old_units[index])
-                    for index in range(old_start, old_end)
-                    if index not in reordered_old_indexes
-                ]
-            ):
-                add_candidate(
-                    "removed",
-                    text=text,
-                    priority_values=source_units,
-                )
-        elif tag == "replace":
-            old_block_units = [
-                old_units[index]
-                for index in range(old_start, old_end)
-                if index not in reordered_old_indexes
-            ]
-            new_block_units = [
-                new_units[index]
-                for index in range(new_start, new_end)
-                if index not in reordered_new_indexes
-            ]
-            for candidate in _unequal_replace_delta_candidates(
-                old_block_units,
-                new_block_units,
-            ):
-                add_candidate(
-                    candidate.kind,
-                    text=candidate.text,
-                    pair=candidate.pair,
-                    priority_values=candidate.priority_values,
-                )  # 等长和不等长块统一经过语义锚点与最低分门槛，禁止按位置强配。
+    residual_old_indexes = [
+        index for index in range(len(old_units)) if index not in reordered_old_indexes
+    ]
+    residual_new_indexes = [
+        index for index in range(len(new_units)) if index not in reordered_new_indexes
+    ]
+    for candidate in _unequal_replace_delta_candidates(
+        [old_units[index] for index in residual_old_indexes],
+        [new_units[index] for index in residual_new_indexes],
+        old_source_indexes=residual_old_indexes,
+        new_source_indexes=residual_new_indexes,
+    ):
+        add_candidate(
+            candidate.kind,
+            text=candidate.text,
+            pair=candidate.pair,
+            priority_values=candidate.priority_values,
+        )  # 残余单元全局安全配对，移动后的同字段修改不受局部 opcode 边界割裂。
 
     return _materialize_delta_candidates(candidates, max_snippets)
 
@@ -3310,45 +3279,20 @@ def _common_unit_occurrence_evidence(
     if not common_counts:
         return None, set(), set()
 
-    old_length = len(old_keys)
-    new_length = len(new_keys)
-    lcs_lengths = [
-        [0] * (new_length + 1)
-        for _old_index in range(old_length + 1)
-    ]
-    for old_index in range(old_length - 1, -1, -1):
-        for new_index in range(new_length - 1, -1, -1):
-            if old_keys[old_index] and old_keys[old_index] == new_keys[new_index]:
-                lcs_lengths[old_index][new_index] = (
-                    1 + lcs_lengths[old_index + 1][new_index + 1]
-                )
-            else:
-                lcs_lengths[old_index][new_index] = max(
-                    lcs_lengths[old_index + 1][new_index],
-                    lcs_lengths[old_index][new_index + 1],
-                )
-
     matched_old_indexes: set[int] = set()
     matched_new_indexes: set[int] = set()
     matched_counts: Counter[str] = Counter()
-    old_index = 0
-    new_index = 0
-    while old_index < old_length and new_index < new_length:
-        if (
-            old_keys[old_index]
-            and old_keys[old_index] == new_keys[new_index]
-            and lcs_lengths[old_index][new_index]
-            == 1 + lcs_lengths[old_index + 1][new_index + 1]
-        ):
+    matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
+    for match in matcher.get_matching_blocks():
+        for offset in range(match.size):
+            old_index = match.a + offset
+            new_index = match.b + offset
+            key = old_keys[old_index]
+            if not key:
+                continue
             matched_old_indexes.add(old_index)
             matched_new_indexes.add(new_index)
-            matched_counts[old_keys[old_index]] += 1
-            old_index += 1
-            new_index += 1
-        elif lcs_lengths[old_index + 1][new_index] >= lcs_lengths[old_index][new_index + 1]:
-            old_index += 1
-        else:
-            new_index += 1
+            matched_counts[key] += 1
 
     moved_counts = common_counts - matched_counts
 
@@ -3369,17 +3313,46 @@ def _common_unit_occurrence_evidence(
     moved_new_indexes = select_moved_indexes(new_keys, matched_new_indexes)
     common_old_indexes = matched_old_indexes | moved_old_indexes
     common_new_indexes = matched_new_indexes | moved_new_indexes
-    common_old_order = [old_keys[index] for index in sorted(common_old_indexes)]
-    common_new_order = [new_keys[index] for index in sorted(common_new_indexes)]
+    ordered_old_indexes = sorted(common_old_indexes)
+    ordered_new_indexes = sorted(common_new_indexes)
+    common_old_order = [old_keys[index] for index in ordered_old_indexes]
+    common_new_order = [new_keys[index] for index in ordered_new_indexes]
     if common_old_order == common_new_order:
         return None, common_old_indexes, common_new_indexes
+    first_difference = next(
+        index
+        for index, (old_key, new_key) in enumerate(
+            zip(common_old_order, common_new_order)
+        )
+        if old_key != new_key
+    )
+    old_first_key = common_old_order[first_difference]
+    new_first_key = common_new_order[first_difference]
+    old_second_position = next(
+        index
+        for index in range(first_difference + 1, len(common_old_order))
+        if common_old_order[index] == new_first_key
+    )
+    new_second_position = next(
+        index
+        for index in range(first_difference + 1, len(common_new_order))
+        if common_new_order[index] == old_first_key
+    )
+    evidence_old_indexes = (
+        ordered_old_indexes[first_difference],
+        ordered_old_indexes[old_second_position],
+    )
+    evidence_new_indexes = (
+        ordered_new_indexes[first_difference],
+        ordered_new_indexes[new_second_position],
+    )
     return (
         SnippetPair(
             old="\n".join(
-                _report_unit(old_units[index]) for index in sorted(common_old_indexes)
+                _report_unit(old_units[index]) for index in evidence_old_indexes
             ),
             new="\n".join(
-                _report_unit(new_units[index]) for index in sorted(common_new_indexes)
+                _report_unit(new_units[index]) for index in evidence_new_indexes
             ),
         ),
         common_old_indexes,
@@ -4426,6 +4399,9 @@ _REVIEW_STOP_WORDS = frozenset(
 def _unequal_replace_delta_candidates(
     old_units: list[str],
     new_units: list[str],
+    *,
+    old_source_indexes: list[int] | None = None,
+    new_source_indexes: list[int] | None = None,
 ) -> list[_PendingDeltaCandidate]:
     """Pair similar units inside an unequal replace block without misalignment.
 
@@ -4437,6 +4413,11 @@ def _unequal_replace_delta_candidates(
     unpaired unit is reported as an addition or deletion instead of a misleading
     side-by-side replacement.
     """
+
+    old_source_indexes = old_source_indexes or list(range(len(old_units)))
+    new_source_indexes = new_source_indexes or list(range(len(new_units)))
+    if len(old_source_indexes) != len(old_units) or len(new_source_indexes) != len(new_units):
+        raise ValueError("source index count must match residual unit count")
 
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
@@ -4486,7 +4467,7 @@ def _unequal_replace_delta_candidates(
             continue
         events.append(
             (
-                min(old_index, new_index),
+                min(old_source_indexes[old_index], new_source_indexes[new_index]),
                 0,
                 event_sequence,
                 _PendingDeltaCandidate(
@@ -4500,7 +4481,7 @@ def _unequal_replace_delta_candidates(
 
     for old_index, text, source_units in _coherent_delta_unit_groups(
         [
-            (old_index, old_unit)
+            (old_source_indexes[old_index], old_unit)
             for old_index, old_unit in enumerate(old_units)
             if old_index not in matched_old
         ]
@@ -4520,7 +4501,7 @@ def _unequal_replace_delta_candidates(
         event_sequence += 1
     for new_index, text, source_units in _coherent_delta_unit_groups(
         [
-            (new_index, new_unit)
+            (new_source_indexes[new_index], new_unit)
             for new_index, new_unit in enumerate(new_units)
             if new_index not in matched_new
         ]

@@ -8095,9 +8095,11 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertFalse(change.removed_snippets)
         self.assertFalse(change.audit_added_snippets)
         self.assertFalse(change.audit_removed_snippets)
-        for token in ("Alpha", "Bravo", "Charlie"):
+        for token in ("Alpha", "Bravo"):
             self.assertIn(token, change.replaced_snippets[0].old)
             self.assertIn(token, change.replaced_snippets[0].new)
+        self.assertNotIn("Charlie", change.replaced_snippets[0].old)
+        self.assertNotIn("Charlie", change.replaced_snippets[0].new)
 
     def test_reordering_with_an_extra_duplicate_reports_both_facts(self) -> None:
         """Multiset excess is reported separately from the common units' reordering."""
@@ -8134,6 +8136,43 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(["PAM4 mode applies."], change.added_snippets)
         self.assertFalse(change.removed_snippets)
         self.assertEqual(["PAM4 mode applies."], change.audit_added_snippets)
+
+    def test_moved_assignment_edit_pairs_across_common_unit(self) -> None:
+        """A moved stable field remains one replacement plus the true extra sentence."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-moved-assignment.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Modes\nMode = PAM4.\nCapture path remains stable.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-moved-assignment.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Modes\nCapture path remains stable.\nMode = NRZ.\n"
+                            "The limit is 20 mV."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(1, len(change.replaced_snippets))
+        self.assertIn("PAM4", change.replaced_snippets[0].old)
+        self.assertIn("NRZ", change.replaced_snippets[0].new)
+        self.assertEqual(["The limit is 20 mV."], change.added_snippets)
+        self.assertFalse(change.removed_snippets)
 
     def test_local_swap_with_peripheral_duplicates_has_no_false_add_delete(self) -> None:
         """All common occurrences are removed from opcode noise after a local swap."""
@@ -8175,6 +8214,26 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertFalse(change.audit_added_snippets)
         self.assertFalse(change.audit_removed_snippets)
         self.assertEqual(0, change.omitted_snippet_count)
+
+    def test_large_local_reorder_keeps_evidence_bounded(self) -> None:
+        """One local swap must not copy a whole large section into one snippet."""
+
+        old_units = [f"Technical mode {index} remains stable." for index in range(500)]
+        new_units = list(old_units)
+        new_units[249], new_units[250] = new_units[250], new_units[249]
+
+        pair, covered_old, covered_new = compare_module._common_unit_occurrence_evidence(
+            old_units,
+            new_units,
+        )
+
+        self.assertIsNotNone(pair)
+        assert pair is not None
+        self.assertEqual(500, len(covered_old))
+        self.assertEqual(500, len(covered_new))
+        self.assertEqual(1, pair.old.count("\n"))
+        self.assertEqual(1, pair.new.count("\n"))
+        self.assertLess(len(pair.old) + len(pair.new), 500)
 
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
