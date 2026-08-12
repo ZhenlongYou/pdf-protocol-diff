@@ -9612,6 +9612,18 @@ class ProtocolDiffTests(unittest.TestCase):
                 for index, value in enumerate(values)
             )
 
+        def distracting_wide() -> str:
+            values = [
+                "SAME_WIDE_ID",
+                "DISTANT_ALT_2",
+                *(f"SAME_{index}" for index in range(3, 33)),
+                "MODE_OTHER",
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
         anchors = [
             f"表格行: T1 | Parameter={name} | Limit=Maximum | Value={index} V"
             for index, name in enumerate(("A", "B", "C", "D", "E"), start=1)
@@ -9632,9 +9644,11 @@ class ProtocolDiffTests(unittest.TestCase):
         pam4 = wide("MODE_PAM4")
         nrz = wide("MODE_NRZ")
         narrow = "表格行: T1 | Column 1=SAME_WIDE_ID | Column 2=UNRELATED_NARROW"
+        mixed = distracting_wide() + " | Units=dB"
+        distractor = distracting_wide()
         changes = reporting_module._table_row_changes(
-            (table([narrow, pam4, *anchors, nrz]),),
-            (table([narrow, nrz, *anchors, pam4]),),
+            (table([narrow, mixed, pam4, distractor, *anchors, nrz]),),
+            (table([narrow, mixed, nrz, distractor, *anchors, pam4]),),
         )
         order_change = next(row for row in changes if row.change_type == "顺序变化")
         evidence = f"{order_change.old_value}\n{order_change.new_value}"

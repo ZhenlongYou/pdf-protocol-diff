@@ -3574,28 +3574,31 @@ def _table_row_changes(
     return changes
 
 
+def _is_overwide_generic_table_row(row: str) -> bool:
+    """Return whether one raw row exceeds the safe pure-Column proof budget."""
+
+    field_labels = [
+        compact_inline(match.group(1)).casefold()
+        for match in re.finditer(
+            r"(?:^|\|)\s*([^=|]+?)\s*=",
+            row,
+            flags=re.I,
+        )
+    ]
+    return (
+        len(field_labels) > 32
+        and all(re.fullmatch(r"column\s+\d+", label) for label in field_labels)
+    )
+
+
 def _partition_overwide_generic_rows(
     old_rows: list[str],
     new_rows: list[str],
 ) -> tuple[list[TableRowChange], list[str], list[str]]:
     """Fail visible only the pure neutral rows that exceed the width budget."""
 
-    def overwide(row: str) -> bool:
-        field_labels = [
-            compact_inline(match.group(1)).casefold()
-            for match in re.finditer(
-                r"(?:^|\|)\s*([^=|]+?)\s*=",
-                row,
-                flags=re.I,
-            )
-        ]
-        return (
-            len(field_labels) > 32
-            and all(re.fullmatch(r"column\s+\d+", label) for label in field_labels)
-        )
-
-    old_is_wide = [overwide(row) for row in old_rows]
-    new_is_wide = [overwide(row) for row in new_rows]
+    old_is_wide = [_is_overwide_generic_table_row(row) for row in old_rows]
+    new_is_wide = [_is_overwide_generic_table_row(row) for row in new_rows]
     if not any(old_is_wide) and not any(new_is_wide):
         return [], old_rows, new_rows
     old_explicit = [
@@ -3860,33 +3863,35 @@ def _first_table_order_difference_indexes(
 ) -> tuple[int, int]:
     """Return raw old/new row offsets around the first order divergence."""
 
-    new_wide_positions: dict[tuple[str, str], list[tuple[int, int]]] = {}
-    for token_offset, (token, row_index) in enumerate(
-        zip(new_tokens, new_row_indexes, strict=True)
-    ):
-        if token[0] == "wide":
-            new_wide_positions.setdefault(token, []).append((token_offset, row_index))
-    old_wide_occurrences: Counter[tuple[str, str]] = Counter()
-    for old_offset, (token, old_row_index) in enumerate(
-        zip(old_tokens, old_row_indexes, strict=True)
-    ):
-        if token[0] != "wide":
-            continue
-        occurrence = old_wide_occurrences[token]
-        old_wide_occurrences[token] += 1
-        candidates = new_wide_positions.get(token, [])
-        if occurrence >= len(candidates):
-            continue
-        new_offset, new_row_index = candidates[occurrence]
-        if old_offset != new_offset:
-            return old_row_index, new_row_index
-    # 宽行顺序证据必须聚焦实际改变 run boundary 的宽行 occurrence；排序后的
-    # Parameter 首差异可能离边界很远，不能再拿其 raw index 截断审计窗口。
+    def nearest_wide_row_index(
+        tokens: list[tuple[str, str]],
+        row_indexes: list[int],
+        offset: int,
+    ) -> int | None:
+        for candidate in range(offset, len(tokens)):
+            if tokens[candidate][0] == "wide":
+                return row_indexes[candidate]
+        for candidate in range(offset - 1, -1, -1):
+            if tokens[candidate][0] == "wide":
+                return row_indexes[candidate]
+        return None
 
     for index, (old_token, new_token) in enumerate(
         zip(old_tokens, new_tokens, strict=False)
     ):
         if old_token != new_token:
+            old_wide_index = nearest_wide_row_index(
+                old_tokens,
+                old_row_indexes,
+                index,
+            )
+            new_wide_index = nearest_wide_row_index(
+                new_tokens,
+                new_row_indexes,
+                index,
+            )
+            if old_wide_index is not None and new_wide_index is not None:
+                return old_wide_index, new_wide_index
             return old_row_indexes[index], new_row_indexes[index]
     old_offset = min(len(old_tokens), len(old_row_indexes) - 1)
     new_offset = min(len(new_tokens), len(new_row_indexes) - 1)
@@ -3930,12 +3935,6 @@ def _paired_table_order_previews(
             )
         ]
 
-    def is_overwide_generic(fields: list[tuple[str, str]]) -> bool:
-        return len(fields) > 32 and all(
-            re.fullmatch(r"(?i)column\s+\d+", field)
-            for field, _value in fields
-        )
-
     old_start = max(0, min(old_focus_index - 1, max(0, len(old_rows) - 4)))
     new_start = max(0, min(new_focus_index - 1, max(0, len(new_rows) - 4)))
     old_window = old_rows[old_start : old_start + 4]
@@ -3975,36 +3974,62 @@ def _paired_table_order_previews(
         focus_first_field = old_focus_fields[0]
         peer_fields = [
             fields
-            for fields in [*old_all_fields, *new_all_fields]
-            if is_overwide_generic(fields)
+            for row, fields in [
+                *zip(old_rows, old_all_fields, strict=True),
+                *zip(new_rows, new_all_fields, strict=True),
+            ]
+            if _is_overwide_generic_table_row(row)
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
+        remaining_peers = list(peer_fields)
         for field_index in range(1, maximum_field_count):
             old_field = (
                 old_focus_fields[field_index]
                 if field_index < len(old_focus_fields)
                 else ("", "")
             )
-            if any(
-                (fields[field_index] if field_index < len(fields) else ("", ""))
+            different_peers = [
+                fields
+                for fields in remaining_peers
+                if (
+                    fields[field_index]
+                    if field_index < len(fields)
+                    else ("", "")
+                )
                 != old_field
-                for fields in peer_fields
-            ):
+            ]
+            if different_peers:
                 selected_indexes.append(field_index)
-                distinguishing_peer_fields = next(
-                    fields
-                    for fields in peer_fields
-                    if (
-                        fields[field_index]
-                        if field_index < len(fields)
-                        else ("", "")
-                    )
-                    != old_field
+            matching_peers = [
+                fields
+                for fields in remaining_peers
+                if (
+                    fields[field_index]
+                    if field_index < len(fields)
+                    else ("", "")
+                )
+                == old_field
+            ]
+            if not matching_peers and different_peers:
+                distinguishing_peer_fields = max(
+                    different_peers,
+                    key=lambda fields: next(
+                        (
+                            index
+                            for index, (focus_field, peer_field) in enumerate(
+                                zip(old_focus_fields, fields, strict=False)
+                            )
+                            if focus_field != peer_field
+                        ),
+                        max(len(old_focus_fields), len(fields)),
+                    ),
                 )
                 break
+            remaining_peers = matching_peers
         # 同一条wide row跨边界时其两侧内容相同；若窗口内还有首字段相同的
-        # wide peer，追加首个能区分两行的字段，避免顺序卡退化为重复Column 1。
+        # wide peer，逐列追加直到focus signature可与全部peer区分；不能让较早
+        # 不同的第三条wide掩盖真正共享更长前缀的竞争peer。
     selected_indexes = list(dict.fromkeys(selected_indexes))
 
     def preview(
