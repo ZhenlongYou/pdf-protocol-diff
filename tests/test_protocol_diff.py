@@ -8750,6 +8750,54 @@ class ProtocolDiffTests(unittest.TestCase):
                     )
                 )
 
+    def test_bounded_matching_rejects_unique_value_label_as_record_identity(self) -> None:
+        """A changing unique profile value cannot compete with stable Lane identities."""
+
+        count = 33
+        old_units = [
+            f"Version 1 Lane {index} uses profile {1000 + index} for receiver calibration."
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[16:] + list(range(count))[:16]
+        new_units = [
+            f"Version 1 Lane {index} uses profile {1001 + index} for receiver calibration."
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-profile-lanes.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Lane Profiles\n" + "\n".join(old_units),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-profile-lanes.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Lane Profiles\n" + "\n".join(new_units),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=count),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual(count, len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                re.search(r"Lane (\d+)", pair.old).group(1)
+                == re.search(r"Lane (\d+)", pair.new).group(1)
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 

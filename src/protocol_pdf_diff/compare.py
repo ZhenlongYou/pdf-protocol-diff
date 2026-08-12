@@ -3141,12 +3141,11 @@ def _review_unit_skeleton_match_count(
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_review_candidate_tokens(unit) for unit in longer]
+    stable_identity_labels = _stable_discriminative_identity_labels(shorter, longer)
     longer_identities = {
-        index: _review_identity_tokens(unit) for index, unit in enumerate(longer)
+        index: _stable_record_identity(unit, stable_identity_labels)
+        for index, unit in enumerate(longer)
     }
-    longer_identity_counts = Counter(
-        identity for identities in longer_identities.values() for identity in identities
-    )
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3198,13 +3197,14 @@ def _review_unit_skeleton_match_count(
                 )
             )
         ]
-        short_identities = _review_identity_tokens(short_unit)
-        identity_matched_indexes = _most_discriminative_identity_indexes(
-            short_identities,
-            longer_identities,
-            longer_identity_counts,
-            indexes,
+        short_identities = _stable_record_identity(
+            short_unit, stable_identity_labels
         )
+        identity_matched_indexes = [
+            index
+            for index in indexes
+            if short_identities and short_identities == longer_identities[index]
+        ]
         if identity_matched_indexes:
             indexes = identity_matched_indexes
         indexes.sort(
@@ -4653,14 +4653,14 @@ def _unequal_replace_delta_candidates(
     new_words_by_index = {
         index: _review_candidate_tokens(new_units[index]) for index in unmatched_new
     }
-    new_identities_by_index = {
-        index: _review_identity_tokens(new_units[index]) for index in unmatched_new
-    }
-    new_identity_counts = Counter(
-        identity
-        for identities in new_identities_by_index.values()
-        for identity in identities
+    stable_identity_labels = _stable_discriminative_identity_labels(
+        [old_units[index] for index in unmatched_old],
+        [new_units[index] for index in unmatched_new],
     )
+    new_identities_by_index = {
+        index: _stable_record_identity(new_units[index], stable_identity_labels)
+        for index in unmatched_new
+    }
     new_indexes_by_word: dict[str, list[int]] = {}
     if bounded_matching:
         for new_index, words in new_words_by_index.items():
@@ -4701,22 +4701,25 @@ def _unequal_replace_delta_candidates(
                     - _relative_position(index, len(new_units))
                 ),
             )[:32]
-        old_identities = _review_identity_tokens(old_unit)
-        identity_matched_indexes = _most_discriminative_identity_indexes(
-            old_identities,
-            new_identities_by_index,
-            new_identity_counts,
-            candidate_indexes,
-        )
+        old_identities = _stable_record_identity(old_unit, stable_identity_labels)
+        identity_matched_indexes = [
+            new_index
+            for new_index in candidate_indexes
+            if old_identities and old_identities == new_identities_by_index[new_index]
+        ]
         if identity_matched_indexes:
             candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
             same_structural_identity = bool(
-                old_identities & new_identities_by_index[new_index]
+                old_identities and old_identities == new_identities_by_index[new_index]
+            )
+            shared_candidate_identity = bool(
+                _review_identity_tokens(old_unit)
+                & _review_identity_tokens(new_unit)
             )
             if (
-                same_structural_identity
+                shared_candidate_identity
                 and not (
                     _review_units_share_sentence_skeleton(old_unit, new_unit)
                     or _review_units_share_numbered_record_skeleton(
@@ -5007,32 +5010,45 @@ def _review_identity_tokens(value: str) -> set[str]:
     return identities
 
 
-def _most_discriminative_identity_indexes(
-    source_identities: set[str],
-    target_identities_by_index: dict[int, set[str]],
-    target_identity_counts: Counter[str],
-    candidate_indexes: list[int],
-) -> list[int]:
-    """Prefer the rarest shared record identity without making it semantic proof."""
+def _identity_label_and_number(token: str) -> tuple[str, str]:
+    """Split one contextual numeric token into its label and normalized value."""
 
-    shared_identities = {
-        identity
-        for identity in source_identities
-        if target_identity_counts.get(identity, 0) > 0
+    _kind, label, number = token.rsplit(":", 2)
+    return label, number
+
+
+def _stable_discriminative_identity_labels(
+    left_units: list[str],
+    right_units: list[str],
+) -> set[str]:
+    """Return labels whose complete observed value multiset is stable and useful."""
+
+    def values_by_label(units: list[str]) -> dict[str, Counter[str]]:
+        result: dict[str, Counter[str]] = {}
+        for unit in units:
+            for token in _review_identity_tokens(unit):
+                label, number = _identity_label_and_number(token)
+                result.setdefault(label, Counter())[number] += 1
+        return result
+
+    left_values = values_by_label(left_units)
+    right_values = values_by_label(right_units)
+    return {
+        label
+        for label, values in left_values.items()
+        if values == right_values.get(label)
+        and len(values) >= 2  # Version 1 等单一常量元数据没有记录判别力。
     }
-    if not shared_identities:
-        return []
-    rarest_count = min(target_identity_counts[identity] for identity in shared_identities)
-    discriminative = {
-        identity
-        for identity in shared_identities
-        if target_identity_counts[identity] == rarest_count
-    }
-    return [
-        index
-        for index in candidate_indexes
-        if discriminative & target_identities_by_index[index]
-    ]
+
+
+def _stable_record_identity(value: str, stable_labels: set[str]) -> frozenset[str]:
+    """Return the full stable label-number identity set for one record."""
+
+    return frozenset(
+        token
+        for token in _review_identity_tokens(value)
+        if _identity_label_and_number(token)[0] in stable_labels
+    )
 
 
 def _review_units_share_numbered_record_skeleton(left: str, right: str) -> bool:
