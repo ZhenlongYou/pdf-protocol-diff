@@ -5115,11 +5115,12 @@ def _english_numeric_label_has_record_shape(
         if _canonical_review_token(match.group(2)) != number:
             continue
         raw_label = match.group(1)
-        if re.search(r"[A-Z]", raw_label):
-            return True  # `Lane 2` / `Port 3` / `Version 1` 的字段形态独立于具体词表。
+        suffix = raw[match.end() :].lstrip()
+        if raw_label.casefold().endswith("s"):
+            continue  # `Reports 2 warnings` / `USES 3 lanes` 是普通计数谓语，不是字段。
         prefix = raw[: match.start()].strip()
         if not prefix:
-            return True  # 小写 `lane 2 ...` 位于记录开头时同样可作为结构候选。
+            return True  # 非计数形态的行首 `Lane 2 voltage...` 是记录头候选。
         while prefix:
             leading_field = re.match(
                 rf"(?i)^\s*[a-z][a-z0-9_-]*\s+{number_pattern}(?:\s+|$)",
@@ -5130,9 +5131,6 @@ def _english_numeric_label_has_record_shape(
             prefix = prefix[leading_field.end() :].strip()
         if not prefix:
             return True  # `rack 1 port 2 lane 3` 的连续字段头支持小写复合键。
-        suffix = raw[match.end() :].lstrip()
-        if not suffix or re.match(r"(?i)^(?:for|with|at|on|in|from|has|have|is|are)\b", suffix):
-            return True  # `profile 1000 for ...` 中数字已闭合字段；`uses 2 lanes` 仍是计数正文。
     return False
 
 
