@@ -4023,17 +4023,40 @@ def _paired_table_order_previews(
             focus_multiplicity = Counter(
                 field.casefold() for field, _value in old_focus_fields
             )
-            duplicate_peers = [
+            old_duplicate_peers = [
                 fields
-                for fields in peer_fields
-                if Counter(field.casefold() for field, _value in fields)
+                for row, fields in zip(old_rows, old_all_fields, strict=True)
+                if _is_overwide_generic_table_row(row)
+                and fields[0] == focus_first_field
+                and fields != old_focus_fields
+                and Counter(field.casefold() for field, _value in fields)
                 == focus_multiplicity
             ]
-            for fields in duplicate_peers:
-                remember_layout_conflict_peer(fields)
+            new_duplicate_peers = [
+                fields
+                for row, fields in zip(new_rows, new_all_fields, strict=True)
+                if _is_overwide_generic_table_row(row)
+                and fields[0] == focus_first_field
+                and fields != old_focus_fields
+                and Counter(field.casefold() for field, _value in fields)
+                == focus_multiplicity
+            ]
+            old_peer_counts = Counter(tuple(fields) for fields in old_duplicate_peers)
+            new_peer_counts = Counter(tuple(fields) for fields in new_duplicate_peers)
+            ordered_peer_keys = list(
+                dict.fromkeys([*old_peer_counts, *new_peer_counts])
+            )
+            layout_conflict_peer_groups.extend(
+                list(peer_key)
+                for peer_key in ordered_peer_keys
+                for _occurrence in range(
+                    max(old_peer_counts[peer_key], new_peer_counts[peer_key])
+                )
+            )
             # 重复Column标签本身已证明布局有歧义；同multiplicity的peer可能
             # 不止一条，不能按输入顺序任选一个代表，也不能跨peer按label
-            # 拍平成不存在的合成行。复核审计层按候选行保留字段关联。
+            # 拍平成不存在的合成行。复核审计层按候选行保留字段关联，并以
+            # 两侧最大occurrence数保留完全相同peer的真实重复次数。
         focus_labels = [field.casefold() for field, _value in old_focus_fields]
         if any(
             [field.casefold() for field, _value in fields] != focus_labels

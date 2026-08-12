@@ -10071,6 +10071,45 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("MODE_NRZ / MODE_DISABLED", order_change.new_value)
         self.assertNotIn("POLICY_HIGH / POLICY_AUTO", order_change.new_value)
 
+    def test_overwide_layout_review_keeps_identical_peer_occurrence_counts(self) -> None:
+        """Equal peer rows remain two candidates instead of one deduplicated row."""
+
+        def row(mode: str) -> str:
+            cells = [
+                (1, "SAME_ID"),
+                (2, "SHARED"),
+                (2, mode),
+                *((index, f"SAME_{index}") for index in range(3, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        focus = row("MODE_PAM4")
+        peer = row("MODE_NRZ")
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([focus, anchor, peer, peer]),),
+            (table([anchor, focus, peer, peer]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        self.assertIn("候选1：Column 2=SHARED / MODE_NRZ", order_change.new_value)
+        self.assertIn("候选2：Column 2=SHARED / MODE_NRZ", order_change.new_value)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 
