@@ -3664,7 +3664,7 @@ def _partition_overwide_generic_rows(
     remaining_new = excess_rows(new_wide, remaining_new_counts)
     old_order = order_tokens(old_rows, old_explicit)
     new_order = order_tokens(new_rows, new_explicit)
-    order_changed = _table_order_tokens_changed(old_order, new_order)
+    order_state = _table_order_token_state(old_order, new_order)
     changes: list[TableRowChange] = []
     changes.extend(
         (
@@ -3678,13 +3678,15 @@ def _partition_overwide_generic_rows(
             for row in remaining_new
         )
     )
-    if order_changed:
+    if order_state != "same":
         changes.append(
             TableRowChange(
                 item="表格行顺序",
                 old_value=_table_order_preview(old_rows),
                 new_value=_table_order_preview(new_rows),
-                change_type="顺序变化",
+                change_type=(
+                    "顺序变化" if order_state == "changed" else "需人工复核"
+                ),
             )
         )
     return (
@@ -3694,29 +3696,48 @@ def _partition_overwide_generic_rows(
     )
 
 
-def _table_order_tokens_changed(
+def _table_order_token_state(
     old_tokens: list[tuple[str, str]],
     new_tokens: list[tuple[str, str]],
-) -> bool:
-    """Return whether common table records changed relative order."""
+) -> str:
+    """Return ``same``, ``changed``, or ``review`` for common record order."""
 
-    common_count = sum((Counter(old_tokens) & Counter(new_tokens)).values())
+    old_counts = Counter(old_tokens)
+    new_counts = Counter(new_tokens)
+    common_count = sum((old_counts & new_counts).values())
     if common_count < 2 or old_tokens == new_tokens:
-        return False
+        return "same"
     if len(old_tokens) * len(new_tokens) > 4_000_000:
-        common_quota = Counter(old_tokens) & Counter(new_tokens)
+        if old_counts == new_counts:
+            return "changed"
 
-        def common_projection(tokens: list[tuple[str, str]]) -> list[tuple[str, str]]:
-            used: Counter[tuple[str, str]] = Counter()
-            projection: list[tuple[str, str]] = []
-            for token in tokens:
-                if used[token] < common_quota[token]:
-                    used[token] += 1
-                    projection.append(token)
-            return projection
+        def is_subsequence(
+            shorter: list[tuple[str, str]],
+            longer: list[tuple[str, str]],
+        ) -> bool:
+            position = 0
+            for token in longer:
+                if position < len(shorter) and token == shorter[position]:
+                    position += 1
+            return position == len(shorter)
 
-        return common_projection(old_tokens) != common_projection(new_tokens)
-        # 超预算时只比较共同 occurrence 的保序投影；两侧各自 excess 不得伪造成重排。
+        if old_counts <= new_counts:
+            return "same" if is_subsequence(old_tokens, new_tokens) else "changed"
+        if new_counts <= old_counts:
+            return "same" if is_subsequence(new_tokens, old_tokens) else "changed"
+        minimum_edits = (
+            sum((old_counts - new_counts).values())
+            + sum((new_counts - old_counts).values())
+        )
+        all_common_are_ordered = _delete_insert_distance_within_budget(
+            old_tokens,
+            new_tokens,
+            maximum_distance=minimum_edits,
+        )
+        if all_common_are_ordered is None:
+            return "review"
+        return "same" if all_common_are_ordered else "changed"
+        # 双侧均有excess时，以理论最小增删距离验证共同occurrence能否保序对齐；预算耗尽才复核。
     previous = [0] * (len(new_tokens) + 1)
     for old_token in old_tokens:
         current = [0] * (len(new_tokens) + 1)
@@ -3729,7 +3750,55 @@ def _table_order_tokens_changed(
                     current[new_offset - 1],
                 )
         previous = current
-    return previous[-1] < common_count
+    return "changed" if previous[-1] < common_count else "same"
+
+
+def _delete_insert_distance_within_budget(
+    old_tokens: list[tuple[str, str]],
+    new_tokens: list[tuple[str, str]],
+    *,
+    maximum_distance: int,
+) -> bool | None:
+    """Run a bounded Myers proof for delete/insert-only sequence equality."""
+
+    operation_budget = 4_000_000
+    operations = 0
+    frontier: dict[int, int] = {1: 0}
+    old_count = len(old_tokens)
+    new_count = len(new_tokens)
+    for distance in range(maximum_distance + 1):
+        next_frontier: dict[int, int] = {}
+        for diagonal in range(-distance, distance + 1, 2):
+            operations += 1
+            if operations > operation_budget:
+                return None
+            if (
+                diagonal == -distance
+                or (
+                    diagonal != distance
+                    and frontier.get(diagonal - 1, -1)
+                    < frontier.get(diagonal + 1, -1)
+                )
+            ):
+                old_offset = frontier.get(diagonal + 1, 0)
+            else:
+                old_offset = frontier.get(diagonal - 1, 0) + 1
+            new_offset = old_offset - diagonal
+            while (
+                old_offset < old_count
+                and new_offset < new_count
+                and old_tokens[old_offset] == new_tokens[new_offset]
+            ):
+                operations += 1
+                if operations > operation_budget:
+                    return None
+                old_offset += 1
+                new_offset += 1
+            next_frontier[diagonal] = old_offset
+            if old_offset >= old_count and new_offset >= new_count:
+                return True
+        frontier = next_frontier
+    return False
 
 
 def _table_order_preview(rows: list[str]) -> str:
