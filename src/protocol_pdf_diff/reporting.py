@@ -3627,18 +3627,21 @@ def _partition_overwide_generic_rows(
     def order_tokens(
         rows: list[str],
         explicit: list[str],
-    ) -> list[tuple[str, str]]:
+    ) -> tuple[list[tuple[str, str]], list[int]]:
         tokens: list[tuple[str, str]] = []
-        for row, explicit_identity in zip(
+        indexes: list[int] = []
+        for row_index, (row, explicit_identity) in enumerate(zip(
             rows,
             explicit,
             strict=True,
-        ):
+        )):
             if explicit_identity in shared_unique_explicit:
                 tokens.append(("explicit", explicit_identity))
+                indexes.append(row_index)
             elif row in shared_raw:
                 tokens.append(("raw", row))
-        return tokens
+                indexes.append(row_index)
+        return tokens, indexes
 
     old_wide = [
         row for row, is_wide in zip(old_rows, old_is_wide, strict=True) if is_wide
@@ -3662,8 +3665,8 @@ def _partition_overwide_generic_rows(
 
     remaining_old = excess_rows(old_wide, remaining_old_counts)
     remaining_new = excess_rows(new_wide, remaining_new_counts)
-    old_order = order_tokens(old_rows, old_explicit)
-    new_order = order_tokens(new_rows, new_explicit)
+    old_order, old_order_indexes = order_tokens(old_rows, old_explicit)
+    new_order, new_order_indexes = order_tokens(new_rows, new_explicit)
     order_state = _table_order_token_state(old_order, new_order)
     changes: list[TableRowChange] = []
     changes.extend(
@@ -3679,20 +3682,22 @@ def _partition_overwide_generic_rows(
         )
     )
     if order_state != "same":
-        order_difference_index = _first_table_order_difference_index(
+        old_focus_index, new_focus_index = _first_table_order_difference_indexes(
             old_order,
             new_order,
+            old_order_indexes,
+            new_order_indexes,
         )
         changes.append(
             TableRowChange(
                 item="表格行顺序",
                 old_value=_table_order_preview(
                     old_rows,
-                    focus_index=order_difference_index,
+                    focus_index=old_focus_index,
                 ),
                 new_value=_table_order_preview(
                     new_rows,
-                    focus_index=order_difference_index,
+                    focus_index=new_focus_index,
                 ),
                 change_type=(
                     "顺序变化" if order_state == "changed" else "需人工复核"
@@ -3811,18 +3816,25 @@ def _delete_insert_distance_within_budget(
     return False
 
 
-def _first_table_order_difference_index(
+def _first_table_order_difference_indexes(
     old_tokens: list[tuple[str, str]],
     new_tokens: list[tuple[str, str]],
-) -> int:
-    """Return the first token offset whose order evidence differs."""
+    old_row_indexes: list[int],
+    new_row_indexes: list[int],
+) -> tuple[int, int]:
+    """Return raw old/new row offsets around the first order divergence."""
 
     for index, (old_token, new_token) in enumerate(
         zip(old_tokens, new_tokens, strict=False)
     ):
         if old_token != new_token:
-            return index
-    return min(len(old_tokens), len(new_tokens))
+            return old_row_indexes[index], new_row_indexes[index]
+    old_offset = min(len(old_tokens), len(old_row_indexes) - 1)
+    new_offset = min(len(new_tokens), len(new_row_indexes) - 1)
+    return (
+        old_row_indexes[old_offset] if old_row_indexes else 0,
+        new_row_indexes[new_offset] if new_row_indexes else 0,
+    )
 
 
 def _table_order_preview(rows: list[str], *, focus_index: int = 0) -> str:

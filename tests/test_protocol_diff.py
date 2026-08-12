@@ -9252,6 +9252,42 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("ROW_009", evidence)
         self.assertNotEqual(order_change.old_value, order_change.new_value)
 
+    def test_overwide_order_preview_uses_raw_row_indexes(self) -> None:
+        """Single-sided prefix rows cannot offset the order evidence window."""
+
+        def generic_row(prefix: str, width: int) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column + 1}={prefix}{column + 1}"
+                for column in range(width)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_prefix = [generic_row(f"OLD_ONLY{index}_", 2) for index in range(6)]
+        new_prefix = [generic_row(f"NEW_ONLY{index}_", 2) for index in range(6)]
+        moved_a = generic_row("MOVED_A_", 33)
+        moved_b = generic_row("MOVED_B_", 33)
+        changes = reporting_module._table_row_changes(
+            (table([*old_prefix, moved_a, moved_b]),),
+            (table([*new_prefix, moved_b, moved_a]),),
+        )
+        order_change = next(
+            row for row in changes if row.change_type == "顺序变化"
+        )
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MOVED_A", evidence)
+        self.assertIn("MOVED_B", evidence)
+
     def test_overwide_repeated_rows_use_true_lcs(self) -> None:
         """Insertion among repeated wide rows does not invent extra changes."""
 
