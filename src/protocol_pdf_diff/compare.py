@@ -3808,7 +3808,7 @@ _CASE_BEARING_TOKEN_RE = re.compile(
 )
 _SEMANTIC_OPERATOR_RE = re.compile(
     r"[\u2061-\u2064]"
-    r"|(<=|>=|!=|==|≤|≥|≠)"
+    r"|([<>!=]\s*=|≤|≥|≠)"
     r"|(?<=[A-Za-z0-9)\]])\s+([+\-−*/×÷])\s+(?=[A-Za-z0-9(\[])"
     r"|(?<=[A-Za-z0-9)\]])([+*×÷−])(?=[A-Za-z0-9(\[])"
 )  # 保留明确的公式运算符；ASCII 连字符仅在两侧有空格时视作减号，避免误伤词内连字符。
@@ -4440,6 +4440,7 @@ def _semantic_operator_signatures(value: str) -> list[str]:
             (group for group in match.groups() if group),
             match.group(0).strip(),
         )
+        operator = re.sub(r"\s+", "", operator)
         if (
             operator in {"+", "-", "−"}
             and match.start() >= 2
