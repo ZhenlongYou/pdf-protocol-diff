@@ -3490,19 +3490,18 @@ def _table_row_changes(
 
     old_rows = _table_group_rows(old_tables)
     new_rows = _table_group_rows(new_tables)
-    if _generic_table_width_exceeds_boundary_budget((*old_rows, *new_rows)):
-        if old_rows == new_rows:
-            return []
-        return [
-            *(
-                _make_table_row_change(row, "", "旧表删除行")
-                for row in old_rows
-            ),
-            *(
-                _make_table_row_change("", row, "新表新增行")
-                for row in new_rows
-            ),
-        ]  # 超宽 generic 表在任何深度解析前 fail-visible；禁止先付出大规模归一化成本再决定保守留痕。
+    overwide_changes, old_rows, new_rows = _partition_overwide_generic_rows(
+        old_rows,
+        new_rows,
+    )
+    if not old_rows and not new_rows:
+        return overwide_changes
+    if overwide_changes:
+        review_changes: list[TableRowChange] = list(overwide_changes)
+    else:
+        review_changes = []
+    # Only pure neutral Column N rows take the width fail-visible path.  Mixed
+    # explicit Parameter/Symbol rows remain available for precise comparison.
     old_rows, new_rows = _remove_same_position_descriptor_reflows(
         old_rows,
         new_rows,
@@ -3513,9 +3512,9 @@ def _table_row_changes(
         old_rows,
         new_rows,
     )
-    review_changes: list[TableRowChange] = []
     if collision_resolution is not None:
-        review_changes, old_rows, new_rows = collision_resolution
+        collision_reviews, old_rows, new_rows = collision_resolution
+        review_changes.extend(collision_reviews)
     wrap_resolution = _table_descriptor_wrap_redistribution_resolution(
         old_rows,
         new_rows,
@@ -3573,6 +3572,51 @@ def _table_row_changes(
         for new_row in new_remaining[paired_count:]:
             changes.append(_make_table_row_change("", new_row, "新表新增行"))
     return changes
+
+
+def _partition_overwide_generic_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Fail visible only the pure neutral rows that exceed the width budget."""
+
+    def overwide(row: str) -> bool:
+        field_labels = [
+            compact_inline(match.group(1)).casefold()
+            for match in re.finditer(
+                r"(?:^|\|)\s*([^=|]+?)\s*=",
+                row,
+                flags=re.I,
+            )
+        ]
+        return (
+            len(field_labels) > 32
+            and all(re.fullmatch(r"column\s+\d+", label) for label in field_labels)
+        )
+
+    old_wide = [row for row in old_rows if overwide(row)]
+    new_wide = [row for row in new_rows if overwide(row)]
+    if not old_wide and not new_wide:
+        return [], old_rows, new_rows
+    changes: list[TableRowChange] = []
+    if old_wide != new_wide:
+        changes.extend(
+            (
+                _make_table_row_change(row, "", "旧表删除行")
+                for row in old_wide
+            )
+        )
+        changes.extend(
+            (
+                _make_table_row_change("", row, "新表新增行")
+                for row in new_wide
+            )
+        )
+    return (
+        changes,
+        [row for row in old_rows if not overwide(row)],
+        [row for row in new_rows if not overwide(row)],
+    )
 
 
 def _remove_same_position_descriptor_reflows(

@@ -9110,6 +9110,50 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(changes)
         self.assertLess(time.monotonic() - started, 2.0)
 
+    def test_overwide_generic_rows_do_not_degrade_explicit_parameters(self) -> None:
+        """A wide neutral row cannot short-circuit explicit Parameter identity."""
+
+        wide_row = "表格行: T1 | " + " | ".join(
+            f"Column {index + 1}=G{index}" for index in range(33)
+        )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Mixed wide rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (
+                table(
+                    [
+                        wide_row,
+                        "表格行: T1 | Parameter=Receiver limit | Symbol=Vrx | Value=5 V",
+                    ]
+                ),
+            ),
+            (
+                table(
+                    [
+                        wide_row,
+                        "表格行: T1 | Parameter=Receiver limit | Symbol=Vrx | Value=6 V",
+                    ]
+                ),
+            ),
+        )
+
+        self.assertEqual(1, len(changes))
+        self.assertEqual("Receiver limit", changes[0].item)
+        self.assertIn("5 V", changes[0].old_value)
+        self.assertIn("6 V", changes[0].new_value)
+        self.assertEqual("实质变化", changes[0].change_type)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
