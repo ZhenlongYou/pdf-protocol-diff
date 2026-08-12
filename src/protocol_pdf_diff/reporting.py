@@ -3594,14 +3594,30 @@ def _is_overwide_generic_table_row(row: str) -> bool:
 def _canonical_generic_column_row_key(row: str) -> str:
     """Normalize tool-owned ``Column N`` labels without rewriting cell values."""
 
-    return re.sub(
-        r"(?i)(^|\|)(\s*)column\s+(\d+)(\s*=)",
-        lambda match: (
-            f"{match.group(1)}{match.group(2)}"
-            f"Column {int(match.group(3))}{match.group(4)}"
-        ),
-        row,
+    prefix, separator, payload = row.partition("|")
+    cells = [cell.strip() for cell in payload.split("|")] if separator else []
+    parsed: list[tuple[int, str]] = []
+    for cell in cells:
+        match = re.fullmatch(r"(?is)column\s+(\d+)\s*=\s*(.*)", cell)
+        if not match:
+            return row
+        parsed.append((int(match.group(1)), compact_inline(match.group(2))))
+    column_numbers = [column for column, _value in parsed]
+    if len(column_numbers) != len(set(column_numbers)):
+        return " | ".join(
+            [compact_inline(prefix), *(f"Column {column}={value}" for column, value in parsed)]
+        )
+    return " | ".join(
+        [
+            compact_inline(prefix),
+            *(
+                f"Column {column}={value}"
+                for column, value in sorted(parsed, key=lambda item: item[0])
+            ),
+        ]
     )
+    # 唯一Column标签的物理抽取顺序不是文档事实，按列号排序；重复标签
+    # 的occurrence顺序可能携带歧义，保留原序并交给review路径。
 
 
 def _partition_overwide_generic_rows(

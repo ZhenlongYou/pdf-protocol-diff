@@ -10314,6 +10314,35 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("候选2：", order_change.new_value)
         self.assertEqual(1, order_change.new_value.count("MODE_NRZ"))
 
+    def test_unique_generic_columns_ignore_physical_extraction_order(self) -> None:
+        """Swapping uniquely labelled cells is extraction noise, not a row edit."""
+
+        cells = [
+            f"Column {index}={'MODE_PAM4' if index == 2 else f'SAME_{index}'}"
+            for index in range(1, 34)
+        ]
+        old_row = "表格行: T1 | " + " | ".join(cells)
+        cells[1], cells[2] = cells[2], cells[1]
+        new_row = "表格行: T1 | " + " | ".join(cells)
+
+        def table(row: str) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Operating modes",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=[row],
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table(old_row),),
+            (table(new_row),),
+        )
+        self.assertEqual([], changes)
+
     def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
         """Repeated missing/extra-column peers remain repeated review candidates."""
 
