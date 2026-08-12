@@ -55,6 +55,7 @@ from .table_codec import (
 from .text_utils import (
     TABLE_NUMBER_DASH_CLASS,
     canonicalize_chinese_number_expressions,
+    canonicalize_chinese_number_token,
     canonicalize_number_word_token,
     canonicalize_number_word_tokens,
     compact_inline,
@@ -4895,6 +4896,16 @@ def _review_candidate_tokens(value: str) -> set[str]:
             normalized,
         )
     )  # `接收机通道21` 等 CJK 紧邻标识也能找回远距候选。
+    chinese_number_chars = "零〇一二两三四五六七八九十百千万亿"
+    chinese_prefix_char = rf"(?:(?![{chinese_number_chars}])[\u4e00-\u9fff])"
+    for match in re.finditer(
+        rf"({chinese_prefix_char}{{1,8}})([{chinese_number_chars}]+)",
+        normalized,
+    ):
+        canonical_number = canonicalize_chinese_number_token(match.group(2))
+        if canonical_number is not None:
+            tokens.add(f"cjk-left:{match.group(1)}:{canonical_number}")
+    # `接收机通道二十一` 与 `限制为二十一毫伏` 由不同左标签区分，不把技术值冒充通道身份。
     # 这些 token 只缩小候选集；最终配对仍必须通过原有语义分数门。
     return tokens
 
