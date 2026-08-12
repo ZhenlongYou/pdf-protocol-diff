@@ -14,6 +14,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from itertools import combinations
 from pathlib import Path
 
 from .formula_visuals import normalized_formula_key
@@ -111,6 +112,15 @@ class _SourceTableCaptionEvidence:
 
     unit_keys: tuple[str, ...]
     leading_text: str
+
+
+@dataclass(frozen=True)
+class _StableRecordIdentityPlan:
+    """A uniquely proven numeric record-key projection for two unit lists."""
+
+    labels: frozenset[str] = frozenset()
+    shared_identities: frozenset[frozenset[str]] = frozenset()
+    ambiguous: bool = False
 
 
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
@@ -3134,6 +3144,43 @@ def _review_unit_skeleton_match_count(
         if not residual_left or not residual_right:
             return proven_count
 
+    identity_plan = _stable_discriminative_identity_plan(
+        residual_left, residual_right
+    )
+    if identity_plan.ambiguous:
+        return proven_count  # 多个同等覆盖的编号组合映射冲突，章节身份不能靠猜测成立。
+    right_indexes_by_identity: dict[frozenset[str], list[int]] = {}
+    for index, unit in enumerate(residual_right):
+        identity = _stable_record_identity(unit, identity_plan)
+        if identity:
+            right_indexes_by_identity.setdefault(identity, []).append(index)
+    identity_left_indexes: set[int] = set()
+    identity_right_indexes: set[int] = set()
+    for left_index, unit in enumerate(residual_left):
+        identity = _stable_record_identity(unit, identity_plan)
+        candidates = right_indexes_by_identity.get(identity, ()) if identity else ()
+        if len(candidates) != 1:
+            continue
+        right_index = candidates[0]
+        if right_index in identity_right_indexes:
+            continue
+        identity_left_indexes.add(left_index)
+        identity_right_indexes.add(right_index)
+    if identity_left_indexes:
+        residual_left = [
+            unit
+            for index, unit in enumerate(residual_left)
+            if index not in identity_left_indexes
+        ]
+        residual_right = [
+            unit
+            for index, unit in enumerate(residual_right)
+            if index not in identity_right_indexes
+        ]
+        proven_count += len(identity_left_indexes)
+        if not residual_left or not residual_right:
+            return proven_count
+
     shorter, longer = (
         (residual_left, residual_right)
         if len(residual_left) <= len(residual_right)
@@ -3141,9 +3188,9 @@ def _review_unit_skeleton_match_count(
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_review_candidate_tokens(unit) for unit in longer]
-    stable_identity_labels = _stable_discriminative_identity_labels(shorter, longer)
+    stable_identity_plan = _stable_discriminative_identity_plan(shorter, longer)
     longer_identities = {
-        index: _stable_record_identity(unit, stable_identity_labels)
+        index: _stable_record_identity(unit, stable_identity_plan)
         for index, unit in enumerate(longer)
     }
     longer_indexes_by_identity: dict[frozenset[str], list[int]] = {}
@@ -3189,7 +3236,7 @@ def _review_unit_skeleton_match_count(
                 sorted(candidate_pool, key=lambda index: abs(index - projected))[:32]
             )
             stable_identity = _stable_record_identity(
-                short_unit, stable_identity_labels
+                short_unit, stable_identity_plan
             )
             candidate_pool.update(
                 longer_indexes_by_identity.get(stable_identity, ())
@@ -3208,14 +3255,17 @@ def _review_unit_skeleton_match_count(
             )
         ]
         short_identities = _stable_record_identity(
-            short_unit, stable_identity_labels
+            short_unit, stable_identity_plan
+        )
+        short_has_stable_label = _record_has_stable_identity_label(
+            short_unit, stable_identity_plan
         )
         identity_matched_indexes = [
             index
             for index in indexes
             if short_identities and short_identities == longer_identities[index]
         ]
-        if short_identities and stable_identity_labels:
+        if short_has_stable_label:
             indexes = identity_matched_indexes
         indexes.sort(
             key=lambda index: (
@@ -4663,12 +4713,12 @@ def _unequal_replace_delta_candidates(
     new_words_by_index = {
         index: _review_candidate_tokens(new_units[index]) for index in unmatched_new
     }
-    stable_identity_labels = _stable_discriminative_identity_labels(
+    stable_identity_plan = _stable_discriminative_identity_plan(
         [old_units[index] for index in unmatched_old],
         [new_units[index] for index in unmatched_new],
     )
     new_identities_by_index = {
-        index: _stable_record_identity(new_units[index], stable_identity_labels)
+        index: _stable_record_identity(new_units[index], stable_identity_plan)
         for index in unmatched_new
     }
     new_indexes_by_identity: dict[frozenset[str], list[int]] = {}
@@ -4715,7 +4765,10 @@ def _unequal_replace_delta_candidates(
                     - _relative_position(index, len(new_units))
                 ),
             )[:32]
-        old_identities = _stable_record_identity(old_unit, stable_identity_labels)
+        old_identities = _stable_record_identity(old_unit, stable_identity_plan)
+        old_has_stable_label = _record_has_stable_identity_label(
+            old_unit, stable_identity_plan
+        )
         if bounded_matching and old_identities:
             candidate_indexes = list(
                 dict.fromkeys(
@@ -4728,7 +4781,7 @@ def _unequal_replace_delta_candidates(
             for new_index in candidate_indexes
             if old_identities and old_identities == new_identities_by_index[new_index]
         ]
-        if old_identities and stable_identity_labels:
+        if old_has_stable_label:
             candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
@@ -5038,65 +5091,126 @@ def _identity_label_and_number(token: str) -> tuple[str, str]:
     return label, number
 
 
-def _stable_discriminative_identity_labels(
+def _stable_discriminative_identity_plan(
     left_units: list[str],
     right_units: list[str],
-) -> dict[str, frozenset[str]]:
-    """Return labels and values that can safely identify shared records.
+) -> _StableRecordIdentityPlan:
+    """Prove one record-key projection, or mark equally strong mappings ambiguous."""
 
-    A completely preserved value multiset is strong evidence.  A strict
-    one-sided extension/contraction is also useful, but only its one-to-one
-    shared values are lockable; excess or duplicate occurrences stay visible
-    for conservative residual handling.  Two-sided value replacement is not
-    identity evidence because it may be an ordinary changing value column.
-    """
+    def tokens_by_label(unit: str) -> dict[str, frozenset[str]]:
+        grouped: dict[str, set[str]] = {}
+        for token in _review_identity_tokens(unit):
+            label, _number = _identity_label_and_number(token)
+            grouped.setdefault(label, set()).add(token)
+        return {label: frozenset(tokens) for label, tokens in grouped.items()}
 
-    def values_by_label(units: list[str]) -> dict[str, Counter[str]]:
-        result: dict[str, Counter[str]] = {}
-        for unit in units:
-            for token in _review_identity_tokens(unit):
-                label, number = _identity_label_and_number(token)
-                result.setdefault(label, Counter())[number] += 1
-        return result
-
-    left_values = values_by_label(left_units)
-    right_values = values_by_label(right_units)
-    stable: dict[str, frozenset[str]] = {}
-    for label, left_counts in left_values.items():
-        right_counts = right_values.get(label)
-        if not right_counts:
-            continue
-        if left_counts == right_counts:
-            proven_values = {
-                number
-                for number, count in left_counts.items()
-                if count == 1
+    left_rows = [tokens_by_label(unit) for unit in left_units]
+    right_rows = [tokens_by_label(unit) for unit in right_units]
+    labels = sorted(
+        set().union(*(row.keys() for row in left_rows))
+        & set().union(*(row.keys() for row in right_rows))
+    )
+    labels = [
+        label
+        for label in labels
+        if len(
+            {
+                next(iter(tokens))
+                for row in left_rows + right_rows
+                for tokens in (row.get(label, frozenset()),)
+                if len(tokens) == 1
             }
-        elif left_counts <= right_counts or right_counts <= left_counts:
-            proven_values = {
-                number
-                for number in left_counts.keys() & right_counts.keys()
-                if left_counts[number] == right_counts[number] == 1
-            }
-        else:
-            continue  # 两侧各有独有值更像技术值变化，不能冒充记录主键。
-        if len(proven_values) >= 2:
-            stable[label] = frozenset(proven_values)
-            # 至少两个可区分编号才具有记录身份意义；Version 1 等常量元数据不算。
-    return stable
+        )
+        >= 2
+    ]  # Version 1 等常量元数据没有记录判别力。
+    if not labels or len(labels) > 10:
+        return _StableRecordIdentityPlan(
+            labels=frozenset(labels),
+            ambiguous=len(labels) > 10,
+        )
+
+    candidates: list[
+        tuple[int, tuple[tuple[int, int], ...], tuple[str, ...], frozenset[frozenset[str]]]
+    ] = []
+    for size in range(1, min(len(labels), 4) + 1):
+        for selected in combinations(labels, size):
+            def indexed_keys(
+                rows: list[dict[str, frozenset[str]]],
+            ) -> dict[frozenset[str], list[int]]:
+                result: dict[frozenset[str], list[int]] = {}
+                for index, row in enumerate(rows):
+                    if any(len(row.get(label, ())) != 1 for label in selected):
+                        continue
+                    key = frozenset(
+                        next(iter(row[label]))
+                        for label in selected
+                    )
+                    result.setdefault(key, []).append(index)
+                return result
+
+            left_indexes = indexed_keys(left_rows)
+            right_indexes = indexed_keys(right_rows)
+            mapping: list[tuple[int, int]] = []
+            shared_keys: set[frozenset[str]] = set()
+            for key in left_indexes.keys() & right_indexes.keys():
+                if len(left_indexes[key]) != 1 or len(right_indexes[key]) != 1:
+                    continue
+                left_index = left_indexes[key][0]
+                right_index = right_indexes[key][0]
+                if not _review_units_share_numbered_record_skeleton(
+                    left_units[left_index], right_units[right_index]
+                ):
+                    continue
+                mapping.append((left_index, right_index))
+                shared_keys.add(key)
+            if len(mapping) >= 2:
+                candidates.append(
+                    (len(mapping), tuple(sorted(mapping)), selected, frozenset(shared_keys))
+                )
+
+    if not candidates:
+        return _StableRecordIdentityPlan()
+    best_coverage = max(candidate[0] for candidate in candidates)
+    best = [candidate for candidate in candidates if candidate[0] == best_coverage]
+    mappings = {candidate[1] for candidate in best}
+    if len(mappings) != 1:
+        competing_labels = frozenset(
+            label for candidate in best for label in candidate[2]
+        )
+        return _StableRecordIdentityPlan(
+            labels=competing_labels,
+            ambiguous=True,
+        )  # Lane 与 Profile 等覆盖相同却指向不同记录时，不能猜主键。
+    chosen = min(best, key=lambda candidate: (len(candidate[2]), candidate[2]))
+    return _StableRecordIdentityPlan(
+        labels=frozenset(chosen[2]),
+        shared_identities=chosen[3],
+    )
 
 
 def _stable_record_identity(
     value: str,
-    stable_labels: dict[str, frozenset[str]],
+    plan: _StableRecordIdentityPlan,
 ) -> frozenset[str]:
     """Return the full stable label-number identity set for one record."""
 
-    return frozenset(
+    identity = frozenset(
         token
         for token in _review_identity_tokens(value)
-        for label, number in (_identity_label_and_number(token),)
-        if number in stable_labels.get(label, ())
+        if _identity_label_and_number(token)[0] in plan.labels
+    )
+    return identity if identity in plan.shared_identities else frozenset()
+
+
+def _record_has_stable_identity_label(
+    value: str,
+    plan: _StableRecordIdentityPlan,
+) -> bool:
+    """Return whether the record uses a proven label, even for an excess value."""
+
+    return any(
+        _identity_label_and_number(token)[0] in plan.labels
+        for token in _review_identity_tokens(value)
     )
 
 

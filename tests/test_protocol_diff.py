@@ -8928,17 +8928,17 @@ class ProtocolDiffTests(unittest.TestCase):
         """Duplicate identifiers remain unproven when one side has an extra occurrence."""
 
         old_units = [
-            "Lane 1 profile is PAM4.",
-            "Lane 1 profile is NRZ.",
-            "Lane 2 profile is PAM4.",
-            "Lane 3 profile is PAM4.",
+            "Lane 1 voltage limit is 20 mV.",
+            "Lane 1 voltage limit is 21 mV.",
+            "Lane 2 voltage limit is 22 mV.",
+            "Lane 3 voltage limit is 23 mV.",
         ]
         new_units = [
-            "Lane 3 profile is NRZ.",
-            "Lane 2 profile is NRZ.",
-            "Lane 1 profile is LEGACY.",
-            "Lane 1 profile is RECOVERY.",
-            "Lane 1 profile is DISABLED.",
+            "Lane 3 voltage limit is 24 mV.",
+            "Lane 2 voltage limit is 23 mV.",
+            "Lane 1 voltage limit is 25 mV.",
+            "Lane 1 voltage limit is 26 mV.",
+            "Lane 1 voltage limit is 27 mV.",
         ]
         result = compare_extractions(
             ExtractionResult(
@@ -8961,6 +8961,83 @@ class ProtocolDiffTests(unittest.TestCase):
                 for pair in (change.audit_replaced_snippets or ())
             )
         )  # 重复 Lane 1 无唯一 occurrence 证明，至少不能跨 Lane 强归因。
+
+    def test_bounded_matching_keeps_two_sided_shared_identity_overlap(self) -> None:
+        """A sliding record window keeps shared Lanes and exposes both edge records."""
+
+        count = 33
+        old_units = [
+            f"Lane {index} has voltage limit {20 + index} mV."
+            for index in range(count)
+        ]
+        shared = list(range(1, count))
+        shifted_shared = shared[16:] + shared[:16]
+        new_units = [
+            f"Lane {index} has voltage limit {21 + index} mV."
+            for index in shifted_shared
+        ] + [f"Lane {count} has voltage limit {21 + count} mV."]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-lane-window.pdf"),
+                pages=[PageText(page_number=1, text="1 Lanes\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-lane-window.pdf"),
+                pages=[PageText(page_number=1, text="1 Lanes\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=count + 1),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual(count - 1, len(change.audit_replaced_snippets))
+        self.assertEqual(1, len(change.audit_added_snippets))
+        self.assertEqual(1, len(change.audit_removed_snippets))
+        self.assertTrue(
+            all(
+                re.search(r"Lane (\d+)", pair.old).group(1)
+                == re.search(r"Lane (\d+)", pair.new).group(1)
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
+    def test_bounded_matching_supports_unique_composite_numeric_identity(self) -> None:
+        """Repeated Port and Lane values can form a unique composite record key."""
+
+        records = [(port, lane) for port in range(6) for lane in range(6)]
+        shifted = records[18:] + records[:18]
+        old_units = [
+            f"Port {port} Lane {lane} has voltage limit {20 + index} mV."
+            for index, (port, lane) in enumerate(records)
+        ]
+        new_units = [
+            f"Port {port} Lane {lane} has voltage limit {21 + records.index((port, lane))} mV."
+            for port, lane in shifted
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-port-lane-grid.pdf"),
+                pages=[PageText(page_number=1, text="1 Grid\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-port-lane-grid.pdf"),
+                pages=[PageText(page_number=1, text="1 Grid\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=len(records)),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual(len(records), len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                re.search(r"Port (\d+) Lane (\d+)", pair.old).groups()
+                == re.search(r"Port (\d+) Lane (\d+)", pair.new).groups()
+                for pair in change.audit_replaced_snippets
+            )
+        )
 
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
