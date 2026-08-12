@@ -3614,11 +3614,14 @@ def _partition_overwide_generic_rows(
     ]
     old_explicit_counts = Counter(identity for identity in old_explicit if identity)
     new_explicit_counts = Counter(identity for identity in new_explicit if identity)
-    shared_unique_explicit = {
+    shared_order_explicit = {
         identity
         for identity in old_explicit_counts.keys() & new_explicit_counts.keys()
-        if old_explicit_counts[identity] == new_explicit_counts[identity] == 1
     }
+    unbalanced_shared_explicit = any(
+        old_explicit_counts[identity] != new_explicit_counts[identity]
+        for identity in shared_order_explicit
+    )
 
     old_raw_counts = Counter(old_rows)
     new_raw_counts = Counter(new_rows)
@@ -3638,7 +3641,7 @@ def _partition_overwide_generic_rows(
         )):
             if row_is_wide and row in shared_raw:
                 indexed_tokens.append((("wide", row), row_index))
-            elif explicit_identity in shared_unique_explicit:
+            elif explicit_identity in shared_order_explicit:
                 indexed_tokens.append((("anchor", explicit_identity), row_index))
             elif row in shared_raw:
                 indexed_tokens.append((("anchor", row), row_index))
@@ -3697,6 +3700,10 @@ def _partition_overwide_generic_rows(
         new_is_wide,
     )
     order_state = _table_order_token_state(old_order, new_order)
+    if order_state == "changed" and unbalanced_shared_explicit:
+        order_state = "review"
+        # 重复显式锚点数量不等时，只能证明物理顺序无法安全对齐，不能断言
+        # 究竟是宽行移动还是某个同名 occurrence 增删；保留人工复核事实。
     changes: list[TableRowChange] = []
     changes.extend(
         (

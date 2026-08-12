@@ -9527,6 +9527,45 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("6 V", evidence)
         self.assertIn("WIDE_PRIORITY", evidence)
 
+    def test_overwide_crossing_repeated_modified_anchor_group_is_visible(self) -> None:
+        """Equal repeated identities can prove crossing of the whole anchor group."""
+
+        wide = "表格行: T1 | " + " | ".join(
+            f"Column {index + 1}=WIDE_PRIORITY{index}" for index in range(33)
+        )
+        old_rows = [
+            "表格行: T1 | Parameter=Receiver limit | Condition=PAM4 | Value=20 mV",
+            "表格行: T1 | Parameter=Receiver limit | Condition=NRZ | Value=30 mV",
+            wide,
+        ]
+        new_rows = [
+            wide,
+            "表格行: T1 | Parameter=Receiver limit | Condition=PAM4 | Value=21 mV",
+            "表格行: T1 | Parameter=Receiver limit | Condition=NRZ | Value=31 mV",
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+        evidence = "\n".join(
+            f"{row.old_value}\n{row.new_value}" for row in changes
+        )
+        self.assertTrue(any(row.change_type == "顺序变化" for row in changes))
+        self.assertIn("WIDE_PRIORITY", evidence)
+
     def test_overwide_row_shift_from_delete_insert_is_not_reordering(self) -> None:
         """A common row may shift index without changing relative order."""
 
