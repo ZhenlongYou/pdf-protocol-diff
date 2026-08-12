@@ -9324,6 +9324,45 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("MODE_NRZ", evidence)
         self.assertNotEqual(order_change.old_value, order_change.new_value)
 
+    def test_overwide_order_preview_finds_the_first_different_field(self) -> None:
+        """Preview is not limited to a fixed number of leading columns."""
+
+        def wide_row(mode: str) -> str:
+            values = [
+                "SAME_PRIORITY_" + "X" * 200,
+                "SAME_CLASS",
+                *(f"V{i}" for i in range(2, 32)),
+                mode,
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        pam4 = wide_row("MODE_PAM4")
+        nrz = wide_row("MODE_NRZ")
+        changes = reporting_module._table_row_changes(
+            (table([pam4, nrz]),),
+            (table([nrz, pam4]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 33=MODE_PAM4", evidence)
+        self.assertIn("Column 33=MODE_NRZ", evidence)
+        self.assertNotEqual(order_change.old_value, order_change.new_value)
+
     def test_overwide_repeated_rows_use_true_lcs(self) -> None:
         """Insertion among repeated wide rows does not invent extra changes."""
 

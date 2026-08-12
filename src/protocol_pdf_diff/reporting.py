@@ -3688,17 +3688,17 @@ def _partition_overwide_generic_rows(
             old_order_indexes,
             new_order_indexes,
         )
+        old_preview, new_preview = _paired_table_order_previews(
+            old_rows,
+            new_rows,
+            old_focus_index=old_focus_index,
+            new_focus_index=new_focus_index,
+        )
         changes.append(
             TableRowChange(
                 item="表格行顺序",
-                old_value=_table_order_preview(
-                    old_rows,
-                    focus_index=old_focus_index,
-                ),
-                new_value=_table_order_preview(
-                    new_rows,
-                    focus_index=new_focus_index,
-                ),
+                old_value=old_preview,
+                new_value=new_preview,
                 change_type=(
                     "顺序变化" if order_state == "changed" else "需人工复核"
                 ),
@@ -3837,29 +3837,109 @@ def _first_table_order_difference_indexes(
     )
 
 
-def _table_order_preview(rows: list[str], *, focus_index: int = 0) -> str:
-    """Return bounded, cheap evidence for one table row order."""
+def _paired_table_order_previews(
+    old_rows: list[str],
+    new_rows: list[str],
+    *,
+    old_focus_index: int,
+    new_focus_index: int,
+) -> tuple[str, str]:
+    """Return bounded evidence including the first distinguishing field."""
 
-    start = max(0, min(focus_index - 1, max(0, len(rows) - 4)))
-    labels: list[str] = []
-    for row in rows[start : start + 4]:
-        matches = re.findall(
-            r"(?i)(?:^|\|)\s*(parameter|characteristic|column\s+\d+)\s*=\s*([^|]+)",
-            row,
-        )
-        visible_cells = [
-            f"{compact_inline(field)}={compact_inline(value)}"
-            for field, value in matches[:2]
-        ]
-        labels.append(
-            truncate(
-                " | ".join(visible_cells) if visible_cells else compact_inline(row),
-                120,
+    def paired_excerpt(value: str, counterpart: str, max_chars: int) -> str:
+        """Keep the first differing part visible even after a long shared prefix."""
+
+        if len(value) <= max_chars:
+            return value
+        if value == counterpart:
+            return truncate(value, max_chars)
+        common_prefix = 0
+        for old_char, new_char in zip(value, counterpart, strict=False):
+            if old_char != new_char:
+                break
+            common_prefix += 1
+        start = max(0, common_prefix - 16)
+        excerpt = value[start : start + max_chars - 2]
+        return f"{'…' if start else ''}{excerpt}{'…' if start + len(excerpt) < len(value) else ''}"
+
+    def field_pairs(row: str) -> list[tuple[str, str]]:
+        return [
+            (compact_inline(field), compact_inline(value))
+            for field, value in re.findall(
+                r"(?i)(?:^|\|)\s*(parameter|characteristic|column\s+\d+)\s*=\s*([^|]+)",
+                row,
             )
-        )
-    prefix = f"第{start + 1}行起：" if start else ""
-    suffix = f"；共{len(rows)}行" if len(rows) > 4 else ""
-    return prefix + " → ".join(labels) + suffix
+        ]
+
+    old_start = max(0, min(old_focus_index - 1, max(0, len(old_rows) - 4)))
+    new_start = max(0, min(new_focus_index - 1, max(0, len(new_rows) - 4)))
+    old_window = old_rows[old_start : old_start + 4]
+    new_window = new_rows[new_start : new_start + 4]
+    old_fields = [field_pairs(row) for row in old_window]
+    new_fields = [field_pairs(row) for row in new_window]
+    selected_indexes: list[int] = [0]
+    maximum_field_count = max(
+        [*(len(fields) for fields in old_fields), *(len(fields) for fields in new_fields)],
+        default=0,
+    )
+    for field_index in range(maximum_field_count):
+        old_values = [
+            fields[field_index] if field_index < len(fields) else ("", "")
+            for fields in old_fields
+        ]
+        new_values = [
+            fields[field_index] if field_index < len(fields) else ("", "")
+            for fields in new_fields
+        ]
+        if old_values != new_values:
+            selected_indexes.append(field_index)
+            break
+    selected_indexes = list(dict.fromkeys(selected_indexes))
+
+    def preview(
+        window_rows: list[str],
+        fields_by_row: list[list[tuple[str, str]]],
+        counterpart_fields_by_row: list[list[tuple[str, str]]],
+        start: int,
+        total_rows: int,
+    ) -> str:
+        labels: list[str] = []
+        for row_index, (row, fields) in enumerate(
+            zip(window_rows, fields_by_row, strict=True)
+        ):
+            counterpart_fields = (
+                counterpart_fields_by_row[row_index]
+                if row_index < len(counterpart_fields_by_row)
+                else []
+            )
+            visible_cells: list[str] = []
+            for index in selected_indexes:
+                if index >= len(fields):
+                    continue
+                field, value = fields[index]
+                counterpart = (
+                    counterpart_fields[index][1]
+                    if index < len(counterpart_fields)
+                    else ""
+                )
+                value_budget = 48 if len(selected_indexes) > 1 and index == 0 else 88
+                visible_cells.append(
+                    f"{field}={paired_excerpt(value, counterpart, value_budget)}"
+                )
+            labels.append(
+                truncate(
+                    " | ".join(visible_cells) if visible_cells else compact_inline(row),
+                    180,
+                )
+            )
+        prefix = f"第{start + 1}行起：" if start else ""
+        suffix = f"；共{total_rows}行" if total_rows > 4 else ""
+        return prefix + " → ".join(labels) + suffix
+
+    return (
+        preview(old_window, old_fields, new_fields, old_start, len(old_rows)),
+        preview(new_window, new_fields, old_fields, new_start, len(new_rows)),
+    )
 
 
 def _remove_same_position_descriptor_reflows(
