@@ -9103,39 +9103,60 @@ class ProtocolDiffTests(unittest.TestCase):
             f"Receiver RX{index} uses {index + 2} lanes and includes {101 + index} warnings."
             for index in shifted_indexes
         ]
-        for style in ("lower", "title", "upper"):
-            def styled(unit: str) -> str:
-                if style == "lower":
-                    return unit
-                if style == "title":
-                    return unit.replace("uses", "Uses").replace("includes", "Includes")
-                return unit.upper()
+        for verbs in (("uses", "includes"), ("count", "add"), ("show", "record")):
+            verb_old_units = [
+                re.sub(r"\buses\b", verbs[0], unit).replace("includes", verbs[1])
+                for unit in old_units
+            ]
+            verb_new_units = [
+                re.sub(r"\buses\b", verbs[0], unit).replace("includes", verbs[1])
+                for unit in new_units
+            ]
+            for style in ("lower", "title", "upper"):
+                def styled(unit: str) -> str:
+                    if style == "lower":
+                        return unit
+                    if style == "title":
+                        return unit.title()
+                    return unit.upper()
 
-            with self.subTest(style=style):
-                result = compare_extractions(
-                    ExtractionResult(
-                        pdf_path=Path(f"old-shifted-count-values-{style}.pdf"),
-                        pages=[PageText(page_number=1, text="1 Receivers\n" + "\n".join(map(styled, old_units)))],
-                    ),
-                    ExtractionResult(
-                        pdf_path=Path(f"new-shifted-count-values-{style}.pdf"),
-                        pages=[PageText(page_number=1, text="1 Receivers\n" + "\n".join(map(styled, new_units)))],
-                    ),
-                    DiffOptions(max_snippets_per_section=count),
-                )
-
-                self.assertEqual(1, len(result.changes))
-                change = result.changes[0]
-                self.assertEqual(count, len(change.audit_replaced_snippets))
-                self.assertFalse(change.audit_added_snippets)
-                self.assertFalse(change.audit_removed_snippets)
-                self.assertTrue(
-                    all(
-                        re.search(r"RX(\d+)", pair.old, flags=re.I).group(1)
-                        == re.search(r"RX(\d+)", pair.new, flags=re.I).group(1)
-                        for pair in change.audit_replaced_snippets
+                with self.subTest(verbs=verbs, style=style):
+                    result = compare_extractions(
+                        ExtractionResult(
+                            pdf_path=Path(f"old-shifted-count-values-{style}.pdf"),
+                            pages=[
+                                PageText(
+                                    page_number=1,
+                                    text="1 Receivers\n"
+                                    + "\n".join(map(styled, verb_old_units)),
+                                )
+                            ],
+                        ),
+                        ExtractionResult(
+                            pdf_path=Path(f"new-shifted-count-values-{style}.pdf"),
+                            pages=[
+                                PageText(
+                                    page_number=1,
+                                    text="1 Receivers\n"
+                                    + "\n".join(map(styled, verb_new_units)),
+                                )
+                            ],
+                        ),
+                        DiffOptions(max_snippets_per_section=count),
                     )
-                )
+
+                    self.assertEqual(1, len(result.changes))
+                    change = result.changes[0]
+                    self.assertEqual(count, len(change.audit_replaced_snippets))
+                    self.assertFalse(change.audit_added_snippets)
+                    self.assertFalse(change.audit_removed_snippets)
+                    self.assertTrue(
+                        all(
+                            re.search(r"RX(\d+)", pair.old, flags=re.I).group(1)
+                            == re.search(r"RX(\d+)", pair.new, flags=re.I).group(1)
+                            for pair in change.audit_replaced_snippets
+                        )
+                    )
 
     def test_multiple_ordinary_count_verbs_remain_a_normal_numeric_edit(self) -> None:
         """Several prose count slots do not trigger composite-key fail-closed mode."""

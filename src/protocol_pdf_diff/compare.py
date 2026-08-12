@@ -5116,21 +5116,28 @@ def _english_numeric_label_has_record_shape(
             continue
         raw_label = match.group(1)
         suffix = raw[match.end() :].lstrip()
-        if raw_label.casefold().endswith("s"):
-            continue  # `Reports 2 warnings` / `USES 3 lanes` 是普通计数谓语，不是字段。
         prefix = raw[: match.start()].strip()
-        if not prefix:
-            return True  # 非计数形态的行首 `Lane 2 voltage...` 是记录头候选。
-        while prefix:
+        remaining_prefix = prefix
+        while remaining_prefix:
             leading_field = re.match(
                 rf"(?i)^\s*[a-z][a-z0-9_-]*\s+{number_pattern}(?:\s+|$)",
-                prefix,
+                remaining_prefix,
             )
             if leading_field is None:
                 break
-            prefix = prefix[leading_field.end() :].strip()
+            remaining_prefix = remaining_prefix[leading_field.end() :].strip()
+        if prefix and not remaining_prefix:
+            return True  # `Version 1 Lane 2` 的后续字段属于同一连续记录头。
+        suffix_word = re.match(r"(?i)^([a-z][a-z0-9_-]*)\b", suffix)
+        if (
+            suffix_word
+            and suffix_word.group(1).casefold().endswith("s")
+            and suffix_word.group(1).casefold()
+            not in {"has", "is", "was", "does"}
+        ):
+            continue  # `Count 2 warnings` 的数字后接复数计数对象；Bus 2 has... 仍是记录头。
         if not prefix:
-            return True  # `rack 1 port 2 lane 3` 的连续字段头支持小写复合键。
+            return True  # 非计数形态的行首 `Lane 2 voltage...` 是记录头候选。
     return False
 
 
