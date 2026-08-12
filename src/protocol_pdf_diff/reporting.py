@@ -4022,18 +4022,27 @@ def _paired_table_order_previews(
                 if Counter(field.casefold() for field, _value in fields)
                 == focus_multiplicity
             ]
-            layout_conflict_peer_fields = max(
-                duplicate_peers,
-                key=lambda fields: sum(
-                    focus_field == peer_field
-                    for focus_field, peer_field in zip(
-                        old_focus_fields,
-                        fields,
-                        strict=False,
-                    )
-                ),
-                default=[],
+            peer_values_by_label: dict[str, list[tuple[str, str]]] = {}
+            for fields in duplicate_peers:
+                for field, value in fields:
+                    label = field.casefold()
+                    occurrence = (field, value)
+                    occurrences = peer_values_by_label.setdefault(label, [])
+                    if occurrence not in occurrences:
+                        occurrences.append(occurrence)
+            layout_conflict_peer_fields = [
+                occurrence
+                for field, _value in old_focus_fields
+                for occurrence in peer_values_by_label.pop(field.casefold(), [])
+            ]
+            layout_conflict_peer_fields.extend(
+                occurrence
+                for occurrences in peer_values_by_label.values()
+                for occurrence in occurrences
             )
+            # 重复Column标签本身已证明布局有歧义；同multiplicity的peer可能
+            # 不止一条，不能按输入顺序任选一个代表。复核审计层保留所有
+            # 不同occurrence值，读者层再按既有长度预算折叠展示。
         focus_labels = [field.casefold() for field, _value in old_focus_fields]
         if any(
             [field.casefold() for field, _value in fields] != focus_labels

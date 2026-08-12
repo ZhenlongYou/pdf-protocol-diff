@@ -9970,6 +9970,57 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("MODE_PAM4", evidence)
         self.assertIn("MODE_NRZ", evidence)
 
+    def test_overwide_layout_review_preserves_every_duplicate_peer_value(self) -> None:
+        """Multiple equal-layout peers cannot be reduced to input-order winner."""
+
+        def row(mode: str) -> str:
+            cells = [
+                (1, "SAME_ID"),
+                (2, "SHARED"),
+                (2, mode),
+                *((index, f"SAME_{index}") for index in range(3, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        pam4 = row("MODE_PAM4")
+        nrz = row("MODE_NRZ")
+        disabled = row("MODE_DISABLED")
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        evidence_by_peer_order: list[str] = []
+        for peers in ([nrz, disabled], [disabled, nrz]):
+            changes = reporting_module._table_row_changes(
+                (table([pam4, *anchors, *peers]),),
+                (table([*anchors, pam4, *peers]),),
+            )
+            order_change = next(row for row in changes if row.item == "表格行顺序")
+            self.assertEqual("需人工复核", order_change.change_type)
+            evidence = f"{order_change.old_value}\n{order_change.new_value}"
+            for fact in ("MODE_PAM4", "MODE_NRZ", "MODE_DISABLED"):
+                self.assertIn(fact, evidence)
+            evidence_by_peer_order.append(evidence)
+
+        for evidence in evidence_by_peer_order:
+            self.assertEqual(1, evidence.count("MODE_NRZ"))
+            self.assertEqual(1, evidence.count("MODE_DISABLED"))
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 
