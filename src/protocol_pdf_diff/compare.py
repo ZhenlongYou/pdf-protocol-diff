@@ -3146,6 +3146,10 @@ def _review_unit_skeleton_match_count(
         index: _stable_record_identity(unit, stable_identity_labels)
         for index, unit in enumerate(longer)
     }
+    longer_indexes_by_identity: dict[frozenset[str], list[int]] = {}
+    for index, identity in longer_identities.items():
+        if identity:
+            longer_indexes_by_identity.setdefault(identity, []).append(index)
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3184,6 +3188,12 @@ def _review_unit_skeleton_match_count(
             candidate_pool = set(
                 sorted(candidate_pool, key=lambda index: abs(index - projected))[:32]
             )
+            stable_identity = _stable_record_identity(
+                short_unit, stable_identity_labels
+            )
+            candidate_pool.update(
+                longer_indexes_by_identity.get(stable_identity, ())
+            )  # 已证明守恒的完整记录身份不受位置窗口截断。
         indexes = [
             index
             for index in candidate_pool
@@ -3205,7 +3215,7 @@ def _review_unit_skeleton_match_count(
             for index in indexes
             if short_identities and short_identities == longer_identities[index]
         ]
-        if identity_matched_indexes:
+        if short_identities and stable_identity_labels:
             indexes = identity_matched_indexes
         indexes.sort(
             key=lambda index: (
@@ -4661,6 +4671,10 @@ def _unequal_replace_delta_candidates(
         index: _stable_record_identity(new_units[index], stable_identity_labels)
         for index in unmatched_new
     }
+    new_indexes_by_identity: dict[frozenset[str], list[int]] = {}
+    for index, identity in new_identities_by_index.items():
+        if identity:
+            new_indexes_by_identity.setdefault(identity, []).append(index)
     new_indexes_by_word: dict[str, list[int]] = {}
     if bounded_matching:
         for new_index, words in new_words_by_index.items():
@@ -4702,12 +4716,19 @@ def _unequal_replace_delta_candidates(
                 ),
             )[:32]
         old_identities = _stable_record_identity(old_unit, stable_identity_labels)
+        if bounded_matching and old_identities:
+            candidate_indexes = list(
+                dict.fromkeys(
+                    candidate_indexes
+                    + new_indexes_by_identity.get(old_identities, [])
+                )
+            )  # 远距完整身份候选不得被32项位置窗口裁掉。
         identity_matched_indexes = [
             new_index
             for new_index in candidate_indexes
             if old_identities and old_identities == new_identities_by_index[new_index]
         ]
-        if identity_matched_indexes:
+        if old_identities and stable_identity_labels:
             candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]

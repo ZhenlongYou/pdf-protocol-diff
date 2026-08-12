@@ -8798,6 +8798,49 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_bounded_matching_fails_closed_when_stable_numeric_labels_compete(self) -> None:
+        """A value permutation cannot be guessed as the record's primary key."""
+
+        count = 33
+        old_units = [
+            f"Version 1 Lane {index} uses profile {1000 + index} for receiver calibration."
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[16:] + list(range(count))[:16]
+        new_units = [
+            f"Version 1 Lane {index} uses profile {1000 + ((index + 1) % count)} for receiver calibration."
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-competing-identities.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Lane Profiles\n" + "\n".join(old_units),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-competing-identities.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Lane Profiles\n" + "\n".join(new_units),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=count * 2),
+        )
+
+        self.assertEqual(
+            ["added", "deleted"],
+            sorted(change.change_type for change in result.changes),
+        )  # 无 provenance 证明主键时整章失败可见，不伪造逐记录归因。
+        self.assertTrue(
+            all(not change.audit_replaced_snippets for change in result.changes)
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
