@@ -4703,9 +4703,33 @@ def _unequal_replace_delta_candidates(
     if not unproven_order_conflict:
         match_identity_occurrences(old_keys, new_keys, report_replacements=False)
         # 自由文本记录已证明发生重排时，相同残片也可能属于不同记录；只有显式字段/表格仍可锁定。
+    old_assignment_fields = [_assignment_field_key(unit) for unit in old_units]
+    new_assignment_fields = [_assignment_field_key(unit) for unit in new_units]
+    old_assignment_counts = Counter(field for field in old_assignment_fields if field)
+    new_assignment_counts = Counter(field for field in new_assignment_fields if field)
     match_identity_occurrences(
-        [_assignment_field_key(unit) for unit in old_units],
-        [_assignment_field_key(unit) for unit in new_units],
+        [
+            field
+            if not unproven_order_conflict
+            or (
+                field
+                and old_assignment_counts[field] == 1
+                and new_assignment_counts[field] == 1
+            )
+            else ""
+            for field in old_assignment_fields
+        ],
+        [
+            field
+            if not unproven_order_conflict
+            or (
+                field
+                and new_assignment_counts[field] == 1
+                and old_assignment_counts[field] == 1
+            )
+            else ""
+            for field in new_assignment_fields
+        ],
         report_replacements=True,
     )
     match_identity_occurrences(

@@ -8749,6 +8749,43 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(f"limit {20 + index} mV", evidence)
             self.assertIn(f"limit {21 + index} mV", evidence)
 
+    def test_moved_records_cannot_pair_repeated_assignment_fields_by_position(self) -> None:
+        """A repeated field name needs parent-record provenance before pairing."""
+
+        count = 8
+        old_units = [
+            f"Count {index} equipment for receiver RX{index}; "
+            f"limit = {20 + index} mV."
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[4:] + list(range(count))[:4]
+        new_units = [
+            f"Count {index} equipment for receiver RX{index}; "
+            f"limit = {21 + index} mV."
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-repeated-fields.pdf"),
+                pages=[PageText(page_number=1, text="1 Limits\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-repeated-fields.pdf"),
+                pages=[PageText(page_number=1, text="1 Limits\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=100),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertFalse(change.audit_replaced_snippets)
+        evidence = "\n".join(
+            (*change.audit_added_snippets, *change.audit_removed_snippets)
+        )
+        for index in range(count):
+            self.assertIn(f"limit = {20 + index} mV", evidence)
+            self.assertIn(f"limit = {21 + index} mV", evidence)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
