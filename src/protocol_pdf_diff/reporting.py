@@ -3843,11 +3843,20 @@ def _table_order_preview(rows: list[str], *, focus_index: int = 0) -> str:
     start = max(0, min(focus_index - 1, max(0, len(rows) - 4)))
     labels: list[str] = []
     for row in rows[start : start + 4]:
-        match = re.search(
-            r"(?i)(?:^|\|)\s*(?:parameter|characteristic|column\s+1)\s*=\s*([^|]+)",
+        matches = re.findall(
+            r"(?i)(?:^|\|)\s*(parameter|characteristic|column\s+\d+)\s*=\s*([^|]+)",
             row,
         )
-        labels.append(truncate(compact_inline(match.group(1) if match else row), 80))
+        visible_cells = [
+            f"{compact_inline(field)}={compact_inline(value)}"
+            for field, value in matches[:2]
+        ]
+        labels.append(
+            truncate(
+                " | ".join(visible_cells) if visible_cells else compact_inline(row),
+                120,
+            )
+        )
     prefix = f"第{start + 1}行起：" if start else ""
     suffix = f"；共{len(rows)}行" if len(rows) > 4 else ""
     return prefix + " → ".join(labels) + suffix
