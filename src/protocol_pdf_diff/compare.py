@@ -3126,6 +3126,41 @@ def _review_unit_skeleton_match_count(
         if not residual_left or not residual_right:
             return proven_count
 
+    right_indexes_by_identity: dict[str, list[int]] = {}
+    for index, unit in enumerate(residual_right):
+        identities = _review_identity_tokens(unit)
+        if len(identities) == 1:
+            right_indexes_by_identity.setdefault(next(iter(identities)), []).append(index)
+    consumed_per_identity: Counter[str] = Counter()
+    identity_left_indexes: set[int] = set()
+    identity_right_indexes: set[int] = set()
+    for left_index, unit in enumerate(residual_left):
+        identities = _review_identity_tokens(unit)
+        if len(identities) != 1:
+            continue
+        identity = next(iter(identities))
+        candidates = right_indexes_by_identity.get(identity, [])
+        occurrence = consumed_per_identity[identity]
+        if occurrence >= len(candidates):
+            continue
+        identity_left_indexes.add(left_index)
+        identity_right_indexes.add(candidates[occurrence])
+        consumed_per_identity[identity] += 1
+    if identity_left_indexes:
+        residual_left = [
+            unit
+            for index, unit in enumerate(residual_left)
+            if index not in identity_left_indexes
+        ]
+        residual_right = [
+            unit
+            for index, unit in enumerate(residual_right)
+            if index not in identity_right_indexes
+        ]
+        proven_count += len(identity_left_indexes)
+        if not residual_left or not residual_right:
+            return proven_count
+
     shorter, longer = (
         (residual_left, residual_right)
         if len(residual_left) <= len(residual_right)
@@ -4602,6 +4637,19 @@ def _unequal_replace_delta_candidates(
     )
     match_identity_occurrences(
         [
+            next(iter(identities)) if len(identities) == 1 else ""
+            for unit in old_units
+            for identities in (_review_identity_tokens(unit),)
+        ],
+        [
+            next(iter(identities)) if len(identities) == 1 else ""
+            for unit in new_units
+            for identities in (_review_identity_tokens(unit),)
+        ],
+        report_replacements=True,
+    )
+    match_identity_occurrences(
+        [
             _table_row_identity(unit) if _is_table_review_unit(unit) else ""
             for unit in old_units
         ],
@@ -4908,6 +4956,27 @@ def _review_candidate_tokens(value: str) -> set[str]:
     # `接收机通道二十一` 与 `限制为二十一毫伏` 由不同左标签区分，不把技术值冒充通道身份。
     # 这些 token 只缩小候选集；最终配对仍必须通过原有语义分数门。
     return tokens
+
+
+def _review_identity_tokens(value: str) -> set[str]:
+    """Return label-number anchors that can be locked before value similarity."""
+
+    if _unit_has_unproven_label_syntax(value):
+        return set()  # `Note 1:` / `Warning 2:` 无 schema provenance，编号不能自证章节身份。
+    identities: set[str] = set()
+    for token in _review_candidate_tokens(value):
+        if not token.startswith(("left:", "cjk-left:")):
+            continue
+        _kind, label, _number = token.rsplit(":", 2)
+        compact_label = normalize_line(label).casefold()
+        if has_measurement_context(compact_label):
+            continue  # `voltage 20` / `电压限制为二十` 是值槽，不是记录身份。
+        if re.search(r"(?i)(?:^|\s)(?:is|are|was|were|equals?|to)$", compact_label):
+            continue
+        if compact_label.endswith(("为", "是", "等于", "至", "到")):
+            continue  # 系词/范围终点后的数字只参与比较，不抢占标签编号身份。
+        identities.add(token)
+    return identities
 
 
 def _relative_position(index: int, length: int) -> float:

@@ -8566,6 +8566,62 @@ class ProtocolDiffTests(unittest.TestCase):
                         )
                     )
 
+    def test_bounded_matching_locks_cjk_identity_before_equal_numeric_values(self) -> None:
+        """A measurement equal to another record id cannot steal that record's pair."""
+
+        chinese_numbers = (
+            "零", "一", "二", "三", "四", "五", "六", "七", "八", "九",
+            "十", "十一", "十二", "十三", "十四", "十五", "十六", "十七",
+            "十八", "十九", "二十", "二十一", "二十二", "二十三", "二十四",
+            "二十五", "二十六", "二十七", "二十八", "二十九", "三十",
+            "三十一", "三十二",
+        )
+        next_numbers = chinese_numbers[1:] + ("零",)
+        old_units = [
+            f"接收机通道{number}的电压限制为{number}毫伏。"
+            for number in chinese_numbers
+        ]
+        shifted_indexes = list(range(33))[16:] + list(range(33))[:16]
+        new_units = [
+            f"接收机通道{chinese_numbers[index]}的电压限制为{next_numbers[index]}毫伏。"
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-cjk-id-value-collision.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 接收机限制\n" + "\n".join(old_units),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-cjk-id-value-collision.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 接收机限制\n" + "\n".join(new_units),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=33),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertEqual(33, len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                re.search(r"通道(.+?)的", pair.old).group(1)
+                == re.search(r"通道(.+?)的", pair.new).group(1)
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
