@@ -3969,8 +3969,14 @@ def _paired_table_order_previews(
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
 
+    def canonical_field_label(field: str) -> str:
+        column_match = re.fullmatch(r"(?i)column\s+(\d+)", field)
+        if column_match:
+            return f"column {int(column_match.group(1))}"
+        return field.casefold()
+
     def has_duplicate_column_labels(fields: list[tuple[str, str]]) -> bool:
-        labels = [field.casefold() for field, _value in fields]
+        labels = [canonical_field_label(field) for field, _value in fields]
         return bool(labels) and len(labels) != len(set(labels))
 
     field_layout_is_ambiguous = has_duplicate_column_labels(
@@ -3980,20 +3986,29 @@ def _paired_table_order_previews(
     # 无关、未移动的duplicate row，不能污染另一组可证明的顺序变化。
     layout_conflict_peer_groups: list[list[tuple[str, str]]] = []
 
-    def remember_layout_conflict_peer(fields: list[tuple[str, str]]) -> None:
-        """Keep candidate rows distinct so their field relationships survive."""
+    def remember_layout_conflict_peer_occurrences(
+        old_candidates: list[list[tuple[str, str]]],
+        new_candidates: list[list[tuple[str, str]]],
+    ) -> None:
+        """Keep candidate relationships and the maximum observed occurrence count."""
 
-        if fields and fields not in layout_conflict_peer_groups:
-            layout_conflict_peer_groups.append(fields)
+        old_counts = Counter(tuple(fields) for fields in old_candidates if fields)
+        new_counts = Counter(tuple(fields) for fields in new_candidates if fields)
+        ordered_keys = list(dict.fromkeys([*old_counts, *new_counts]))
+        layout_conflict_peer_groups.extend(
+            list(peer_key)
+            for peer_key in ordered_keys
+            for _occurrence in range(max(old_counts[peer_key], new_counts[peer_key]))
+        )
 
     if (
         old_focus_fields
         and new_focus_fields
-        and [field.casefold() for field, _value in old_focus_fields]
-        != [field.casefold() for field, _value in new_focus_fields]
+        and [canonical_field_label(field) for field, _value in old_focus_fields]
+        != [canonical_field_label(field) for field, _value in new_focus_fields]
     ):
         field_layout_is_ambiguous = True
-        remember_layout_conflict_peer(new_focus_fields)
+        remember_layout_conflict_peer_occurrences([], [new_focus_fields])
     selected_indexes: list[int] = [0]
     distinguishing_peer_fields: list[tuple[str, str]] = []
     signature_is_ambiguous = False
@@ -4026,7 +4041,7 @@ def _paired_table_order_previews(
         ]
         if field_layout_is_ambiguous and not layout_conflict_peer_groups:
             focus_multiplicity = Counter(
-                field.casefold() for field, _value in old_focus_fields
+                canonical_field_label(field) for field, _value in old_focus_fields
             )
             old_duplicate_peers = [
                 fields
@@ -4034,7 +4049,7 @@ def _paired_table_order_previews(
                 if _is_overwide_generic_table_row(row)
                 and fields[0] == focus_first_field
                 and fields != old_focus_fields
-                and Counter(field.casefold() for field, _value in fields)
+                and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
             ]
             new_duplicate_peers = [
@@ -4043,34 +4058,45 @@ def _paired_table_order_previews(
                 if _is_overwide_generic_table_row(row)
                 and fields[0] == focus_first_field
                 and fields != old_focus_fields
-                and Counter(field.casefold() for field, _value in fields)
+                and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
             ]
-            old_peer_counts = Counter(tuple(fields) for fields in old_duplicate_peers)
-            new_peer_counts = Counter(tuple(fields) for fields in new_duplicate_peers)
-            ordered_peer_keys = list(
-                dict.fromkeys([*old_peer_counts, *new_peer_counts])
-            )
-            layout_conflict_peer_groups.extend(
-                list(peer_key)
-                for peer_key in ordered_peer_keys
-                for _occurrence in range(
-                    max(old_peer_counts[peer_key], new_peer_counts[peer_key])
-                )
+            remember_layout_conflict_peer_occurrences(
+                old_duplicate_peers,
+                new_duplicate_peers,
             )
             # 重复Column标签本身已证明布局有歧义；同multiplicity的peer可能
             # 不止一条，不能按输入顺序任选一个代表，也不能跨peer按label
             # 拍平成不存在的合成行。复核审计层按候选行保留字段关联，并以
             # 两侧最大occurrence数保留完全相同peer的真实重复次数。
-        focus_labels = [field.casefold() for field, _value in old_focus_fields]
+        focus_labels = [canonical_field_label(field) for field, _value in old_focus_fields]
         if any(
-            [field.casefold() for field, _value in fields] != focus_labels
+            [canonical_field_label(field) for field, _value in fields] != focus_labels
             for fields in peer_fields
         ):
             field_layout_is_ambiguous = True
-            for fields in peer_fields:
-                if [field.casefold() for field, _value in fields] != focus_labels:
-                    remember_layout_conflict_peer(fields)
+            old_layout_peers = [
+                fields
+                for row, fields in zip(old_rows, old_all_fields, strict=True)
+                if _is_overwide_generic_table_row(row)
+                and fields[0] == focus_first_field
+                and fields != old_focus_fields
+                and [canonical_field_label(field) for field, _value in fields]
+                != focus_labels
+            ]
+            new_layout_peers = [
+                fields
+                for row, fields in zip(new_rows, new_all_fields, strict=True)
+                if _is_overwide_generic_table_row(row)
+                and fields[0] == focus_first_field
+                and fields != old_focus_fields
+                and [canonical_field_label(field) for field, _value in fields]
+                != focus_labels
+            ]
+            remember_layout_conflict_peer_occurrences(
+                old_layout_peers,
+                new_layout_peers,
+            )
         distinguishing_index = next(
             (
                 field_index
@@ -4159,7 +4185,9 @@ def _paired_table_order_previews(
         ) -> dict[str, list[tuple[str, str]]]:
             result: dict[str, list[tuple[str, str]]] = {}
             for field, value in values:
-                result.setdefault(field.casefold(), []).append((field, value))
+                result.setdefault(canonical_field_label(field), []).append(
+                    (field, value)
+                )
             return result
 
         by_label = grouped(fields)

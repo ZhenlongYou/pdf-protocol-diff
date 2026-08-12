@@ -10161,6 +10161,85 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("MODE_PAM4", evidence)
         self.assertIn("MODE_NRZ", evidence)
 
+    def test_zero_padded_column_alias_is_treated_as_duplicate_layout(self) -> None:
+        """Column 2 and COLUMN 02 are occurrences of the same logical column."""
+
+        def row(mode: str) -> str:
+            cells = [
+                "Column 1=SAME_ID",
+                "Column 2=SHARED",
+                f"COLUMN 02={mode}",
+                *(f"Column {index}=SAME_{index}" for index in range(3, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(cells)
+
+        pam4 = row("MODE_PAM4")
+        nrz = row("MODE_NRZ")
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([pam4, *anchors, nrz]),),
+            (table([*anchors, pam4, nrz]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MODE_PAM4", evidence)
+        self.assertIn("MODE_NRZ", evidence)
+
+    def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
+        """Repeated missing/extra-column peers remain repeated review candidates."""
+
+        focus_cells = [(index, f"SAME_{index}") for index in range(1, 34)]
+        focus_cells[1] = (2, "MODE_PAM4")
+        peer_cells = [(1, "SAME_1"), *((index, f"SAME_{index}") for index in range(3, 34))]
+        peer_cells.append((34, "MODE_NRZ"))
+
+        def row(cells: list[tuple[int, str]]) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        focus = row(focus_cells)
+        peer = row(peer_cells)
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([focus, anchor, peer, peer]),),
+            (table([anchor, focus, peer, peer]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        self.assertIn("候选1：Column 34=MODE_NRZ", order_change.new_value)
+        self.assertIn("候选2：Column 34=MODE_NRZ", order_change.new_value)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 
