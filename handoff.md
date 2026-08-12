@@ -6,12 +6,12 @@
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `86e1a26e6cc7c20abf7905fbddd3935ce6e41165`
-- implementation_commit: `3cba6685db56217073ec5d9e6e72a15deb896ee3`
-- status: `validated_pending_commit_bound_review`
-- oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=3cba6685db56217073ec5d9e6e72a15deb896ee3 .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v19`
-- non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=3cba6685db56217073ec5d9e6e72a15deb896ee3 .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v23`
-- accepted_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v19/protocol_diff_20260811_081957/protocol_diff_report.html`
-- accepted_non_oif_report: `/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v23/protocol_diff_20260811_081959/protocol_diff_report.html`
+- implementation_commit: `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95`
+- status: `validated_and_dual_attested`
+- oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532`
+- non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie`
+- accepted_oif_report: `/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
+- accepted_non_oif_report: `/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie/protocol_diff_20260813_073717/protocol_diff_report.html`
 
 ## Rollback Baselines
 
@@ -42,13 +42,16 @@
 
 ## Acceptance Evidence
 
+- 最终全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover`，`1035` 项通过、`0` 失败，耗时 `435.652s`；独立 regression reviewer 在 exact implementation commit 上再次得到 `1035/1035 PASS`。
+- 最终修复覆盖普通数值/CJK 数词、技术运算符、章节身份配对、重复显式字段、表格重复行、混合重排+值变化、宽表 Column 标签别名与物理抽取顺序。没有以 OIF/PCIe 出版方词表作为身份依据；证明不足时保留新增/删除或“需人工复核”，不猜 replacement。
+- 最终 GUI：`.venv/bin/python gui_app.py --smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`；真实 Tk 根窗口、控件树、页码输入、滚动路径和字体均被创建并验证后关闭。
 - 全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`，`933` 项通过、`0` 失败，耗时 `329.409s`。
 - 目标 RED/GREEN：同一快照伪表卡、SerDes 缩写隐藏、同家族伪覆盖、通用编号叙述链均先证明旧实现失败，再由公开入口回归变绿。
 - 受控解析基准：`5 PASS / 0 FAIL / 0 SKIP`。
 - 混合 Corpus：最终代码重跑为 `8 PASS / 0 FAIL / 1 SKIP`；三组 OIF 真实版本、PCIe PHY 真实版本、JLT 论文、表单、幻灯片和 OIF 自比均通过。PCIe PHY 页窗为 `2` 个正文变化、`0` 个表格变化并因非对齐页窗诚实降级；唯一 skip 是未提供的可选扫描 PDF。运行后用于集合样本的 12 份临时 PDF 副本已移入废纸篓，可恢复；只保留 summary 和最终报告。Gold/受控解析/Corpus summary SHA-256 分别为 `22b15cc8d57a4a156a911126870e1b203959f05296d10c628b1296ed35912b07` / `a8fed071006168fe12f7ad42e9a5996db3be90da823bd8bad07a56b3b0fd899b` / `cf44291181202a57f3b65b96830a0435dfe7c89048b979ef1f37d73a07ae41c3`。
 - Gold 示例：`1 PASS / 0 FAIL / 0 SKIP`，family coverage `required=1/executed=1/complete=true`；2/2 事件命中，recall 与 critical recall 均为 `1.0`。它仍只认证单一 OIF 家族。
-- 最终 OIF 532：`35` 张原始正文审计卡、`12` 张原始表格审计卡、`7` 项公式证据、`0` 张视觉变化卡；视觉覆盖为 eligible/checked/failed/ambiguous=`1/0/1/18`，保持 incomplete 并阻止 all-clear。v19 的 HTML/Markdown/TXT 隐藏截图中的 Table/Section 纯引用原句，JSON 保留 `18` 个原始命中，`33.5 dB`、`53.125 GHz`、`CMIT-LT/CMIS-LT` 均三面可见，MCB/HCB 表题误检为 `0`；固定页眉不因 36/35 页数差制造新卡。报告 provenance.build_commit 精确绑定 `3cba6685db56217073ec5d9e6e72a15deb896ee3`；HTML/JSON SHA-256 分别为 `045bd196465f5cf9321a1158d449ba0440624b85f728fcdcb5adf93fc3a1b170` / `6eda9ab15367dffbfcd8dfc9e56db29c843fddf91523145a8f49ea63e340676a`。
-- 非 OIF PCIe 技术报告：旧 `62` 页、新 `65` 页，JSON 为 `30` 个原始正文变化、`58` 个表格变化/复核组、`0` 个公式、`0` 张视觉变化卡。`4..9` 数据路径、`1..3` 总结句、`2. Link Equalization` 与 `202、234…` 均不成为假章节，只在所属正文卡中保留真实编号/内容变化。报告仍因多栏、表格归属和视觉覆盖不足明确为 degraded，没有假装全量可靠；provenance.build_commit 同样绑定 `3cba6685db56217073ec5d9e6e72a15deb896ee3`，HTML/JSON SHA-256 为 `3fe5fbc7a36329dd03b9b45a7d83acd7ed87d74e74c498024143f52ebcf15efd` / `23f469fe8be926e6fbb8016e0eb67a185f1eefb7f386e185d90ebff350f8d077`。
+- 最终 OIF 532：`35` 张原始正文审计卡、`12` 张原始表格审计卡、`7` 项公式证据、`0` 张视觉变化卡；报告明确为 `degraded / 需人工复核`，不允许无差异结论。报告 provenance.build_commit 精确绑定 `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95`；HTML/JSON SHA-256 分别为 `032cce111e7682fbe14b5e10c329d0216db8e6d11450eb1079be9cc87db63ef9` / `564bff761a8656846c094a739e316462ce6580318bc0c4fef824e0c80055a6bd`。
+- 非 OIF PCIe 技术报告：旧 `62` 页、新 `65` 页，JSON 为 `26` 个原始正文变化、`58` 个表格变化/复核组、`0` 个公式、`0` 张视觉变化卡。报告因多栏、表格归属和视觉覆盖不足明确为 `degraded / 需人工复核`，没有假装全量可靠；provenance.build_commit 同样绑定 `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95`，HTML/JSON SHA-256 为 `63122c20ac7a032b3ab685bf8670354692a3114baa9e0819c806fe93614faa08` / `c54d6ac1d20dc53962dbacaf4bd64a3287e31fc55700149b1b8c1b89f4ccd37e`。
 - 先前同一渲染器的 v3 HTML 已在应用内浏览器实测首屏表格前置、OIF h2 顺序为表格/公式/正文且 PCIe 人工复核提示可见。v19/v23 再核对 HTML h2、Markdown 章节顺序、三种读者文字和 JSON；OIF Markdown 顺序为第 35/152/197 行。应用内浏览器安全策略拒绝直接打开新的本地 `file://`，未绕过该限制，也不把静态检查冒充新的视觉验收。
 - `.venv/bin/python gui_app.py --smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`；本轮核心 Python 文件 Ruff `F/E9/I`、全源码 `compileall`、`git diff --check` 均通过。全仓 import 排序仍有既有格式债务，不作为本轮功能门禁。
 
@@ -59,10 +62,15 @@
 
 ## Independent Review
 
-- 新实现提交尚待两名只读 reviewer 对同一 exact commit 复核和 commit-bound attestation；上一阶段对 `69857da98b0789bb364a0c53f1b7160e65af5ab4` 的 PASS 不能替代本轮审查。
+- exact implementation commit `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95` 已获两名只读 reviewer 的 commit-bound PASS，unresolved P1/P2=`0/0`。
+- correctness reviewer：`019fcb67-bcc9-7270-988d-113d07697892`，review task `accuracy-phase1-correctness-20260810`。
+- regression reviewer：`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`，review task `accuracy-phase1-regression-20260810`；独立全量 `1035/1035 PASS`。
 
 ## User-Facing Artifacts
 
+- 最终验收根目录：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813`
+- OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
+- 非 OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie/protocol_diff_20260813_073717/protocol_diff_report.html`
 - OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/532-final-v19/protocol_diff_20260811_081957/protocol_diff_report.html`
 - 非 OIF HTML：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/pcie-final-v23/protocol_diff_20260811_081959/protocol_diff_report.html`
 - Gold summary：`/Users/mac/Desktop/PDF对比工具_通用性增强验收_20260811/gold_accuracy_final_v13.json`
