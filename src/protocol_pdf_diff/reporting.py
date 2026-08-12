@@ -3518,6 +3518,13 @@ def _table_row_changes(
     )
     if revision_changes is not None:
         return [*review_changes, *revision_changes]
+    ambiguous_row_changes, old_rows, new_rows = (
+        _resolve_duplicate_primary_table_rows(old_rows, new_rows)
+    )
+    review_changes.extend(ambiguous_row_changes)
+    # Apply the same identityless/repeated-row contract before choosing either
+    # ordered or parameter-key comparison.  Schema drift must not bypass the
+    # conservative resolver merely because the table otherwise looks unordered.
     if not _table_group_has_order_independent_parameter_identity(
         old_tables,
         new_tables,
