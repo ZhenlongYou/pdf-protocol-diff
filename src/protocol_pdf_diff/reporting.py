@@ -3860,6 +3860,29 @@ def _first_table_order_difference_indexes(
 ) -> tuple[int, int]:
     """Return raw old/new row offsets around the first order divergence."""
 
+    new_wide_positions: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for token_offset, (token, row_index) in enumerate(
+        zip(new_tokens, new_row_indexes, strict=True)
+    ):
+        if token[0] == "wide":
+            new_wide_positions.setdefault(token, []).append((token_offset, row_index))
+    old_wide_occurrences: Counter[tuple[str, str]] = Counter()
+    for old_offset, (token, old_row_index) in enumerate(
+        zip(old_tokens, old_row_indexes, strict=True)
+    ):
+        if token[0] != "wide":
+            continue
+        occurrence = old_wide_occurrences[token]
+        old_wide_occurrences[token] += 1
+        candidates = new_wide_positions.get(token, [])
+        if occurrence >= len(candidates):
+            continue
+        new_offset, new_row_index = candidates[occurrence]
+        if old_offset != new_offset:
+            return old_row_index, new_row_index
+    # 宽行顺序证据必须聚焦实际改变 run boundary 的宽行 occurrence；排序后的
+    # Parameter 首差异可能离边界很远，不能再拿其 raw index 截断审计窗口。
+
     for index, (old_token, new_token) in enumerate(
         zip(old_tokens, new_tokens, strict=False)
     ):
@@ -3939,6 +3962,30 @@ def _paired_table_order_previews(
         if old_field != new_field:
             selected_indexes.append(field_index)
             break
+    if len(selected_indexes) == 1 and old_focus_fields:
+        focus_first_field = old_focus_fields[0]
+        peer_fields = [
+            fields
+            for fields in [*old_fields, *new_fields]
+            if fields
+            and fields[0] == focus_first_field
+            and fields != old_focus_fields
+        ]
+        for field_index in range(1, maximum_field_count):
+            old_field = (
+                old_focus_fields[field_index]
+                if field_index < len(old_focus_fields)
+                else ("", "")
+            )
+            if any(
+                (fields[field_index] if field_index < len(fields) else ("", ""))
+                != old_field
+                for fields in peer_fields
+            ):
+                selected_indexes.append(field_index)
+                break
+        # 同一条wide row跨边界时其两侧内容相同；若窗口内还有首字段相同的
+        # wide peer，追加首个能区分两行的字段，避免顺序卡退化为重复Column 1。
     selected_indexes = list(dict.fromkeys(selected_indexes))
 
     def preview(
