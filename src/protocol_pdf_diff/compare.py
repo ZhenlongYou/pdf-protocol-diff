@@ -2968,6 +2968,14 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
             )
         ):
             return None  # 单句冒号标签无法在无 schema provenance 时证明字段身份。
+        if (
+            _review_identity_tokens(left_units[0])
+            & _review_identity_tokens(right_units[0])
+            and not _review_units_share_sentence_skeleton(
+                left_units[0], right_units[0]
+            )
+        ):
+            return None  # 共享 uses 2 等普通计数只找候选，不能绕过单句语义骨架门。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
     matched_unit_count = _review_unit_skeleton_match_count(
         left_units,
@@ -3126,41 +3134,6 @@ def _review_unit_skeleton_match_count(
         if not residual_left or not residual_right:
             return proven_count
 
-    right_indexes_by_identity: dict[str, list[int]] = {}
-    for index, unit in enumerate(residual_right):
-        identities = _review_identity_tokens(unit)
-        if len(identities) == 1:
-            right_indexes_by_identity.setdefault(next(iter(identities)), []).append(index)
-    consumed_per_identity: Counter[str] = Counter()
-    identity_left_indexes: set[int] = set()
-    identity_right_indexes: set[int] = set()
-    for left_index, unit in enumerate(residual_left):
-        identities = _review_identity_tokens(unit)
-        if len(identities) != 1:
-            continue
-        identity = next(iter(identities))
-        candidates = right_indexes_by_identity.get(identity, [])
-        occurrence = consumed_per_identity[identity]
-        if occurrence >= len(candidates):
-            continue
-        identity_left_indexes.add(left_index)
-        identity_right_indexes.add(candidates[occurrence])
-        consumed_per_identity[identity] += 1
-    if identity_left_indexes:
-        residual_left = [
-            unit
-            for index, unit in enumerate(residual_left)
-            if index not in identity_left_indexes
-        ]
-        residual_right = [
-            unit
-            for index, unit in enumerate(residual_right)
-            if index not in identity_right_indexes
-        ]
-        proven_count += len(identity_left_indexes)
-        if not residual_left or not residual_right:
-            return proven_count
-
     shorter, longer = (
         (residual_left, residual_right)
         if len(residual_left) <= len(residual_right)
@@ -3168,6 +3141,7 @@ def _review_unit_skeleton_match_count(
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_review_candidate_tokens(unit) for unit in longer]
+    longer_identities = [_review_identity_tokens(unit) for unit in longer]
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3211,11 +3185,29 @@ def _review_unit_skeleton_match_count(
             for index in candidate_pool
             for long_unit in (longer[index],)
             if _review_units_share_sentence_skeleton(short_unit, long_unit)
+            or (
+                _review_identity_tokens(short_unit)
+                & _review_identity_tokens(long_unit)
+                and max(
+                    _review_similarity(short_unit, long_unit),
+                    _similarity(short_unit, long_unit),
+                )
+                >= 0.80
+            )
         ]
+        short_identities = _review_identity_tokens(short_unit)
+        identity_matched_indexes = [
+            index for index in indexes if short_identities & longer_identities[index]
+        ]
+        if identity_matched_indexes:
+            indexes = identity_matched_indexes
         indexes.sort(
-            key=lambda index: _review_unit_key(longer[index]) == short_key,
+            key=lambda index: (
+                bool(short_identities & longer_identities[index]),
+                _review_unit_key(longer[index]) == short_key,
+            ),
             reverse=True,
-        )  # 先占用完全相等的同句，再用骨架配对真实字段/数值修改。
+        )  # 编号只决定安全候选的先后；最终仍须通过上面的句子骨架门。
         candidates.append(indexes)
 
     matched_short_by_long: dict[int, int] = {}
@@ -4637,19 +4629,6 @@ def _unequal_replace_delta_candidates(
     )
     match_identity_occurrences(
         [
-            next(iter(identities)) if len(identities) == 1 else ""
-            for unit in old_units
-            for identities in (_review_identity_tokens(unit),)
-        ],
-        [
-            next(iter(identities)) if len(identities) == 1 else ""
-            for unit in new_units
-            for identities in (_review_identity_tokens(unit),)
-        ],
-        report_replacements=True,
-    )
-    match_identity_occurrences(
-        [
             _table_row_identity(unit) if _is_table_review_unit(unit) else ""
             for unit in old_units
         ],
@@ -4674,7 +4653,7 @@ def _unequal_replace_delta_candidates(
             for word in words:
                 new_indexes_by_word.setdefault(word, []).append(new_index)
 
-    pair_scores: list[tuple[float, float, int, int]] = []
+    pair_scores: list[tuple[bool, float, float, int, int]] = []
     for old_position, old_index in enumerate(unmatched_old):
         old_unit = old_units[old_index]
         if not bounded_matching:
@@ -4708,17 +4687,42 @@ def _unequal_replace_delta_candidates(
                     - _relative_position(index, len(new_units))
                 ),
             )[:32]
+        old_identities = _review_identity_tokens(old_unit)
+        identity_matched_indexes = [
+            new_index
+            for new_index in candidate_indexes
+            if old_identities & _review_identity_tokens(new_units[new_index])
+        ]
+        if identity_matched_indexes:
+            candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
+            same_structural_identity = bool(
+                _review_identity_tokens(old_unit)
+                & _review_identity_tokens(new_unit)
+            )
             score = _unit_pair_score(old_unit, new_unit)
+            if same_structural_identity:
+                score = max(score, 0.80)
             if score >= _MIN_UNEQUAL_REPLACE_PAIR_SCORE:
                 position_gap = abs(
                     _relative_position(old_index, len(old_units))
                     - _relative_position(new_index, len(new_units))
                 )
-                pair_scores.append((score, -position_gap, old_index, new_index))
+                pair_scores.append(
+                    (
+                        same_structural_identity,
+                        score,
+                        -position_gap,
+                        old_index,
+                        new_index,
+                    )
+                )
 
-    for _score, _position_gap, old_index, new_index in sorted(pair_scores, reverse=True):
+    for _identity, _score, _position_gap, old_index, new_index in sorted(
+        pair_scores,
+        reverse=True,
+    ):
         if old_index in matched_old or new_index in matched_new:
             continue
         matched_old.add(old_index)

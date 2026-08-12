@@ -8622,6 +8622,39 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_narrative_count_cannot_prove_section_identity(self) -> None:
+        """A shared prose verb plus count remains candidate evidence, not identity."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-narrative-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Procedure\n"
+                            "The procedure uses 2 examples for optical calibration."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-narrative-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Procedure\n"
+                            "The receiver uses 2 examples for copper link training."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+
+        self.assertEqual(["added", "deleted"], sorted(change.change_type for change in result.changes))
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
