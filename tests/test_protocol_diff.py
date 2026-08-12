@@ -9930,6 +9930,46 @@ class ProtocolDiffTests(unittest.TestCase):
         ):
             self.assertIn(fact, evidence)
 
+    def test_overwide_layout_review_preserves_duplicate_only_peer_values(self) -> None:
+        """Equal label layouts with duplicates still expose the competing peer."""
+
+        def row(mode: str) -> str:
+            cells = [
+                (1, "SAME_ID"),
+                (2, "SHARED"),
+                (2, mode),
+                *((index, f"SAME_{index}") for index in range(3, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        pam4 = row("MODE_PAM4")
+        nrz = row("MODE_NRZ")
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([pam4, anchor, nrz]),),
+            (table([anchor, pam4, nrz]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MODE_PAM4", evidence)
+        self.assertIn("MODE_NRZ", evidence)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 

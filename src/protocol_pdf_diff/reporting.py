@@ -4012,6 +4012,28 @@ def _paired_table_order_previews(
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
+        if field_layout_is_ambiguous and not layout_conflict_peer_fields:
+            focus_multiplicity = Counter(
+                field.casefold() for field, _value in old_focus_fields
+            )
+            duplicate_peers = [
+                fields
+                for fields in peer_fields
+                if Counter(field.casefold() for field, _value in fields)
+                == focus_multiplicity
+            ]
+            layout_conflict_peer_fields = max(
+                duplicate_peers,
+                key=lambda fields: sum(
+                    focus_field == peer_field
+                    for focus_field, peer_field in zip(
+                        old_focus_fields,
+                        fields,
+                        strict=False,
+                    )
+                ),
+                default=[],
+            )
         focus_labels = [field.casefold() for field, _value in old_focus_fields]
         if any(
             [field.casefold() for field, _value in fields] != focus_labels
