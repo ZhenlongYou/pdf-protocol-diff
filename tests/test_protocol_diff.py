@@ -9656,6 +9656,54 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Column 33=MODE_NRZ", evidence)
         self.assertNotIn("UNRELATED_NARROW", evidence)
 
+    def test_overwide_preview_stays_bounded_with_many_competing_peers(self) -> None:
+        """One peer per earlier column cannot crowd out the final mode field."""
+
+        def row(values: list[str]) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        focus_values = ["SAME_ID", *(f"SAME_{index}" for index in range(2, 33)), "MODE_PAM4"]
+        focus = row(focus_values)
+        competitor_values = [*focus_values]
+        competitor_values[-1] = "MODE_NRZ"
+        competitor = row(competitor_values)
+        distractors: list[str] = []
+        for column in range(1, 32):
+            values = [*focus_values]
+            values[column] = f"ALT_{column + 1}"
+            values[-1] = f"MODE_OTHER_{column + 1}"
+            distractors.append(row(values))
+        anchors = [
+            f"表格行: T1 | Parameter={name} | Limit=Maximum | Value={index} V"
+            for index, name in enumerate(("A", "B", "C", "D", "E"), start=1)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([*distractors, focus, *anchors, competitor]),),
+            (table([*distractors, *anchors[:2], focus, *anchors[2:], competitor]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 33=MODE_PAM4", evidence)
+        self.assertIn("Column 33=MODE_NRZ", evidence)
+        self.assertLessEqual(len(order_change.old_value), 760)
+        self.assertLessEqual(len(order_change.new_value), 760)
+
     def test_overwide_row_shift_from_delete_insert_is_not_reordering(self) -> None:
         """A common row may shift index without changing relative order."""
 

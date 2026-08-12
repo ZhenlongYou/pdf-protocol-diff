@@ -3982,54 +3982,66 @@ def _paired_table_order_previews(
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
-        remaining_peers = list(peer_fields)
-        for field_index in range(1, maximum_field_count):
-            old_field = (
-                old_focus_fields[field_index]
-                if field_index < len(old_focus_fields)
-                else ("", "")
+        distinguishing_index = next(
+            (
+                field_index
+                for field_index in range(1, maximum_field_count)
+                if all(
+                    (
+                        fields[field_index]
+                        if field_index < len(fields)
+                        else ("", "")
+                    )
+                    != old_focus_fields[field_index]
+                    for fields in peer_fields
+                )
+            ),
+            None,
+        )
+        if distinguishing_index is None and peer_fields:
+            distinguishing_index = max(
+                (
+                    field_index
+                    for field_index in range(1, maximum_field_count)
+                    if any(
+                        (
+                            fields[field_index]
+                            if field_index < len(fields)
+                            else ("", "")
+                        )
+                        != old_focus_fields[field_index]
+                        for fields in peer_fields
+                    )
+                ),
+                default=None,
             )
+        if distinguishing_index is not None:
+            selected_indexes.append(distinguishing_index)
             different_peers = [
                 fields
-                for fields in remaining_peers
+                for fields in peer_fields
                 if (
-                    fields[field_index]
-                    if field_index < len(fields)
+                    fields[distinguishing_index]
+                    if distinguishing_index < len(fields)
                     else ("", "")
                 )
-                != old_field
+                != old_focus_fields[distinguishing_index]
             ]
-            if different_peers:
-                selected_indexes.append(field_index)
-            matching_peers = [
-                fields
-                for fields in remaining_peers
-                if (
-                    fields[field_index]
-                    if field_index < len(fields)
-                    else ("", "")
-                )
-                == old_field
-            ]
-            if not matching_peers and different_peers:
-                distinguishing_peer_fields = max(
-                    different_peers,
-                    key=lambda fields: next(
-                        (
-                            index
-                            for index, (focus_field, peer_field) in enumerate(
-                                zip(old_focus_fields, fields, strict=False)
-                            )
-                            if focus_field != peer_field
-                        ),
-                        max(len(old_focus_fields), len(fields)),
-                    ),
-                )
-                break
-            remaining_peers = matching_peers
+            distinguishing_peer_fields = max(
+                different_peers,
+                key=lambda fields: sum(
+                    focus_field == peer_field
+                    for focus_field, peer_field in zip(
+                        old_focus_fields,
+                        fields,
+                        strict=False,
+                    )
+                ),
+                default=[],
+            )
         # 同一条wide row跨边界时其两侧内容相同；若窗口内还有首字段相同的
-        # wide peer，逐列追加直到focus signature可与全部peer区分；不能让较早
-        # 不同的第三条wide掩盖真正共享更长前缀的竞争peer。
+        # wide peer，只追加一个能区分全部peer的列；若不存在则选最深分歧列。
+        # 证据长度因此不随peer数量增长，也不会把真正的末列差异截掉。
     selected_indexes = list(dict.fromkeys(selected_indexes))
 
     def preview(
@@ -4081,8 +4093,8 @@ def _paired_table_order_previews(
                 for index in selected_indexes
                 if index < len(distinguishing_peer_fields)
             ]
-            suffix += f"；相关宽行：{' | '.join(peer_cells)}"
-        return prefix + " → ".join(labels) + suffix
+            suffix += f"；相关宽行：{truncate(' | '.join(peer_cells), 120)}"
+        return truncate(prefix + " → ".join(labels) + suffix, 760)
 
     return (
         preview(
