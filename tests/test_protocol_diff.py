@@ -9312,9 +9312,11 @@ class ProtocolDiffTests(unittest.TestCase):
 
         pam4 = wide_row("MODE_PAM4")
         nrz = wide_row("MODE_NRZ")
+        old_only = "表格行: T1 | Column 1=OLD_ONLY | Column 2=CONTEXT"
+        new_only = "表格行: T1 | Column 1=NEW_ONLY | Column 2=CONTEXT"
         changes = reporting_module._table_row_changes(
-            (table([pam4, nrz]),),
-            (table([nrz, pam4]),),
+            (table([old_only, pam4, nrz]),),
+            (table([new_only, nrz, pam4]),),
         )
         order_change = next(
             row for row in changes if row.change_type == "顺序变化"
@@ -9353,9 +9355,11 @@ class ProtocolDiffTests(unittest.TestCase):
 
         pam4 = wide_row("MODE_PAM4")
         nrz = wide_row("MODE_NRZ")
+        old_only = "表格行: T1 | Column 1=OLD_ONLY | Column 2=CONTEXT"
+        new_only = "表格行: T1 | Column 1=NEW_ONLY | Column 2=CONTEXT"
         changes = reporting_module._table_row_changes(
-            (table([pam4, nrz]),),
-            (table([nrz, pam4]),),
+            (table([old_only, pam4, nrz]),),
+            (table([new_only, nrz, pam4]),),
         )
         order_change = next(row for row in changes if row.change_type == "顺序变化")
         evidence = f"{order_change.old_value}\n{order_change.new_value}"

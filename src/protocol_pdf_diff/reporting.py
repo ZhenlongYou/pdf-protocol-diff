@@ -3877,21 +3877,30 @@ def _paired_table_order_previews(
     new_window = new_rows[new_start : new_start + 4]
     old_fields = [field_pairs(row) for row in old_window]
     new_fields = [field_pairs(row) for row in new_window]
-    selected_indexes: list[int] = [0]
-    maximum_field_count = max(
-        [*(len(fields) for fields in old_fields), *(len(fields) for fields in new_fields)],
-        default=0,
+    old_focus_offset = min(
+        max(0, old_focus_index - old_start),
+        max(0, len(old_fields) - 1),
     )
+    new_focus_offset = min(
+        max(0, new_focus_index - new_start),
+        max(0, len(new_fields) - 1),
+    )
+    old_focus_fields = old_fields[old_focus_offset] if old_fields else []
+    new_focus_fields = new_fields[new_focus_offset] if new_fields else []
+    selected_indexes: list[int] = [0]
+    maximum_field_count = max(len(old_focus_fields), len(new_focus_fields))
     for field_index in range(maximum_field_count):
-        old_values = [
-            fields[field_index] if field_index < len(fields) else ("", "")
-            for fields in old_fields
-        ]
-        new_values = [
-            fields[field_index] if field_index < len(fields) else ("", "")
-            for fields in new_fields
-        ]
-        if old_values != new_values:
+        old_field = (
+            old_focus_fields[field_index]
+            if field_index < len(old_focus_fields)
+            else ("", "")
+        )
+        new_field = (
+            new_focus_fields[field_index]
+            if field_index < len(new_focus_fields)
+            else ("", "")
+        )
+        if old_field != new_field:
             selected_indexes.append(field_index)
             break
     selected_indexes = list(dict.fromkeys(selected_indexes))
@@ -3900,6 +3909,8 @@ def _paired_table_order_previews(
         window_rows: list[str],
         fields_by_row: list[list[tuple[str, str]]],
         counterpart_fields_by_row: list[list[tuple[str, str]]],
+        focus_offset: int,
+        counterpart_focus_fields: list[tuple[str, str]],
         start: int,
         total_rows: int,
     ) -> str:
@@ -3908,7 +3919,9 @@ def _paired_table_order_previews(
             zip(window_rows, fields_by_row, strict=True)
         ):
             counterpart_fields = (
-                counterpart_fields_by_row[row_index]
+                counterpart_focus_fields
+                if row_index == focus_offset
+                else counterpart_fields_by_row[row_index]
                 if row_index < len(counterpart_fields_by_row)
                 else []
             )
@@ -3937,8 +3950,24 @@ def _paired_table_order_previews(
         return prefix + " → ".join(labels) + suffix
 
     return (
-        preview(old_window, old_fields, new_fields, old_start, len(old_rows)),
-        preview(new_window, new_fields, old_fields, new_start, len(new_rows)),
+        preview(
+            old_window,
+            old_fields,
+            new_fields,
+            old_focus_offset,
+            new_focus_fields,
+            old_start,
+            len(old_rows),
+        ),
+        preview(
+            new_window,
+            new_fields,
+            old_fields,
+            new_focus_offset,
+            old_focus_fields,
+            new_start,
+            len(new_rows),
+        ),
     )
 
 
