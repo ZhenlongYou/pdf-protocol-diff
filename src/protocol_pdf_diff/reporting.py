@@ -3602,6 +3602,40 @@ def _partition_overwide_generic_rows(
             labels.append((row, counts[row]))
         return labels
 
+    old_explicit = [
+        _table_row_pairing_primary_identity(row, allow_generic_column=False)
+        for row in old_rows
+    ]
+    new_explicit = [
+        _table_row_pairing_primary_identity(row, allow_generic_column=False)
+        for row in new_rows
+    ]
+    old_explicit_counts = Counter(identity for identity in old_explicit if identity)
+    new_explicit_counts = Counter(identity for identity in new_explicit if identity)
+    shared_unique_explicit = {
+        identity
+        for identity in old_explicit_counts.keys() & new_explicit_counts.keys()
+        if old_explicit_counts[identity] == new_explicit_counts[identity] == 1
+    }
+
+    def order_labels(
+        rows: list[str],
+        occurrence: list[tuple[str, int]],
+        explicit: list[str],
+    ) -> list[tuple[str, str | int]]:
+        labels: list[tuple[str, str | int]] = []
+        for row, occurrence_label, explicit_identity in zip(
+            rows,
+            occurrence,
+            explicit,
+            strict=True,
+        ):
+            if explicit_identity in shared_unique_explicit:
+                labels.append(("explicit", explicit_identity))
+            elif occurrence_label in common_occurrences:
+                labels.append(("raw", f"{occurrence_label[0]}\x1f{occurrence_label[1]}"))
+        return labels
+
     old_labels = occurrence_labels(old_rows)
     new_labels = occurrence_labels(new_rows)
     old_wide = [
@@ -3616,9 +3650,9 @@ def _partition_overwide_generic_rows(
     ]
     if not old_wide and not new_wide:
         return [], old_rows, new_rows
-    common_labels = set(old_labels) & set(new_labels)
-    old_common = [label for label in old_labels if label in common_labels]
-    new_common = [label for label in new_labels if label in common_labels]
+    common_occurrences = set(old_labels) & set(new_labels)
+    old_common = order_labels(old_rows, old_labels, old_explicit)
+    new_common = order_labels(new_rows, new_labels, new_explicit)
     old_common_position = {
         label: index for index, label in enumerate(old_common)
     }
@@ -3627,10 +3661,15 @@ def _partition_overwide_generic_rows(
     }
     moved_labels = {
         label
-        for label in common_labels
+        for label in set(old_common) & set(new_common)
         if old_common_position[label] != new_common_position[label]
     }
-    cancellable_labels = common_labels - moved_labels
+    moved_occurrences = {
+        (label[1].rsplit("\x1f", 1)[0], int(label[1].rsplit("\x1f", 1)[1]))
+        for label in moved_labels
+        if label[0] == "raw" and isinstance(label[1], str)
+    }
+    cancellable_labels = common_occurrences - moved_occurrences
     remaining_old = [
         row for row, label in old_wide if label not in cancellable_labels
     ]
