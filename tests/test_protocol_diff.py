@@ -9086,15 +9086,19 @@ class ProtocolDiffTests(unittest.TestCase):
                 row_alignment_reliable=True,
             )
 
+        width = 500
         old_rows = [
-            row([f"H{index}" for index in range(70)]),
-            row([f"A{index}" for index in range(70)]),
-            row([f"B{index}" for index in range(70)]),
+            row([f"R{row_index}C{column}" for column in range(width)])
+            for row_index in range(10)
         ]
         new_rows = [
-            row(["H0 H1", *(f"H{index}" for index in range(2, 70))]),
-            row(["A0 A1", *(f"A{index}" for index in range(2, 70))]),
-            row(["B0 B1", *(f"B{index}" for index in range(2, 70))]),
+            row(
+                [
+                    f"R{row_index}C0 R{row_index}C1",
+                    *(f"R{row_index}C{column}" for column in range(2, width)),
+                ]
+            )
+            for row_index in range(10)
         ]
 
         started = time.monotonic()

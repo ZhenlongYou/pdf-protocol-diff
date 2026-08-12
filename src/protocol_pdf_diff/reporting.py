@@ -3490,6 +3490,19 @@ def _table_row_changes(
 
     old_rows = _table_group_rows(old_tables)
     new_rows = _table_group_rows(new_tables)
+    if _generic_table_width_exceeds_boundary_budget((*old_rows, *new_rows)):
+        if old_rows == new_rows:
+            return []
+        return [
+            *(
+                _make_table_row_change(row, "", "旧表删除行")
+                for row in old_rows
+            ),
+            *(
+                _make_table_row_change("", row, "新表新增行")
+                for row in new_rows
+            ),
+        ]  # 超宽 generic 表在任何深度解析前 fail-visible；禁止先付出大规模归一化成本再决定保守留痕。
     old_rows, new_rows = _remove_same_position_descriptor_reflows(
         old_rows,
         new_rows,
@@ -4268,6 +4281,9 @@ def _remove_proven_generic_column_boundary_reflows(
 ) -> tuple[list[str], list[str]]:
     """Consume only table-wide-proven generic column boundary reflows."""
 
+    if _generic_table_width_exceeds_boundary_budget((*old_rows, *new_rows)):
+        return old_rows, new_rows
+        # 宽表在任何 cell token/key 归一化前退出；无法证明时保守留痕，避免行数×列数放大无用工作。
     old_entries = [_table_row_field_entries(row) for row in old_rows]
     new_entries = [_table_row_field_entries(row) for row in new_rows]
     patterns_by_width: dict[
@@ -4350,6 +4366,21 @@ def _remove_proven_generic_column_boundary_reflows(
     return (
         [row for index, row in enumerate(old_rows) if index not in consumed_old],
         [row for index, row in enumerate(new_rows) if index not in consumed_new],
+    )
+
+
+def _generic_table_width_exceeds_boundary_budget(rows: Iterable[str]) -> bool:
+    """Detect an over-budget neutral schema without decoding every cell."""
+
+    return any(
+        len(
+            re.findall(
+                r"(?i)(?:^|\|)\s*column\s+\d+\s*=",
+                row,
+            )
+        )
+        > 32
+        for row in rows
     )
 
 
