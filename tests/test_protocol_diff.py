@@ -9873,6 +9873,63 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Column 2=MODE_PAM4", evidence)
         self.assertIn("Column 34=MODE_NRZ", evidence)
 
+    def test_overwide_layout_review_preserves_all_and_duplicate_conflicts(self) -> None:
+        """Audit values retain every layout conflict and duplicate occurrence."""
+
+        def row(cells: list[tuple[int, str]]) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        common = [(1, "SAME_ID"), *((index, f"SAME_{index}") for index in range(6, 34))]
+        old_cells = [
+            *common,
+            (2, "SHARED"),
+            (2, "MODE_PAM4"),
+            (3, "OLD_TECH_3"),
+            (4, "OLD_TECH_4"),
+            (5, "OLD_TECH_5"),
+        ]
+        new_cells = [
+            *common,
+            (2, "SHARED"),
+            (2, "MODE_NRZ"),
+            (34, "NEW_TECH_34"),
+            (35, "NEW_TECH_35"),
+            (36, "NEW_TECH_36"),
+            (37, "NEW_TECH_37"),
+        ]
+        old_row = row(old_cells)
+        new_row = row(new_cells)
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([old_row, anchor, new_row]),),
+            (table([anchor, old_row, new_row]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        for fact in (
+            "MODE_PAM4",
+            "MODE_NRZ",
+            "OLD_TECH_5",
+            "NEW_TECH_37",
+        ):
+            self.assertIn(fact, evidence)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 

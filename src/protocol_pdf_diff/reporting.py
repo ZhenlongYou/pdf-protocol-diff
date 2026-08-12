@@ -4128,19 +4128,21 @@ def _paired_table_order_previews(
         for label in ordered_labels:
             values = by_label.get(label, [])
             counterparts = counterpart_by_label.get(label, [])
-            value = values[0] if values else None
-            counterpart = counterparts[0] if counterparts else None
             if values == counterparts:
                 continue
-            if value is None:
-                cells.append(f"{counterpart[0]}=<缺失>")
+            display_label = (
+                values[0][0]
+                if values
+                else counterparts[0][0]
+            )
+            if not values:
+                cells.append(f"{display_label}=<缺失>")
             else:
-                cells.append(
-                    f"{value[0]}={paired_excerpt(value[1], counterpart[1] if counterpart else '', 72)}"
-                )
-            if len(cells) >= 3:
-                break
-        return truncate(" | ".join(cells) or compact_inline(str(fields)), 240)
+                occurrence_values = " / ".join(value for _field, value in values)
+                cells.append(f"{display_label}={occurrence_values}")
+        return " | ".join(cells) or compact_inline(str(fields))
+        # TableRowChange/JSON/CSV保留全部冲突label及重复occurrence；HTML、
+        # Markdown和TXT在渲染层已有独立的读者长度预算，不能反向裁掉审计事实。
 
     def preview(
         window_rows: list[str],
