@@ -9462,6 +9462,39 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(changes)
         self.assertTrue(any(row.change_type == "顺序变化" for row in changes))
 
+    def test_overwide_partition_ignores_only_explicit_parameter_reordering(self) -> None:
+        """A neutral wide row cannot make an unordered parameter table ordered."""
+
+        wide = "表格行: T1 | " + " | ".join(
+            f"Column {index + 1}=W{index}" for index in range(33)
+        )
+        voltage = (
+            "表格行: T1 | Parameter=Voltage | Limit=Maximum | Value=5 | Units=V"
+        )
+        current = (
+            "表格行: T1 | Parameter=Current | Limit=Maximum | Value=2 | Units=A"
+        )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Operating limits",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        self.assertEqual(
+            [],
+            reporting_module._table_row_changes(
+                (table([wide, voltage, current]),),
+                (table([wide, current, voltage]),),
+            ),
+        )
+
     def test_overwide_row_crossing_modified_explicit_anchor_is_visible(self) -> None:
         """A unique Parameter remains an order anchor while its value changes."""
 

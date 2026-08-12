@@ -3627,21 +3627,42 @@ def _partition_overwide_generic_rows(
     def order_tokens(
         rows: list[str],
         explicit: list[str],
+        is_wide: list[bool],
     ) -> tuple[list[tuple[str, str]], list[int]]:
-        tokens: list[tuple[str, str]] = []
-        indexes: list[int] = []
-        for row_index, (row, explicit_identity) in enumerate(zip(
+        indexed_tokens: list[tuple[tuple[str, str], int]] = []
+        for row_index, (row, explicit_identity, row_is_wide) in enumerate(zip(
             rows,
             explicit,
+            is_wide,
             strict=True,
         )):
-            if explicit_identity in shared_unique_explicit:
-                tokens.append(("explicit", explicit_identity))
-                indexes.append(row_index)
+            if row_is_wide and row in shared_raw:
+                indexed_tokens.append((("wide", row), row_index))
+            elif explicit_identity in shared_unique_explicit:
+                indexed_tokens.append((("anchor", explicit_identity), row_index))
             elif row in shared_raw:
-                tokens.append(("raw", row))
-                indexes.append(row_index)
-        return tokens, indexes
+                indexed_tokens.append((("anchor", row), row_index))
+
+        normalized: list[tuple[tuple[str, str], int]] = []
+        anchor_run: list[tuple[tuple[str, str], int]] = []
+
+        def flush_anchor_run() -> None:
+            normalized.extend(sorted(anchor_run, key=lambda item: item[0]))
+            anchor_run.clear()
+
+        for item in indexed_tokens:
+            if item[0][0] == "wide":
+                flush_anchor_run()
+                normalized.append(item)
+            else:
+                anchor_run.append(item)
+        flush_anchor_run()
+        return (
+            [token for token, _index in normalized],
+            [index for _token, index in normalized],
+        )
+        # 非宽行只为证明宽行是否跨越可靠锚点；同一宽行间隔内的 Parameter
+        # 自身顺序不属于这个保守宽表分支的技术变化，仍交回常规表格身份比较。
 
     old_wide = [
         row for row, is_wide in zip(old_rows, old_is_wide, strict=True) if is_wide
@@ -3665,8 +3686,16 @@ def _partition_overwide_generic_rows(
 
     remaining_old = excess_rows(old_wide, remaining_old_counts)
     remaining_new = excess_rows(new_wide, remaining_new_counts)
-    old_order, old_order_indexes = order_tokens(old_rows, old_explicit)
-    new_order, new_order_indexes = order_tokens(new_rows, new_explicit)
+    old_order, old_order_indexes = order_tokens(
+        old_rows,
+        old_explicit,
+        old_is_wide,
+    )
+    new_order, new_order_indexes = order_tokens(
+        new_rows,
+        new_explicit,
+        new_is_wide,
+    )
     order_state = _table_order_token_state(old_order, new_order)
     changes: list[TableRowChange] = []
     changes.extend(
