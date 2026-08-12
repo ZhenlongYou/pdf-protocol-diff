@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from argparse import Namespace
 from html.parser import HTMLParser
@@ -9063,6 +9064,47 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Second", evidence)
         self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
         self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
+
+    def test_very_wide_generic_column_reflow_fails_visible_quickly(self) -> None:
+        """Wide tables stay responsive when merge proof exceeds its budget."""
+
+        def row(values: list[str]) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Wide data",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [
+            row([f"H{index}" for index in range(70)]),
+            row([f"A{index}" for index in range(70)]),
+            row([f"B{index}" for index in range(70)]),
+        ]
+        new_rows = [
+            row(["H0 H1", *(f"H{index}" for index in range(2, 70))]),
+            row(["A0 A1", *(f"A{index}" for index in range(2, 70))]),
+            row(["B0 B1", *(f"B{index}" for index in range(2, 70))]),
+        ]
+
+        started = time.monotonic()
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        self.assertTrue(changes)
+        self.assertLess(time.monotonic() - started, 2.0)
 
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""

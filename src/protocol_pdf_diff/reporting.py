@@ -4429,6 +4429,8 @@ def _generic_boundary_merge_patterns_for_entries(
         return set()
     source_count = len(source_entries)
     target_count = len(target_entries)
+    if source_count > 32 or target_count > 32:
+        return set()  # 极宽表格超出有界证明预算时保守留痕，避免立方级列分组搜索卡住报告。
     target_keys = tuple(
         _table_row_single_line_text_key(entry[3])
         for entry in target_entries
