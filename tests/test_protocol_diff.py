@@ -8494,8 +8494,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Lane 119 voltage limit", audited)
         self.assertGreater(change.omitted_snippet_count, 0)
 
-    def test_bounded_matching_keeps_cjk_adjacent_numeric_identity(self) -> None:
-        """A CJK label directly joined to a number remains a remote identity anchor."""
+    def test_cjk_free_text_numeric_labels_remain_unattributed(self) -> None:
+        """CJK label-number text remains visible without guessed record identity."""
 
         count = 100
         old_units = [
@@ -8531,19 +8531,12 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(result.changes))
         change = result.changes[0]
         self.assertEqual("modified", change.change_type)
-        self.assertEqual(count, len(change.audit_replaced_snippets))
-        self.assertFalse(change.audit_added_snippets)
-        self.assertFalse(change.audit_removed_snippets)
-        self.assertTrue(
-            all(
-                re.search(r"通道(\d+)", pair.old).group(1)
-                == re.search(r"通道(\d+)", pair.new).group(1)
-                for pair in change.audit_replaced_snippets
-            )
-        )
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_keeps_cjk_number_word_identity(self) -> None:
-        """Chinese number words keep the same threshold behavior as Arabic digits."""
+    def test_cjk_number_word_records_remain_unattributed(self) -> None:
+        """Chinese-number labels use the same conservative policy as digits."""
 
         chinese_numbers = (
             "零", "一", "二", "三", "四", "五", "六", "七", "八", "九",
@@ -8593,19 +8586,12 @@ class ProtocolDiffTests(unittest.TestCase):
                     self.assertEqual(1, len(result.changes))
                     change = result.changes[0]
                     self.assertEqual("modified", change.change_type)
-                    self.assertEqual(count, len(change.audit_replaced_snippets))
-                    self.assertFalse(change.audit_added_snippets)
-                    self.assertFalse(change.audit_removed_snippets)
-                    self.assertTrue(
-                        all(
-                            re.search(r"通道\s*(.+?)的", pair.old).group(1)
-                            == re.search(r"通道\s*(.+?)的", pair.new).group(1)
-                            for pair in change.audit_replaced_snippets
-                        )
-                    )
+                    self.assertFalse(change.audit_replaced_snippets)
+                    self.assertTrue(change.audit_added_snippets)
+                    self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_locks_cjk_identity_before_equal_numeric_values(self) -> None:
-        """A measurement equal to another record id cannot steal that record's pair."""
+    def test_cjk_numeric_value_collision_remains_unattributed(self) -> None:
+        """A value equal to another CJK label cannot create a guessed pairing."""
 
         chinese_numbers = (
             "零", "一", "二", "三", "四", "五", "六", "七", "八", "九",
@@ -8649,16 +8635,81 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(result.changes))
         change = result.changes[0]
         self.assertEqual("modified", change.change_type)
-        self.assertEqual(33, len(change.audit_replaced_snippets))
-        self.assertFalse(change.audit_added_snippets)
-        self.assertFalse(change.audit_removed_snippets)
-        self.assertTrue(
-            all(
-                re.search(r"通道(.+?)的", pair.old).group(1)
-                == re.search(r"通道(.+?)的", pair.new).group(1)
-                for pair in change.audit_replaced_snippets
-            )
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
+
+    def test_cjk_table_reference_and_record_number_remain_unattributed(self) -> None:
+        """Channel, locator, and value numbers cannot guess a free-text primary key."""
+
+        count = 8
+        old_units = [
+            f"接收机通道{index}应符合表31的要求，电压限制为20毫伏。"
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[4:] + list(range(count))[:4]
+        new_units = [
+            f"接收机通道{index}应符合表32的要求，电压限制为21毫伏。"
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-cjk-table-reference.pdf"),
+                pages=[PageText(page_number=1, text="1 通道\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-cjk-table-reference.pdf"),
+                pages=[PageText(page_number=1, text="1 通道\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=count),
         )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
+
+    def test_repeated_cjk_label_cannot_borrow_count_as_composite_identity(self) -> None:
+        """A repeated channel cannot use configuration/count text to fake uniqueness."""
+
+        for count_phrase in ("配置", "包含", "使用", "报告", "具有", "需要"):
+            old_units = [
+                f"通道1{count_phrase}2个模式供接收器甲使用，限制为20毫伏。",
+                f"通道1{count_phrase}3个模式供接收器乙使用，限制为30毫伏。",
+            ]
+            new_units = [
+                f"通道1{count_phrase}3个模式供接收器甲使用，限制为21毫伏。",
+                f"通道1{count_phrase}2个模式供接收器乙使用，限制为31毫伏。",
+            ]
+            with self.subTest(count_phrase=count_phrase):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path(f"old-repeated-cjk-{count_phrase}.pdf"),
+                        pages=[PageText(page_number=1, text="1 配置\n" + "\n".join(old_units))],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path(f"new-repeated-cjk-{count_phrase}.pdf"),
+                        pages=[PageText(page_number=1, text="1 配置\n" + "\n".join(new_units))],
+                    ),
+                    DiffOptions(max_snippets_per_section=4),
+                )
+
+                self.assertTrue(result.changes)
+                self.assertTrue(
+                    all(not change.audit_replaced_snippets for change in result.changes)
+                )
+                evidence = " ".join(
+                    snippet
+                    for change in result.changes
+                    for snippet in (
+                        *change.audit_added_snippets,
+                        *change.audit_removed_snippets,
+                    )
+                )
+                self.assertIn("接收器甲", evidence)
+                self.assertIn("接收器乙", evidence)
 
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
@@ -15106,6 +15157,47 @@ class ProtocolDiffTests(unittest.TestCase):
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
         self.assertEqual([], result.changes)
+
+    def test_semantic_semicolon_is_not_lost_when_sentence_boundaries_change(self) -> None:
+        """A command separator remains visible even when it changes unit splitting."""
+
+        shared = (
+            "The implementation shall retain traceable requirements and review records. "
+        ) * 12
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-semicolon-boundary.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=f"1 Scope\n{shared}\nPerform reset; continue.",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-semicolon-boundary.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=f"1 Scope\n{shared}\nPerform reset continue.",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        evidence = "\n".join(
+            [
+                *result.changes[0].audit_added_snippets,
+                *result.changes[0].audit_removed_snippets,
+                *(
+                    f"{pair.old}\n{pair.new}"
+                    for pair in result.changes[0].audit_replaced_snippets
+                ),
+            ]
+        )
+        self.assertIn("reset;", evidence)
 
     def test_chinese_count_words_before_ascii_units_are_semantically_equal(self) -> None:
         """Chinese counts before standalone ASCII units should compare equal."""

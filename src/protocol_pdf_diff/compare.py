@@ -14,7 +14,6 @@ import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
-from itertools import combinations
 from pathlib import Path
 
 from .formula_visuals import normalized_formula_key
@@ -112,15 +111,6 @@ class _SourceTableCaptionEvidence:
 
     unit_keys: tuple[str, ...]
     leading_text: str
-
-
-@dataclass(frozen=True)
-class _StableRecordIdentityPlan:
-    """A uniquely proven numeric record-key projection for two unit lists."""
-
-    labels: frozenset[str] = frozenset()
-    shared_identities: frozenset[frozenset[str]] = frozenset()
-    ambiguous: bool = False
 
 
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
@@ -2918,6 +2908,7 @@ def _section_match_score(old_section: Section, new_section: Section) -> float:
 
 _SECTION_MATCH_SAMPLE_CHARS = 1200  # 长章节匹配采样代表性文本，避免反复对整章做昂贵相似度计算。
 _MAX_ALL_PAIR_UNIT_MATCHES = 1024  # 32×32 以内可穷举；更长章节必须走有界候选索引。
+_MAX_WHOLE_BODY_REVIEW_KEY_CHARS = 2048  # 只在短正文分句数量漂移时计算整段语义键，避免长章节二次扫描退化。
 
 
 def _section_similarity(left: str, right: str) -> float:
@@ -2950,8 +2941,20 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     right_unit_keys = [_review_unit_key(unit) for unit in right_units]
     left_review_key = " ".join(key for key in left_unit_keys if key)
     right_review_key = " ".join(key for key in right_unit_keys if key)
-    if left_review_key and left_review_key == right_review_key:
-        return 1.0  # 整段语义键完全相等时，句末标点造成的分句差异不应破坏章节身份。
+    if (
+        left_review_key
+        and left_review_key == right_review_key
+        and len(left_units) == len(right_units)
+    ):
+        return 1.0  # 分句数量相同时逐单元语义键完全相等即可证明章节身份。
+    if (
+        len(left_units) != len(right_units)
+        and len(left) + len(right) <= _MAX_WHOLE_BODY_REVIEW_KEY_CHARS
+    ):
+        whole_left_key = _review_unit_key(left)
+        whole_right_key = _review_unit_key(right)
+        if whole_left_key and whole_left_key == whole_right_key:
+            return 1.0  # 短正文整段键允许PDF分句边界漂移；结构化分号仍留在语义键中。
     if _unproven_record_order_conflict(left_units, right_units):
         matched_unit_count = _review_unit_skeleton_match_count(
             left_units,
@@ -2995,10 +2998,6 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         right_field = _assignment_field_key(right_units[0])
         if left_field and left_field == right_field:
             return max(raw_score, 0.90)  # 稳定字段名可以证明 Mode/State 的值槽修改。
-        left_identity = _review_identity_tokens(left_units[0])
-        right_identity = _review_identity_tokens(right_units[0])
-        if left_identity and left_identity == right_identity:
-            return max(raw_score, 0.90)  # 紧邻中文编号只证明同一条记录，不把字形差异误当等价。
         if (
             _review_unit_key(left_units[0]) != _review_unit_key(right_units[0])
             and (
@@ -3010,8 +3009,11 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         if (
             _review_candidate_identity_tokens(left_units[0])
             & _review_candidate_identity_tokens(right_units[0])
-            and not _review_units_share_sentence_skeleton(
-                left_units[0], right_units[0]
+            and not (
+                _review_units_share_sentence_skeleton(left_units[0], right_units[0])
+                or _review_units_share_numbered_record_skeleton(
+                    left_units[0], right_units[0]
+                )
             )
         ):
             return None  # 共享 uses 2 等普通计数只找候选，不能绕过单句语义骨架门。
@@ -3173,43 +3175,6 @@ def _review_unit_skeleton_match_count(
         if not residual_left or not residual_right:
             return proven_count
 
-    identity_plan = _stable_discriminative_identity_plan(
-        residual_left, residual_right
-    )
-    if identity_plan.ambiguous:
-        return proven_count  # 多个同等覆盖的编号组合映射冲突，章节身份不能靠猜测成立。
-    right_indexes_by_identity: dict[frozenset[str], list[int]] = {}
-    for index, unit in enumerate(residual_right):
-        identity = _stable_record_identity(unit, identity_plan)
-        if identity:
-            right_indexes_by_identity.setdefault(identity, []).append(index)
-    identity_left_indexes: set[int] = set()
-    identity_right_indexes: set[int] = set()
-    for left_index, unit in enumerate(residual_left):
-        identity = _stable_record_identity(unit, identity_plan)
-        candidates = right_indexes_by_identity.get(identity, ()) if identity else ()
-        if len(candidates) != 1:
-            continue
-        right_index = candidates[0]
-        if right_index in identity_right_indexes:
-            continue
-        identity_left_indexes.add(left_index)
-        identity_right_indexes.add(right_index)
-    if identity_left_indexes:
-        residual_left = [
-            unit
-            for index, unit in enumerate(residual_left)
-            if index not in identity_left_indexes
-        ]
-        residual_right = [
-            unit
-            for index, unit in enumerate(residual_right)
-            if index not in identity_right_indexes
-        ]
-        proven_count += len(identity_left_indexes)
-        if not residual_left or not residual_right:
-            return proven_count
-
     shorter, longer = (
         (residual_left, residual_right)
         if len(residual_left) <= len(residual_right)
@@ -3217,15 +3182,6 @@ def _review_unit_skeleton_match_count(
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_review_candidate_tokens(unit) for unit in longer]
-    stable_identity_plan = _stable_discriminative_identity_plan(shorter, longer)
-    longer_identities = {
-        index: _stable_record_identity(unit, stable_identity_plan)
-        for index, unit in enumerate(longer)
-    }
-    longer_indexes_by_identity: dict[frozenset[str], list[int]] = {}
-    for index, identity in longer_identities.items():
-        if identity:
-            longer_indexes_by_identity.setdefault(identity, []).append(index)
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3264,12 +3220,6 @@ def _review_unit_skeleton_match_count(
             candidate_pool = set(
                 sorted(candidate_pool, key=lambda index: abs(index - projected))[:32]
             )
-            stable_identity = _stable_record_identity(
-                short_unit, stable_identity_plan
-            )
-            candidate_pool.update(
-                longer_indexes_by_identity.get(stable_identity, ())
-            )  # 已证明守恒的完整记录身份不受位置窗口截断。
         indexes = [
             index
             for index in candidate_pool
@@ -3283,26 +3233,10 @@ def _review_unit_skeleton_match_count(
                 )
             )
         ]
-        short_identities = _stable_record_identity(
-            short_unit, stable_identity_plan
-        )
-        short_has_stable_label = _record_has_stable_identity_label(
-            short_unit, stable_identity_plan
-        )
-        identity_matched_indexes = [
-            index
-            for index in indexes
-            if short_identities and short_identities == longer_identities[index]
-        ]
-        if short_has_stable_label:
-            indexes = identity_matched_indexes
         indexes.sort(
-            key=lambda index: (
-                bool(short_identities & longer_identities[index]),
-                _review_unit_key(longer[index]) == short_key,
-            ),
+            key=lambda index: _review_unit_key(longer[index]) == short_key,
             reverse=True,
-        )  # 编号只决定安全候选的先后；最终仍须通过上面的句子骨架门。
+        )
         candidates.append(indexes)
 
     matched_short_by_long: dict[int, int] = {}
@@ -3380,6 +3314,10 @@ def _sections_effectively_unchanged(
 ) -> bool:
     """Treat only conservatively normalized, exactly equal sections as unchanged."""
 
+    if _section_heading_changed(old_section, new_section):
+        return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
+    if old_section.body == new_section.body:
+        return True
     old_units = _paragraph_review_units(
         old_section.body,
         suppressed_table_unit_keys=set(),
@@ -3388,15 +3326,19 @@ def _sections_effectively_unchanged(
         new_section.body,
         suppressed_table_unit_keys=set(),
     )
-    old_review_key = " ".join(
-        key for unit in old_units if (key := _review_unit_key(unit))
-    )
-    new_review_key = " ".join(
-        key for unit in new_units if (key := _review_unit_key(unit))
-    )
-    body_same = old_review_key == new_review_key
-    if _section_heading_changed(old_section, new_section):
-        return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
+    old_keys = [_review_unit_key(unit) for unit in old_units]
+    new_keys = [_review_unit_key(unit) for unit in new_units]
+    body_same = len(old_units) == len(new_units) and old_keys == new_keys
+    if (
+        not body_same
+        and len(old_units) != len(new_units)
+        and len(old_section.body) + len(new_section.body)
+        <= _MAX_WHOLE_BODY_REVIEW_KEY_CHARS
+    ):
+        body_same = _review_unit_key(old_section.body) == _review_unit_key(
+            new_section.body
+        )
+        # 短正文整段键可中和PDF分句边界差异；长章节走逐单元键，避免二次复杂度。
     return body_same  # 相似度不能授权猜测复数、动词变化或其他语义等价。
 
 
@@ -3866,6 +3808,7 @@ _CASE_BEARING_TOKEN_RE = re.compile(
 )
 _SEMANTIC_OPERATOR_RE = re.compile(
     r"[\u2061-\u2064]"
+    r"|(?<=[A-Za-z0-9)\]])\s*(<=|>=|!=|==|≤|≥|≠)\s*(?=[A-Za-z0-9(\[])"
     r"|(?<=[A-Za-z0-9)\]])\s+([+\-−*/×÷])\s+(?=[A-Za-z0-9(\[])"
     r"|(?<=[A-Za-z0-9)\]])([+*×÷−])(?=[A-Za-z0-9(\[])"
 )  # 保留明确的公式运算符；ASCII 连字符仅在两侧有空格时视作减号，避免误伤词内连字符。
@@ -4472,6 +4415,13 @@ def _semantic_operator_signatures(value: str) -> list[str]:
     """Return canonical signatures for operators with explicit formula context."""
 
     canonical = {
+        "<=": "less-or-equal",
+        ">=": "greater-or-equal",
+        "!=": "not-equal",
+        "==": "equal-comparison",
+        "≤": "less-or-equal",
+        "≥": "greater-or-equal",
+        "≠": "not-equal",
         "+": "plus",
         "-": "minus",
         "−": "minus",
@@ -4747,30 +4697,6 @@ def _unequal_replace_delta_candidates(
         ],
         report_replacements=True,
     )
-    old_cjk_identities = [
-        "|".join(sorted(_review_identity_tokens(unit))) for unit in old_units
-    ]
-    new_cjk_identities = [
-        "|".join(sorted(_review_identity_tokens(unit))) for unit in new_units
-    ]
-    old_cjk_counts = Counter(identity for identity in old_cjk_identities if identity)
-    new_cjk_counts = Counter(identity for identity in new_cjk_identities if identity)
-    match_identity_occurrences(
-        [
-            identity
-            if old_cjk_counts[identity] == 1 and new_cjk_counts[identity] == 1
-            else ""
-            for identity in old_cjk_identities
-        ],
-        [
-            identity
-            if new_cjk_counts[identity] == 1 and old_cjk_counts[identity] == 1
-            else ""
-            for identity in new_cjk_identities
-        ],
-        report_replacements=True,
-    )  # 仅唯一紧邻中文编号保留精确归因；重复编号和英语空格数字都不进入强身份路径。
-
     unmatched_old = [index for index in range(len(old_units)) if index not in matched_old]
     unmatched_new = [index for index in range(len(new_units)) if index not in matched_new]
     bounded_matching = (
@@ -4779,25 +4705,13 @@ def _unequal_replace_delta_candidates(
     new_words_by_index = {
         index: _review_candidate_tokens(new_units[index]) for index in unmatched_new
     }
-    stable_identity_plan = _stable_discriminative_identity_plan(
-        [old_units[index] for index in unmatched_old],
-        [new_units[index] for index in unmatched_new],
-    )
-    new_identities_by_index = {
-        index: _stable_record_identity(new_units[index], stable_identity_plan)
-        for index in unmatched_new
-    }
-    new_indexes_by_identity: dict[frozenset[str], list[int]] = {}
-    for index, identity in new_identities_by_index.items():
-        if identity:
-            new_indexes_by_identity.setdefault(identity, []).append(index)
     new_indexes_by_word: dict[str, list[int]] = {}
     if bounded_matching:
         for new_index, words in new_words_by_index.items():
             for word in words:
                 new_indexes_by_word.setdefault(word, []).append(new_index)
 
-    pair_scores: list[tuple[bool, float, float, int, int]] = []
+    pair_scores: list[tuple[float, float, int, int]] = []
     for old_position, old_index in enumerate(unmatched_old):
         old_unit = old_units[old_index]
         if unproven_order_conflict:
@@ -4833,29 +4747,8 @@ def _unequal_replace_delta_candidates(
                     - _relative_position(index, len(new_units))
                 ),
             )[:32]
-        old_identities = _stable_record_identity(old_unit, stable_identity_plan)
-        old_has_stable_label = _record_has_stable_identity_label(
-            old_unit, stable_identity_plan
-        )
-        if bounded_matching and old_identities:
-            candidate_indexes = list(
-                dict.fromkeys(
-                    candidate_indexes
-                    + new_indexes_by_identity.get(old_identities, [])
-                )
-            )  # 远距完整身份候选不得被32项位置窗口裁掉。
-        identity_matched_indexes = [
-            new_index
-            for new_index in candidate_indexes
-            if old_identities and old_identities == new_identities_by_index[new_index]
-        ]
-        if old_has_stable_label:
-            candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
-            same_structural_identity = bool(
-                old_identities and old_identities == new_identities_by_index[new_index]
-            )
             shared_candidate_identity = bool(
                 _review_candidate_identity_tokens(old_unit)
                 & _review_candidate_identity_tokens(new_unit)
@@ -4878,7 +4771,6 @@ def _unequal_replace_delta_candidates(
                 )
                 pair_scores.append(
                     (
-                        same_structural_identity,
                         score,
                         -position_gap,
                         old_index,
@@ -4886,7 +4778,7 @@ def _unequal_replace_delta_candidates(
                     )
                 )
 
-    for _identity, _score, _position_gap, old_index, new_index in sorted(
+    for _score, _position_gap, old_index, new_index in sorted(
         pair_scores,
         reverse=True,
     ):
@@ -5129,16 +5021,6 @@ def _review_candidate_tokens(value: str) -> set[str]:
     return tokens
 
 
-def _review_identity_tokens(value: str) -> set[str]:
-    """Return label-number anchors that can be locked before value similarity."""
-
-    return {
-        token
-        for token in _review_candidate_identity_tokens(value)
-        if token.startswith("cjk-left:")
-    }
-
-
 def _review_candidate_identity_tokens(value: str) -> set[str]:
     """Return plausible label-number anchors without claiming record identity."""
 
@@ -5167,112 +5049,6 @@ def _identity_label_and_number(token: str) -> tuple[str, str]:
 
     _kind, label, number = token.rsplit(":", 2)
     return label, number
-
-
-def _stable_discriminative_identity_plan(
-    left_units: list[str],
-    right_units: list[str],
-) -> _StableRecordIdentityPlan:
-    """Prove one record-key projection, or mark equally strong mappings ambiguous."""
-
-    def tokens_by_label(unit: str) -> dict[str, frozenset[str]]:
-        grouped: dict[str, set[str]] = {}
-        for token in _review_identity_tokens(unit):
-            label, _number = _identity_label_and_number(token)
-            grouped.setdefault(label, set()).add(token)
-        return {label: frozenset(tokens) for label, tokens in grouped.items()}
-
-    left_rows = [tokens_by_label(unit) for unit in left_units]
-    right_rows = [tokens_by_label(unit) for unit in right_units]
-    labels = sorted(
-        set().union(*(row.keys() for row in left_rows))
-        & set().union(*(row.keys() for row in right_rows))
-    )
-    labels = [
-        label
-        for label in labels
-        if len(
-            {
-                next(iter(tokens))
-                for row in left_rows + right_rows
-                for tokens in (row.get(label, frozenset()),)
-                if len(tokens) == 1
-            }
-        )
-        >= 2
-    ]  # Version 1 等常量元数据没有记录判别力。
-    if not labels or len(labels) > 10:
-        return _StableRecordIdentityPlan(
-            labels=frozenset(labels),
-            ambiguous=len(labels) > 10,
-        )
-
-    candidates: list[
-        tuple[int, tuple[tuple[int, int], ...], tuple[str, ...], frozenset[frozenset[str]]]
-    ] = []
-    for size in range(1, min(len(labels), 4) + 1):
-        for selected in combinations(labels, size):
-            def indexed_keys(
-                rows: list[dict[str, frozenset[str]]],
-            ) -> dict[frozenset[str], list[int]]:
-                result: dict[frozenset[str], list[int]] = {}
-                for index, row in enumerate(rows):
-                    if any(len(row.get(label, ())) != 1 for label in selected):
-                        continue
-                    key = frozenset(
-                        next(iter(row[label]))
-                        for label in selected
-                    )
-                    result.setdefault(key, []).append(index)
-                return result
-
-            left_indexes = indexed_keys(left_rows)
-            right_indexes = indexed_keys(right_rows)
-            mapping: list[tuple[int, int]] = []
-            shared_keys: set[frozenset[str]] = set()
-            for key in left_indexes.keys() & right_indexes.keys():
-                if len(left_indexes[key]) != 1 or len(right_indexes[key]) != 1:
-                    continue
-                left_index = left_indexes[key][0]
-                right_index = right_indexes[key][0]
-                if not (
-                    _review_units_share_sentence_skeleton(
-                        left_units[left_index], right_units[right_index]
-                    )
-                    or _review_units_share_numbered_record_skeleton(
-                        left_units[left_index], right_units[right_index]
-                    )
-                ):
-                    continue
-                mapping.append((left_index, right_index))
-                shared_keys.add(key)
-            if len(mapping) >= 2:
-                candidates.append(
-                    (len(mapping), tuple(sorted(mapping)), selected, frozenset(shared_keys))
-                )
-
-    if not candidates:
-        ambiguous = len(labels) > 1
-        return _StableRecordIdentityPlan(
-            labels=frozenset(labels) if ambiguous else frozenset(),
-            ambiguous=ambiguous,
-        )  # 多个可变编号字段却无法证明唯一投影时，禁止回退模糊归因。
-    best_coverage = max(candidate[0] for candidate in candidates)
-    best = [candidate for candidate in candidates if candidate[0] == best_coverage]
-    mappings = {candidate[1] for candidate in best}
-    if len(mappings) != 1:
-        competing_labels = frozenset(
-            label for candidate in best for label in candidate[2]
-        )
-        return _StableRecordIdentityPlan(
-            labels=competing_labels,
-            ambiguous=True,
-        )  # Lane 与 Profile 等覆盖相同却指向不同记录时，不能猜主键。
-    chosen = min(best, key=lambda candidate: (len(candidate[2]), candidate[2]))
-    return _StableRecordIdentityPlan(
-        labels=frozenset(chosen[2]),
-        shared_identities=chosen[3],
-    )
 
 
 def _unproven_record_order_conflict(
@@ -5343,32 +5119,6 @@ def _unproven_record_order_conflict(
         if left_shared_order != right_shared_order:
             return True
     return False
-
-
-def _stable_record_identity(
-    value: str,
-    plan: _StableRecordIdentityPlan,
-) -> frozenset[str]:
-    """Return the full stable label-number identity set for one record."""
-
-    identity = frozenset(
-        token
-        for token in _review_identity_tokens(value)
-        if _identity_label_and_number(token)[0] in plan.labels
-    )
-    return identity if identity in plan.shared_identities else frozenset()
-
-
-def _record_has_stable_identity_label(
-    value: str,
-    plan: _StableRecordIdentityPlan,
-) -> bool:
-    """Return whether the record uses a proven label, even for an excess value."""
-
-    return any(
-        _identity_label_and_number(token)[0] in plan.labels
-        for token in _review_identity_tokens(value)
-    )
 
 
 def _review_units_share_numbered_record_skeleton(left: str, right: str) -> bool:
