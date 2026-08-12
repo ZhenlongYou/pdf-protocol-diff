@@ -4040,6 +4040,14 @@ def _paired_table_order_previews(
             return f"column {int(column_match.group(1))}"
         return field.casefold()
 
+    def canonical_candidate_key(
+        fields: list[tuple[str, str]],
+    ) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (canonical_field_label(field), value)
+            for field, value in fields
+        )
+
     def has_duplicate_column_labels(fields: list[tuple[str, str]]) -> bool:
         labels = [canonical_field_label(field) for field, _value in fields]
         return bool(labels) and len(labels) != len(set(labels))
@@ -4057,18 +4065,16 @@ def _paired_table_order_previews(
     ) -> None:
         """Keep candidate relationships and the maximum observed occurrence count."""
 
-        def candidate_key(fields: list[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
-            return tuple(
-                (canonical_field_label(field), value)
-                for field, value in fields
-            )
-
-        old_counts = Counter(candidate_key(fields) for fields in old_candidates if fields)
-        new_counts = Counter(candidate_key(fields) for fields in new_candidates if fields)
+        old_counts = Counter(
+            canonical_candidate_key(fields) for fields in old_candidates if fields
+        )
+        new_counts = Counter(
+            canonical_candidate_key(fields) for fields in new_candidates if fields
+        )
         display_by_key: dict[tuple[tuple[str, str], ...], list[tuple[str, str]]] = {}
         for fields in [*old_candidates, *new_candidates]:
             if fields:
-                display_by_key.setdefault(candidate_key(fields), fields)
+                display_by_key.setdefault(canonical_candidate_key(fields), fields)
         ordered_keys = list(dict.fromkeys([*old_counts, *new_counts]))
         layout_conflict_peer_groups.extend(
             display_by_key[peer_key]
@@ -4099,11 +4105,18 @@ def _paired_table_order_previews(
             if field_index < len(new_focus_fields)
             else ("", "")
         )
-        if old_field != new_field:
+        if (
+            canonical_field_label(old_field[0]),
+            old_field[1],
+        ) != (
+            canonical_field_label(new_field[0]),
+            new_field[1],
+        ):
             selected_indexes.append(field_index)
             break
     if len(selected_indexes) == 1 and old_focus_fields:
         focus_first_field = old_focus_fields[0]
+        focus_candidate_key = canonical_candidate_key(old_focus_fields)
 
         def shares_focus_first_field(fields: list[tuple[str, str]]) -> bool:
             if not fields:
@@ -4122,7 +4135,7 @@ def _paired_table_order_previews(
             ]
             if _is_overwide_generic_table_row(row)
             and shares_focus_first_field(fields)
-            and fields != old_focus_fields
+            and canonical_candidate_key(fields) != focus_candidate_key
         ]
         if field_layout_is_ambiguous and not layout_conflict_peer_groups:
             focus_multiplicity = Counter(
@@ -4133,7 +4146,7 @@ def _paired_table_order_previews(
                 for row, fields in zip(old_rows, old_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
                 and shares_focus_first_field(fields)
-                and fields != old_focus_fields
+                and canonical_candidate_key(fields) != focus_candidate_key
                 and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
             ]
@@ -4142,7 +4155,7 @@ def _paired_table_order_previews(
                 for row, fields in zip(new_rows, new_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
                 and shares_focus_first_field(fields)
-                and fields != old_focus_fields
+                and canonical_candidate_key(fields) != focus_candidate_key
                 and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
             ]
@@ -4165,7 +4178,7 @@ def _paired_table_order_previews(
                 for row, fields in zip(old_rows, old_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
                 and shares_focus_first_field(fields)
-                and fields != old_focus_fields
+                and canonical_candidate_key(fields) != focus_candidate_key
                 and [canonical_field_label(field) for field, _value in fields]
                 != focus_labels
             ]
@@ -4174,7 +4187,7 @@ def _paired_table_order_previews(
                 for row, fields in zip(new_rows, new_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
                 and shares_focus_first_field(fields)
-                and fields != old_focus_fields
+                and canonical_candidate_key(fields) != focus_candidate_key
                 and [canonical_field_label(field) for field, _value in fields]
                 != focus_labels
             ]

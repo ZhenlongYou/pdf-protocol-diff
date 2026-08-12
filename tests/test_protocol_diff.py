@@ -10343,6 +10343,48 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual([], changes)
 
+    def test_focus_label_alias_does_not_replace_actual_order_peer(self) -> None:
+        """An aliased focus row is not a candidate for itself after moving."""
+
+        def row(mode: str, *, padded_labels: bool) -> str:
+            return "表格行: T1 | " + " | ".join(
+                (
+                    f"{'COLUMN ' + str(column).zfill(2) if padded_labels else 'Column ' + str(column)}="
+                    f"{mode if column == 2 else f'SAME_{column}'}"
+                )
+                for column in range(1, 34)
+            )
+
+        old_focus = row("MODE_PAM4", padded_labels=False)
+        new_focus = row("MODE_PAM4", padded_labels=True)
+        peer = row("MODE_NRZ", padded_labels=False)
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([old_focus, *anchors, peer]),),
+            (table([*anchors, new_focus, peer]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("顺序变化", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MODE_PAM4", evidence)
+        self.assertIn("MODE_NRZ", evidence)
+
     def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
         """Repeated missing/extra-column peers remain repeated review candidates."""
 
