@@ -3999,24 +3999,40 @@ def _paired_table_order_previews(
             None,
         )
         if distinguishing_index is None and peer_fields:
-            distinguishing_index = max(
-                (
-                    field_index
-                    for field_index in range(1, maximum_field_count)
-                    if any(
+            unresolved = list(peer_fields)
+            while unresolved and len(selected_indexes) < 4:
+                coverage: list[tuple[int, int]] = []
+                for field_index in range(1, maximum_field_count):
+                    if field_index in selected_indexes:
+                        continue
+                    covered = sum(
                         (
                             fields[field_index]
                             if field_index < len(fields)
                             else ("", "")
                         )
                         != old_focus_fields[field_index]
-                        for fields in peer_fields
+                        for fields in unresolved
                     )
-                ),
-                default=None,
-            )
+                    coverage.append((covered, field_index))
+                covered, field_index = max(coverage, default=(0, -1))
+                if covered <= 0:
+                    break
+                selected_indexes.append(field_index)
+                unresolved = [
+                    fields
+                    for fields in unresolved
+                    if (
+                        fields[field_index]
+                        if field_index < len(fields)
+                        else ("", "")
+                    )
+                    == old_focus_fields[field_index]
+                ]
+            distinguishing_index = selected_indexes[-1] if len(selected_indexes) > 1 else None
         if distinguishing_index is not None:
-            selected_indexes.append(distinguishing_index)
+            if distinguishing_index not in selected_indexes:
+                selected_indexes.append(distinguishing_index)
             different_peers = [
                 fields
                 for fields in peer_fields
@@ -4040,8 +4056,8 @@ def _paired_table_order_previews(
                 default=[],
             )
         # 同一条wide row跨边界时其两侧内容相同；若窗口内还有首字段相同的
-        # wide peer，只追加一个能区分全部peer的列；若不存在则选最深分歧列。
-        # 证据长度因此不随peer数量增长，也不会把真正的末列差异截掉。
+        # wide peer，优先使用一个能区分全部peer的列；否则以最多三个后续列
+        # 做有界集合覆盖。超过上限仍不能唯一时保留最接近peer，避免伪装确定性。
     selected_indexes = list(dict.fromkeys(selected_indexes))
 
     def preview(
@@ -4058,7 +4074,9 @@ def _paired_table_order_previews(
             zip(window_rows, fields_by_row, strict=True)
         ):
             counterpart_fields = (
-                counterpart_focus_fields
+                distinguishing_peer_fields
+                if row_index == focus_offset and distinguishing_peer_fields
+                else counterpart_focus_fields
                 if row_index == focus_offset
                 else counterpart_fields_by_row[row_index]
                 if row_index < len(counterpart_fields_by_row)
@@ -4089,7 +4107,11 @@ def _paired_table_order_previews(
         if distinguishing_peer_fields:
             peer_cells = [
                 f"{distinguishing_peer_fields[index][0]}="
-                f"{truncate(distinguishing_peer_fields[index][1], 48)}"
+                f"{paired_excerpt(
+                    distinguishing_peer_fields[index][1],
+                    old_focus_fields[index][1] if index < len(old_focus_fields) else '',
+                    64,
+                )}"
                 for index in selected_indexes
                 if index < len(distinguishing_peer_fields)
             ]

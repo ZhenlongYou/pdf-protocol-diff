@@ -9704,6 +9704,91 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertLessEqual(len(order_change.old_value), 760)
         self.assertLessEqual(len(order_change.new_value), 760)
 
+    def test_overwide_preview_uses_a_bounded_multi_column_signature(self) -> None:
+        """Two complementary peer differences require two evidence columns."""
+
+        def row(column_2: str, column_3: str) -> str:
+            values = [
+                "SAME_ID",
+                column_2,
+                column_3,
+                *(f"SAME_{index}" for index in range(4, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        focus = row("MODE_PAM4", "SHARED")
+        competitor = row("MODE_NRZ", "SHARED")
+        distractor = row("MODE_PAM4", "DISTRACTOR_ALT")
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(8)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([distractor, focus, *anchors, competitor]),),
+            (table([distractor, *anchors[:4], focus, *anchors[4:], competitor]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 2=MODE_PAM4", evidence)
+        self.assertIn("Column 2=MODE_NRZ", evidence)
+        self.assertIn("Column 3=SHARED", evidence)
+        self.assertIn("Column 3=DISTRACTOR_ALT", evidence)
+
+    def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
+        """A long shared value prefix cannot hide the final mode token."""
+
+        def row(mode: str) -> str:
+            values = [
+                "SAME_ID",
+                *(f"SAME_{index}" for index in range(2, 33)),
+                "COMMON_" + "X" * 220 + mode,
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        pam4 = row("MODE_PAM4")
+        nrz = row("MODE_NRZ")
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([pam4, anchor, nrz]),),
+            (table([anchor, pam4, nrz]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MODE_PAM4", evidence)
+        self.assertIn("MODE_NRZ", evidence)
+
     def test_overwide_row_shift_from_delete_insert_is_not_reordering(self) -> None:
         """A common row may shift index without changing relative order."""
 
