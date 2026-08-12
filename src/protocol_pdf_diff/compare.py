@@ -2979,8 +2979,8 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         ):
             return None  # 单句冒号标签无法在无 schema provenance 时证明字段身份。
         if (
-            _review_identity_tokens(left_units[0])
-            & _review_identity_tokens(right_units[0])
+            _review_candidate_identity_tokens(left_units[0])
+            & _review_candidate_identity_tokens(right_units[0])
             and not _review_units_share_sentence_skeleton(
                 left_units[0], right_units[0]
             )
@@ -3247,8 +3247,8 @@ def _review_unit_skeleton_match_count(
             for long_unit in (longer[index],)
             if _review_units_share_sentence_skeleton(short_unit, long_unit)
             or (
-                _review_identity_tokens(short_unit)
-                & _review_identity_tokens(long_unit)
+                _review_candidate_identity_tokens(short_unit)
+                & _review_candidate_identity_tokens(long_unit)
                 and _review_units_share_numbered_record_skeleton(
                     short_unit, long_unit
                 )
@@ -4789,8 +4789,8 @@ def _unequal_replace_delta_candidates(
                 old_identities and old_identities == new_identities_by_index[new_index]
             )
             shared_candidate_identity = bool(
-                _review_identity_tokens(old_unit)
-                & _review_identity_tokens(new_unit)
+                _review_candidate_identity_tokens(old_unit)
+                & _review_candidate_identity_tokens(new_unit)
             )
             if (
                 shared_candidate_identity
@@ -5064,6 +5064,18 @@ def _review_candidate_tokens(value: str) -> set[str]:
 def _review_identity_tokens(value: str) -> set[str]:
     """Return label-number anchors that can be locked before value similarity."""
 
+    return {
+        token
+        for token in _review_candidate_identity_tokens(value)
+        for _kind, label, number in (token.rsplit(":", 2),)
+        if token.startswith("cjk-left:")
+        or _english_numeric_label_has_record_shape(value, label, number)
+    }
+
+
+def _review_candidate_identity_tokens(value: str) -> set[str]:
+    """Return plausible label-number anchors without claiming record identity."""
+
     if _unit_has_unproven_label_syntax(value):
         return set()  # `Note 1:` / `Warning 2:` 无 schema provenance，编号不能自证章节身份。
     identities: set[str] = set()
@@ -5082,6 +5094,46 @@ def _review_identity_tokens(value: str) -> set[str]:
             continue  # 系词/范围终点后的数字只参与比较，不抢占标签编号身份。
         identities.add(token)
     return identities
+
+
+def _english_numeric_label_has_record_shape(
+    value: str,
+    label: str,
+    number: str,
+) -> bool:
+    """Require a leading/cased field shape before using an English number as identity."""
+
+    raw = normalize_line(value)
+    number_pattern = r"[+\-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    matches = list(
+        re.finditer(
+            rf"(?i)(?<![\w.])({re.escape(label)})\s+({number_pattern})(?![\w.])",
+            raw,
+        )
+    )
+    for match in matches:
+        if _canonical_review_token(match.group(2)) != number:
+            continue
+        raw_label = match.group(1)
+        if re.search(r"[A-Z]", raw_label):
+            return True  # `Lane 2` / `Port 3` / `Version 1` 的字段形态独立于具体词表。
+        prefix = raw[: match.start()].strip()
+        if not prefix:
+            return True  # 小写 `lane 2 ...` 位于记录开头时同样可作为结构候选。
+        while prefix:
+            leading_field = re.match(
+                rf"(?i)^\s*[a-z][a-z0-9_-]*\s+{number_pattern}(?:\s+|$)",
+                prefix,
+            )
+            if leading_field is None:
+                break
+            prefix = prefix[leading_field.end() :].strip()
+        if not prefix:
+            return True  # `rack 1 port 2 lane 3` 的连续字段头支持小写复合键。
+        suffix = raw[match.end() :].lstrip()
+        if not suffix or re.match(r"(?i)^(?:for|with|at|on|in|from|has|have|is|are)\b", suffix):
+            return True  # `profile 1000 for ...` 中数字已闭合字段；`uses 2 lanes` 仍是计数正文。
+    return False
 
 
 def _identity_label_and_number(token: str) -> tuple[str, str]:

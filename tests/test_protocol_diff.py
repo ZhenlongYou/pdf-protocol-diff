@@ -9085,6 +9085,80 @@ class ProtocolDiffTests(unittest.TestCase):
             all(not change.audit_replaced_snippets for change in result.changes)
         )
 
+    def test_ordinary_count_verbs_cannot_become_record_identity(self) -> None:
+        """Unique shifted counts after prose verbs cannot override an alphanumeric record id."""
+
+        count = 8
+        old_units = [
+            f"Receiver RX{index} uses {index + 1} lanes and includes {100 + index} warnings."
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[4:] + list(range(count))[:4]
+        new_units = [
+            f"Receiver RX{index} uses {index + 2} lanes and includes {101 + index} warnings."
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-shifted-count-values.pdf"),
+                pages=[PageText(page_number=1, text="1 Receivers\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-shifted-count-values.pdf"),
+                pages=[PageText(page_number=1, text="1 Receivers\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=count),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual(count, len(change.audit_replaced_snippets))
+        self.assertFalse(change.audit_added_snippets)
+        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(
+            all(
+                re.search(r"RX(\d+)", pair.old).group(1)
+                == re.search(r"RX(\d+)", pair.new).group(1)
+                for pair in change.audit_replaced_snippets
+            )
+        )
+
+    def test_multiple_ordinary_count_verbs_remain_a_normal_numeric_edit(self) -> None:
+        """Several prose count slots do not trigger composite-key fail-closed mode."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-prose-count-slots.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Status\n"
+                            "The device reports 2 warnings and records 4 failures.\n"
+                            "The device reports 3 warnings and records 5 failures."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-prose-count-slots.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Status\n"
+                            "The device reports 6 warnings and records 8 failures.\n"
+                            "The device reports 7 warnings and records 9 failures."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=4),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
