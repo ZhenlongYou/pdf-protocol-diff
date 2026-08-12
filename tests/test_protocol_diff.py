@@ -10385,6 +10385,37 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("MODE_PAM4", evidence)
         self.assertIn("MODE_NRZ", evidence)
 
+    def test_duplicate_column_group_ignores_other_column_extraction_order(self) -> None:
+        """Duplicate occurrence order is kept while unique column groups may move."""
+
+        cells = [
+            "Column 1=SAME_ID",
+            "Column 2=SHARED",
+            "Column 2=MODE_PAM4",
+            *(f"Column {index}=SAME_{index}" for index in range(3, 34)),
+        ]
+        old_row = "表格行: T1 | " + " | ".join(cells)
+        cells[3], cells[4] = cells[4], cells[3]
+        new_row = "表格行: T1 | " + " | ".join(cells)
+
+        def table(row: str) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Operating modes",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=[row],
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table(old_row),),
+            (table(new_row),),
+        )
+        self.assertEqual([], changes)
+
     def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
         """Repeated missing/extra-column peers remain repeated review candidates."""
 
