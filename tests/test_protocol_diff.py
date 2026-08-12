@@ -9154,6 +9154,38 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("6 V", changes[0].new_value)
         self.assertEqual("实质变化", changes[0].change_type)
 
+    def test_overwide_generic_rows_cancel_exact_occurrences(self) -> None:
+        """Only an excess occurrence is reported for over-budget neutral rows."""
+
+        def wide_row(prefix: str) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={prefix}{index}" for index in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Wide rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        common = wide_row("A")
+        added = wide_row("B")
+        changes = reporting_module._table_row_changes(
+            (table([common, common]),),
+            (table([common, common, added]),),
+        )
+
+        self.assertEqual(1, len(changes))
+        self.assertEqual("新表新增行", changes[0].change_type)
+        self.assertIn("B0", changes[0].new_value)
+        self.assertNotIn("A0", changes[0].new_value)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
