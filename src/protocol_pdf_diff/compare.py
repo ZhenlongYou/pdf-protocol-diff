@@ -4710,8 +4710,7 @@ def _unequal_replace_delta_candidates(
     match_identity_occurrences(
         [
             field
-            if not unproven_order_conflict
-            or (
+            if (
                 field
                 and old_assignment_counts[field] == 1
                 and new_assignment_counts[field] == 1
@@ -4721,8 +4720,7 @@ def _unequal_replace_delta_candidates(
         ],
         [
             field
-            if not unproven_order_conflict
-            or (
+            if (
                 field
                 and new_assignment_counts[field] == 1
                 and old_assignment_counts[field] == 1
@@ -4795,6 +4793,16 @@ def _unequal_replace_delta_candidates(
             )[:32]
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
+            old_field = old_assignment_fields[old_index]
+            new_field = new_assignment_fields[new_index]
+            if old_field or new_field:
+                if not (
+                    old_field
+                    and old_field == new_field
+                    and old_assignment_counts[old_field] == 1
+                    and new_assignment_counts[new_field] == 1
+                ):
+                    continue  # 重复字段没有父记录 provenance；不得在模糊配对阶段重新按位置抢配。
             shared_candidate_identity = bool(
                 _review_candidate_identity_tokens(old_unit)
                 & _review_candidate_identity_tokens(new_unit)

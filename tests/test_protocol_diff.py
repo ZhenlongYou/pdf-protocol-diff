@@ -8786,6 +8786,44 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(f"limit = {20 + index} mV", evidence)
             self.assertIn(f"limit = {21 + index} mV", evidence)
 
+    def test_inserted_record_cannot_shift_repeated_assignment_pairing(self) -> None:
+        """An inserted parent record cannot steal a repeated child field."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-inserted-record-field.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Limits\nRX0 record; limit = 20 mV.",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-inserted-record-field.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Limits\nRX1 record; limit = 30 mV.\n"
+                            "RX0 record; limit = 21 mV."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=10),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertFalse(change.audit_replaced_snippets)
+        evidence = "\n".join(
+            (*change.audit_added_snippets, *change.audit_removed_snippets)
+        )
+        self.assertIn("limit = 20 mV", evidence)
+        self.assertIn("limit = 21 mV", evidence)
+        self.assertIn("limit = 30 mV", evidence)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
