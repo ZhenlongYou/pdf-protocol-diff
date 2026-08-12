@@ -3928,10 +3928,7 @@ def _paired_table_order_previews(
         excerpt = value[start : start + max_chars - 2]
         return f"{'…' if start else ''}{excerpt}{'…' if start + len(excerpt) < len(value) else ''}"
 
-    field_layout_is_ambiguous = False
-
     def field_pairs(row: str) -> list[tuple[str, str]]:
-        nonlocal field_layout_is_ambiguous
         pairs = [
             (compact_inline(field), compact_inline(value))
             for field, value in re.findall(
@@ -3948,8 +3945,6 @@ def _paired_table_order_previews(
                 int(re.search(r"\d+", field).group())
                 for field, _value in sorted_pairs
             ]
-            if len(column_numbers) != len(set(column_numbers)):
-                field_layout_is_ambiguous = True
             return sorted_pairs
         return pairs
         # PDF提取可能打乱同一行的物理字段顺序；pure Column N 宽行先按列号
@@ -3973,6 +3968,16 @@ def _paired_table_order_previews(
     )
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
+
+    def has_duplicate_column_labels(fields: list[tuple[str, str]]) -> bool:
+        labels = [field.casefold() for field, _value in fields]
+        return bool(labels) and len(labels) != len(set(labels))
+
+    field_layout_is_ambiguous = has_duplicate_column_labels(
+        old_focus_fields
+    ) or has_duplicate_column_labels(new_focus_fields)
+    # 布局歧义只属于焦点wide row及其同身份候选。扫描整表时看到一条
+    # 无关、未移动的duplicate row，不能污染另一组可证明的顺序变化。
     layout_conflict_peer_groups: list[list[tuple[str, str]]] = []
 
     def remember_layout_conflict_peer(fields: list[tuple[str, str]]) -> None:
