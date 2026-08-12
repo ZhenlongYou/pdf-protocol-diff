@@ -8711,6 +8711,44 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertIn("接收器甲", evidence)
                 self.assertIn("接收器乙", evidence)
 
+    def test_semicolon_split_free_text_reorder_keeps_every_value_fact(self) -> None:
+        """A moved record split at a semicolon cannot lose its value half."""
+
+        count = 8
+        old_units = [
+            f"Count {index} equipment for receiver RX{index}; "
+            f"limit {20 + index} mV."
+            for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[4:] + list(range(count))[:4]
+        new_units = [
+            f"Count {index} equipment for receiver RX{index}; "
+            f"limit {21 + index} mV."
+            for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-semicolon-records.pdf"),
+                pages=[PageText(page_number=1, text="1 Limits\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-semicolon-records.pdf"),
+                pages=[PageText(page_number=1, text="1 Limits\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=100),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        evidence = "\n".join(
+            (*change.audit_added_snippets, *change.audit_removed_snippets)
+        )
+        for index in range(count):
+            self.assertIn(f"limit {20 + index} mV", evidence)
+            self.assertIn(f"limit {21 + index} mV", evidence)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
@@ -15236,6 +15274,31 @@ class ProtocolDiffTests(unittest.TestCase):
                 )
 
                 self.assertTrue(result.changes)
+
+    def test_comparison_operator_width_and_pdf_spacing_are_presentation_only(self) -> None:
+        """Equivalent comparison operators survive width and extraction spacing."""
+
+        for old_body, new_body in (
+            ("模式！＝关闭", "模式!=关闭"),
+            ("模式！ =关闭", "模式!=关闭"),
+            ("模式＝＝关闭", "模式==关闭"),
+            ("参数＜＝20", "参数<=20"),
+            ("参数＞\n＝20", "参数>=20"),
+        ):
+            with self.subTest(old_body=old_body):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-operator-width.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 配置\n{old_body}")],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-operator-width.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 配置\n{new_body}")],
+                    ),
+                    DiffOptions(),
+                )
+
+                self.assertFalse(result.changes)
 
     def test_chinese_count_words_before_ascii_units_are_semantically_equal(self) -> None:
         """Chinese counts before standalone ASCII units should compare equal."""

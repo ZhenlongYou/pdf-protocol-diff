@@ -2947,10 +2947,7 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         and len(left_units) == len(right_units)
     ):
         return 1.0  # 分句数量相同时逐单元语义键完全相等即可证明章节身份。
-    if (
-        len(left_units) != len(right_units)
-        and len(left) + len(right) <= _MAX_WHOLE_BODY_REVIEW_KEY_CHARS
-    ):
+    if len(left) + len(right) <= _MAX_WHOLE_BODY_REVIEW_KEY_CHARS:
         whole_left_key = _review_unit_key(left)
         whole_right_key = _review_unit_key(right)
         if whole_left_key and whole_left_key == whole_right_key:
@@ -3331,7 +3328,6 @@ def _sections_effectively_unchanged(
     body_same = len(old_units) == len(new_units) and old_keys == new_keys
     if (
         not body_same
-        and len(old_units) != len(new_units)
         and len(old_section.body) + len(new_section.body)
         <= _MAX_WHOLE_BODY_REVIEW_KEY_CHARS
     ):
@@ -3431,8 +3427,13 @@ def _summarize_text_delta(
             priority_values=(leading_replacement.old, leading_replacement.new),
         )
 
+    unproven_order_conflict = _unproven_record_order_conflict(
+        old_units, new_units
+    )
     reordered_pair, reordered_old_indexes, reordered_new_indexes = (
-        _common_unit_occurrence_evidence(old_units, new_units)
+        (None, set(), set())
+        if unproven_order_conflict
+        else _common_unit_occurrence_evidence(old_units, new_units)
     )
     if reordered_pair is not None:
         add_candidate(
@@ -3452,6 +3453,7 @@ def _summarize_text_delta(
         [new_units[index] for index in residual_new_indexes],
         old_source_indexes=residual_old_indexes,
         new_source_indexes=residual_new_indexes,
+        force_unproven_order_conflict=unproven_order_conflict,
     ):
         add_candidate(
             candidate.kind,
@@ -3808,7 +3810,7 @@ _CASE_BEARING_TOKEN_RE = re.compile(
 )
 _SEMANTIC_OPERATOR_RE = re.compile(
     r"[\u2061-\u2064]"
-    r"|([<>!=＜＞！]\s*[=＝]|≤|≥|≠)"
+    r"|([<>!=＜＞！＝]\s*[=＝]|≤|≥|≠)"
     r"|(?<=[A-Za-z0-9)\]])\s+([+\-−*/×÷])\s+(?=[A-Za-z0-9(\[])"
     r"|(?<=[A-Za-z0-9)\]])([+*×÷−])(?=[A-Za-z0-9(\[])"
 )  # 保留明确的公式运算符；ASCII 连字符仅在两侧有空格时视作减号，避免误伤词内连字符。
@@ -3873,6 +3875,9 @@ def _review_unit_key(value: str) -> str:
     normalized_list_value = _normalize_known_body_compact_symbol_spacing(
         _normalize_leading_list_marker(value)
     )  # Z c/Zc 等有上下文证明的排版空格可统一；无字体 provenance 的 PUA 必须保留差异。
+    normalized_list_value = _normalize_comparison_operator_width(
+        normalized_list_value
+    )  # 仅统一已证明的双字符比较运算符；普通全角正文不做全局宽度折叠。
     case_signature_source = _normalize_math_symbol_artifacts(
         _normalize_embedded_number_list_spacing(normalized_list_value)
     )
@@ -4456,6 +4461,17 @@ def _semantic_operator_signatures(value: str) -> list[str]:
     return signatures
 
 
+def _normalize_comparison_operator_width(value: str) -> str:
+    """Canonicalize width and internal PDF whitespace of comparison operators."""
+
+    pattern = re.compile(r"[<>!=＜＞！＝]\s*[=＝]")
+    translation = str.maketrans("＜＞！＝", "<>!=")
+    return pattern.sub(
+        lambda match: re.sub(r"\s+", "", match.group(0)).translate(translation),
+        value,
+    )
+
+
 def _semantic_ampersand_signatures(value: str) -> list[str]:
     """Preserve ``&`` where an assignment makes operator intent explicit."""
 
@@ -4628,6 +4644,7 @@ def _unequal_replace_delta_candidates(
     *,
     old_source_indexes: list[int] | None = None,
     new_source_indexes: list[int] | None = None,
+    force_unproven_order_conflict: bool = False,
 ) -> list[_PendingDeltaCandidate]:
     """Pair similar units inside an unequal replace block without misalignment.
 
@@ -4649,8 +4666,8 @@ def _unequal_replace_delta_candidates(
 
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
-    unproven_order_conflict = _unproven_record_order_conflict(
-        old_units, new_units
+    unproven_order_conflict = force_unproven_order_conflict or (
+        _unproven_record_order_conflict(old_units, new_units)
     )
     matched_old: set[int] = set()
     matched_new: set[int] = set()
@@ -4683,7 +4700,9 @@ def _unequal_replace_delta_candidates(
             if report_replacements and old_keys[old_index] != new_keys[new_index]:
                 paired_indexes.append((old_index, new_index))
 
-    match_identity_occurrences(old_keys, new_keys, report_replacements=False)
+    if not unproven_order_conflict:
+        match_identity_occurrences(old_keys, new_keys, report_replacements=False)
+        # 自由文本记录已证明发生重排时，相同残片也可能属于不同记录；只有显式字段/表格仍可锁定。
     match_identity_occurrences(
         [_assignment_field_key(unit) for unit in old_units],
         [_assignment_field_key(unit) for unit in new_units],
