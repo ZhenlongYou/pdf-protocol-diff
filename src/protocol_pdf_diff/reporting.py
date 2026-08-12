@@ -3594,21 +3594,23 @@ def _partition_overwide_generic_rows(
             and all(re.fullmatch(r"column\s+\d+", label) for label in field_labels)
         )
 
-    def occurrence_labels(rows: list[str]) -> list[tuple[str, int]]:
-        counts: Counter[str] = Counter()
-        labels: list[tuple[str, int]] = []
-        for row in rows:
-            counts[row] += 1
-            labels.append((row, counts[row]))
-        return labels
-
+    old_is_wide = [overwide(row) for row in old_rows]
+    new_is_wide = [overwide(row) for row in new_rows]
+    if not any(old_is_wide) and not any(new_is_wide):
+        return [], old_rows, new_rows
     old_explicit = [
-        _table_row_pairing_primary_identity(row, allow_generic_column=False)
-        for row in old_rows
+        "" if is_wide else _table_row_pairing_primary_identity(
+            row,
+            allow_generic_column=False,
+        )
+        for row, is_wide in zip(old_rows, old_is_wide, strict=True)
     ]
     new_explicit = [
-        _table_row_pairing_primary_identity(row, allow_generic_column=False)
-        for row in new_rows
+        "" if is_wide else _table_row_pairing_primary_identity(
+            row,
+            allow_generic_column=False,
+        )
+        for row, is_wide in zip(new_rows, new_is_wide, strict=True)
     ]
     old_explicit_counts = Counter(identity for identity in old_explicit if identity)
     new_explicit_counts = Counter(identity for identity in new_explicit if identity)
@@ -3618,64 +3620,51 @@ def _partition_overwide_generic_rows(
         if old_explicit_counts[identity] == new_explicit_counts[identity] == 1
     }
 
-    def order_labels(
+    old_raw_counts = Counter(old_rows)
+    new_raw_counts = Counter(new_rows)
+    shared_raw = set(old_raw_counts) & set(new_raw_counts)
+
+    def order_tokens(
         rows: list[str],
-        occurrence: list[tuple[str, int]],
         explicit: list[str],
-    ) -> list[tuple[str, str | int]]:
-        labels: list[tuple[str, str | int]] = []
-        for row, occurrence_label, explicit_identity in zip(
+    ) -> list[tuple[str, str]]:
+        tokens: list[tuple[str, str]] = []
+        for row, explicit_identity in zip(
             rows,
-            occurrence,
             explicit,
             strict=True,
         ):
             if explicit_identity in shared_unique_explicit:
-                labels.append(("explicit", explicit_identity))
-            elif occurrence_label in common_occurrences:
-                labels.append(("raw", f"{occurrence_label[0]}\x1f{occurrence_label[1]}"))
-        return labels
+                tokens.append(("explicit", explicit_identity))
+            elif row in shared_raw:
+                tokens.append(("raw", row))
+        return tokens
 
-    old_labels = occurrence_labels(old_rows)
-    new_labels = occurrence_labels(new_rows)
     old_wide = [
-        (row, label)
-        for row, label in zip(old_rows, old_labels, strict=True)
-        if overwide(row)
+        row for row, is_wide in zip(old_rows, old_is_wide, strict=True) if is_wide
     ]
     new_wide = [
-        (row, label)
-        for row, label in zip(new_rows, new_labels, strict=True)
-        if overwide(row)
+        row for row, is_wide in zip(new_rows, new_is_wide, strict=True) if is_wide
     ]
-    if not old_wide and not new_wide:
-        return [], old_rows, new_rows
-    common_occurrences = set(old_labels) & set(new_labels)
-    old_common = order_labels(old_rows, old_labels, old_explicit)
-    new_common = order_labels(new_rows, new_labels, new_explicit)
-    old_common_position = {
-        label: index for index, label in enumerate(old_common)
-    }
-    new_common_position = {
-        label: index for index, label in enumerate(new_common)
-    }
-    moved_labels = {
-        label
-        for label in set(old_common) & set(new_common)
-        if old_common_position[label] != new_common_position[label]
-    }
-    moved_occurrences = {
-        (label[1].rsplit("\x1f", 1)[0], int(label[1].rsplit("\x1f", 1)[1]))
-        for label in moved_labels
-        if label[0] == "raw" and isinstance(label[1], str)
-    }
-    cancellable_labels = common_occurrences - moved_occurrences
-    remaining_old = [
-        row for row, label in old_wide if label not in cancellable_labels
-    ]
-    remaining_new = [
-        row for row, label in new_wide if label not in cancellable_labels
-    ]
+    old_wide_counts = Counter(old_wide)
+    new_wide_counts = Counter(new_wide)
+    remaining_old_counts = old_wide_counts - new_wide_counts
+    remaining_new_counts = new_wide_counts - old_wide_counts
+
+    def excess_rows(rows: list[str], excess: Counter[str]) -> list[str]:
+        used: Counter[str] = Counter()
+        selected: list[str] = []
+        for row in rows:
+            if used[row] < excess[row]:
+                used[row] += 1
+                selected.append(row)
+        return selected
+
+    remaining_old = excess_rows(old_wide, remaining_old_counts)
+    remaining_new = excess_rows(new_wide, remaining_new_counts)
+    old_order = order_tokens(old_rows, old_explicit)
+    new_order = order_tokens(new_rows, new_explicit)
+    order_changed = _table_order_tokens_changed(old_order, new_order)
     changes: list[TableRowChange] = []
     changes.extend(
         (
@@ -3689,11 +3678,72 @@ def _partition_overwide_generic_rows(
             for row in remaining_new
         )
     )
+    if order_changed:
+        changes.append(
+            TableRowChange(
+                item="表格行顺序",
+                old_value=_table_order_preview(old_rows),
+                new_value=_table_order_preview(new_rows),
+                change_type="顺序变化",
+            )
+        )
     return (
         changes,
-        [row for row in old_rows if not overwide(row)],
-        [row for row in new_rows if not overwide(row)],
+        [row for row, is_wide in zip(old_rows, old_is_wide, strict=True) if not is_wide],
+        [row for row, is_wide in zip(new_rows, new_is_wide, strict=True) if not is_wide],
     )
+
+
+def _table_order_tokens_changed(
+    old_tokens: list[tuple[str, str]],
+    new_tokens: list[tuple[str, str]],
+) -> bool:
+    """Return whether common table records changed relative order."""
+
+    common_count = sum((Counter(old_tokens) & Counter(new_tokens)).values())
+    if common_count < 2 or old_tokens == new_tokens:
+        return False
+    if len(old_tokens) * len(new_tokens) > 4_000_000:
+        if Counter(old_tokens) == Counter(new_tokens):
+            return True
+        shorter, longer = (
+            (old_tokens, new_tokens)
+            if len(old_tokens) <= len(new_tokens)
+            else (new_tokens, old_tokens)
+        )
+        position = 0
+        for token in longer:
+            if position < len(shorter) and token == shorter[position]:
+                position += 1
+        return position != len(shorter)
+        # 超大且双侧各有独有项时，无法线性证明保序就保守留一条顺序复核证据。
+    previous = [0] * (len(new_tokens) + 1)
+    for old_token in old_tokens:
+        current = [0] * (len(new_tokens) + 1)
+        for new_offset, new_token in enumerate(new_tokens, start=1):
+            if old_token == new_token:
+                current[new_offset] = previous[new_offset - 1] + 1
+            else:
+                current[new_offset] = max(
+                    previous[new_offset],
+                    current[new_offset - 1],
+                )
+        previous = current
+    return previous[-1] < common_count
+
+
+def _table_order_preview(rows: list[str]) -> str:
+    """Return bounded, cheap evidence for one table row order."""
+
+    labels: list[str] = []
+    for row in rows[:4]:
+        match = re.search(
+            r"(?i)(?:^|\|)\s*(?:parameter|characteristic|column\s+1)\s*=\s*([^|]+)",
+            row,
+        )
+        labels.append(truncate(compact_inline(match.group(1) if match else row), 80))
+    suffix = f"；共{len(rows)}行" if len(rows) > 4 else ""
+    return " → ".join(labels) + suffix
 
 
 def _remove_same_position_descriptor_reflows(

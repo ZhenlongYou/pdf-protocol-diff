@@ -9214,8 +9214,7 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
         self.assertTrue(changes)
-        self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
-        self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
+        self.assertTrue(any(row.change_type == "顺序变化" for row in changes))
 
     def test_overwide_repeated_rows_use_true_lcs(self) -> None:
         """Insertion among repeated wide rows does not invent extra changes."""
@@ -9310,8 +9309,7 @@ class ProtocolDiffTests(unittest.TestCase):
             (table([explicit, wide]),),
         )
         self.assertTrue(changes)
-        self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
-        self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
+        self.assertTrue(any(row.change_type == "顺序变化" for row in changes))
 
     def test_overwide_row_crossing_modified_explicit_anchor_is_visible(self) -> None:
         """A unique Parameter remains an order anchor while its value changes."""
