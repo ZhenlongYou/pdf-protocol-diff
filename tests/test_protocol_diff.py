@@ -10270,6 +10270,50 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual([], changes)
 
+    def test_peer_label_alias_does_not_duplicate_review_candidate(self) -> None:
+        """A candidate keeps one occurrence across Column label formatting drift."""
+
+        def row(mode: str, *, padded_labels: bool) -> str:
+            cells = [
+                (
+                    f"{'COLUMN ' + str(column).zfill(2) if padded_labels else 'Column ' + str(column)}="
+                    f"{mode if column == 2 else f'SAME_{column}'}"
+                )
+                for column in range(1, 34)
+            ]
+            cells.insert(2, f"{'COLUMN 02' if padded_labels else 'Column 2'}=SHARED")
+            return "表格行: T1 | " + " | ".join(cells)
+
+        focus = row("MODE_PAM4", padded_labels=False)
+        old_peer = row("MODE_NRZ", padded_labels=False)
+        new_peer = row("MODE_NRZ", padded_labels=True)
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([focus, *anchors, old_peer]),),
+            (table([*anchors, focus, new_peer]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        self.assertIn("候选1：", order_change.new_value)
+        self.assertNotIn("候选2：", order_change.new_value)
+        self.assertEqual(1, order_change.new_value.count("MODE_NRZ"))
+
     def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
         """Repeated missing/extra-column peers remain repeated review candidates."""
 

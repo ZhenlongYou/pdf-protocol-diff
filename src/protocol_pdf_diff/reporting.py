@@ -4041,11 +4041,21 @@ def _paired_table_order_previews(
     ) -> None:
         """Keep candidate relationships and the maximum observed occurrence count."""
 
-        old_counts = Counter(tuple(fields) for fields in old_candidates if fields)
-        new_counts = Counter(tuple(fields) for fields in new_candidates if fields)
+        def candidate_key(fields: list[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+            return tuple(
+                (canonical_field_label(field), value)
+                for field, value in fields
+            )
+
+        old_counts = Counter(candidate_key(fields) for fields in old_candidates if fields)
+        new_counts = Counter(candidate_key(fields) for fields in new_candidates if fields)
+        display_by_key: dict[tuple[tuple[str, str], ...], list[tuple[str, str]]] = {}
+        for fields in [*old_candidates, *new_candidates]:
+            if fields:
+                display_by_key.setdefault(candidate_key(fields), fields)
         ordered_keys = list(dict.fromkeys([*old_counts, *new_counts]))
         layout_conflict_peer_groups.extend(
-            list(peer_key)
+            display_by_key[peer_key]
             for peer_key in ordered_keys
             for _occurrence in range(max(old_counts[peer_key], new_counts[peer_key]))
         )
