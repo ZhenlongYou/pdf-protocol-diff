@@ -5041,8 +5041,15 @@ def _identity_label_and_number(token: str) -> tuple[str, str]:
 def _stable_discriminative_identity_labels(
     left_units: list[str],
     right_units: list[str],
-) -> set[str]:
-    """Return labels whose complete observed value multiset is stable and useful."""
+) -> dict[str, frozenset[str]]:
+    """Return labels and values that can safely identify shared records.
+
+    A completely preserved value multiset is strong evidence.  A strict
+    one-sided extension/contraction is also useful, but only its one-to-one
+    shared values are lockable; excess or duplicate occurrences stay visible
+    for conservative residual handling.  Two-sided value replacement is not
+    identity evidence because it may be an ordinary changing value column.
+    """
 
     def values_by_label(units: list[str]) -> dict[str, Counter[str]]:
         result: dict[str, Counter[str]] = {}
@@ -5054,21 +5061,42 @@ def _stable_discriminative_identity_labels(
 
     left_values = values_by_label(left_units)
     right_values = values_by_label(right_units)
-    return {
-        label
-        for label, values in left_values.items()
-        if values == right_values.get(label)
-        and len(values) >= 2  # Version 1 等单一常量元数据没有记录判别力。
-    }
+    stable: dict[str, frozenset[str]] = {}
+    for label, left_counts in left_values.items():
+        right_counts = right_values.get(label)
+        if not right_counts:
+            continue
+        if left_counts == right_counts:
+            proven_values = {
+                number
+                for number, count in left_counts.items()
+                if count == 1
+            }
+        elif left_counts <= right_counts or right_counts <= left_counts:
+            proven_values = {
+                number
+                for number in left_counts.keys() & right_counts.keys()
+                if left_counts[number] == right_counts[number] == 1
+            }
+        else:
+            continue  # 两侧各有独有值更像技术值变化，不能冒充记录主键。
+        if len(proven_values) >= 2:
+            stable[label] = frozenset(proven_values)
+            # 至少两个可区分编号才具有记录身份意义；Version 1 等常量元数据不算。
+    return stable
 
 
-def _stable_record_identity(value: str, stable_labels: set[str]) -> frozenset[str]:
+def _stable_record_identity(
+    value: str,
+    stable_labels: dict[str, frozenset[str]],
+) -> frozenset[str]:
     """Return the full stable label-number identity set for one record."""
 
     return frozenset(
         token
         for token in _review_identity_tokens(value)
-        if _identity_label_and_number(token)[0] in stable_labels
+        for label, number in (_identity_label_and_number(token),)
+        if number in stable_labels.get(label, ())
     )
 
 

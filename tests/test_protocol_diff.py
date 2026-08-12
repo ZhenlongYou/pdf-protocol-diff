@@ -8841,6 +8841,127 @@ class ProtocolDiffTests(unittest.TestCase):
             all(not change.audit_replaced_snippets for change in result.changes)
         )
 
+    def test_bounded_matching_keeps_shared_identity_when_one_record_is_added(self) -> None:
+        """A new unique record must not invalidate every existing Lane identity."""
+
+        for count in (32, 33):
+            old_units = [
+                f"Lane {index} has voltage limit {20 + index} mV."
+                for index in range(count)
+            ]
+            shifted_indexes = list(range(count))[count // 2 :] + list(range(count))[: count // 2]
+            new_units = [
+                f"Lane {index} has voltage limit {21 + index} mV."
+                for index in shifted_indexes
+            ] + [f"Lane {count} has voltage limit {21 + count} mV."]
+            with self.subTest(count=count):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path(f"old-lane-extra-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(old_units),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path(f"new-lane-extra-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(new_units),
+                            )
+                        ],
+                    ),
+                    DiffOptions(max_snippets_per_section=count + 1),
+                )
+
+                self.assertEqual(1, len(result.changes))
+                change = result.changes[0]
+                self.assertEqual(count, len(change.audit_replaced_snippets))
+                self.assertEqual(1, len(change.audit_added_snippets))
+                self.assertFalse(change.audit_removed_snippets)
+                self.assertTrue(
+                    all(
+                        re.search(r"Lane (\d+)", pair.old).group(1)
+                        == re.search(r"Lane (\d+)", pair.new).group(1)
+                        for pair in change.audit_replaced_snippets
+                    )
+                )
+
+                reverse = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path(f"old-lane-remove-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(new_units),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path(f"new-lane-remove-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(old_units),
+                            )
+                        ],
+                    ),
+                    DiffOptions(max_snippets_per_section=count + 1),
+                )
+                self.assertEqual(1, len(reverse.changes))
+                reverse_change = reverse.changes[0]
+                self.assertEqual(count, len(reverse_change.audit_replaced_snippets))
+                self.assertFalse(reverse_change.audit_added_snippets)
+                self.assertEqual(1, len(reverse_change.audit_removed_snippets))
+                self.assertTrue(
+                    all(
+                        re.search(r"Lane (\d+)", pair.old).group(1)
+                        == re.search(r"Lane (\d+)", pair.new).group(1)
+                        for pair in reverse_change.audit_replaced_snippets
+                    )
+                )
+
+    def test_bounded_matching_does_not_lock_duplicate_partial_identities(self) -> None:
+        """Duplicate identifiers remain unproven when one side has an extra occurrence."""
+
+        old_units = [
+            "Lane 1 profile is PAM4.",
+            "Lane 1 profile is NRZ.",
+            "Lane 2 profile is PAM4.",
+            "Lane 3 profile is PAM4.",
+        ]
+        new_units = [
+            "Lane 3 profile is NRZ.",
+            "Lane 2 profile is NRZ.",
+            "Lane 1 profile is LEGACY.",
+            "Lane 1 profile is RECOVERY.",
+            "Lane 1 profile is DISABLED.",
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-duplicate-partial-id.pdf"),
+                pages=[PageText(page_number=1, text="1 Profiles\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-duplicate-partial-id.pdf"),
+                pages=[PageText(page_number=1, text="1 Profiles\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=8),
+        )
+
+        self.assertTrue(result.changes)
+        self.assertTrue(
+            all(
+                not pair.old.startswith("Lane 1 ")
+                or pair.new.startswith("Lane 1 ")
+                for change in result.changes
+                for pair in (change.audit_replaced_snippets or ())
+            )
+        )  # 重复 Lane 1 无唯一 occurrence 证明，至少不能跨 Lane 强归因。
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
