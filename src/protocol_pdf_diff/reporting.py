@@ -4904,6 +4904,10 @@ def _resolve_duplicate_primary_table_rows(
 ) -> tuple[list[TableRowChange], list[str], list[str]]:
     """Consume rows that have no safe primary identity or repeat one."""
 
+    if not old_rows or not new_rows:
+        return [], old_rows, new_rows
+        # 单侧整表新增/删除无需身份配对；保留物理行序交给下游生成审计事实。
+
     old_explicit = [
         _table_row_pairing_primary_identity(row, allow_generic_column=False)
         for row in old_rows
@@ -5009,16 +5013,54 @@ def _resolve_duplicate_primary_table_rows(
             row for row, row_identity in zip(new_rows, new_primary, strict=True)
             if row_identity == identity
         ]
-        if [
-            _table_row_display_key(row) for row in old_group
-        ] == [
-            _table_row_display_key(row) for row in new_group
-        ]:
+        old_group_keys = [_table_row_display_key(row) for row in old_group]
+        new_group_keys = [_table_row_display_key(row) for row in new_group]
+        if old_group_keys == new_group_keys:
             continue
-        for old_row in old_group:
+        old_remaining, new_remaining = _remove_equal_table_rows(
+            old_group,
+            new_group,
+        )
+        if (
+            len(old_group) == len(new_group)
+            and len(old_remaining) == 1
+            and len(new_remaining) == 1
+            and sum(
+                old_key == new_key
+                for old_key, new_key in zip(
+                    old_group_keys,
+                    new_group_keys,
+                    strict=True,
+                )
+            )
+            == len(old_group) - 1
+        ):
+            kind = _table_structured_diff_kind(
+                old_remaining[0],
+                new_remaining[0],
+            )
+            if kind != "无变化":
+                changes.append(
+                    _make_table_row_change(
+                        old_remaining[0],
+                        new_remaining[0],
+                        kind,
+                    )
+                )
+            continue
+            # 等量重复组中N-1个occurrences已按完整reader key消去后，
+            # 且它们仍在相同位置，最后1:1残差由集合守恒唯一证明；纯
+            # occurrence重排不满足此门，继续fail-visible而不猜配。
+        if not old_remaining and not new_remaining:
+            old_remaining = old_group
+            new_remaining = new_group
+            # 多重集相同但物理顺序不同是可见事实，不能被无序抵消。
+        for old_row in old_remaining:
             changes.append(_make_table_row_change(old_row, "", "旧表删除行"))
-        for new_row in new_group:
+        for new_row in new_remaining:
             changes.append(_make_table_row_change("", new_row, "新表新增行"))
+        # 重复身份内只消去完整reader key相等的occurrences；任何剩余行都
+        # 保守报告为删/增，不按位置或值相似度猜测replacement。
     return changes, retained_old, retained_new
 
 
