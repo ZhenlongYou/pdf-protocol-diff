@@ -9216,6 +9216,42 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(changes)
         self.assertTrue(any(row.change_type == "顺序变化" for row in changes))
 
+    def test_overwide_order_preview_focuses_on_the_moved_rows(self) -> None:
+        """Order evidence includes the late rows that actually changed place."""
+
+        def wide_row(index: int) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column + 1}=ROW_{index:03d}_C{column + 1}"
+                for column in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [wide_row(index) for index in range(12)]
+        new_rows = [*old_rows]
+        new_rows[8], new_rows[9] = new_rows[9], new_rows[8]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+        order_change = next(
+            row for row in changes if row.change_type == "顺序变化"
+        )
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("ROW_008", evidence)
+        self.assertIn("ROW_009", evidence)
+        self.assertNotEqual(order_change.old_value, order_change.new_value)
+
     def test_overwide_repeated_rows_use_true_lcs(self) -> None:
         """Insertion among repeated wide rows does not invent extra changes."""
 

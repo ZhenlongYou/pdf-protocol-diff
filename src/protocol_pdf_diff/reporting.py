@@ -3679,11 +3679,21 @@ def _partition_overwide_generic_rows(
         )
     )
     if order_state != "same":
+        order_difference_index = _first_table_order_difference_index(
+            old_order,
+            new_order,
+        )
         changes.append(
             TableRowChange(
                 item="表格行顺序",
-                old_value=_table_order_preview(old_rows),
-                new_value=_table_order_preview(new_rows),
+                old_value=_table_order_preview(
+                    old_rows,
+                    focus_index=order_difference_index,
+                ),
+                new_value=_table_order_preview(
+                    new_rows,
+                    focus_index=order_difference_index,
+                ),
                 change_type=(
                     "顺序变化" if order_state == "changed" else "需人工复核"
                 ),
@@ -3801,18 +3811,34 @@ def _delete_insert_distance_within_budget(
     return False
 
 
-def _table_order_preview(rows: list[str]) -> str:
+def _first_table_order_difference_index(
+    old_tokens: list[tuple[str, str]],
+    new_tokens: list[tuple[str, str]],
+) -> int:
+    """Return the first token offset whose order evidence differs."""
+
+    for index, (old_token, new_token) in enumerate(
+        zip(old_tokens, new_tokens, strict=False)
+    ):
+        if old_token != new_token:
+            return index
+    return min(len(old_tokens), len(new_tokens))
+
+
+def _table_order_preview(rows: list[str], *, focus_index: int = 0) -> str:
     """Return bounded, cheap evidence for one table row order."""
 
+    start = max(0, min(focus_index - 1, max(0, len(rows) - 4)))
     labels: list[str] = []
-    for row in rows[:4]:
+    for row in rows[start : start + 4]:
         match = re.search(
             r"(?i)(?:^|\|)\s*(?:parameter|characteristic|column\s+1)\s*=\s*([^|]+)",
             row,
         )
         labels.append(truncate(compact_inline(match.group(1) if match else row), 80))
+    prefix = f"第{start + 1}行起：" if start else ""
     suffix = f"；共{len(rows)}行" if len(rows) > 4 else ""
-    return " → ".join(labels) + suffix
+    return prefix + " → ".join(labels) + suffix
 
 
 def _remove_same_position_descriptor_reflows(
