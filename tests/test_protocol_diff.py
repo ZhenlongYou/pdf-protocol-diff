@@ -9248,6 +9248,71 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("新表新增行", changes[0].change_type)
         self.assertIn("B0", changes[0].new_value)
 
+    def test_overwide_rows_have_no_256_occurrence_cliff(self) -> None:
+        """Large equal prefixes still cancel before one inserted occurrence."""
+
+        def wide_row(prefix: str) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={prefix}{index}" for index in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Wide rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        common = [wide_row(f"R{index}") for index in range(257)]
+        self.assertEqual(
+            [],
+            reporting_module._table_row_changes(
+                (table(common),),
+                (table(common),),
+            ),
+        )
+        added = wide_row("ADDED")
+        changes = reporting_module._table_row_changes(
+            (table(common),),
+            (table([*common[:128], added, *common[128:]]),),
+        )
+        self.assertEqual(1, len(changes))
+        self.assertEqual("新表新增行", changes[0].change_type)
+        self.assertIn("ADDED0", changes[0].new_value)
+
+    def test_overwide_partition_preserves_mixed_row_order(self) -> None:
+        """A wide row moving across an explicit row remains visible."""
+
+        wide = "表格行: T1 | " + " | ".join(
+            f"Column {index + 1}=A{index}" for index in range(33)
+        )
+        explicit = "表格行: T1 | Parameter=Receiver limit | Value=5 V"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([wide, explicit]),),
+            (table([explicit, wide]),),
+        )
+        self.assertTrue(changes)
+        self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
+        self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 

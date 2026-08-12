@@ -3594,47 +3594,54 @@ def _partition_overwide_generic_rows(
             and all(re.fullmatch(r"column\s+\d+", label) for label in field_labels)
         )
 
-    old_wide = [row for row in old_rows if overwide(row)]
-    new_wide = [row for row in new_rows if overwide(row)]
+    def occurrence_labels(rows: list[str]) -> list[tuple[str, int]]:
+        counts: Counter[str] = Counter()
+        labels: list[tuple[str, int]] = []
+        for row in rows:
+            counts[row] += 1
+            labels.append((row, counts[row]))
+        return labels
+
+    old_labels = occurrence_labels(old_rows)
+    new_labels = occurrence_labels(new_rows)
+    old_wide = [
+        (row, label)
+        for row, label in zip(old_rows, old_labels, strict=True)
+        if overwide(row)
+    ]
+    new_wide = [
+        (row, label)
+        for row, label in zip(new_rows, new_labels, strict=True)
+        if overwide(row)
+    ]
     if not old_wide and not new_wide:
         return [], old_rows, new_rows
-    matched_old: set[int] = set()
-    matched_new: set[int] = set()
-    if len(old_wide) <= 256 and len(new_wide) <= 256:
-        lengths = [
-            [0] * (len(new_wide) + 1)
-            for _ in range(len(old_wide) + 1)
-        ]
-        for old_offset, old_row in enumerate(old_wide, start=1):
-            for new_offset, new_row in enumerate(new_wide, start=1):
-                if old_row == new_row:
-                    lengths[old_offset][new_offset] = (
-                        lengths[old_offset - 1][new_offset - 1] + 1
-                    )
-                else:
-                    lengths[old_offset][new_offset] = max(
-                        lengths[old_offset - 1][new_offset],
-                        lengths[old_offset][new_offset - 1],
-                    )
-        old_offset = len(old_wide)
-        new_offset = len(new_wide)
-        while old_offset and new_offset:
-            if old_wide[old_offset - 1] == new_wide[new_offset - 1]:
-                matched_old.add(old_offset - 1)
-                matched_new.add(new_offset - 1)
-                old_offset -= 1
-                new_offset -= 1
-            elif lengths[old_offset - 1][new_offset] >= lengths[old_offset][new_offset - 1]:
-                old_offset -= 1
-            else:
-                new_offset -= 1
-    # More than 256 overwide rows exceed the bounded occurrence proof budget;
-    # retaining all facts is safer than either quadratic growth or guessed pairs.
+    common_labels = set(old_labels) & set(new_labels)
+    old_common = [label for label in old_labels if label in common_labels]
+    new_common = [label for label in new_labels if label in common_labels]
+    old_common_position = {
+        label: index for index, label in enumerate(old_common)
+    }
+    new_common_position = {
+        label: index for index, label in enumerate(new_common)
+    }
+    old_absolute_position = {label: index for index, label in enumerate(old_labels)}
+    new_absolute_position = {label: index for index, label in enumerate(new_labels)}
+    moved_labels = {
+        label
+        for label in common_labels
+        if old_common_position[label] != new_common_position[label]
+        or (
+            len(old_rows) == len(new_rows)
+            and old_absolute_position[label] != new_absolute_position[label]
+        )
+    }
+    cancellable_labels = common_labels - moved_labels
     remaining_old = [
-        row for index, row in enumerate(old_wide) if index not in matched_old
+        row for row, label in old_wide if label not in cancellable_labels
     ]
     remaining_new = [
-        row for index, row in enumerate(new_wide) if index not in matched_new
+        row for row, label in new_wide if label not in cancellable_labels
     ]
     changes: list[TableRowChange] = []
     changes.extend(
