@@ -8655,6 +8655,51 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(["added", "deleted"], sorted(change.change_type for change in result.changes))
 
+    def test_narrative_count_cannot_force_residual_replacement(self) -> None:
+        """Stable surrounding units do not turn a generic count into a field key."""
+
+        stable_units = (
+            "The implementation preserves every declared timing boundary.",
+            "The receiver records each completed transaction for review.",
+            "The device reports faults through the standard interface.",
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-residual-narrative-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Procedure\n"
+                            + "\n".join(stable_units)
+                            + "\nThe procedure uses 2 examples for optical calibration."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-residual-narrative-count.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 Procedure\n"
+                            + "\n".join(stable_units)
+                            + "\nThe receiver uses 2 examples for copper link training."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=4),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertEqual(1, len(change.audit_added_snippets))
+        self.assertEqual(1, len(change.audit_removed_snippets))
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 

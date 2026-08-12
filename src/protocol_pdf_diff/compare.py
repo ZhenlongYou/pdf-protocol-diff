@@ -3188,11 +3188,9 @@ def _review_unit_skeleton_match_count(
             or (
                 _review_identity_tokens(short_unit)
                 & _review_identity_tokens(long_unit)
-                and max(
-                    _review_similarity(short_unit, long_unit),
-                    _similarity(short_unit, long_unit),
+                and _review_units_share_numbered_record_skeleton(
+                    short_unit, long_unit
                 )
-                >= 0.80
             )
         ]
         short_identities = _review_identity_tokens(short_unit)
@@ -4701,9 +4699,17 @@ def _unequal_replace_delta_candidates(
                 _review_identity_tokens(old_unit)
                 & _review_identity_tokens(new_unit)
             )
+            if (
+                same_structural_identity
+                and not (
+                    _review_units_share_sentence_skeleton(old_unit, new_unit)
+                    or _review_units_share_numbered_record_skeleton(
+                        old_unit, new_unit
+                    )
+                )
+            ):
+                continue  # 编号候选只排序；普通 uses 2 叙述不得绕过残余片段骨架门。
             score = _unit_pair_score(old_unit, new_unit)
-            if same_structural_identity:
-                score = max(score, 0.80)
             if score >= _MIN_UNEQUAL_REPLACE_PAIR_SCORE:
                 position_gap = abs(
                     _relative_position(old_index, len(old_units))
@@ -4981,6 +4987,34 @@ def _review_identity_tokens(value: str) -> set[str]:
             continue  # 系词/范围终点后的数字只参与比较，不抢占标签编号身份。
         identities.add(token)
     return identities
+
+
+def _review_units_share_numbered_record_skeleton(left: str, right: str) -> bool:
+    """Compare wording after masking record identifiers and numeric value slots."""
+
+    def skeleton(value: str) -> str:
+        normalized = normalize_for_similarity(value)
+        normalized = re.sub(
+            r"(?<![\w.])[+\-]?(?:\d+(?:\.\d+)?|\.\d+)(?![\w.])",
+            " # ",
+            normalized,
+        )
+        normalized = re.sub(r"[零〇一二两三四五六七八九十百千万亿]+", "#", normalized)
+        return compact_inline(normalized)
+
+    left_skeleton = skeleton(left)
+    right_skeleton = skeleton(right)
+    return bool(
+        left_skeleton
+        and right_skeleton
+        and difflib.SequenceMatcher(
+            None,
+            left_skeleton,
+            right_skeleton,
+            autojunk=False,
+        ).ratio()
+        >= 0.90
+    )
 
 
 def _relative_position(index: int, length: int) -> float:
