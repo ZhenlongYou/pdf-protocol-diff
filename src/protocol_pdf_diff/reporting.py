@@ -5017,6 +5017,17 @@ def _resolve_duplicate_primary_table_rows(
         new_group_keys = [_table_row_display_key(row) for row in new_group]
         if old_group_keys == new_group_keys:
             continue
+        if _table_order_token_state(
+            [("row", key) for key in old_group_keys],
+            [("row", key) for key in new_group_keys],
+        ) != "same":
+            for old_row in old_group:
+                changes.append(_make_table_row_change(old_row, "", "旧表删除行"))
+            for new_row in new_group:
+                changes.append(_make_table_row_change("", new_row, "新表新增行"))
+            continue
+            # 相等occurrences的共同序列已发生反转时，值变化与移动无法
+            # 拆分归因；整组fail-visible，不能先跨位置消去后隐藏顺序事实。
         old_remaining, new_remaining = _remove_equal_table_rows(
             old_group,
             new_group,

@@ -8862,6 +8862,44 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
         self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
 
+    def test_repeated_identity_reorder_with_value_change_keeps_whole_group_visible(self) -> None:
+        """A moved occurrence cannot disappear behind another row's value edit."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Priority rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [
+            "表格行: T1 | Parameter=Limit | Condition=A | Value=20 mV",
+            "表格行: T1 | Parameter=Limit | Condition=B | Value=30 mV",
+            "表格行: T1 | Parameter=Limit | Condition=C | Value=40 mV",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Limit | Condition=C | Value=40 mV",
+            "表格行: T1 | Parameter=Limit | Condition=A | Value=21 mV",
+            "表格行: T1 | Parameter=Limit | Condition=B | Value=30 mV",
+        ]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        evidence = "\n".join(
+            f"{row.old_value}\n{row.new_value}" for row in changes
+        )
+        for fact in ("20 mV", "21 mV", "30 mV", "40 mV"):
+            self.assertIn(fact, evidence)
+        self.assertEqual(3, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(3, sum(row.change_type == "新表新增行" for row in changes))
+
     def test_inserted_duplicate_table_row_cannot_steal_original_pair(self) -> None:
         """An inserted duplicate parameter row remains a visible added fact."""
 
