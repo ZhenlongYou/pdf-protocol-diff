@@ -3518,6 +3518,10 @@ def _table_row_changes(
     )
     if revision_changes is not None:
         return [*review_changes, *revision_changes]
+    old_rows, new_rows = _remove_proven_generic_column_boundary_reflows(
+        old_rows,
+        new_rows,
+    )
     ambiguous_row_changes, old_rows, new_rows = (
         _resolve_duplicate_primary_table_rows(old_rows, new_rows)
     )
@@ -4258,6 +4262,94 @@ def _generic_row_equal_under_proven_column_boundary_drift(
     )  # 两条不同数据行必须证明同一连续列合并；表头 token 也只能在该列组内重排。
 
 
+def _remove_proven_generic_column_boundary_reflows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[str], list[str]]:
+    """Consume only table-wide-proven generic column boundary reflows."""
+
+    old_entries = [_table_row_field_entries(row) for row in old_rows]
+    new_entries = [_table_row_field_entries(row) for row in new_rows]
+    patterns_by_width: dict[
+        tuple[int, int],
+        dict[tuple[str, tuple[tuple[int, int], ...]], set[str]],
+    ] = {}
+
+    def proven_equal(old_index: int, new_index: int) -> bool:
+        old_row_entries = old_entries[old_index]
+        new_row_entries = new_entries[new_index]
+        if not (
+            old_row_entries
+            and new_row_entries
+            and len(old_row_entries) != len(new_row_entries)
+            and all(
+                re.fullmatch(r"column\s+\d+", entry[2], flags=re.I)
+                for entry in old_row_entries
+            )
+            and all(
+                re.fullmatch(r"column\s+\d+", entry[2], flags=re.I)
+                for entry in new_row_entries
+            )
+        ):
+            return False
+        width_key = (len(old_row_entries), len(new_row_entries))
+        supported_patterns = patterns_by_width.setdefault(
+            width_key,
+            _generic_boundary_merge_pattern_evidence(
+                old_rows,
+                new_rows,
+                old_column_count=width_key[0],
+                new_column_count=width_key[1],
+            ),
+        )
+        old_is_header = _generic_boundary_entries_look_like_header(old_row_entries)
+        new_is_header = _generic_boundary_entries_look_like_header(new_row_entries)
+        if old_is_header != new_is_header:
+            return False
+        return any(
+            len(evidence_keys) >= 2
+            and (
+                _generic_header_matches_boundary_merge_pattern(
+                    old_row_entries,
+                    new_row_entries,
+                    pattern,
+                )
+                if old_is_header
+                else _generic_data_matches_boundary_merge_pattern(
+                    old_row_entries,
+                    new_row_entries,
+                    pattern,
+                )
+            )
+            for pattern, evidence_keys in supported_patterns.items()
+        )
+
+    new_indexes_by_flattened_key: dict[str, list[int]] = {}
+    for new_index, entries in enumerate(new_entries):
+        if entries:
+            new_indexes_by_flattened_key.setdefault(
+                _generic_boundary_flattened_key(entries),
+                [],
+            ).append(new_index)
+    consumed_new: set[int] = set()
+    consumed_old: set[int] = set()
+    for old_index, entries in enumerate(old_entries):
+        if not entries:
+            continue
+        flattened_key = _generic_boundary_flattened_key(entries)
+        for new_index in new_indexes_by_flattened_key.get(flattened_key, []):
+            if new_index in consumed_new:
+                continue
+            if proven_equal(old_index, new_index):
+                consumed_old.add(old_index)
+                consumed_new.add(new_index)
+                break
+    return (
+        [row for index, row in enumerate(old_rows) if index not in consumed_old],
+        [row for index, row in enumerate(new_rows) if index not in consumed_new],
+    )
+
+
 def _generic_boundary_merge_pattern_evidence(
     old_rows: list[str],
     new_rows: list[str],
@@ -4458,7 +4550,7 @@ def _generic_boundary_entries_look_like_header(
         bool(set(re.findall(r"[a-z]+", value.casefold())) & header_words)
         for _column, _label, _normalized, value in entries
     )
-    return len(entries) >= 3 and hits >= 2
+    return len(entries) >= 2 and hits >= 2
 
 def _table_rows_by_pairing_key(rows: list[str]) -> dict[str, list[str]]:
     """Group rows by stable visible identity while preserving document order."""

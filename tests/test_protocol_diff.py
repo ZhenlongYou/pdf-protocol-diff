@@ -8992,6 +8992,40 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
         self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
 
+    def test_proven_generic_column_boundary_reflow_is_not_a_change(self) -> None:
+        """Two body rows may prove one consistent generic column merge."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Modes",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [
+            "表格行: T1 | Column 1=Mode | Column 2=Type | Column 3=Value",
+            "表格行: T1 | Column 1=Near | Column 2=end | Column 3=20",
+            "表格行: T1 | Column 1=Far | Column 2=end | Column 3=30",
+        ]
+        new_rows = [
+            "表格行: T1 | Column 1=Mode Type | Column 2=Value",
+            "表格行: T1 | Column 1=Near end | Column 2=20",
+            "表格行: T1 | Column 1=Far end | Column 2=30",
+        ]
+
+        self.assertEqual(
+            [],
+            reporting_module._table_row_changes(
+                (table(old_rows),),
+                (table(new_rows),),
+            ),
+        )
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
