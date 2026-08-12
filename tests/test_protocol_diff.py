@@ -15199,6 +15199,32 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("reset;", evidence)
 
+    def test_unicode_adjacent_comparison_operator_changes_remain_visible(self) -> None:
+        """CJK text directly touching a comparison operator remains semantic."""
+
+        for old_body, new_body in (
+            ("模式!=关闭", "模式=关闭"),
+            ("参数!=20", "参数=20"),
+            ("模式==关闭", "模式=关闭"),
+            ("参数<=20", "参数=20"),
+            ("参数>=20", "参数=20"),
+            ("模式≠关闭", "模式=关闭"),
+        ):
+            with self.subTest(old_body=old_body):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old-unicode-operator.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 配置\n{old_body}")],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new-unicode-operator.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 配置\n{new_body}")],
+                    ),
+                    DiffOptions(),
+                )
+
+                self.assertTrue(result.changes)
+
     def test_chinese_count_words_before_ascii_units_are_semantically_equal(self) -> None:
         """Chinese counts before standalone ASCII units should compare equal."""
 
