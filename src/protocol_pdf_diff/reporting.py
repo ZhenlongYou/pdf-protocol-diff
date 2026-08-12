@@ -4324,26 +4324,29 @@ def _remove_proven_generic_column_boundary_reflows(
             for pattern, evidence_keys in supported_patterns.items()
         )
 
-    new_indexes_by_flattened_key: dict[str, list[int]] = {}
-    for new_index, entries in enumerate(new_entries):
-        if entries:
-            new_indexes_by_flattened_key.setdefault(
-                _generic_boundary_flattened_key(entries),
-                [],
-            ).append(new_index)
+    old_flattened_keys = [
+        _generic_boundary_flattened_key(entries) if entries else ""
+        for entries in old_entries
+    ]
+    new_flattened_keys = [
+        _generic_boundary_flattened_key(entries) if entries else ""
+        for entries in new_entries
+    ]
     consumed_new: set[int] = set()
     consumed_old: set[int] = set()
-    for old_index, entries in enumerate(old_entries):
-        if not entries:
-            continue
-        flattened_key = _generic_boundary_flattened_key(entries)
-        for new_index in new_indexes_by_flattened_key.get(flattened_key, []):
-            if new_index in consumed_new:
-                continue
+    matcher = difflib.SequenceMatcher(
+        None,
+        old_flattened_keys,
+        new_flattened_keys,
+        autojunk=False,
+    )
+    for old_start, new_start, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            old_index = old_start + offset
+            new_index = new_start + offset
             if proven_equal(old_index, new_index):
                 consumed_old.add(old_index)
                 consumed_new.add(new_index)
-                break
     return (
         [row for index, row in enumerate(old_rows) if index not in consumed_old],
         [row for index, row in enumerate(new_rows) if index not in consumed_new],
