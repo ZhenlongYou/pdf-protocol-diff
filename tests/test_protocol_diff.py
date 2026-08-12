@@ -10202,6 +10202,74 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("MODE_PAM4", evidence)
         self.assertIn("MODE_NRZ", evidence)
 
+    def test_zero_padded_first_column_alias_still_identifies_duplicate_peer(self) -> None:
+        """Column 1 and COLUMN 01 must lead to the same peer candidate set."""
+
+        def row(mode: str, *, padded_first: bool) -> str:
+            cells = [
+                f"{'COLUMN 01' if padded_first else 'Column 1'}=SAME_ID",
+                "Column 2=SHARED",
+                f"COLUMN 002={mode}",
+                *(f"Column {index}=SAME_{index}" for index in range(3, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(cells)
+
+        pam4 = row("MODE_PAM4", padded_first=False)
+        nrz = row("MODE_NRZ", padded_first=True)
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([pam4, *anchors, nrz]),),
+            (table([*anchors, pam4, nrz]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("MODE_PAM4", evidence)
+        self.assertIn("MODE_NRZ", evidence)
+
+    def test_generic_column_label_alias_does_not_create_row_changes(self) -> None:
+        """Tool-owned Column N case and zero-padding are not document facts."""
+
+        old_row = "表格行: T1 | " + " | ".join(
+            f"Column {index}={'MODE_PAM4' if index == 2 else f'SAME_{index}'}"
+            for index in range(1, 34)
+        )
+        new_row = old_row.replace("Column 2=MODE_PAM4", "COLUMN 02=MODE_PAM4")
+
+        def table(row: str) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Operating modes",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=[row],
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table(old_row),),
+            (table(new_row),),
+        )
+        self.assertEqual([], changes)
+
     def test_layout_drift_review_keeps_repeated_peer_occurrences(self) -> None:
         """Repeated missing/extra-column peers remain repeated review candidates."""
 

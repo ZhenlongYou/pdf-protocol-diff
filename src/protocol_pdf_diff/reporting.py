@@ -3591,6 +3591,19 @@ def _is_overwide_generic_table_row(row: str) -> bool:
     )
 
 
+def _canonical_generic_column_row_key(row: str) -> str:
+    """Normalize tool-owned ``Column N`` labels without rewriting cell values."""
+
+    return re.sub(
+        r"(?i)(^|\|)(\s*)column\s+(\d+)(\s*=)",
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}"
+            f"Column {int(match.group(3))}{match.group(4)}"
+        ),
+        row,
+    )
+
+
 def _partition_overwide_generic_rows(
     old_rows: list[str],
     new_rows: list[str],
@@ -3626,28 +3639,38 @@ def _partition_overwide_generic_rows(
         for identity in shared_order_explicit
     )
 
-    old_raw_counts = Counter(old_rows)
-    new_raw_counts = Counter(new_rows)
+    old_row_keys = [
+        _canonical_generic_column_row_key(row) if is_wide else row
+        for row, is_wide in zip(old_rows, old_is_wide, strict=True)
+    ]
+    new_row_keys = [
+        _canonical_generic_column_row_key(row) if is_wide else row
+        for row, is_wide in zip(new_rows, new_is_wide, strict=True)
+    ]
+    old_raw_counts = Counter(old_row_keys)
+    new_raw_counts = Counter(new_row_keys)
     shared_raw = set(old_raw_counts) & set(new_raw_counts)
 
     def order_tokens(
         rows: list[str],
+        row_keys: list[str],
         explicit: list[str],
         is_wide: list[bool],
     ) -> tuple[list[tuple[str, str]], list[int]]:
         indexed_tokens: list[tuple[tuple[str, str], int]] = []
-        for row_index, (row, explicit_identity, row_is_wide) in enumerate(zip(
+        for row_index, (row, row_key, explicit_identity, row_is_wide) in enumerate(zip(
             rows,
+            row_keys,
             explicit,
             is_wide,
             strict=True,
         )):
-            if row_is_wide and row in shared_raw:
-                indexed_tokens.append((("wide", row), row_index))
+            if row_is_wide and row_key in shared_raw:
+                indexed_tokens.append((("wide", row_key), row_index))
             elif explicit_identity in shared_order_explicit:
                 indexed_tokens.append((("anchor", explicit_identity), row_index))
-            elif row in shared_raw:
-                indexed_tokens.append((("anchor", row), row_index))
+            elif row_key in shared_raw:
+                indexed_tokens.append((("anchor", row_key), row_index))
 
         normalized: list[tuple[tuple[str, str], int]] = []
         anchor_run: list[tuple[tuple[str, str], int]] = []
@@ -3670,35 +3693,61 @@ def _partition_overwide_generic_rows(
         # 非宽行只为证明宽行是否跨越可靠锚点；同一宽行间隔内的 Parameter
         # 自身顺序不属于这个保守宽表分支的技术变化，仍交回常规表格身份比较。
 
-    old_wide = [
-        row for row, is_wide in zip(old_rows, old_is_wide, strict=True) if is_wide
+    old_wide_keys = [
+        row_key
+        for row_key, is_wide in zip(old_row_keys, old_is_wide, strict=True)
+        if is_wide
     ]
-    new_wide = [
-        row for row, is_wide in zip(new_rows, new_is_wide, strict=True) if is_wide
+    new_wide_keys = [
+        row_key
+        for row_key, is_wide in zip(new_row_keys, new_is_wide, strict=True)
+        if is_wide
     ]
-    old_wide_counts = Counter(old_wide)
-    new_wide_counts = Counter(new_wide)
+    old_wide_counts = Counter(old_wide_keys)
+    new_wide_counts = Counter(new_wide_keys)
     remaining_old_counts = old_wide_counts - new_wide_counts
     remaining_new_counts = new_wide_counts - old_wide_counts
 
-    def excess_rows(rows: list[str], excess: Counter[str]) -> list[str]:
+    def excess_rows(
+        rows: list[str],
+        row_keys: list[str],
+        is_wide: list[bool],
+        excess: Counter[str],
+    ) -> list[str]:
         used: Counter[str] = Counter()
         selected: list[str] = []
-        for row in rows:
-            if used[row] < excess[row]:
-                used[row] += 1
+        for row, row_key, row_is_wide in zip(
+            rows,
+            row_keys,
+            is_wide,
+            strict=True,
+        ):
+            if row_is_wide and used[row_key] < excess[row_key]:
+                used[row_key] += 1
                 selected.append(row)
         return selected
 
-    remaining_old = excess_rows(old_wide, remaining_old_counts)
-    remaining_new = excess_rows(new_wide, remaining_new_counts)
+    remaining_old = excess_rows(
+        old_rows,
+        old_row_keys,
+        old_is_wide,
+        remaining_old_counts,
+    )
+    remaining_new = excess_rows(
+        new_rows,
+        new_row_keys,
+        new_is_wide,
+        remaining_new_counts,
+    )
     old_order, old_order_indexes = order_tokens(
         old_rows,
+        old_row_keys,
         old_explicit,
         old_is_wide,
     )
     new_order, new_order_indexes = order_tokens(
         new_rows,
+        new_row_keys,
         new_explicit,
         new_is_wide,
     )
@@ -4029,6 +4078,16 @@ def _paired_table_order_previews(
             break
     if len(selected_indexes) == 1 and old_focus_fields:
         focus_first_field = old_focus_fields[0]
+
+        def shares_focus_first_field(fields: list[tuple[str, str]]) -> bool:
+            if not fields:
+                return False
+            return (
+                canonical_field_label(fields[0][0])
+                == canonical_field_label(focus_first_field[0])
+                and fields[0][1] == focus_first_field[1]
+            )
+
         peer_fields = [
             fields
             for row, fields in [
@@ -4036,7 +4095,7 @@ def _paired_table_order_previews(
                 *zip(new_rows, new_all_fields, strict=True),
             ]
             if _is_overwide_generic_table_row(row)
-            and fields[0] == focus_first_field
+            and shares_focus_first_field(fields)
             and fields != old_focus_fields
         ]
         if field_layout_is_ambiguous and not layout_conflict_peer_groups:
@@ -4047,7 +4106,7 @@ def _paired_table_order_previews(
                 fields
                 for row, fields in zip(old_rows, old_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
-                and fields[0] == focus_first_field
+                and shares_focus_first_field(fields)
                 and fields != old_focus_fields
                 and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
@@ -4056,7 +4115,7 @@ def _paired_table_order_previews(
                 fields
                 for row, fields in zip(new_rows, new_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
-                and fields[0] == focus_first_field
+                and shares_focus_first_field(fields)
                 and fields != old_focus_fields
                 and Counter(canonical_field_label(field) for field, _value in fields)
                 == focus_multiplicity
@@ -4079,7 +4138,7 @@ def _paired_table_order_previews(
                 fields
                 for row, fields in zip(old_rows, old_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
-                and fields[0] == focus_first_field
+                and shares_focus_first_field(fields)
                 and fields != old_focus_fields
                 and [canonical_field_label(field) for field, _value in fields]
                 != focus_labels
@@ -4088,7 +4147,7 @@ def _paired_table_order_previews(
                 fields
                 for row, fields in zip(new_rows, new_all_fields, strict=True)
                 if _is_overwide_generic_table_row(row)
-                and fields[0] == focus_first_field
+                and shares_focus_first_field(fields)
                 and fields != old_focus_fields
                 and [canonical_field_label(field) for field, _value in fields]
                 != focus_labels
