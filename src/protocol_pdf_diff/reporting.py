@@ -3973,6 +3973,7 @@ def _paired_table_order_previews(
     )
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
+    layout_conflict_peer_fields: list[tuple[str, str]] = []
     if (
         old_focus_fields
         and new_focus_fields
@@ -3980,6 +3981,7 @@ def _paired_table_order_previews(
         != [field.casefold() for field, _value in new_focus_fields]
     ):
         field_layout_is_ambiguous = True
+        layout_conflict_peer_fields = new_focus_fields
     selected_indexes: list[int] = [0]
     distinguishing_peer_fields: list[tuple[str, str]] = []
     signature_is_ambiguous = False
@@ -4016,6 +4018,18 @@ def _paired_table_order_previews(
             for fields in peer_fields
         ):
             field_layout_is_ambiguous = True
+            layout_conflict_peer_fields = max(
+                (
+                    fields
+                    for fields in peer_fields
+                    if [field.casefold() for field, _value in fields]
+                    != focus_labels
+                ),
+                key=lambda fields: len(
+                    set(focus_labels)
+                    & {field.casefold() for field, _value in fields}
+                ),
+            )
         distinguishing_index = next(
             (
                 field_index
@@ -4095,6 +4109,39 @@ def _paired_table_order_previews(
         # 做有界集合覆盖。超过上限仍不能唯一时保留最接近peer，避免伪装确定性。
     selected_indexes = list(dict.fromkeys(selected_indexes))
 
+    def layout_conflict_preview(
+        fields: list[tuple[str, str]],
+        counterpart_fields: list[tuple[str, str]],
+    ) -> str:
+        def grouped(
+            values: list[tuple[str, str]],
+        ) -> dict[str, list[tuple[str, str]]]:
+            result: dict[str, list[tuple[str, str]]] = {}
+            for field, value in values:
+                result.setdefault(field.casefold(), []).append((field, value))
+            return result
+
+        by_label = grouped(fields)
+        counterpart_by_label = grouped(counterpart_fields)
+        ordered_labels = list(dict.fromkeys([*by_label, *counterpart_by_label]))
+        cells: list[str] = []
+        for label in ordered_labels:
+            values = by_label.get(label, [])
+            counterparts = counterpart_by_label.get(label, [])
+            value = values[0] if values else None
+            counterpart = counterparts[0] if counterparts else None
+            if values == counterparts:
+                continue
+            if value is None:
+                cells.append(f"{counterpart[0]}=<缺失>")
+            else:
+                cells.append(
+                    f"{value[0]}={paired_excerpt(value[1], counterpart[1] if counterpart else '', 72)}"
+                )
+            if len(cells) >= 3:
+                break
+        return truncate(" | ".join(cells) or compact_inline(str(fields)), 240)
+
     def preview(
         window_rows: list[str],
         fields_by_row: list[list[tuple[str, str]]],
@@ -4154,7 +4201,12 @@ def _paired_table_order_previews(
         return truncate(prefix + " → ".join(labels) + suffix, 760)
 
     return (
-        preview(
+        layout_conflict_preview(
+            old_focus_fields,
+            layout_conflict_peer_fields or new_focus_fields,
+        )
+        if field_layout_is_ambiguous
+        else preview(
             old_window,
             old_fields,
             new_fields,
@@ -4163,7 +4215,12 @@ def _paired_table_order_previews(
             old_start,
             len(old_rows),
         ),
-        preview(
+        layout_conflict_preview(
+            layout_conflict_peer_fields or new_focus_fields,
+            old_focus_fields,
+        )
+        if field_layout_is_ambiguous
+        else preview(
             new_window,
             new_fields,
             old_fields,

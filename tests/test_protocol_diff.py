@@ -9869,6 +9869,9 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         order_change = next(row for row in changes if row.item == "表格行顺序")
         self.assertEqual("需人工复核", order_change.change_type)
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 2=MODE_PAM4", evidence)
+        self.assertIn("Column 34=MODE_NRZ", evidence)
 
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
