@@ -9186,6 +9186,37 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("B0", changes[0].new_value)
         self.assertNotIn("A0", changes[0].new_value)
 
+    def test_overwide_generic_row_reordering_remains_visible(self) -> None:
+        """Order-aware cancellation cannot erase a moved over-budget row."""
+
+        def wide_row(prefix: str) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={prefix}{index}" for index in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match priority rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        alpha = wide_row("A")
+        beta = wide_row("B")
+        changes = reporting_module._table_row_changes(
+            (table([alpha, beta]),),
+            (table([beta, alpha]),),
+        )
+
+        self.assertTrue(changes)
+        self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
+        self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 

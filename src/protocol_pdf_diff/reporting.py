@@ -3598,26 +3598,18 @@ def _partition_overwide_generic_rows(
     new_wide = [row for row in new_rows if overwide(row)]
     if not old_wide and not new_wide:
         return [], old_rows, new_rows
-    remaining_old = list(old_wide)
-    remaining_new = list(new_wide)
-    new_count_by_row = Counter(remaining_new)
-    exact_common_count: Counter[str] = Counter()
-    for row in remaining_old:
-        if new_count_by_row[row] > exact_common_count[row]:
-            exact_common_count[row] += 1
-
-    def remove_common(rows: list[str]) -> list[str]:
-        consumed: Counter[str] = Counter()
-        retained: list[str] = []
-        for row in rows:
-            if consumed[row] < exact_common_count[row]:
-                consumed[row] += 1
-            else:
-                retained.append(row)
-        return retained
-
-    remaining_old = remove_common(remaining_old)
-    remaining_new = remove_common(remaining_new)
+    matcher = difflib.SequenceMatcher(None, old_wide, new_wide, autojunk=False)
+    matched_old: set[int] = set()
+    matched_new: set[int] = set()
+    for old_start, new_start, size in matcher.get_matching_blocks():
+        matched_old.update(range(old_start, old_start + size))
+        matched_new.update(range(new_start, new_start + size))
+    remaining_old = [
+        row for index, row in enumerate(old_wide) if index not in matched_old
+    ]
+    remaining_new = [
+        row for index, row in enumerate(new_wide) if index not in matched_new
+    ]
     changes: list[TableRowChange] = []
     changes.extend(
         (
