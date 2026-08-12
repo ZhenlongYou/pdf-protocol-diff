@@ -2952,14 +2952,39 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
     right_review_key = " ".join(key for key in right_unit_keys if key)
     if left_review_key and left_review_key == right_review_key:
         return 1.0  # 整段语义键完全相等时，句末标点造成的分句差异不应破坏章节身份。
-    if len(left_units) != len(right_units):
-        if _review_unit_skeleton_match_count(
+    if _unproven_record_order_conflict(left_units, right_units):
+        matched_unit_count = _review_unit_skeleton_match_count(
             left_units,
             right_units,
             left_keys=left_unit_keys,
             right_keys=right_unit_keys,
-        ) != min(len(left_units), len(right_units)):
-            return None
+        )
+        shorter_count = min(len(left_units), len(right_units))
+        if matched_unit_count >= 2 and matched_unit_count / shorter_count >= 0.75:
+            return max(
+                raw_score,
+                _review_similarity(left_sample, right_sample),
+                0.90,
+            )
+            # 多数记录骨架稳定可证明仍是同一章；逐条对应关系仍留给报告层保守显示。
+    if len(left_units) != len(right_units):
+        matched_unit_count = _review_unit_skeleton_match_count(
+            left_units,
+            right_units,
+            left_keys=left_unit_keys,
+            right_keys=right_unit_keys,
+        )
+        shorter_count = min(len(left_units), len(right_units))
+        if matched_unit_count != shorter_count:
+            stable_ratio = matched_unit_count / shorter_count
+            if (
+                matched_unit_count < 2
+                or stable_ratio < 0.60
+                or raw_score < 0.72
+            ):
+                return None
+            return max(raw_score, _review_similarity(left_sample, right_sample))
+            # 大部分独立片段和正文仍稳定时，新增表格/页尾抽取碎片不能拆散同一明确章节。
         return max(
             raw_score,
             _review_similarity(left_sample, right_sample),
@@ -2970,6 +2995,10 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         right_field = _assignment_field_key(right_units[0])
         if left_field and left_field == right_field:
             return max(raw_score, 0.90)  # 稳定字段名可以证明 Mode/State 的值槽修改。
+        left_identity = _review_identity_tokens(left_units[0])
+        right_identity = _review_identity_tokens(right_units[0])
+        if left_identity and left_identity == right_identity:
+            return max(raw_score, 0.90)  # 紧邻中文编号只证明同一条记录，不把字形差异误当等价。
         if (
             _review_unit_key(left_units[0]) != _review_unit_key(right_units[0])
             and (
@@ -3592,6 +3621,8 @@ def _coherent_delta_unit_groups(
 ) -> list[tuple[int, str, tuple[str, ...]]]:
     """Join prose only when source indexes prove one uninterrupted diff run."""
 
+    max_group_units = 12
+    max_group_chars = 6000
     groups: list[tuple[int, str, tuple[str, ...]]] = []
     prose_buffer: list[tuple[int, str]] = []
 
@@ -3612,6 +3643,15 @@ def _coherent_delta_unit_groups(
         if previous_index is not None and index != previous_index + 1:
             flush_prose()
         if _delta_unit_is_joinable_prose(unit):
+            rendered = _report_unit(unit)
+            current_chars = sum(
+                len(_report_unit(buffered)) for _buffer_index, buffered in prose_buffer
+            )
+            if prose_buffer and (
+                len(prose_buffer) >= max_group_units
+                or current_chars + len(rendered) + 1 > max_group_chars
+            ):
+                flush_prose()  # 审计保留全部片段，但单张报告卡设硬上限，避免长章节生成巨型文本块。
             prose_buffer.append((index, unit))
         else:
             flush_prose()
@@ -4656,6 +4696,9 @@ def _unequal_replace_delta_candidates(
 
     old_keys = [_review_unit_key(unit) for unit in old_units]
     new_keys = [_review_unit_key(unit) for unit in new_units]
+    unproven_order_conflict = _unproven_record_order_conflict(
+        old_units, new_units
+    )
     matched_old: set[int] = set()
     matched_new: set[int] = set()
     paired_indexes: list[tuple[int, int]] = []
@@ -4704,6 +4747,29 @@ def _unequal_replace_delta_candidates(
         ],
         report_replacements=True,
     )
+    old_cjk_identities = [
+        "|".join(sorted(_review_identity_tokens(unit))) for unit in old_units
+    ]
+    new_cjk_identities = [
+        "|".join(sorted(_review_identity_tokens(unit))) for unit in new_units
+    ]
+    old_cjk_counts = Counter(identity for identity in old_cjk_identities if identity)
+    new_cjk_counts = Counter(identity for identity in new_cjk_identities if identity)
+    match_identity_occurrences(
+        [
+            identity
+            if old_cjk_counts[identity] == 1 and new_cjk_counts[identity] == 1
+            else ""
+            for identity in old_cjk_identities
+        ],
+        [
+            identity
+            if new_cjk_counts[identity] == 1 and old_cjk_counts[identity] == 1
+            else ""
+            for identity in new_cjk_identities
+        ],
+        report_replacements=True,
+    )  # 仅唯一紧邻中文编号保留精确归因；重复编号和英语空格数字都不进入强身份路径。
 
     unmatched_old = [index for index in range(len(old_units)) if index not in matched_old]
     unmatched_new = [index for index in range(len(new_units)) if index not in matched_new]
@@ -4734,6 +4800,8 @@ def _unequal_replace_delta_candidates(
     pair_scores: list[tuple[bool, float, float, int, int]] = []
     for old_position, old_index in enumerate(unmatched_old):
         old_unit = old_units[old_index]
+        if unproven_order_conflict:
+            continue  # 自由文本记录发生移动但无强身份时，保留增删事实，不伪造逐条 replacement。
         if not bounded_matching:
             candidate_indexes = unmatched_new
         else:
@@ -5067,9 +5135,7 @@ def _review_identity_tokens(value: str) -> set[str]:
     return {
         token
         for token in _review_candidate_identity_tokens(value)
-        for _kind, label, number in (token.rsplit(":", 2),)
         if token.startswith("cjk-left:")
-        or _english_numeric_label_has_record_shape(value, label, number)
     }
 
 
@@ -5094,51 +5160,6 @@ def _review_candidate_identity_tokens(value: str) -> set[str]:
             continue  # 系词/范围终点后的数字只参与比较，不抢占标签编号身份。
         identities.add(token)
     return identities
-
-
-def _english_numeric_label_has_record_shape(
-    value: str,
-    label: str,
-    number: str,
-) -> bool:
-    """Require a leading/cased field shape before using an English number as identity."""
-
-    raw = normalize_line(value)
-    number_pattern = r"[+\-]?(?:\d+(?:\.\d+)?|\.\d+)"
-    matches = list(
-        re.finditer(
-            rf"(?i)(?<![\w.])({re.escape(label)})\s+({number_pattern})(?![\w.])",
-            raw,
-        )
-    )
-    for match in matches:
-        if _canonical_review_token(match.group(2)) != number:
-            continue
-        raw_label = match.group(1)
-        suffix = raw[match.end() :].lstrip()
-        prefix = raw[: match.start()].strip()
-        remaining_prefix = prefix
-        while remaining_prefix:
-            leading_field = re.match(
-                rf"(?i)^\s*[a-z][a-z0-9_-]*\s+{number_pattern}(?:\s+|$)",
-                remaining_prefix,
-            )
-            if leading_field is None:
-                break
-            remaining_prefix = remaining_prefix[leading_field.end() :].strip()
-        if prefix and not remaining_prefix:
-            return True  # `Version 1 Lane 2` 的后续字段属于同一连续记录头。
-        suffix_word = re.match(r"(?i)^([a-z][a-z0-9_-]*)\b", suffix)
-        if (
-            suffix_word
-            and suffix_word.group(1).casefold().endswith("s")
-            and suffix_word.group(1).casefold()
-            not in {"has", "is", "was", "does"}
-        ):
-            continue  # `Count 2 warnings` 的数字后接复数计数对象；Bus 2 has... 仍是记录头。
-        if not prefix:
-            return True  # 非计数形态的行首 `Lane 2 voltage...` 是记录头候选。
-    return False
 
 
 def _identity_label_and_number(token: str) -> tuple[str, str]:
@@ -5252,6 +5273,76 @@ def _stable_discriminative_identity_plan(
         labels=frozenset(chosen[2]),
         shared_identities=chosen[3],
     )
+
+
+def _unproven_record_order_conflict(
+    left_units: list[str],
+    right_units: list[str],
+) -> bool:
+    """Detect moved free-text record candidates without promoting them to identity."""
+
+    def values_by_label(unit: str) -> dict[str, str]:
+        grouped: dict[str, set[str]] = {}
+        for token in _review_candidate_identity_tokens(unit):
+            label, number = _identity_label_and_number(token)
+            grouped.setdefault(f"number:{label}", set()).add(number)
+        normalized = normalize_for_similarity(unit)
+        for match in re.finditer(r"(?<![a-z0-9])([a-z]+)[-_]?(\d+)(?![a-z0-9])", normalized):
+            grouped.setdefault(f"compact:{match.group(1)}", set()).add(
+                f"{match.group(1)}{match.group(2)}"
+            )
+        return {
+            label: next(iter(values))
+            for label, values in grouped.items()
+            if len(values) == 1
+        }
+
+    left_rows = [values_by_label(unit) for unit in left_units]
+    right_rows = [values_by_label(unit) for unit in right_units]
+
+    def row_signature(row: dict[str, str]) -> tuple[tuple[str, str], ...]:
+        return tuple(sorted(row.items()))
+
+    left_signatures = [row_signature(row) for row in left_rows if row]
+    right_signatures = [row_signature(row) for row in right_rows if row]
+    left_signature_counts = Counter(left_signatures)
+    right_signature_counts = Counter(right_signatures)
+    shared_signatures = set(left_signature_counts) & set(right_signature_counts)
+    if len(shared_signatures) >= 2 and all(
+        left_signature_counts[signature] == 1
+        and right_signature_counts[signature] == 1
+        for signature in shared_signatures
+    ):
+        left_shared_order = [
+            signature for signature in left_signatures if signature in shared_signatures
+        ]
+        right_shared_order = [
+            signature for signature in right_signatures if signature in shared_signatures
+        ]
+        if left_shared_order != right_shared_order:
+            return True  # Port+Lane 等复合自由文本候选可证明发生移动，却仍不足以证明逐条主键。
+
+    labels = set().union(*(row.keys() for row in left_rows)) & set().union(
+        *(row.keys() for row in right_rows)
+    )
+    for label in labels:
+        left_values = [row[label] for row in left_rows if label in row]
+        right_values = [row[label] for row in right_rows if label in row]
+        left_value_counts = Counter(left_values)
+        right_value_counts = Counter(right_values)
+        shared_values = set(left_value_counts) & set(right_value_counts)
+        if len(shared_values) < 2:
+            continue
+        if any(
+            left_value_counts[value] != 1 or right_value_counts[value] != 1
+            for value in shared_values
+        ):
+            continue
+        left_shared_order = [value for value in left_values if value in shared_values]
+        right_shared_order = [value for value in right_values if value in shared_values]
+        if left_shared_order != right_shared_order:
+            return True
+    return False
 
 
 def _stable_record_identity(

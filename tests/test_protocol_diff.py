@@ -8407,8 +8407,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(100, len(result.changes[0].audit_replaced_snippets))
         self.assertLess(pair_score.call_count, 1000)
 
-    def test_bounded_matching_keeps_numeric_lane_identity_across_threshold(self) -> None:
-        """The 32-to-33 candidate threshold must not change technical attribution."""
+    def test_free_text_numeric_lanes_fail_closed_across_threshold(self) -> None:
+        """Whitespace-only numeric labels stay visible without guessed attribution."""
 
         for count in (32, 33):
             old_units = [
@@ -8445,16 +8445,54 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(1, len(result.changes))
                 change = result.changes[0]
                 self.assertEqual("modified", change.change_type)
-                self.assertEqual(count, len(change.audit_replaced_snippets))
-                self.assertFalse(change.audit_added_snippets)
-                self.assertFalse(change.audit_removed_snippets)
-                self.assertTrue(
-                    all(
-                        re.search(r"Lane (\d+)", pair.old).group(1)
-                        == re.search(r"Lane (\d+)", pair.new).group(1)
-                        for pair in change.audit_replaced_snippets
-                    )
+                self.assertFalse(change.audit_replaced_snippets)
+                self.assertTrue(change.audit_added_snippets)
+                self.assertTrue(change.audit_removed_snippets)
+
+    def test_large_free_text_fail_closed_report_is_bounded(self) -> None:
+        """Conservative record evidence keeps all text without creating giant cards."""
+
+        count = 120
+        old_units = [
+            f"Lane {index} voltage limit is 20 mV." for index in range(count)
+        ]
+        shifted_indexes = list(range(count))[60:] + list(range(count))[:60]
+        new_units = [
+            f"Lane {index} voltage limit is 21 mV." for index in shifted_indexes
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-large-free-text.pdf"),
+                pages=[PageText(page_number=1, text="1 Lanes\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-large-free-text.pdf"),
+                pages=[PageText(page_number=1, text="1 Lanes\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=1),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertGreater(len(change.audit_added_snippets), 1)
+        self.assertGreater(len(change.audit_removed_snippets), 1)
+        self.assertTrue(
+            all(
+                len(snippet) <= 6000
+                for snippet in (
+                    *change.audit_added_snippets,
+                    *change.audit_removed_snippets,
                 )
+            )
+        )
+        audited = " ".join(
+            (*change.audit_added_snippets, *change.audit_removed_snippets)
+        )
+        self.assertIn("Lane 0 voltage limit", audited)
+        self.assertIn("Lane 119 voltage limit", audited)
+        self.assertGreater(change.omitted_snippet_count, 0)
 
     def test_bounded_matching_keeps_cjk_adjacent_numeric_identity(self) -> None:
         """A CJK label directly joined to a number remains a remote identity anchor."""
@@ -8700,8 +8738,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(change.audit_added_snippets))
         self.assertEqual(1, len(change.audit_removed_snippets))
 
-    def test_bounded_matching_prefers_discriminative_identity_over_shared_metadata(self) -> None:
-        """A shared Version number cannot outweigh each record's unique Lane id."""
+    def test_free_text_metadata_cannot_prove_record_identity(self) -> None:
+        """Version/Lane/value candidates cannot choose a free-text primary key."""
 
         for count in (32, 33):
             old_units = [
@@ -8739,19 +8777,13 @@ class ProtocolDiffTests(unittest.TestCase):
 
                 self.assertEqual(1, len(result.changes))
                 change = result.changes[0]
-                self.assertEqual(count, len(change.audit_replaced_snippets))
-                self.assertFalse(change.audit_added_snippets)
-                self.assertFalse(change.audit_removed_snippets)
-                self.assertTrue(
-                    all(
-                        re.search(r"Lane (\d+)", pair.old).group(1)
-                        == re.search(r"Lane (\d+)", pair.new).group(1)
-                        for pair in change.audit_replaced_snippets
-                    )
-                )
+                self.assertEqual("modified", change.change_type)
+                self.assertFalse(change.audit_replaced_snippets)
+                self.assertTrue(change.audit_added_snippets)
+                self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_rejects_unique_value_label_as_record_identity(self) -> None:
-        """A changing unique profile value cannot compete with stable Lane identities."""
+    def test_free_text_unique_values_cannot_prove_record_identity(self) -> None:
+        """Unique Lane/profile candidates still lack structured-key provenance."""
 
         count = 33
         old_units = [
@@ -8787,19 +8819,13 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(1, len(result.changes))
         change = result.changes[0]
-        self.assertEqual(count, len(change.audit_replaced_snippets))
-        self.assertFalse(change.audit_added_snippets)
-        self.assertFalse(change.audit_removed_snippets)
-        self.assertTrue(
-            all(
-                re.search(r"Lane (\d+)", pair.old).group(1)
-                == re.search(r"Lane (\d+)", pair.new).group(1)
-                for pair in change.audit_replaced_snippets
-            )
-        )
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_uses_record_header_instead_of_shifted_value_column(self) -> None:
-        """A shifted profile value cannot compete with the leading Lane record key."""
+    def test_free_text_numeric_fields_do_not_guess_a_primary_record_key(self) -> None:
+        """Whitespace-only English fields remain candidates, never strong record identity."""
 
         count = 33
         old_units = [
@@ -8833,21 +8859,16 @@ class ProtocolDiffTests(unittest.TestCase):
             DiffOptions(max_snippets_per_section=count * 2),
         )
 
-        self.assertEqual(1, len(result.changes))
-        change = result.changes[0]
-        self.assertEqual(count, len(change.audit_replaced_snippets))
-        self.assertFalse(change.audit_added_snippets)
-        self.assertFalse(change.audit_removed_snippets)
+        self.assertTrue(result.changes)
+        self.assertEqual(["modified"], [change.change_type for change in result.changes])
         self.assertTrue(
-            all(
-                re.search(r"Lane (\d+)", pair.old).group(1)
-                == re.search(r"Lane (\d+)", pair.new).group(1)
-                for pair in change.audit_replaced_snippets
-            )
+            all(not change.audit_replaced_snippets for change in result.changes)
         )
+        self.assertTrue(result.changes[0].audit_added_snippets)
+        self.assertTrue(result.changes[0].audit_removed_snippets)
 
-    def test_bounded_matching_keeps_shared_identity_when_one_record_is_added(self) -> None:
-        """A new unique record must not invalidate every existing Lane identity."""
+    def test_free_text_record_addition_does_not_enable_guessed_identity(self) -> None:
+        """A new free-text record remains visible without guessed Lane pairings."""
 
         for count in (32, 33):
             old_units = [
@@ -8884,16 +8905,10 @@ class ProtocolDiffTests(unittest.TestCase):
 
                 self.assertEqual(1, len(result.changes))
                 change = result.changes[0]
-                self.assertEqual(count, len(change.audit_replaced_snippets))
-                self.assertEqual(1, len(change.audit_added_snippets))
-                self.assertFalse(change.audit_removed_snippets)
-                self.assertTrue(
-                    all(
-                        re.search(r"Lane (\d+)", pair.old).group(1)
-                        == re.search(r"Lane (\d+)", pair.new).group(1)
-                        for pair in change.audit_replaced_snippets
-                    )
-                )
+                self.assertEqual("modified", change.change_type)
+                self.assertFalse(change.audit_replaced_snippets)
+                self.assertTrue(change.audit_added_snippets)
+                self.assertTrue(change.audit_removed_snippets)
 
                 reverse = compare_extractions(
                     ExtractionResult(
@@ -8918,16 +8933,10 @@ class ProtocolDiffTests(unittest.TestCase):
                 )
                 self.assertEqual(1, len(reverse.changes))
                 reverse_change = reverse.changes[0]
-                self.assertEqual(count, len(reverse_change.audit_replaced_snippets))
-                self.assertFalse(reverse_change.audit_added_snippets)
-                self.assertEqual(1, len(reverse_change.audit_removed_snippets))
-                self.assertTrue(
-                    all(
-                        re.search(r"Lane (\d+)", pair.old).group(1)
-                        == re.search(r"Lane (\d+)", pair.new).group(1)
-                        for pair in reverse_change.audit_replaced_snippets
-                    )
-                )
+                self.assertEqual("modified", reverse_change.change_type)
+                self.assertFalse(reverse_change.audit_replaced_snippets)
+                self.assertTrue(reverse_change.audit_added_snippets)
+                self.assertTrue(reverse_change.audit_removed_snippets)
 
     def test_bounded_matching_does_not_lock_duplicate_partial_identities(self) -> None:
         """Duplicate identifiers remain unproven when one side has an extra occurrence."""
@@ -8967,8 +8976,8 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )  # 重复 Lane 1 无唯一 occurrence 证明，至少不能跨 Lane 强归因。
 
-    def test_bounded_matching_keeps_two_sided_shared_identity_overlap(self) -> None:
-        """A sliding record window keeps shared Lanes and exposes both edge records."""
+    def test_free_text_two_sided_overlap_remains_unattributed(self) -> None:
+        """A sliding free-text window exposes facts without guessed Lane pairings."""
 
         count = 33
         old_units = [
@@ -8995,19 +9004,13 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(1, len(result.changes))
         change = result.changes[0]
-        self.assertEqual(count - 1, len(change.audit_replaced_snippets))
-        self.assertEqual(1, len(change.audit_added_snippets))
-        self.assertEqual(1, len(change.audit_removed_snippets))
-        self.assertTrue(
-            all(
-                re.search(r"Lane (\d+)", pair.old).group(1)
-                == re.search(r"Lane (\d+)", pair.new).group(1)
-                for pair in change.audit_replaced_snippets
-            )
-        )
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_supports_unique_composite_numeric_identity(self) -> None:
-        """Repeated Port and Lane values can form a unique composite record key."""
+    def test_free_text_composite_numeric_fields_remain_unattributed(self) -> None:
+        """Port+Lane text without structure is not promoted to a composite key."""
 
         records = [(port, lane) for port in range(6) for lane in range(6)]
         shifted = records[18:] + records[:18]
@@ -9033,19 +9036,13 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(1, len(result.changes))
         change = result.changes[0]
-        self.assertEqual(len(records), len(change.audit_replaced_snippets))
-        self.assertFalse(change.audit_added_snippets)
-        self.assertFalse(change.audit_removed_snippets)
-        self.assertTrue(
-            all(
-                re.search(r"Port (\d+) Lane (\d+)", pair.old).groups()
-                == re.search(r"Port (\d+) Lane (\d+)", pair.new).groups()
-                for pair in change.audit_replaced_snippets
-            )
-        )
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
 
-    def test_bounded_matching_fails_closed_beyond_composite_key_search_limit(self) -> None:
-        """A five-field key must not fall back to fuzzy cross-record attribution."""
+    def test_free_text_five_field_candidates_fail_closed_within_section(self) -> None:
+        """Many free-text fields stay in one chapter without fuzzy attribution."""
 
         records = [
             (rack, shelf, port, lane, slot)
@@ -9082,13 +9079,12 @@ class ProtocolDiffTests(unittest.TestCase):
             DiffOptions(max_snippets_per_section=len(records) * 2),
         )
 
-        self.assertEqual(
-            ["added", "deleted"],
-            sorted(change.change_type for change in result.changes),
-        )
-        self.assertTrue(
-            all(not change.audit_replaced_snippets for change in result.changes)
-        )
+        self.assertEqual(1, len(result.changes))
+        change = result.changes[0]
+        self.assertEqual("modified", change.change_type)
+        self.assertFalse(change.audit_replaced_snippets)
+        self.assertTrue(change.audit_added_snippets)
+        self.assertTrue(change.audit_removed_snippets)
 
     def test_ordinary_count_verbs_cannot_become_record_identity(self) -> None:
         """Unique shifted counts after prose verbs cannot override an alphanumeric record id."""
@@ -9146,17 +9142,12 @@ class ProtocolDiffTests(unittest.TestCase):
                     )
 
                     self.assertEqual(1, len(result.changes))
-                    change = result.changes[0]
-                    self.assertEqual(count, len(change.audit_replaced_snippets))
-                    self.assertFalse(change.audit_added_snippets)
-                    self.assertFalse(change.audit_removed_snippets)
+                    self.assertEqual("modified", result.changes[0].change_type)
                     self.assertTrue(
-                        all(
-                            re.search(r"RX(\d+)", pair.old, flags=re.I).group(1)
-                            == re.search(r"RX(\d+)", pair.new, flags=re.I).group(1)
-                            for pair in change.audit_replaced_snippets
-                        )
+                        all(not change.audit_replaced_snippets for change in result.changes)
                     )
+                    self.assertTrue(result.changes[0].audit_added_snippets)
+                    self.assertTrue(result.changes[0].audit_removed_snippets)
 
     def test_multiple_ordinary_count_verbs_remain_a_normal_numeric_edit(self) -> None:
         """Several prose count slots do not trigger composite-key fail-closed mode."""
@@ -9193,6 +9184,47 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(1, len(result.changes))
         self.assertEqual("modified", result.changes[0].change_type)
+
+    def test_shared_count_order_cannot_rescue_disjoint_sections(self) -> None:
+        """A reordered ordinary count is not enough to prove chapter identity."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-disjoint-count-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 General\n"
+                            "The procedure uses 2 examples for optical calibration.\n"
+                            "The link uses 3 examples for legacy timing."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-disjoint-count-order.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "1 General\n"
+                            "The receiver uses 3 examples for copper training.\n"
+                            "The transmitter uses 2 examples for packet routing."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(max_snippets_per_section=4),
+        )
+
+        self.assertEqual(
+            ["added", "deleted"],
+            sorted(change.change_type for change in result.changes),
+        )
+        self.assertTrue(
+            all(not change.audit_replaced_snippets for change in result.changes)
+        )
 
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
