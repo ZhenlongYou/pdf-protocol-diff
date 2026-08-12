@@ -9217,6 +9217,37 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(any(row.change_type == "旧表删除行" for row in changes))
         self.assertTrue(any(row.change_type == "新表新增行" for row in changes))
 
+    def test_overwide_repeated_rows_use_true_lcs(self) -> None:
+        """Insertion among repeated wide rows does not invent extra changes."""
+
+        def wide_row(prefix: str) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={prefix}{index}" for index in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Wide rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        alpha = wide_row("A")
+        beta = wide_row("B")
+        changes = reporting_module._table_row_changes(
+            (table([alpha, alpha, alpha]),),
+            (table([alpha, beta, alpha, alpha]),),
+        )
+
+        self.assertEqual(1, len(changes))
+        self.assertEqual("新表新增行", changes[0].change_type)
+        self.assertIn("B0", changes[0].new_value)
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 

@@ -3598,12 +3598,38 @@ def _partition_overwide_generic_rows(
     new_wide = [row for row in new_rows if overwide(row)]
     if not old_wide and not new_wide:
         return [], old_rows, new_rows
-    matcher = difflib.SequenceMatcher(None, old_wide, new_wide, autojunk=False)
     matched_old: set[int] = set()
     matched_new: set[int] = set()
-    for old_start, new_start, size in matcher.get_matching_blocks():
-        matched_old.update(range(old_start, old_start + size))
-        matched_new.update(range(new_start, new_start + size))
+    if len(old_wide) <= 256 and len(new_wide) <= 256:
+        lengths = [
+            [0] * (len(new_wide) + 1)
+            for _ in range(len(old_wide) + 1)
+        ]
+        for old_offset, old_row in enumerate(old_wide, start=1):
+            for new_offset, new_row in enumerate(new_wide, start=1):
+                if old_row == new_row:
+                    lengths[old_offset][new_offset] = (
+                        lengths[old_offset - 1][new_offset - 1] + 1
+                    )
+                else:
+                    lengths[old_offset][new_offset] = max(
+                        lengths[old_offset - 1][new_offset],
+                        lengths[old_offset][new_offset - 1],
+                    )
+        old_offset = len(old_wide)
+        new_offset = len(new_wide)
+        while old_offset and new_offset:
+            if old_wide[old_offset - 1] == new_wide[new_offset - 1]:
+                matched_old.add(old_offset - 1)
+                matched_new.add(new_offset - 1)
+                old_offset -= 1
+                new_offset -= 1
+            elif lengths[old_offset - 1][new_offset] >= lengths[old_offset][new_offset - 1]:
+                old_offset -= 1
+            else:
+                new_offset -= 1
+    # More than 256 overwide rows exceed the bounded occurrence proof budget;
+    # retaining all facts is safer than either quadratic growth or guessed pairs.
     remaining_old = [
         row for index, row in enumerate(old_wide) if index not in matched_old
     ]
