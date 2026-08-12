@@ -3996,10 +3996,13 @@ def _ordered_table_row_changes(
 ) -> list[TableRowChange]:
     """Compare order-sensitive or unknown tables without multiset cancellation."""
 
+    duplicate_changes, old_rows, new_rows = (
+        _resolve_duplicate_primary_table_rows(old_rows, new_rows)
+    )
     old_keys = [_table_row_display_key(row) for row in old_rows]
     new_keys = [_table_row_display_key(row) for row in new_rows]
     matcher = difflib.SequenceMatcher(None, old_keys, new_keys, autojunk=False)
-    changes: list[TableRowChange] = []
+    changes: list[TableRowChange] = list(duplicate_changes)
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
         if tag == "equal":
             continue
@@ -4021,6 +4024,61 @@ def _ordered_table_row_changes(
         for new_row in new_changed[paired_count:]:
             changes.append(_make_table_row_change("", new_row, "新表新增行"))
     return changes
+
+
+def _resolve_duplicate_primary_table_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Resolve repeated parameter rows only with unique secondary evidence."""
+
+    old_primary = [_table_row_pairing_primary_identity(row) for row in old_rows]
+    new_primary = [_table_row_pairing_primary_identity(row) for row in new_rows]
+    old_counts = Counter(identity for identity in old_primary if identity)
+    new_counts = Counter(identity for identity in new_primary if identity)
+    repeated = {
+        identity
+        for identity in old_counts.keys() | new_counts.keys()
+        if old_counts[identity] > 1 or new_counts[identity] > 1
+    }
+    if not repeated:
+        return [], old_rows, new_rows
+
+    changes: list[TableRowChange] = []
+    retained_old = [
+        row for row, identity in zip(old_rows, old_primary, strict=True) if identity not in repeated
+    ]
+    retained_new = [
+        row for row, identity in zip(new_rows, new_primary, strict=True) if identity not in repeated
+    ]
+    ordered_identities = list(
+        dict.fromkeys(
+            [
+                *(identity for identity in old_primary if identity in repeated),
+                *(identity for identity in new_primary if identity in repeated),
+            ]
+        )
+    )
+    for identity in ordered_identities:
+        old_group = [
+            row for row, row_identity in zip(old_rows, old_primary, strict=True)
+            if row_identity == identity
+        ]
+        new_group = [
+            row for row, row_identity in zip(new_rows, new_primary, strict=True)
+            if row_identity == identity
+        ]
+        if [
+            _table_row_display_key(row) for row in old_group
+        ] == [
+            _table_row_display_key(row) for row in new_group
+        ]:
+            continue
+        for old_row in old_group:
+            changes.append(_make_table_row_change(old_row, "", "旧表删除行"))
+        for new_row in new_group:
+            changes.append(_make_table_row_change("", new_row, "新表新增行"))
+    return changes, retained_old, retained_new
 
 
 def _revision_record_row_changes(

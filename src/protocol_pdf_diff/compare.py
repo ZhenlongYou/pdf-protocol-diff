@@ -4730,14 +4730,36 @@ def _unequal_replace_delta_candidates(
         ],
         report_replacements=True,
     )
+    old_table_identities = [
+        _table_row_identity(unit) if _is_table_review_unit(unit) else ""
+        for unit in old_units
+    ]
+    new_table_identities = [
+        _table_row_identity(unit) if _is_table_review_unit(unit) else ""
+        for unit in new_units
+    ]
+    old_table_identity_counts = Counter(
+        identity for identity in old_table_identities if identity
+    )
+    new_table_identity_counts = Counter(
+        identity for identity in new_table_identities if identity
+    )
     match_identity_occurrences(
         [
-            _table_row_identity(unit) if _is_table_review_unit(unit) else ""
-            for unit in old_units
+            identity
+            if identity
+            and old_table_identity_counts[identity] == 1
+            and new_table_identity_counts[identity] == 1
+            else ""
+            for identity in old_table_identities
         ],
         [
-            _table_row_identity(unit) if _is_table_review_unit(unit) else ""
-            for unit in new_units
+            identity
+            if identity
+            and new_table_identity_counts[identity] == 1
+            and old_table_identity_counts[identity] == 1
+            else ""
+            for identity in new_table_identities
         ],
         report_replacements=True,
     )
@@ -4803,6 +4825,16 @@ def _unequal_replace_delta_candidates(
                     and new_assignment_counts[new_field] == 1
                 ):
                     continue  # 重复字段没有父记录 provenance；不得在模糊配对阶段重新按位置抢配。
+            old_table_identity = old_table_identities[old_index]
+            new_table_identity = new_table_identities[new_index]
+            if old_table_identity or new_table_identity:
+                if not (
+                    old_table_identity
+                    and old_table_identity == new_table_identity
+                    and old_table_identity_counts[old_table_identity] == 1
+                    and new_table_identity_counts[new_table_identity] == 1
+                ):
+                    continue  # 重复表格行身份同样不能在模糊阶段按位置造 replacement。
             shared_candidate_identity = bool(
                 _review_candidate_identity_tokens(old_unit)
                 & _review_candidate_identity_tokens(new_unit)

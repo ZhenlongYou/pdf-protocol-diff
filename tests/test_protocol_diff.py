@@ -8824,6 +8824,73 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("limit = 21 mV", evidence)
         self.assertIn("limit = 30 mV", evidence)
 
+    def test_repeated_structured_table_identity_stays_unpaired(self) -> None:
+        """Repeated table identities cannot be aligned by occurrence order."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Receiver limits",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [
+            "表格行: T1 | Parameter=Input voltage | Symbol=Vin | "
+            "Condition=PAM4 | Value=20 mV",
+            "表格行: T1 | Parameter=Input voltage | Symbol=Vin | "
+            "Condition=NRZ | Value=30 mV",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Input voltage | Symbol=Vin | "
+            "Condition=NRZ | Value=31 mV",
+            "表格行: T1 | Parameter=Input voltage | Symbol=Vin | "
+            "Condition=PAM4 | Value=21 mV",
+        ]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        self.assertEqual(4, len(changes))
+        self.assertEqual(2, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
+        self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
+
+    def test_inserted_duplicate_table_row_cannot_steal_original_pair(self) -> None:
+        """An inserted duplicate parameter row remains a visible added fact."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Limits",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = ["表格行: T1 | Parameter=Limit | Symbol=L | Value=20 mV"]
+        new_rows = [
+            "表格行: T1 | Parameter=Limit | Symbol=L | Value=30 mV",
+            "表格行: T1 | Parameter=Limit | Symbol=L | Value=21 mV",
+        ]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        self.assertEqual(3, len(changes))
+        self.assertEqual(1, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
+        self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
