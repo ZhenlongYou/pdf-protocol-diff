@@ -9750,6 +9750,46 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Column 3=SHARED", evidence)
         self.assertIn("Column 3=DISTRACTOR_ALT", evidence)
 
+    def test_overwide_preview_marks_over_budget_identity_as_review(self) -> None:
+        """Four independent peer columns exceed the proof budget and stay reviewable."""
+
+        def row(alternates: dict[int, str]) -> str:
+            values = ["SAME_ID", *(f"SAME_{index}" for index in range(2, 34))]
+            for one_based_column, value in alternates.items():
+                values[one_based_column - 1] = value
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        focus = row({})
+        peers = [row({column: f"ALT_{column}"}) for column in (2, 3, 4, 5)]
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([*peers, focus, *anchors]),),
+            (table([*peers, *anchors, focus]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        self.assertLessEqual(len(order_change.old_value), 760)
+        self.assertLessEqual(len(order_change.new_value), 760)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 

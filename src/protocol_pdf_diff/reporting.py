@@ -3727,12 +3727,14 @@ def _partition_overwide_generic_rows(
             old_order_indexes,
             new_order_indexes,
         )
-        old_preview, new_preview = _paired_table_order_previews(
+        old_preview, new_preview, preview_is_ambiguous = _paired_table_order_previews(
             old_rows,
             new_rows,
             old_focus_index=old_focus_index,
             new_focus_index=new_focus_index,
         )
+        if preview_is_ambiguous:
+            order_state = "review"
         changes.append(
             TableRowChange(
                 item="表格行顺序",
@@ -3907,7 +3909,7 @@ def _paired_table_order_previews(
     *,
     old_focus_index: int,
     new_focus_index: int,
-) -> tuple[str, str]:
+) -> tuple[str, str, bool]:
     """Return bounded evidence including the first distinguishing field."""
 
     def paired_excerpt(value: str, counterpart: str, max_chars: int) -> str:
@@ -3955,6 +3957,7 @@ def _paired_table_order_previews(
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
     selected_indexes: list[int] = [0]
     distinguishing_peer_fields: list[tuple[str, str]] = []
+    signature_is_ambiguous = False
     maximum_field_count = max(len(old_focus_fields), len(new_focus_fields))
     for field_index in range(maximum_field_count):
         old_field = (
@@ -4029,6 +4032,7 @@ def _paired_table_order_previews(
                     )
                     == old_focus_fields[field_index]
                 ]
+            signature_is_ambiguous = bool(unresolved)
             distinguishing_index = selected_indexes[-1] if len(selected_indexes) > 1 else None
         if distinguishing_index is not None:
             if distinguishing_index not in selected_indexes:
@@ -4137,6 +4141,7 @@ def _paired_table_order_previews(
             new_start,
             len(new_rows),
         ),
+        signature_is_ambiguous,
     )
 
 
