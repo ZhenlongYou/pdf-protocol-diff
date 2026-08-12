@@ -4030,10 +4030,80 @@ def _resolve_duplicate_primary_table_rows(
     old_rows: list[str],
     new_rows: list[str],
 ) -> tuple[list[TableRowChange], list[str], list[str]]:
-    """Resolve repeated parameter rows only with unique secondary evidence."""
+    """Consume rows that have no safe primary identity or repeat one."""
 
-    old_primary = [_table_row_pairing_primary_identity(row) for row in old_rows]
-    new_primary = [_table_row_pairing_primary_identity(row) for row in new_rows]
+    old_explicit = [
+        _table_row_pairing_primary_identity(row, allow_generic_column=False)
+        for row in old_rows
+    ]
+    new_explicit = [
+        _table_row_pairing_primary_identity(row, allow_generic_column=False)
+        for row in new_rows
+    ]
+    old_generic = [_table_row_pairing_primary_identity(row) for row in old_rows]
+    new_generic = [_table_row_pairing_primary_identity(row) for row in new_rows]
+    shared_generic = {
+        identity
+        for identity in set(old_generic) & set(new_generic)
+        if identity
+    }
+    old_header_indexes = {
+        index
+        for index, row in enumerate(old_rows)
+        if _generic_boundary_entries_look_like_header(_table_row_field_entries(row))
+    }
+    new_header_indexes = {
+        index
+        for index, row in enumerate(new_rows)
+        if _generic_boundary_entries_look_like_header(_table_row_field_entries(row))
+    }
+    old_primary = [
+        explicit
+        or ("__generic_schema_header__" if index in old_header_indexes else "")
+        or (generic if generic in shared_generic else "")
+        for index, (explicit, generic) in enumerate(
+            zip(old_explicit, old_generic, strict=True)
+        )
+    ]
+    new_primary = [
+        explicit
+        or ("__generic_schema_header__" if index in new_header_indexes else "")
+        or (generic if generic in shared_generic else "")
+        for index, (explicit, generic) in enumerate(
+            zip(new_explicit, new_generic, strict=True)
+        )
+    ]
+    changes: list[TableRowChange] = []
+    identityless_old = [
+        row for row, identity in zip(old_rows, old_primary, strict=True) if not identity
+    ]
+    identityless_new = [
+        row for row, identity in zip(new_rows, new_primary, strict=True) if not identity
+    ]
+    if [
+        _table_row_display_key(row) for row in identityless_old
+    ] != [
+        _table_row_display_key(row) for row in identityless_new
+    ]:
+        changes.extend(
+            _make_table_row_change(row, "", "旧表删除行")
+            for row in identityless_old
+        )
+        changes.extend(
+            _make_table_row_change("", row, "新表新增行")
+            for row in identityless_new
+        )
+    # Generic Column N/cell-only rows have no stable record key.  Consume them
+    # separately so an insertion cannot manufacture a positional replacement,
+    # while explicit rows in the same table retain their normal comparison.
+    old_rows = [
+        row for row, identity in zip(old_rows, old_primary, strict=True) if identity
+    ]
+    new_rows = [
+        row for row, identity in zip(new_rows, new_primary, strict=True) if identity
+    ]
+    old_primary = [identity for identity in old_primary if identity]
+    new_primary = [identity for identity in new_primary if identity]
     old_counts = Counter(identity for identity in old_primary if identity)
     new_counts = Counter(identity for identity in new_primary if identity)
     repeated = {
@@ -4042,9 +4112,8 @@ def _resolve_duplicate_primary_table_rows(
         if old_counts[identity] > 1 or new_counts[identity] > 1
     }
     if not repeated:
-        return [], old_rows, new_rows
+        return changes, old_rows, new_rows
 
-    changes: list[TableRowChange] = []
     retained_old = [
         row for row, identity in zip(old_rows, old_primary, strict=True) if identity not in repeated
     ]
@@ -4364,7 +4433,20 @@ def _generic_boundary_entries_look_like_header(
 
     if _generic_table_entries_look_like_header(entries):
         return True
-    header_words = {"channel", "loss", "mode", "range", "type", "unit", "value"}
+    header_words = {
+        "channel",
+        "loss",
+        "max",
+        "maximum",
+        "min",
+        "minimum",
+        "mode",
+        "parameter",
+        "range",
+        "type",
+        "unit",
+        "value",
+    }
     hits = sum(
         bool(set(re.findall(r"[a-z]+", value.casefold())) & header_words)
         for _column, _label, _normalized, value in entries

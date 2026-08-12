@@ -8891,6 +8891,74 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
         self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
 
+    def test_inserted_identityless_table_row_stays_unpaired(self) -> None:
+        """Generic Column rows have no proof for positional replacement."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Modes",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = ["表格行: T1 | Column 1=20 mV | Column 2=PAM4"]
+        new_rows = [
+            "表格行: T1 | Column 1=30 mV | Column 2=NRZ",
+            "表格行: T1 | Column 1=21 mV | Column 2=PAM4",
+        ]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        self.assertEqual(3, len(changes))
+        self.assertEqual(1, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
+        self.assertTrue(all(not (row.old_value and row.new_value) for row in changes))
+
+    def test_identityless_rows_do_not_disable_explicit_table_pairing(self) -> None:
+        """Ambiguous rows stay separate without degrading explicit parameters."""
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Mixed rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        old_rows = [
+            "表格行: T1 | Column 1=20 mV | Column 2=PAM4",
+            "表格行: T1 | Parameter=Limit | Symbol=L | Value=5 V",
+        ]
+        new_rows = [
+            "表格行: T1 | Column 1=30 mV | Column 2=NRZ",
+            "表格行: T1 | Column 1=21 mV | Column 2=PAM4",
+            "表格行: T1 | Parameter=Limit | Symbol=L | Value=6 V",
+        ]
+        changes = reporting_module._table_row_changes(
+            (table(old_rows),),
+            (table(new_rows),),
+        )
+
+        paired = [row for row in changes if row.old_value and row.new_value]
+        self.assertEqual(4, len(changes))
+        self.assertEqual(1, len(paired))
+        self.assertEqual("Limit", paired[0].item)
+        self.assertIn("5 V", paired[0].old_value)
+        self.assertIn("6 V", paired[0].new_value)
+        self.assertEqual(1, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(2, sum(row.change_type == "新表新增行" for row in changes))
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
