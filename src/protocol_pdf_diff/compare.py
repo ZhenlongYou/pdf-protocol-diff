@@ -5157,8 +5157,13 @@ def _stable_discriminative_identity_plan(
                     continue
                 left_index = left_indexes[key][0]
                 right_index = right_indexes[key][0]
-                if not _review_units_share_numbered_record_skeleton(
-                    left_units[left_index], right_units[right_index]
+                if not (
+                    _review_units_share_sentence_skeleton(
+                        left_units[left_index], right_units[right_index]
+                    )
+                    or _review_units_share_numbered_record_skeleton(
+                        left_units[left_index], right_units[right_index]
+                    )
                 ):
                     continue
                 mapping.append((left_index, right_index))
@@ -5169,7 +5174,11 @@ def _stable_discriminative_identity_plan(
                 )
 
     if not candidates:
-        return _StableRecordIdentityPlan()
+        ambiguous = len(labels) > 1
+        return _StableRecordIdentityPlan(
+            labels=frozenset(labels) if ambiguous else frozenset(),
+            ambiguous=ambiguous,
+        )  # 多个可变编号字段却无法证明唯一投影时，禁止回退模糊归因。
     best_coverage = max(candidate[0] for candidate in candidates)
     best = [candidate for candidate in candidates if candidate[0] == best_coverage]
     mappings = {candidate[1] for candidate in best}

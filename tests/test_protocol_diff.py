@@ -9039,6 +9039,52 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_bounded_matching_fails_closed_beyond_composite_key_search_limit(self) -> None:
+        """A five-field key must not fall back to fuzzy cross-record attribution."""
+
+        records = [
+            (rack, shelf, port, lane, slot)
+            for rack in range(2)
+            for shelf in range(2)
+            for port in range(2)
+            for lane in range(2)
+            for slot in range(2)
+        ]
+        shifted = records[16:] + records[:16]
+        old_units = [
+            (
+                f"Rack {rack} Shelf {shelf} Port {port} Lane {lane} Slot {slot} "
+                f"has voltage limit {20 + index} mV."
+            )
+            for index, (rack, shelf, port, lane, slot) in enumerate(records)
+        ]
+        new_units = [
+            (
+                f"Rack {rack} Shelf {shelf} Port {port} Lane {lane} Slot {slot} "
+                f"has voltage limit {21 + records.index((rack, shelf, port, lane, slot))} mV."
+            )
+            for rack, shelf, port, lane, slot in shifted
+        ]
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-five-field-key.pdf"),
+                pages=[PageText(page_number=1, text="1 Grid\n" + "\n".join(old_units))],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-five-field-key.pdf"),
+                pages=[PageText(page_number=1, text="1 Grid\n" + "\n".join(new_units))],
+            ),
+            DiffOptions(max_snippets_per_section=len(records) * 2),
+        )
+
+        self.assertEqual(
+            ["added", "deleted"],
+            sorted(change.change_type for change in result.changes),
+        )
+        self.assertTrue(
+            all(not change.audit_replaced_snippets for change in result.changes)
+        )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 
