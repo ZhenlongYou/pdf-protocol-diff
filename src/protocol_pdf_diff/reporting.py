@@ -3704,19 +3704,19 @@ def _table_order_tokens_changed(
     if common_count < 2 or old_tokens == new_tokens:
         return False
     if len(old_tokens) * len(new_tokens) > 4_000_000:
-        if Counter(old_tokens) == Counter(new_tokens):
-            return True
-        shorter, longer = (
-            (old_tokens, new_tokens)
-            if len(old_tokens) <= len(new_tokens)
-            else (new_tokens, old_tokens)
-        )
-        position = 0
-        for token in longer:
-            if position < len(shorter) and token == shorter[position]:
-                position += 1
-        return position != len(shorter)
-        # 超大且双侧各有独有项时，无法线性证明保序就保守留一条顺序复核证据。
+        common_quota = Counter(old_tokens) & Counter(new_tokens)
+
+        def common_projection(tokens: list[tuple[str, str]]) -> list[tuple[str, str]]:
+            used: Counter[tuple[str, str]] = Counter()
+            projection: list[tuple[str, str]] = []
+            for token in tokens:
+                if used[token] < common_quota[token]:
+                    used[token] += 1
+                    projection.append(token)
+            return projection
+
+        return common_projection(old_tokens) != common_projection(new_tokens)
+        # 超预算时只比较共同 occurrence 的保序投影；两侧各自 excess 不得伪造成重排。
     previous = [0] * (len(new_tokens) + 1)
     for old_token in old_tokens:
         current = [0] * (len(new_tokens) + 1)

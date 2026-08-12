@@ -9379,6 +9379,38 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("C0", evidence)
         self.assertNotIn("B0", evidence)
 
+    def test_large_wide_count_shift_is_not_reordering(self) -> None:
+        """Linear order fallback projects both sides to common occurrences."""
+
+        def wide_row(prefix: str) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={prefix}{index}" for index in range(33)
+            )
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 Wide rows",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        alpha = wide_row("A")
+        beta = wide_row("B")
+        changes = reporting_module._table_row_changes(
+            (table([*([alpha] * 2001), *([beta] * 2000)]),),
+            (table([*([alpha] * 2000), *([beta] * 2001)]),),
+        )
+
+        self.assertEqual(2, len(changes))
+        self.assertFalse(any(row.change_type == "顺序变化" for row in changes))
+        self.assertEqual(1, sum(row.change_type == "旧表删除行" for row in changes))
+        self.assertEqual(1, sum(row.change_type == "新表新增行" for row in changes))
+
     def test_narrative_count_cannot_prove_section_identity(self) -> None:
         """A shared prose verb plus count remains candidate evidence, not identity."""
 
