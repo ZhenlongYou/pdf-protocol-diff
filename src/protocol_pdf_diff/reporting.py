@@ -3929,13 +3929,21 @@ def _paired_table_order_previews(
         return f"{'…' if start else ''}{excerpt}{'…' if start + len(excerpt) < len(value) else ''}"
 
     def field_pairs(row: str) -> list[tuple[str, str]]:
-        return [
+        pairs = [
             (compact_inline(field), compact_inline(value))
             for field, value in re.findall(
                 r"(?i)(?:^|\|)\s*(parameter|characteristic|column\s+\d+)\s*=\s*([^|]+)",
                 row,
             )
         ]
+        if pairs and all(re.fullmatch(r"(?i)column\s+\d+", field) for field, _ in pairs):
+            return sorted(
+                pairs,
+                key=lambda pair: int(re.search(r"\d+", pair[0]).group()),
+            )
+        return pairs
+        # PDF提取可能打乱同一行的物理字段顺序；pure Column N 宽行先按列号
+        # 对齐，避免把Column 2技术值与peer的Column 3误比较。
 
     old_start = max(0, min(old_focus_index - 1, max(0, len(old_rows) - 4)))
     new_start = max(0, min(new_focus_index - 1, max(0, len(new_rows) - 4)))

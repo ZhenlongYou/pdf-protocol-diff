@@ -9790,6 +9790,50 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertLessEqual(len(order_change.old_value), 760)
         self.assertLessEqual(len(order_change.new_value), 760)
 
+    def test_overwide_preview_aligns_reordered_column_labels(self) -> None:
+        """Physical extraction order cannot misalign Column 2 with Column 3."""
+
+        def row(mode: str, *, swap_columns: bool) -> str:
+            cells = [
+                (1, "SAME_ID"),
+                (2, mode),
+                (3, "SAME_3"),
+                *((index, f"SAME_{index}") for index in range(4, 34)),
+            ]
+            if swap_columns:
+                cells[1], cells[2] = cells[2], cells[1]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        pam4 = row("MODE_PAM4", swap_columns=False)
+        nrz = row("MODE_NRZ", swap_columns=True)
+        anchors = [
+            f"表格行: T1 | Parameter=A{index} | Limit=Maximum | Value={index} V"
+            for index in range(5)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([pam4, *anchors, nrz]),),
+            (table([nrz, *anchors, pam4]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 2=MODE_PAM4", evidence)
+        self.assertIn("Column 2=MODE_NRZ", evidence)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 
