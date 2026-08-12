@@ -9834,6 +9834,42 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Column 2=MODE_PAM4", evidence)
         self.assertIn("Column 2=MODE_NRZ", evidence)
 
+    def test_overwide_preview_marks_column_set_drift_as_review(self) -> None:
+        """Missing Column 2 plus extra Column 34 cannot be index-aligned."""
+
+        focus_cells = [(index, f"SAME_{index}") for index in range(1, 34)]
+        focus_cells[1] = (2, "MODE_PAM4")
+        peer_cells = [(1, "SAME_1"), *((index, f"SAME_{index}") for index in range(3, 34))]
+        peer_cells.append((34, "MODE_NRZ"))
+
+        def row(cells: list[tuple[int, str]]) -> str:
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        focus = row(focus_cells)
+        peer = row(peer_cells)
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([focus, anchor, peer]),),
+            (table([anchor, focus, peer]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 

@@ -3928,7 +3928,10 @@ def _paired_table_order_previews(
         excerpt = value[start : start + max_chars - 2]
         return f"{'…' if start else ''}{excerpt}{'…' if start + len(excerpt) < len(value) else ''}"
 
+    field_layout_is_ambiguous = False
+
     def field_pairs(row: str) -> list[tuple[str, str]]:
+        nonlocal field_layout_is_ambiguous
         pairs = [
             (compact_inline(field), compact_inline(value))
             for field, value in re.findall(
@@ -3937,10 +3940,17 @@ def _paired_table_order_previews(
             )
         ]
         if pairs and all(re.fullmatch(r"(?i)column\s+\d+", field) for field, _ in pairs):
-            return sorted(
+            sorted_pairs = sorted(
                 pairs,
                 key=lambda pair: int(re.search(r"\d+", pair[0]).group()),
             )
+            column_numbers = [
+                int(re.search(r"\d+", field).group())
+                for field, _value in sorted_pairs
+            ]
+            if len(column_numbers) != len(set(column_numbers)):
+                field_layout_is_ambiguous = True
+            return sorted_pairs
         return pairs
         # PDF提取可能打乱同一行的物理字段顺序；pure Column N 宽行先按列号
         # 对齐，避免把Column 2技术值与peer的Column 3误比较。
@@ -3963,6 +3973,13 @@ def _paired_table_order_previews(
     )
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
+    if (
+        old_focus_fields
+        and new_focus_fields
+        and [field.casefold() for field, _value in old_focus_fields]
+        != [field.casefold() for field, _value in new_focus_fields]
+    ):
+        field_layout_is_ambiguous = True
     selected_indexes: list[int] = [0]
     distinguishing_peer_fields: list[tuple[str, str]] = []
     signature_is_ambiguous = False
@@ -3993,6 +4010,12 @@ def _paired_table_order_previews(
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
+        focus_labels = [field.casefold() for field, _value in old_focus_fields]
+        if any(
+            [field.casefold() for field, _value in fields] != focus_labels
+            for fields in peer_fields
+        ):
+            field_layout_is_ambiguous = True
         distinguishing_index = next(
             (
                 field_index
@@ -4149,7 +4172,7 @@ def _paired_table_order_previews(
             new_start,
             len(new_rows),
         ),
-        signature_is_ambiguous,
+        signature_is_ambiguous or field_layout_is_ambiguous,
     )
 
 
