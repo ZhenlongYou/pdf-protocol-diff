@@ -10021,6 +10021,56 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertEqual(1, evidence.count("MODE_NRZ"))
             self.assertEqual(1, evidence.count("MODE_DISABLED"))
 
+    def test_overwide_layout_review_keeps_duplicate_peer_field_relationships(self) -> None:
+        """Candidate rows remain separate instead of forming synthetic records."""
+
+        def row(mode: str, policy: str) -> str:
+            cells = [
+                (1, "SAME_ID"),
+                (2, "SHARED"),
+                (2, mode),
+                (3, "BASE"),
+                (3, policy),
+                *((index, f"SAME_{index}") for index in range(4, 34)),
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {column}={value}" for column, value in cells
+            )
+
+        focus = row("MODE_PAM4", "POLICY_LOW")
+        nrz = row("MODE_NRZ", "POLICY_HIGH")
+        disabled = row("MODE_DISABLED", "POLICY_AUTO")
+        anchor = "表格行: T1 | Parameter=Mode | Limit=Maximum | Value=1"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        changes = reporting_module._table_row_changes(
+            (table([focus, anchor, nrz, disabled]),),
+            (table([anchor, focus, nrz, disabled]),),
+        )
+        order_change = next(row for row in changes if row.item == "表格行顺序")
+        self.assertEqual("需人工复核", order_change.change_type)
+        self.assertIn(
+            "候选1：Column 2=SHARED / MODE_NRZ | Column 3=BASE / POLICY_HIGH",
+            order_change.new_value,
+        )
+        self.assertIn(
+            "候选2：Column 2=SHARED / MODE_DISABLED | Column 3=BASE / POLICY_AUTO",
+            order_change.new_value,
+        )
+        self.assertNotIn("MODE_NRZ / MODE_DISABLED", order_change.new_value)
+        self.assertNotIn("POLICY_HIGH / POLICY_AUTO", order_change.new_value)
+
     def test_overwide_preview_centers_long_peer_value_differences(self) -> None:
         """A long shared value prefix cannot hide the final mode token."""
 

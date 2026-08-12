@@ -3973,7 +3973,14 @@ def _paired_table_order_previews(
     )
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
-    layout_conflict_peer_fields: list[tuple[str, str]] = []
+    layout_conflict_peer_groups: list[list[tuple[str, str]]] = []
+
+    def remember_layout_conflict_peer(fields: list[tuple[str, str]]) -> None:
+        """Keep candidate rows distinct so their field relationships survive."""
+
+        if fields and fields not in layout_conflict_peer_groups:
+            layout_conflict_peer_groups.append(fields)
+
     if (
         old_focus_fields
         and new_focus_fields
@@ -3981,7 +3988,7 @@ def _paired_table_order_previews(
         != [field.casefold() for field, _value in new_focus_fields]
     ):
         field_layout_is_ambiguous = True
-        layout_conflict_peer_fields = new_focus_fields
+        remember_layout_conflict_peer(new_focus_fields)
     selected_indexes: list[int] = [0]
     distinguishing_peer_fields: list[tuple[str, str]] = []
     signature_is_ambiguous = False
@@ -4012,7 +4019,7 @@ def _paired_table_order_previews(
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
-        if field_layout_is_ambiguous and not layout_conflict_peer_fields:
+        if field_layout_is_ambiguous and not layout_conflict_peer_groups:
             focus_multiplicity = Counter(
                 field.casefold() for field, _value in old_focus_fields
             )
@@ -4022,45 +4029,20 @@ def _paired_table_order_previews(
                 if Counter(field.casefold() for field, _value in fields)
                 == focus_multiplicity
             ]
-            peer_values_by_label: dict[str, list[tuple[str, str]]] = {}
             for fields in duplicate_peers:
-                for field, value in fields:
-                    label = field.casefold()
-                    occurrence = (field, value)
-                    occurrences = peer_values_by_label.setdefault(label, [])
-                    if occurrence not in occurrences:
-                        occurrences.append(occurrence)
-            layout_conflict_peer_fields = [
-                occurrence
-                for field, _value in old_focus_fields
-                for occurrence in peer_values_by_label.pop(field.casefold(), [])
-            ]
-            layout_conflict_peer_fields.extend(
-                occurrence
-                for occurrences in peer_values_by_label.values()
-                for occurrence in occurrences
-            )
+                remember_layout_conflict_peer(fields)
             # 重复Column标签本身已证明布局有歧义；同multiplicity的peer可能
-            # 不止一条，不能按输入顺序任选一个代表。复核审计层保留所有
-            # 不同occurrence值，读者层再按既有长度预算折叠展示。
+            # 不止一条，不能按输入顺序任选一个代表，也不能跨peer按label
+            # 拍平成不存在的合成行。复核审计层按候选行保留字段关联。
         focus_labels = [field.casefold() for field, _value in old_focus_fields]
         if any(
             [field.casefold() for field, _value in fields] != focus_labels
             for fields in peer_fields
         ):
             field_layout_is_ambiguous = True
-            layout_conflict_peer_fields = max(
-                (
-                    fields
-                    for fields in peer_fields
-                    if [field.casefold() for field, _value in fields]
-                    != focus_labels
-                ),
-                key=lambda fields: len(
-                    set(focus_labels)
-                    & {field.casefold() for field, _value in fields}
-                ),
-            )
+            for fields in peer_fields:
+                if [field.casefold() for field, _value in fields] != focus_labels:
+                    remember_layout_conflict_peer(fields)
         distinguishing_index = next(
             (
                 field_index
@@ -4175,6 +4157,27 @@ def _paired_table_order_previews(
         # TableRowChange/JSON/CSV保留全部冲突label及重复occurrence；HTML、
         # Markdown和TXT在渲染层已有独立的读者长度预算，不能反向裁掉审计事实。
 
+    def layout_conflict_candidate_previews(
+        fields: list[tuple[str, str]],
+        peer_groups: list[list[tuple[str, str]]],
+        *,
+        focus_side: bool,
+    ) -> str:
+        """Render every ambiguous peer as a separate auditable candidate."""
+
+        groups = peer_groups or [new_focus_fields]
+        labels: list[str] = []
+        for index, peer_fields in enumerate(groups, start=1):
+            candidate_fields = fields if focus_side else peer_fields
+            counterpart_fields = peer_fields if focus_side else fields
+            labels.append(
+                f"{'焦点对候选' if focus_side else '候选'}{index}："
+                f"{layout_conflict_preview(candidate_fields, counterpart_fields)}"
+            )
+        return "；".join(labels)
+        # 候选编号保留跨label的行内关系；JSON/CSV拿到完整候选集合，读者面
+        # 仍由统一的单元格长度预算折叠，不能把候选值合并成虚构记录。
+
     def preview(
         window_rows: list[str],
         fields_by_row: list[list[tuple[str, str]]],
@@ -4234,9 +4237,10 @@ def _paired_table_order_previews(
         return truncate(prefix + " → ".join(labels) + suffix, 760)
 
     return (
-        layout_conflict_preview(
+        layout_conflict_candidate_previews(
             old_focus_fields,
-            layout_conflict_peer_fields or new_focus_fields,
+            layout_conflict_peer_groups,
+            focus_side=True,
         )
         if field_layout_is_ambiguous
         else preview(
@@ -4248,9 +4252,10 @@ def _paired_table_order_previews(
             old_start,
             len(old_rows),
         ),
-        layout_conflict_preview(
-            layout_conflict_peer_fields or new_focus_fields,
+        layout_conflict_candidate_previews(
             old_focus_fields,
+            layout_conflict_peer_groups,
+            focus_side=False,
         )
         if field_layout_is_ambiguous
         else preview(
