@@ -9631,14 +9631,16 @@ class ProtocolDiffTests(unittest.TestCase):
 
         pam4 = wide("MODE_PAM4")
         nrz = wide("MODE_NRZ")
+        narrow = "表格行: T1 | Column 1=SAME_WIDE_ID | Column 2=UNRELATED_NARROW"
         changes = reporting_module._table_row_changes(
-            (table([pam4, *anchors, nrz]),),
-            (table([nrz, *anchors, pam4]),),
+            (table([narrow, pam4, *anchors, nrz]),),
+            (table([narrow, nrz, *anchors, pam4]),),
         )
         order_change = next(row for row in changes if row.change_type == "顺序变化")
         evidence = f"{order_change.old_value}\n{order_change.new_value}"
         self.assertIn("Column 33=MODE_PAM4", evidence)
         self.assertIn("Column 33=MODE_NRZ", evidence)
+        self.assertNotIn("UNRELATED_NARROW", evidence)
 
     def test_overwide_row_shift_from_delete_insert_is_not_reordering(self) -> None:
         """A common row may shift index without changing relative order."""

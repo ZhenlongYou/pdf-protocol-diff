@@ -3930,6 +3930,12 @@ def _paired_table_order_previews(
             )
         ]
 
+    def is_overwide_generic(fields: list[tuple[str, str]]) -> bool:
+        return len(fields) > 32 and all(
+            re.fullmatch(r"(?i)column\s+\d+", field)
+            for field, _value in fields
+        )
+
     old_start = max(0, min(old_focus_index - 1, max(0, len(old_rows) - 4)))
     new_start = max(0, min(new_focus_index - 1, max(0, len(new_rows) - 4)))
     old_window = old_rows[old_start : old_start + 4]
@@ -3970,7 +3976,7 @@ def _paired_table_order_previews(
         peer_fields = [
             fields
             for fields in [*old_all_fields, *new_all_fields]
-            if fields
+            if is_overwide_generic(fields)
             and fields[0] == focus_first_field
             and fields != old_focus_fields
         ]
