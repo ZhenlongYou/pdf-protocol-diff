@@ -4899,7 +4899,7 @@ def _review_candidate_tokens(value: str) -> set[str]:
     chinese_number_chars = "零〇一二两三四五六七八九十百千万亿"
     chinese_prefix_char = rf"(?:(?![{chinese_number_chars}])[\u4e00-\u9fff])"
     for match in re.finditer(
-        rf"({chinese_prefix_char}{{1,8}})([{chinese_number_chars}]+)",
+        rf"({chinese_prefix_char}{{1,8}})\s*([{chinese_number_chars}]+)",
         normalized,
     ):
         canonical_number = canonicalize_chinese_number_token(match.group(2))

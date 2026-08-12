@@ -8514,56 +8514,57 @@ class ProtocolDiffTests(unittest.TestCase):
             "二十五", "二十六", "二十七", "二十八", "二十九", "三十",
             "三十一", "三十二",
         )
-        for count in (32, 33):
-            old_units = [
-                f"接收机通道{number}的电压限制为二十毫伏。"
-                for number in chinese_numbers[:count]
-            ]
-            shift = count // 2
-            shifted_numbers = (
-                list(chinese_numbers[:count])[shift:]
-                + list(chinese_numbers[:count])[:shift]
-            )
-            new_units = [
-                f"接收机通道{number}的电压限制为二十一毫伏。"
-                for number in shifted_numbers
-            ]
-            with self.subTest(count=count):
-                result = compare_extractions(
-                    ExtractionResult(
-                        pdf_path=Path(f"old-cjk-words-{count}.pdf"),
-                        pages=[
-                            PageText(
-                                page_number=1,
-                                text="1 接收机限制\n" + "\n".join(old_units),
-                            )
-                        ],
-                    ),
-                    ExtractionResult(
-                        pdf_path=Path(f"new-cjk-words-{count}.pdf"),
-                        pages=[
-                            PageText(
-                                page_number=1,
-                                text="1 接收机限制\n" + "\n".join(new_units),
-                            )
-                        ],
-                    ),
-                    DiffOptions(max_snippets_per_section=count),
+        for separator in ("", " ", "   ", "\N{NO-BREAK SPACE}"):
+            for count in (32, 33):
+                old_units = [
+                    f"接收机通道{separator}{number}的电压限制为二十毫伏。"
+                    for number in chinese_numbers[:count]
+                ]
+                shift = count // 2
+                shifted_numbers = (
+                    list(chinese_numbers[:count])[shift:]
+                    + list(chinese_numbers[:count])[:shift]
                 )
-
-                self.assertEqual(1, len(result.changes))
-                change = result.changes[0]
-                self.assertEqual("modified", change.change_type)
-                self.assertEqual(count, len(change.audit_replaced_snippets))
-                self.assertFalse(change.audit_added_snippets)
-                self.assertFalse(change.audit_removed_snippets)
-                self.assertTrue(
-                    all(
-                        re.search(r"通道(.+?)的", pair.old).group(1)
-                        == re.search(r"通道(.+?)的", pair.new).group(1)
-                        for pair in change.audit_replaced_snippets
+                new_units = [
+                    f"接收机通道{separator}{number}的电压限制为二十一毫伏。"
+                    for number in shifted_numbers
+                ]
+                with self.subTest(count=count, separator=repr(separator)):
+                    result = compare_extractions(
+                        ExtractionResult(
+                            pdf_path=Path(f"old-cjk-words-{count}.pdf"),
+                            pages=[
+                                PageText(
+                                    page_number=1,
+                                    text="1 接收机限制\n" + "\n".join(old_units),
+                                )
+                            ],
+                        ),
+                        ExtractionResult(
+                            pdf_path=Path(f"new-cjk-words-{count}.pdf"),
+                            pages=[
+                                PageText(
+                                    page_number=1,
+                                    text="1 接收机限制\n" + "\n".join(new_units),
+                                )
+                            ],
+                        ),
+                        DiffOptions(max_snippets_per_section=count),
                     )
-                )
+
+                    self.assertEqual(1, len(result.changes))
+                    change = result.changes[0]
+                    self.assertEqual("modified", change.change_type)
+                    self.assertEqual(count, len(change.audit_replaced_snippets))
+                    self.assertFalse(change.audit_added_snippets)
+                    self.assertFalse(change.audit_removed_snippets)
+                    self.assertTrue(
+                        all(
+                            re.search(r"通道\s*(.+?)的", pair.old).group(1)
+                            == re.search(r"通道\s*(.+?)的", pair.new).group(1)
+                            for pair in change.audit_replaced_snippets
+                        )
+                    )
 
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
