@@ -3625,16 +3625,10 @@ def _partition_overwide_generic_rows(
     new_common_position = {
         label: index for index, label in enumerate(new_common)
     }
-    old_absolute_position = {label: index for index, label in enumerate(old_labels)}
-    new_absolute_position = {label: index for index, label in enumerate(new_labels)}
     moved_labels = {
         label
         for label in common_labels
         if old_common_position[label] != new_common_position[label]
-        or (
-            len(old_rows) == len(new_rows)
-            and old_absolute_position[label] != new_absolute_position[label]
-        )
     }
     cancellable_labels = common_labels - moved_labels
     remaining_old = [
