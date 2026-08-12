@@ -8700,6 +8700,56 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(change.audit_added_snippets))
         self.assertEqual(1, len(change.audit_removed_snippets))
 
+    def test_bounded_matching_prefers_discriminative_identity_over_shared_metadata(self) -> None:
+        """A shared Version number cannot outweigh each record's unique Lane id."""
+
+        for count in (32, 33):
+            old_units = [
+                f"Version 1 Lane {index} has a voltage limit of {index} mV."
+                for index in range(count)
+            ]
+            shift = count // 2
+            shifted_indexes = list(range(count))[shift:] + list(range(count))[:shift]
+            new_units = [
+                f"Version 1 Lane {index} has a voltage limit of {(index + 1) % count} mV."
+                for index in shifted_indexes
+            ]
+            with self.subTest(count=count):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path(f"old-version-lanes-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(old_units),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path(f"new-version-lanes-{count}.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text="1 Lane Limits\n" + "\n".join(new_units),
+                            )
+                        ],
+                    ),
+                    DiffOptions(max_snippets_per_section=count),
+                )
+
+                self.assertEqual(1, len(result.changes))
+                change = result.changes[0]
+                self.assertEqual(count, len(change.audit_replaced_snippets))
+                self.assertFalse(change.audit_added_snippets)
+                self.assertFalse(change.audit_removed_snippets)
+                self.assertTrue(
+                    all(
+                        re.search(r"Lane (\d+)", pair.old).group(1)
+                        == re.search(r"Lane (\d+)", pair.new).group(1)
+                        for pair in change.audit_replaced_snippets
+                    )
+                )
+
     def test_comparison_operator_cannot_prove_assignment_identity(self) -> None:
         """Comparison operators must not bypass the disjoint-unit hard gate."""
 

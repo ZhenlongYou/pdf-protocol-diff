@@ -3141,7 +3141,12 @@ def _review_unit_skeleton_match_count(
     )
     bounded_matching = len(shorter) * len(longer) > _MAX_ALL_PAIR_UNIT_MATCHES
     longer_words = [_review_candidate_tokens(unit) for unit in longer]
-    longer_identities = [_review_identity_tokens(unit) for unit in longer]
+    longer_identities = {
+        index: _review_identity_tokens(unit) for index, unit in enumerate(longer)
+    }
+    longer_identity_counts = Counter(
+        identity for identities in longer_identities.values() for identity in identities
+    )
     longer_fields = [_assignment_field_key(unit) for unit in longer]
     word_indexes: dict[str, list[int]] = {}
     field_indexes: dict[str, list[int]] = {}
@@ -3194,9 +3199,12 @@ def _review_unit_skeleton_match_count(
             )
         ]
         short_identities = _review_identity_tokens(short_unit)
-        identity_matched_indexes = [
-            index for index in indexes if short_identities & longer_identities[index]
-        ]
+        identity_matched_indexes = _most_discriminative_identity_indexes(
+            short_identities,
+            longer_identities,
+            longer_identity_counts,
+            indexes,
+        )
         if identity_matched_indexes:
             indexes = identity_matched_indexes
         indexes.sort(
@@ -4645,6 +4653,14 @@ def _unequal_replace_delta_candidates(
     new_words_by_index = {
         index: _review_candidate_tokens(new_units[index]) for index in unmatched_new
     }
+    new_identities_by_index = {
+        index: _review_identity_tokens(new_units[index]) for index in unmatched_new
+    }
+    new_identity_counts = Counter(
+        identity
+        for identities in new_identities_by_index.values()
+        for identity in identities
+    )
     new_indexes_by_word: dict[str, list[int]] = {}
     if bounded_matching:
         for new_index, words in new_words_by_index.items():
@@ -4686,18 +4702,18 @@ def _unequal_replace_delta_candidates(
                 ),
             )[:32]
         old_identities = _review_identity_tokens(old_unit)
-        identity_matched_indexes = [
-            new_index
-            for new_index in candidate_indexes
-            if old_identities & _review_identity_tokens(new_units[new_index])
-        ]
+        identity_matched_indexes = _most_discriminative_identity_indexes(
+            old_identities,
+            new_identities_by_index,
+            new_identity_counts,
+            candidate_indexes,
+        )
         if identity_matched_indexes:
             candidate_indexes = identity_matched_indexes
         for new_index in candidate_indexes:
             new_unit = new_units[new_index]
             same_structural_identity = bool(
-                _review_identity_tokens(old_unit)
-                & _review_identity_tokens(new_unit)
+                old_identities & new_identities_by_index[new_index]
             )
             if (
                 same_structural_identity
@@ -4979,6 +4995,8 @@ def _review_identity_tokens(value: str) -> set[str]:
             continue
         _kind, label, _number = token.rsplit(":", 2)
         compact_label = normalize_line(label).casefold()
+        if compact_label in _REVIEW_STOP_WORDS:
+            continue  # `of 20` / `to 4` 是语法连接和值槽，不是记录标签。
         if has_measurement_context(compact_label):
             continue  # `voltage 20` / `电压限制为二十` 是值槽，不是记录身份。
         if re.search(r"(?i)(?:^|\s)(?:is|are|was|were|equals?|to)$", compact_label):
@@ -4987,6 +5005,34 @@ def _review_identity_tokens(value: str) -> set[str]:
             continue  # 系词/范围终点后的数字只参与比较，不抢占标签编号身份。
         identities.add(token)
     return identities
+
+
+def _most_discriminative_identity_indexes(
+    source_identities: set[str],
+    target_identities_by_index: dict[int, set[str]],
+    target_identity_counts: Counter[str],
+    candidate_indexes: list[int],
+) -> list[int]:
+    """Prefer the rarest shared record identity without making it semantic proof."""
+
+    shared_identities = {
+        identity
+        for identity in source_identities
+        if target_identity_counts.get(identity, 0) > 0
+    }
+    if not shared_identities:
+        return []
+    rarest_count = min(target_identity_counts[identity] for identity in shared_identities)
+    discriminative = {
+        identity
+        for identity in shared_identities
+        if target_identity_counts[identity] == rarest_count
+    }
+    return [
+        index
+        for index in candidate_indexes
+        if discriminative & target_identities_by_index[index]
+    ]
 
 
 def _review_units_share_numbered_record_skeleton(left: str, right: str) -> bool:
