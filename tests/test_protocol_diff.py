@@ -9598,6 +9598,48 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("WIDE_PRIORITY", evidence)
         self.assertIn("Parameter=B", evidence)
 
+    def test_overwide_preview_distinguishes_distant_same_identity_wide_rows(self) -> None:
+        """A same-Column-1 peer outside the preview window still informs its label."""
+
+        def wide(mode: str) -> str:
+            values = [
+                "SAME_WIDE_ID",
+                *(f"SAME_{index}" for index in range(2, 33)),
+                mode,
+            ]
+            return "表格行: T1 | " + " | ".join(
+                f"Column {index + 1}={value}"
+                for index, value in enumerate(values)
+            )
+
+        anchors = [
+            f"表格行: T1 | Parameter={name} | Limit=Maximum | Value={index} V"
+            for index, name in enumerate(("A", "B", "C", "D", "E"), start=1)
+        ]
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1 First-match rules",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+                row_alignment_reliable=True,
+            )
+
+        pam4 = wide("MODE_PAM4")
+        nrz = wide("MODE_NRZ")
+        changes = reporting_module._table_row_changes(
+            (table([pam4, *anchors, nrz]),),
+            (table([nrz, *anchors, pam4]),),
+        )
+        order_change = next(row for row in changes if row.change_type == "顺序变化")
+        evidence = f"{order_change.old_value}\n{order_change.new_value}"
+        self.assertIn("Column 33=MODE_PAM4", evidence)
+        self.assertIn("Column 33=MODE_NRZ", evidence)
+
     def test_overwide_row_shift_from_delete_insert_is_not_reordering(self) -> None:
         """A common row may shift index without changing relative order."""
 

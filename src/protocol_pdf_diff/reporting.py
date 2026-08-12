@@ -3934,6 +3934,8 @@ def _paired_table_order_previews(
     new_start = max(0, min(new_focus_index - 1, max(0, len(new_rows) - 4)))
     old_window = old_rows[old_start : old_start + 4]
     new_window = new_rows[new_start : new_start + 4]
+    old_all_fields = [field_pairs(row) for row in old_rows]
+    new_all_fields = [field_pairs(row) for row in new_rows]
     old_fields = [field_pairs(row) for row in old_window]
     new_fields = [field_pairs(row) for row in new_window]
     old_focus_offset = min(
@@ -3947,6 +3949,7 @@ def _paired_table_order_previews(
     old_focus_fields = old_fields[old_focus_offset] if old_fields else []
     new_focus_fields = new_fields[new_focus_offset] if new_fields else []
     selected_indexes: list[int] = [0]
+    distinguishing_peer_fields: list[tuple[str, str]] = []
     maximum_field_count = max(len(old_focus_fields), len(new_focus_fields))
     for field_index in range(maximum_field_count):
         old_field = (
@@ -3966,7 +3969,7 @@ def _paired_table_order_previews(
         focus_first_field = old_focus_fields[0]
         peer_fields = [
             fields
-            for fields in [*old_fields, *new_fields]
+            for fields in [*old_all_fields, *new_all_fields]
             if fields
             and fields[0] == focus_first_field
             and fields != old_focus_fields
@@ -3983,6 +3986,16 @@ def _paired_table_order_previews(
                 for fields in peer_fields
             ):
                 selected_indexes.append(field_index)
+                distinguishing_peer_fields = next(
+                    fields
+                    for fields in peer_fields
+                    if (
+                        fields[field_index]
+                        if field_index < len(fields)
+                        else ("", "")
+                    )
+                    != old_field
+                )
                 break
         # 同一条wide row跨边界时其两侧内容相同；若窗口内还有首字段相同的
         # wide peer，追加首个能区分两行的字段，避免顺序卡退化为重复Column 1。
@@ -4030,6 +4043,14 @@ def _paired_table_order_previews(
             )
         prefix = f"第{start + 1}行起：" if start else ""
         suffix = f"；共{total_rows}行" if total_rows > 4 else ""
+        if distinguishing_peer_fields:
+            peer_cells = [
+                f"{distinguishing_peer_fields[index][0]}="
+                f"{truncate(distinguishing_peer_fields[index][1], 48)}"
+                for index in selected_indexes
+                if index < len(distinguishing_peer_fields)
+            ]
+            suffix += f"；相关宽行：{' | '.join(peer_cells)}"
         return prefix + " → ".join(labels) + suffix
 
     return (
