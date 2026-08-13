@@ -377,7 +377,8 @@ def _page_vector_graphic_bboxes(
             if x1 <= x0 or bottom <= top:
                 continue
             bboxes.append((x0, top, x1, bottom))
-    return tuple(bboxes)
+    # PDF 常为同一描边/叠画重复发出完全相同对象；重复 bbox 不能虚增图形证据。
+    return tuple(dict.fromkeys(bboxes))
 
 def _extract_pdfplumber_page_text(
     page: object,
