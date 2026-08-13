@@ -8338,6 +8338,27 @@ def _reader_change_without_proven_child_clause_renumber(
             and re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", old_prefix)
         ):
             return False
+        # 前置单词必须由同一页 Figure 图题、图内几何区间和后续标题共同证明。
+        # 仅证明编号行是标题还不够；Version/Firmware 等上一物理行继续失败可见。
+        if not (
+            any(
+                label == old_prefix
+                and (
+                    old_candidate_prefix.startswith(candidate)
+                    or candidate.startswith(old_candidate_prefix)
+                )
+                for label, candidate in old_section.proven_figure_label_heading_candidates
+            )
+            and any(
+                label == new_prefix
+                and (
+                    new_candidate_prefix.startswith(candidate)
+                    or candidate.startswith(new_candidate_prefix)
+                )
+                for label, candidate in new_section.proven_figure_label_heading_candidates
+            )
+        ):
+            return False
         old_trailing_tokens = _reader_clause_title_tokens(
             pair.old[old_matches[0].end() :]
         )

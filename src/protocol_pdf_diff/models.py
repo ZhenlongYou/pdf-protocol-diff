@@ -330,6 +330,11 @@ class Section:
         compare=False,
         repr=False,
     )  # 仅记录物理行首且字体与已接纳父标题一致的后代候选；普通 Version/ID 不得借行首形态获得标题身份。
+    proven_figure_label_heading_candidates: tuple[tuple[str, str], ...] = field(
+        default=(),
+        compare=False,
+        repr=False,
+    )  # (图内标签, 后续编号标题) 必须由同一页图题、几何区间和父标题字体共同证明。
 
     @property
     def location(self) -> str:

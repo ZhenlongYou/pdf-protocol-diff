@@ -15,7 +15,14 @@ from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
 
-from .models import DocumentBlockKind, ExtractionResult, HeadingInfo, PageText, Section
+from .models import (
+    DocumentBlock,
+    DocumentBlockKind,
+    ExtractionResult,
+    HeadingInfo,
+    PageText,
+    Section,
+)
 from .text_utils import (
     compact_inline,
     normalize_for_similarity,
@@ -128,6 +135,7 @@ class _OpenSection:
     page_lines: dict[int, list[str]]
     heading_font_names: tuple[str, ...]
     proven_numbered_heading_candidates: list[str]
+    proven_figure_label_heading_candidates: list[tuple[str, str]]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -370,6 +378,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         heading_candidate,
                     ),
                     proven_numbered_heading_candidates=[],
+                    proven_figure_label_heading_candidates=[],
                 )
                 continue
 
@@ -386,6 +395,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     page_lines={},
                     heading_font_names=(),
                     proven_numbered_heading_candidates=[],
+                    proven_figure_label_heading_candidates=[],
                 )
             current.end_page = page.page_number
             if candidate := _proven_numbered_heading_descendant_candidate(
@@ -394,6 +404,14 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 _physical_line_font_names(page, heading_candidate),
             ):
                 current.proven_numbered_heading_candidates.append(candidate)
+                if figure_label := _proven_figure_label_before_heading(
+                    page,
+                    line_index,
+                    heading_candidate,
+                ):
+                    current.proven_figure_label_heading_candidates.append(
+                        (figure_label, candidate)
+                    )
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
 
@@ -967,6 +985,9 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         proven_numbered_heading_candidates=tuple(
             open_section.proven_numbered_heading_candidates
         ),
+        proven_figure_label_heading_candidates=tuple(
+            open_section.proven_figure_label_heading_candidates
+        ),
     )
 
 
@@ -1067,6 +1088,103 @@ def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
     if len(matches) != 1:
         return ()
     return matches[0]
+
+
+_FIGURE_CAPTION_LINE_RE = re.compile(
+    r"(?i)^(?:figure|fig\.|图)\s*[A-Z0-9]+(?:[.\-–—][A-Z0-9]+)*\b"
+)
+
+
+def _proven_figure_label_before_heading(
+    page: PageText,
+    heading_line_index: int,
+    heading_line: str,
+) -> str:
+    """证明编号标题的上一物理行位于同页 Figure 图题与标题之间。"""
+
+    page_lines = [normalize_line(line) for line in page.text.splitlines()]
+    if heading_line_index <= 0 or heading_line_index >= len(page_lines):
+        return ""
+    label = page_lines[heading_line_index - 1]
+    if (
+        not label
+        or len(label) > 64
+        or not re.fullmatch(r"[A-Za-z][A-Za-z0-9 /()_.+\-]{0,63}", label)
+        or re.search(r"(?i)\b(?:is|are|shall|must|should|may|can|will)\b", label)
+    ):
+        return ""
+    label_blocks = _physical_line_blocks(page, label)
+    heading_blocks = _physical_line_blocks(page, heading_line)
+    if len(label_blocks) != 1 or len(heading_blocks) != 1:
+        return ""
+    label_block = label_blocks[0]
+    heading_block = heading_blocks[0]
+    if not (
+        label_block.bbox[1] < heading_block.bbox[1]
+        and heading_block.bbox[1] - label_block.bbox[3] <= 45.0
+    ):
+        return ""
+    caption_blocks = [
+        block
+        for block in page.blocks
+        if block.kind == DocumentBlockKind.TEXT
+        and block.bbox[1] < label_block.bbox[1]
+        and label_block.bbox[1] - block.bbox[1] <= 360.0
+        and _FIGURE_CAPTION_LINE_RE.match(
+            _strip_edge_line_number(block.text)
+        )
+    ]
+    if not caption_blocks:
+        return ""
+    caption = max(caption_blocks, key=lambda block: block.bbox[1])
+    intervening_blocks = [
+        block
+        for block in page.blocks
+        if block.kind == DocumentBlockKind.TEXT
+        and caption.bbox[1] < block.bbox[1] < heading_block.bbox[1]
+        and not re.fullmatch(r"\d{1,3}", compact_inline(block.text))
+    ]
+    # 一个图题与单个普通标签不足以证明图形区域；真实图内应有多个短标签/说明。
+    if len(intervening_blocks) < 4:
+        return ""
+    if any(
+        len(compact_inline(block.text)) > 120
+        or re.search(
+            r"(?i)\b(?:shall|must|should|required|prohibited|specified|applies)\b",
+            block.text,
+        )
+        for block in intervening_blocks
+    ):
+        return ""
+    return compact_inline(label)
+
+
+def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
+    """查找清洗正文行对应的唯一原生文字块，允许已证明页边行号。"""
+
+    target = compact_inline(line)
+    matches = []
+    for block in page.blocks:
+        if block.kind != DocumentBlockKind.TEXT:
+            continue
+        normalized = compact_inline(block.text)
+        if normalized == target:
+            matches.append(block)
+            continue
+        if re.fullmatch(rf"\d{{1,3}}\s+{re.escape(target)}", normalized) or re.fullmatch(
+            rf"{re.escape(target)}\s+\d{{1,3}}",
+            normalized,
+        ):
+            matches.append(block)
+    return matches
+
+
+def _strip_edge_line_number(value: str) -> str:
+    """仅为图题识别去除一个物理块边缘的打印行号。"""
+
+    candidate = compact_inline(value)
+    candidate = re.sub(r"^\d{1,3}\s+(?=(?:Figure|Fig\.|图)\b)", "", candidate)
+    return re.sub(r"(?<=\S)\s+\d{1,3}$", "", candidate)
 
 
 def _section_role(open_section: _OpenSection) -> str:

@@ -7055,9 +7055,14 @@ class ProtocolDiffTests(unittest.TestCase):
                 )
                 for index, (line, top, font_name) in enumerate(
                     (
-                        (parent_heading, 72.0, "Synthetic+Heading"),
-                        ("Jitter", 110.0, "Synthetic+Figure"),
-                        (child_heading, 140.0, "Synthetic+Heading"),
+                        (parent_heading, 20.0, "Synthetic+Heading"),
+                        ("Figure 31-6. Module input test setup", 72.0, "Synthetic+Heading"),
+                        ("Sinusoidal Interface", 86.0, "Synthetic+Figure"),
+                        ("Crosstalk Generator", 96.0, "Synthetic+Figure"),
+                        ("Stressed signal calibration", 106.0, "Synthetic+Figure"),
+                        ("Module under test", 116.0, "Synthetic+Figure"),
+                        ("Jitter", 126.0, "Synthetic+Figure"),
+                        (child_heading, 150.0, "Synthetic+Heading"),
                     )
                 )
             )
@@ -7415,14 +7420,43 @@ class ProtocolDiffTests(unittest.TestCase):
             "Calibration remains stable."
         )
         new_text = old_text.replace("31.3.17.2", "31.3.18.2")
+        def page_with_nonfigure_label(text: str, parent: str, child: str) -> PageText:
+            blocks = tuple(
+                DocumentBlock(
+                    page_number=1,
+                    bbox=(72.0, top, 520.0, top + 12.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text=line,
+                    reading_order=index,
+                    source_engine="pdfplumber",
+                    font_names=(font_name,),
+                )
+                for index, (line, top, font_name) in enumerate(
+                    (
+                        (parent, 20.0, "Synthetic+Heading"),
+                        ("Version", 120.0, "Synthetic+Body"),
+                        (child, 145.0, "Synthetic+Heading"),
+                    )
+                )
+            )
+            return PageText(page_number=1, text=text, blocks=blocks)
+
+        old_parent = "31.3.17.2 Host and Module input tolerance tests"
+        new_parent = "31.3.18.2 Host and Module input tolerance tests"
+        old_child = (
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        )
+        new_child = (
+            "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        )
         result = compare_extractions(
             ExtractionResult(
                 pdf_path=Path("old_split_technical_label.pdf"),
-                pages=[PageText(page_number=1, text=old_text)],
+                pages=[page_with_nonfigure_label(old_text, old_parent, old_child)],
             ),
             ExtractionResult(
                 pdf_path=Path("new_split_technical_label.pdf"),
-                pages=[PageText(page_number=1, text=new_text)],
+                pages=[page_with_nonfigure_label(new_text, new_parent, new_child)],
             ),
             DiffOptions(),
         )
