@@ -298,12 +298,19 @@ def write_reports(
         *table_changes,
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
+    old_structural_numbers = _reader_structural_section_numbers(result.old_sections)
+    new_structural_numbers = _reader_structural_section_numbers(result.new_sections)
     reader_changes: list[SectionChange] = []
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
         if change.role == "document_metadata":
             continue
-        reader_change = _reader_section_change(change, reader_table_evidence)
+        reader_change = _reader_section_change(
+            change,
+            reader_table_evidence,
+            old_structural_numbers=old_structural_numbers,
+            new_structural_numbers=new_structural_numbers,
+        )
         if reader_change is not None:
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
@@ -8148,6 +8155,9 @@ def _reader_section_change(
         list[TableChange | _TableVisualGroup]
         | tuple[TableChange | _TableVisualGroup, ...]
     ) = (),
+    *,
+    old_structural_numbers: frozenset[str] = frozenset(),
+    new_structural_numbers: frozenset[str] = frozenset(),
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
@@ -8171,7 +8181,11 @@ def _reader_section_change(
     if change is None:
         return None
     # 同题条款已由章节器配对后，正文中以该条款号为完整前缀的裸子条款号也是定位引用。
-    change = _reader_change_without_proven_child_clause_renumber(change)
+    change = _reader_change_without_proven_child_clause_renumber(
+        change,
+        old_structural_numbers=old_structural_numbers,
+        new_structural_numbers=new_structural_numbers,
+    )
     if change is None:
         return None
     # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
@@ -8239,6 +8253,9 @@ def _reader_change_without_proven_heading_renumber(
 
 def _reader_change_without_proven_child_clause_renumber(
     change: SectionChange,
+    *,
+    old_structural_numbers: frozenset[str] = frozenset(),
+    new_structural_numbers: frozenset[str] = frozenset(),
 ) -> SectionChange | None:
     """隐藏已配对同题条款内、以父条款号开头的裸子条款号顺延。"""
 
@@ -8270,34 +8287,57 @@ def _reader_change_without_proven_child_clause_renumber(
         rf"(?<![A-Za-z0-9_.]){re.escape(new_parent)}(?P<child_suffix>(?:\.\d+)+)"
         rf"(?![A-Za-z0-9_.])"
     )
-    section_title_words = _reader_clause_title_words(old_section.title)
-    # 裸编号没有 Section/Clause 前缀，只在编号后正文复用了已配对父条款标题的
-    # 至少两个实质词时，才有足够正向证据认定它是嵌入正文的子条款标题。
-    if len(section_title_words) < 2:
+    section_title_tokens = _reader_clause_title_tokens(old_section.title)
+    # 裸编号没有 Section/Clause 前缀。只有较完整的父标题结构可用于证明嵌入标题；
+    # 短标题继续失败可见，避免把普通技术 ID 的偶然词汇交集当作条款身份。
+    if len(section_title_tokens) < 4:
         return change
 
     def is_child_clause_renumbering(pair: SnippetPair) -> bool:
         """只中和两侧都实际出现、且完整继承已配对父条款号的子条款编号。"""
 
-        old_suffixes = [
-            match.group("child_suffix") for match in old_child_re.finditer(pair.old)
-        ]
-        new_suffixes = [
-            match.group("child_suffix") for match in new_child_re.finditer(pair.new)
-        ]
+        old_matches = list(old_child_re.finditer(pair.old))
+        new_matches = list(new_child_re.finditer(pair.new))
+        old_suffixes = [match.group("child_suffix") for match in old_matches]
+        new_suffixes = [match.group("child_suffix") for match in new_matches]
         # 父条款顺延可以中和，子层级自身从 .1→.2 仍是可复核的定位变化。
-        if not old_suffixes or old_suffixes != new_suffixes:
+        if (
+            len(old_matches) != 1
+            or len(new_matches) != 1
+            or old_suffixes != new_suffixes
+        ):
             return False
-        old_trailing_words = _reader_clause_title_words(
-            old_child_re.split(pair.old, maxsplit=1)[-1]
+        old_child_number = old_parent + old_suffixes[0]
+        new_child_number = new_parent + new_suffixes[0]
+        # 句子形态本身不能证明点分数字是条款号；还必须由同版文档的实际章节树
+        # （含更深后代条款）证明该编号存在。技术 Version/ID 恰好长得像章节号时
+        # 不会仅凭文字相似度获得隐藏资格。
+        if not (
+            old_child_number in old_structural_numbers
+            and new_child_number in new_structural_numbers
+        ):
+            return False
+        # 嵌入标题必须采用“单个标题主题词 + 子条款号 + 父条款完整标题…”结构。
+        # 关键是父标题需从编号后立即开始；出现在普通技术句后部的 Host/Module
+        # 等词不能反向授权 Firmware ID、Version 或未知技术标识符被隐藏。
+        old_prefix = compact_inline(pair.old[: old_matches[0].start()])
+        new_prefix = compact_inline(pair.new[: new_matches[0].start()])
+        if not (
+            re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", old_prefix)
+            and re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", new_prefix)
+        ):
+            return False
+        old_trailing_tokens = _reader_clause_title_tokens(
+            pair.old[old_matches[0].end() :]
         )
-        new_trailing_words = _reader_clause_title_words(
-            new_child_re.split(pair.new, maxsplit=1)[-1]
+        new_trailing_tokens = _reader_clause_title_tokens(
+            pair.new[new_matches[0].end() :]
         )
-        shared_title_words = (
-            section_title_words & old_trailing_words & new_trailing_words
-        )
-        if len(shared_title_words) < 2:
+        title_length = len(section_title_tokens)
+        if not (
+            old_trailing_tokens[:title_length] == section_title_tokens
+            and new_trailing_tokens[:title_length] == section_title_tokens
+        ):
             return False
         return old_child_re.sub(
             "<child-clause-reference>",
@@ -8308,6 +8348,23 @@ def _reader_change_without_proven_child_clause_renumber(
         )
 
     return _reader_change_without_replaced_pairs(change, is_child_clause_renumbering)
+
+
+def _reader_structural_section_numbers(sections: Sequence[Section]) -> frozenset[str]:
+    """Return dotted section numbers proven by the parsed hierarchy."""
+
+    proven: set[str] = set()
+    for section in sections:
+        for raw_number in section.number_path:
+            number = compact_inline(raw_number).rstrip(".")
+            if not re.fullmatch(r"\d+(?:\.\d+)+", number):
+                continue
+            parts = number.split(".")
+            # A parsed 31.3.17.2.1.1 heading also proves the intermediate
+            # 31.3.17.2.1 container even when the PDF merged that heading into prose.
+            for end in range(2, len(parts) + 1):
+                proven.add(".".join(parts[:end]))
+    return frozenset(proven)
 
 
 _READER_CLAUSE_TITLE_STOP_WORDS = frozenset(
@@ -8334,14 +8391,24 @@ _READER_CLAUSE_TITLE_STOP_WORDS = frozenset(
 )
 
 
-def _reader_clause_title_words(value: str) -> set[str]:
-    """提取父条款标题与正文中可交叉证明身份的实质英文词。"""
+def _reader_clause_title_tokens(value: str) -> tuple[str, ...]:
+    """提取可用于验证嵌入子条款标题的有序、轻量归一化英文词。"""
 
-    return {
-        word
-        for word in re.findall(r"[A-Za-z][A-Za-z0-9-]*", compact_inline(value).casefold())
-        if word not in _READER_CLAUSE_TITLE_STOP_WORDS
-    }
+    # 测试点等括号限定词可以插在标题词之间，不改变标题主干。
+    without_parentheticals = re.sub(r"\([^()\r\n]{0,80}\)", " ", compact_inline(value))
+    tokens: list[str] = []
+    for raw_word in re.findall(
+        r"[A-Za-z][A-Za-z0-9-]*",
+        without_parentheticals.casefold(),
+    ):
+        if raw_word in _READER_CLAUSE_TITLE_STOP_WORDS:
+            continue
+        # 这里只消除规范标题中常见的单复数排版漂移（test/tests）；不做词典推断。
+        word = raw_word
+        if len(word) >= 5 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        tokens.append(word)
+    return tuple(tokens)
 
 
 def _reader_change_without_replaced_pairs(

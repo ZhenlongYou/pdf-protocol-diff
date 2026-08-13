@@ -7017,7 +7017,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "Jitter tolerance tests specified in Table 31-2.\n"
             "Sinusoidal Interface\n"
             "Jitter 31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test "
-            "methods To be updated."
+            "methods To be updated.\n"
+            "31.3.17.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
         )
         new_text = (
             "31.3.18.2 Host and Module input tolerance tests\n"
@@ -7026,7 +7028,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "and Table 31-11.\n"
             "Sinusoidal Interface TP4a\n"
             "Jitter 31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test "
-            "methods To be updated."
+            "methods To be updated.\n"
+            "31.3.18.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
         )
         result = compare_extractions(
             ExtractionResult(
@@ -7106,8 +7110,16 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("20 mV", rendered)
             self.assertIn("21 mV", rendered)
 
-        # 点分技术版本/固件/寄存器标识即使恰好继承章节数字，也不是子条款引用。
-        for technical_label in ("Protocol Version", "Firmware ID", "Register identifier"):
+        # 点分技术版本/固件/寄存器标识即使恰好继承章节数字、并复用父标题词，
+        # 也不是子条款引用。这里刻意覆盖“标题词碰撞”，防止弱词集启发式假绿。
+        technical_id_sentences = {
+            "Protocol Version": "supports Host and Module input modes.",
+            "Firmware ID": "is used for Host and Module interoperability.",
+            "Register identifier": "selects the input tolerance profile.",
+            # 即使完整父标题出现在后文，只要编号后不是直接开始条款标题，也应可见。
+            "Profile Code": "is used for Host and Module input tolerance tests.",
+        }
+        for technical_label, technical_suffix in technical_id_sentences.items():
             with self.subTest(technical_label=technical_label):
                 technical_id_result = compare_extractions(
                     ExtractionResult(
@@ -7117,7 +7129,7 @@ class ProtocolDiffTests(unittest.TestCase):
                                 page_number=1,
                                 text=(
                                     "31.3.17.2 Host and Module input tolerance tests\n"
-                                    f"{technical_label} 31.3.17.2.1 remains supported."
+                                    f"{technical_label} 31.3.17.2.1 {technical_suffix}"
                                 ),
                             )
                         ],
@@ -7129,7 +7141,7 @@ class ProtocolDiffTests(unittest.TestCase):
                                 page_number=1,
                                 text=(
                                     "31.3.18.2 Host and Module input tolerance tests\n"
-                                    f"{technical_label} 31.3.18.2.1 remains supported."
+                                    f"{technical_label} 31.3.18.2.1 {technical_suffix}"
                                 ),
                             )
                         ],
@@ -7149,6 +7161,10 @@ class ProtocolDiffTests(unittest.TestCase):
                         technical_id_paths["markdown"].read_text(encoding="utf-8"),
                         technical_id_paths["text"].read_text(encoding="utf-8"),
                     )
+                    technical_id_audit_reports = (
+                        technical_id_paths["json"].read_text(encoding="utf-8"),
+                        technical_id_paths["csv"].read_text(encoding="utf-8"),
+                    )
                 for rendered in technical_id_reports:
                     self.assertIn(
                         f"{technical_label} 31.3.17.2.1",
@@ -7158,6 +7174,59 @@ class ProtocolDiffTests(unittest.TestCase):
                         f"{technical_label} 31.3.18.2.1",
                         rendered,
                     )
+                for audit_report in technical_id_audit_reports:
+                    self.assertIn(
+                        f"{technical_label} 31.3.17.2.1",
+                        audit_report,
+                    )
+                    self.assertIn(
+                        f"{technical_label} 31.3.18.2.1",
+                        audit_report,
+                    )
+
+        # 即使章节树里确实存在同号子条款，普通技术 ID 也不能借用该结构证据。
+        # 这比“编号不存在”反例更接近真实规范中的版本号/条款号碰撞。
+        structural_collision_old = (
+            "31.3.17.2 Host and Module input tolerance tests\n"
+            "Firmware ID 31.3.17.2.1 is used for Host and Module interoperability.\n"
+            "31.3.17.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
+        )
+        structural_collision_new = (
+            "31.3.18.2 Host and Module input tolerance tests\n"
+            "Firmware ID 31.3.18.2.1 is used for Host and Module interoperability.\n"
+            "31.3.18.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
+        )
+        structural_collision_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_structural_id_collision.pdf"),
+                pages=[PageText(page_number=1, text=structural_collision_old)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_structural_id_collision.pdf"),
+                pages=[PageText(page_number=1, text=structural_collision_new)],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            structural_collision_paths = write_reports(
+                structural_collision_result,
+                temp_dir,
+                DiffOptions(),
+            )
+            structural_collision_reports = (
+                _visible_html_text(
+                    structural_collision_paths["html"].read_text(encoding="utf-8")
+                ),
+                structural_collision_paths["markdown"].read_text(encoding="utf-8"),
+                structural_collision_paths["text"].read_text(encoding="utf-8"),
+                structural_collision_paths["json"].read_text(encoding="utf-8"),
+                structural_collision_paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in structural_collision_reports:
+            self.assertIn("Firmware ID 31.3.17.2.1", rendered)
+            self.assertIn("Firmware ID 31.3.18.2.1", rendered)
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
