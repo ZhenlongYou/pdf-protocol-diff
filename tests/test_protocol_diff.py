@@ -4482,8 +4482,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("- 旧选择页: 2-3", report_text)
         self.assertIn("- 新选择页: 2-4", report_text)
         self.assertIn("<dt>旧选择页</dt><dd>2-3</dd>", report_html)
-        self.assertEqual({"start_page": 2, "end_page": 3, "label": "2-3", "is_full_document": False}, payload["old_selected_pages"])
-        self.assertEqual({"start_page": 2, "end_page": 4, "label": "2-4", "is_full_document": False}, payload["new_selected_pages"])
+        self.assertEqual({"start_page": 2, "end_page": 3, "label": "2-3", "total_pages_known": True, "is_full_document": False}, payload["old_selected_pages"])
+        self.assertEqual({"start_page": 2, "end_page": 4, "label": "2-4", "total_pages_known": True, "is_full_document": False}, payload["new_selected_pages"])
 
     def test_reports_preserve_different_old_and_new_source_start_pages(self) -> None:
         """Reports should show real source pages when selected windows start apart."""
@@ -4515,8 +4515,8 @@ class ProtocolDiffTests(unittest.TestCase):
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
             report_html = outputs["html"].read_text(encoding="utf-8")
 
-        self.assertEqual({"start_page": 36, "end_page": 37, "label": "36-37", "is_full_document": False}, payload["old_selected_pages"])
-        self.assertEqual({"start_page": 78, "end_page": 79, "label": "78-79", "is_full_document": False}, payload["new_selected_pages"])
+        self.assertEqual({"start_page": 36, "end_page": 37, "label": "36-37", "total_pages_known": True, "is_full_document": False}, payload["old_selected_pages"])
+        self.assertEqual({"start_page": 78, "end_page": 79, "label": "78-79", "total_pages_known": True, "is_full_document": False}, payload["new_selected_pages"])
         self.assertIn("<dt>旧选择页</dt><dd>36-37</dd>", report_html)
         self.assertIn("<dt>新选择页</dt><dd>78-79</dd>", report_html)
 
@@ -7759,9 +7759,23 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["markdown"].read_text(encoding="utf-8"),
                 paths["text"].read_text(encoding="utf-8"),
             )
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
         for rendered in reader_reports:
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
+            self.assertIn("已抽取 1（源文档总页数未知）", rendered)
+        self.assertFalse(payload["old_total_pages_known"])
+        self.assertFalse(payload["new_total_pages_known"])
+        self.assertEqual(
+            {
+                "start_page": 1,
+                "end_page": 1,
+                "label": "已抽取 1（源文档总页数未知）",
+                "total_pages_known": False,
+                "is_full_document": False,
+            },
+            payload["old_selected_pages"],
+        )
 
     def test_cross_card_citation_cleanup_reclassifies_review_only_card(self) -> None:
         """跨卡引用消噪后只剩结构复核时不得继续计作核心变化。"""

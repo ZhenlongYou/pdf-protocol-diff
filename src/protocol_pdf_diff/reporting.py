@@ -341,6 +341,8 @@ def write_reports(
         "new_pdf": str(result.new_pdf),
         "old_total_pages": _source_page_count(result, "old"),
         "new_total_pages": _source_page_count(result, "new"),
+        "old_total_pages_known": result.old_total_pages_known,
+        "new_total_pages_known": result.new_total_pages_known,
         "old_selected_pages": _selected_page_payload(result, "old"),
         "new_selected_pages": _selected_page_payload(result, "new"),
         "changes": [
@@ -11142,6 +11144,12 @@ def _selected_page_label(result: DiffResult, side: str) -> str:
     total_pages = _source_page_count(result, side)
     if start is None or end is None:
         return "无可比较页"
+    total_known = (
+        result.old_total_pages_known if side == "old" else result.new_total_pages_known
+    )
+    if not total_known:
+        extracted = str(start) if start == end else f"{start}-{end}"
+        return f"已抽取 {extracted}（源文档总页数未知）"
     if total_pages and start == 1 and end == total_pages:
         return f"全部 (1-{total_pages})" if total_pages > 1 else "全部 (1)"
     if start == end:
@@ -11154,11 +11162,17 @@ def _selected_page_payload(result: DiffResult, side: str) -> dict[str, object]:
 
     start, end = _selected_pages(result, side)
     total_pages = _source_page_count(result, side)
+    total_known = (
+        result.old_total_pages_known if side == "old" else result.new_total_pages_known
+    )
     return {
         "start_page": start,
         "end_page": end,
         "label": _selected_page_label(result, side),
-        "is_full_document": bool(total_pages and start == 1 and end == total_pages),
+        "total_pages_known": total_known,
+        "is_full_document": bool(
+            total_known and total_pages and start == 1 and end == total_pages
+        ),
     }
 
 
