@@ -7971,7 +7971,7 @@ def _reader_changes_without_cross_card_locator_pairs(
     for change_index, change in enumerate(changes):
         if change.omitted_snippet_count != 0:
             continue
-        location_key = compact_inline(change.report_location)
+        location_key = _reader_cross_card_location_key(change)
         # 新增句按其完整中和文本建索引；明确出处语法还需同步折叠来源类别，
         # 使 Table→Section+Tables 在底层拆成独立卡片时仍落到同一窄 key。
         for snippet_index, snippet in enumerate(change.added_snippets):
@@ -8077,6 +8077,39 @@ def _reader_changes_without_cross_card_locator_pairs(
         reader_changes.append(cleaned)
     # 返回新的读者卡片序列，调用者仍持有完全未修改的原始 DiffResult。
     return reader_changes
+
+
+def _reader_cross_card_location_key(change: SectionChange) -> str:
+    """Return a location key that ignores only proven structural heading numbers."""
+
+    section = change.new_section or change.old_section
+    if section is None:
+        return compact_inline(change.report_location).casefold()
+
+    # Cross-card add/delete pairs can be the same semantic section after a document-wide
+    # renumbering.  Build the key from the complete heading path, but remove a prefix only
+    # when that exact token is present in Section.number_path.  This is narrower than
+    # erasing arbitrary dotted values from a location and keeps unrelated technical IDs
+    # separated.
+    normalized_parts: list[str] = []
+    structural_numbers = sorted(
+        (compact_inline(number) for number in section.number_path if compact_inline(number)),
+        key=len,
+        reverse=True,
+    )
+    for raw_part in section.heading_path or (section.heading,):
+        part = compact_inline(raw_part)
+        for number in structural_numbers:
+            prefix = re.compile(
+                rf"(?i)^(?:(?:chapter|section|clause)\s+)?{re.escape(number)}"
+                r"(?=\s|[-:.)]|$)\s*[-:.)]?\s*"
+            )
+            stripped = prefix.sub("", part, count=1)
+            if stripped != part:
+                part = stripped
+                break
+        normalized_parts.append(part.casefold())
+    return " / ".join(normalized_parts)
 
 
 def _reader_audit_without_occurrences(

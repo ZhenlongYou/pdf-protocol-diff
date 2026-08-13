@@ -7439,6 +7439,57 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
 
+    def test_cross_card_citation_cleanup_matches_renumbered_section_location(self) -> None:
+        """章节本身顺延时，纯出处扩展仍应只留在机器审计中。"""
+
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11 and Table 31-12 and Table 31-13 and Table 31-14 and "
+            "Table 31-15 and Table 31-16 and Table 31-17 and Table 31-18 and "
+            "Table 31-19."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_renumbered_cross_card_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=f"31.3.17.2 Host input tolerance tests\n{old_sentence}",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_renumbered_cross_card_refs.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=f"31.3.18.2 Host input tolerance tests\n{new_sentence}",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+        self.assertTrue(any(change.added_snippets for change in result.changes))
+        self.assertTrue(any(change.removed_snippets for change in result.changes))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reader_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+            audit_reports = (
+                paths["json"].read_text(encoding="utf-8"),
+                paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in reader_reports:
+            self.assertNotIn(old_sentence, rendered)
+            self.assertNotIn(new_sentence, rendered)
+        for rendered in audit_reports:
+            self.assertIn(old_sentence, rendered)
+            self.assertIn(new_sentence, rendered)
+
     def test_cross_card_citation_cleanup_reclassifies_review_only_card(self) -> None:
         """跨卡引用消噪后只剩结构复核时不得继续计作核心变化。"""
 
