@@ -7101,6 +7101,15 @@ class ProtocolDiffTests(unittest.TestCase):
             ExtractionResult(
                 pdf_path=Path("old_mixed_reference_source.pdf"),
                 pages=[page_with_heading_fonts(old_text)],
+                peer_outline_heading_paths=((
+                    "31.3.18.2 Host and Module input tolerance tests",
+                    "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods",
+                    "31.3.18.2.1.1 Host input test signal calibration",
+                ), (
+                    "31.3.18.2 Host and Module input tolerance tests",
+                    "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods",
+                    "31.3.18.2.1.2 Module input test signal calibration",
+                )),
             ),
             ExtractionResult(
                 pdf_path=Path("new_mixed_reference_source.pdf"),
@@ -7108,7 +7117,12 @@ class ProtocolDiffTests(unittest.TestCase):
                 outline_heading_paths=((
                     "31.3.18.2 Host and Module input tolerance tests",
                     "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods",
-                ),),
+                    "31.3.18.2.1.1 Host input test signal calibration",
+                ), (
+                    "31.3.18.2 Host and Module input tolerance tests",
+                    "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods",
+                    "31.3.18.2.1.2 Module input test signal calibration",
+                )),
             ),
             DiffOptions(),
         )

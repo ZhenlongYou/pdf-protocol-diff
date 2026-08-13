@@ -181,7 +181,12 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading_candidate,
                     heading_stack,
                     current,
+                    page,
+                    cleaned_pages,
+                    page_index,
+                    line_index,
                     extraction.outline_heading_paths,
+                    extraction.peer_outline_heading_paths,
                 ))
                 is not None
             ):
@@ -1179,13 +1184,19 @@ def _detect_dense_numbered_heading_under_parent(
     line: str,
     heading_stack: list[HeadingInfo],
     open_section: _OpenSection | None,
+    page: PageText,
+    cleaned_pages: list[PageText],
+    page_index: int,
+    line_index: int,
     outline_heading_paths: tuple[tuple[str, ...], ...],
+    peer_outline_heading_paths: tuple[tuple[str, ...], ...],
 ) -> HeadingInfo | None:
     """用真实章节树证据恢复被多数字门挡住的完整子标题。
 
     点分数字、标题词和 ``TP4a`` 等技术记号都可能出现在表格、版本号或
     寄存器记录中，不能单独证明章节身份。这里要求候选完整命中 PDF 自带
-    outline/bookmark；没有原生结构证据时保留为正文，宁可显示也不猜测。
+    outline/bookmark。当前 PDF 若因打印丢失 outline，对侧 outline 只能辅助，
+    当前侧还必须独立证明同字体父标题和两个同字体直接子标题。
     """
 
     if "|" in line or "\t" in line:
@@ -1215,7 +1226,7 @@ def _detect_dense_numbered_heading_under_parent(
         return None
     parent_title_key = normalize_for_similarity(parent.title)
     title_key = normalize_for_similarity(title)
-    outline_pairs = {
+    own_outline_pairs = {
         (
             normalize_for_similarity(_outline_numeric_title(path[-2])),
             normalize_for_similarity(_outline_numeric_title(path[-1])),
@@ -1223,8 +1234,34 @@ def _detect_dense_numbered_heading_under_parent(
         for path in outline_heading_paths
         if len(path) >= 2
     }
-    if (parent_title_key, title_key) not in outline_pairs:
-        return None
+    title_pair = (parent_title_key, title_key)
+    if title_pair not in own_outline_pairs:
+        peer_outline_pairs = {
+            (
+                normalize_for_similarity(_outline_numeric_title(path[-2])),
+                normalize_for_similarity(_outline_numeric_title(path[-1])),
+            )
+            for path in peer_outline_heading_paths
+            if len(path) >= 3
+        }
+        candidate_fonts = _physical_line_font_names(page, line)
+        if (
+            title_pair not in peer_outline_pairs
+            or not candidate_fonts
+            or not open_section.heading_font_names
+            or candidate_fonts != open_section.heading_font_names
+            or not _has_two_peer_outline_backed_direct_children(
+                number,
+                level,
+                candidate_fonts,
+                cleaned_pages,
+                page_index,
+                line_index,
+                title_key,
+                peer_outline_heading_paths,
+            )
+        ):
+            return None
     candidate = HeadingInfo(
         raw=compact_inline(line),
         number=number,
@@ -1240,6 +1277,61 @@ def _detect_dense_numbered_heading_under_parent(
     ):
         return None
     return candidate
+
+
+def _has_two_peer_outline_backed_direct_children(
+    parent_number: str,
+    parent_level: int,
+    parent_fonts: tuple[str, ...],
+    pages: list[PageText],
+    page_index: int,
+    line_index: int,
+    parent_title_key: str,
+    peer_outline_paths: tuple[tuple[str, ...], ...],
+) -> bool:
+    """当前 PDF 的两个后代行须逐一命中对侧 outline 的同一父路径。"""
+
+    expected_child_titles = {
+        normalize_for_similarity(_outline_numeric_title(path[-1]))
+        for path in peer_outline_paths
+        if len(path) >= 2
+        and normalize_for_similarity(_outline_numeric_title(path[-2]))
+        == parent_title_key
+    }
+    if len(expected_child_titles) < 2:
+        return False
+    canonical_parent = canonical_number_identity(parent_number)
+    found_titles: set[str] = set()
+    inspected_nonempty = 0
+    for candidate_page_index in range(page_index, len(pages)):
+        candidate_page = pages[candidate_page_index]
+        lines = candidate_page.text.splitlines()
+        start = line_index + 1 if candidate_page_index == page_index else 0
+        for candidate_line_index in range(start, len(lines)):
+            candidate_line = normalize_line(lines[candidate_line_index])
+            if not candidate_line:
+                continue
+            inspected_nonempty += 1
+            if inspected_nonempty > 256:
+                return False
+            heading = detect_heading(candidate_line)
+            if heading is None or not heading.number:
+                continue
+            canonical_number = canonical_number_identity(heading.number)
+            title_key = normalize_for_similarity(heading.title)
+            if heading.level <= parent_level:
+                return False
+            if (
+                heading.level == parent_level + 1
+                and canonical_number.startswith(canonical_parent + ".")
+                and _physical_line_font_names(candidate_page, candidate_line)
+                == parent_fonts
+                and title_key in expected_child_titles
+            ):
+                found_titles.add(title_key)
+                if len(found_titles) >= 2:
+                    return True
+    return False
 
 
 def _outline_numeric_title(value: str) -> str:

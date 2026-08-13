@@ -232,19 +232,14 @@ def compare_extractions(
     matching and report generation.
     """
 
-    shared_outline_paths = tuple(
-        dict.fromkeys(
-            (*old_extraction.outline_heading_paths, *new_extraction.outline_heading_paths)
-        )
-    )
     old_extraction = replace(
         old_extraction,
-        outline_heading_paths=shared_outline_paths,
+        peer_outline_heading_paths=new_extraction.outline_heading_paths,
     )
     new_extraction = replace(
         new_extraction,
-        outline_heading_paths=shared_outline_paths,
-    )  # 同一版本对共享原生导航结构；标题正文相同而编号顺延时旧版仍可获得新版本 outline 证明。
+        peer_outline_heading_paths=old_extraction.outline_heading_paths,
+    )  # 对侧 outline 只作辅助；当前 PDF 仍须独立提供版面与后代行证据。
     old_table_visuals = _table_visuals_with_cross_page_captions(
         old_extraction.table_visuals,
         old_extraction.pages,

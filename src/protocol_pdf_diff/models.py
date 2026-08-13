@@ -161,6 +161,7 @@ class ExtractionResult:
     source_sha256: str | None = None  # 解析入口对实际快照字节计算；禁止报告层事后重读路径伪装成同一输入。
     formula_visuals: list["FormulaVisual"] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存显示公式源截图和坐标语义。
     outline_heading_paths: tuple[tuple[str, ...], ...] = ()  # PDF 原生 outline/bookmark 路径；为空时章节器不得猜测 dense 编号行身份。
+    peer_outline_heading_paths: tuple[tuple[str, ...], ...] = ()  # 对侧 outline 只作辅助，不能单独授权当前 PDF 的章节身份。
 
 
 def snapshot_page_extraction_audit(
