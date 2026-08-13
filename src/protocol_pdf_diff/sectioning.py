@@ -1037,7 +1037,6 @@ def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
             # 目标本身可能以数字开头，因此左右方向不能靠一个宽松正则择优。
             # 直接验证完整前/后缀可避免把标题首段误认成页边行号。
             for margin_match in re.finditer(r"(?<!\d)\d{1,3}(?!\d)", normalized_block_line):
-                number = margin_match.group(0)
                 left_body = compact_inline(normalized_block_line[margin_match.end() :])
                 right_body = compact_inline(normalized_block_line[: margin_match.start()])
                 if left_body == target or right_body == target:
@@ -1162,61 +1161,99 @@ def _proven_figure_label_before_heading(
         for block in intervening_blocks
     ):
         return ""
-    graphic_region_bboxes = [
-        bbox
-        for bbox in page.vector_graphic_bboxes
-        if bbox[1] >= caption.bbox[1] - 1.0
-        and bbox[3] <= heading_block.bbox[1] + 1.0
-        and bbox[0] <= label_block.bbox[2]
-        and bbox[2] >= label_block.bbox[0]
-        and (bbox[2] - bbox[0] >= 8.0 or bbox[3] - bbox[1] >= 8.0)
+    graphic_region = [
+        graphic
+        for graphic in page.vector_graphics
+        if graphic[2] >= caption.bbox[1] - 1.0
+        and graphic[4] <= heading_block.bbox[1] + 1.0
     ]
-    # 纯文字块不能伪造 Figure 区域；至少三个真实矢量对象必须位于图题与标题之间。
-    independent_graphics = _independent_vector_bboxes(graphic_region_bboxes)
-    if len(independent_graphics) < 3:
-        return ""
     label_intersecting_graphics = [
-        bbox
-        for bbox in independent_graphics
-        if bbox[0] <= label_block.bbox[2]
-        and bbox[2] >= label_block.bbox[0]
-        and bbox[1] <= label_block.bbox[3]
-        and bbox[3] >= label_block.bbox[1]
+        graphic
+        for graphic in graphic_region
+        if _bbox_intersects(_vector_graphic_bbox(graphic), label_block.bbox)
     ]
-    # 标签本身还必须与图形对象包络相交；仅在同一纵向区间存在无关矢量不够。
     if not label_intersecting_graphics:
+        return ""
+    # 从标签真正接触的对象出发建立同栏连通图形区，禁止把右栏无关 Figure 图题
+    # 与左栏普通表格框拼成伪 provenance。矩形/直线网格本身仍不证明 Figure；
+    # 区域必须连到至少一个原生 curve，且应覆盖多个非正文图内标签。
+    connected_graphics = _connected_vector_graphics(
+        graphic_region,
+        label_intersecting_graphics,
+    )
+    if not any(
+        graphic[0] == "curve"
+        and (graphic[3] - graphic[1] >= 1.0 or graphic[4] - graphic[2] >= 1.0)
+        for graphic in connected_graphics
+    ):
+        return ""
+    connected_bbox = _vector_graphics_envelope(connected_graphics)
+    connected_labels = [
+        block
+        for block in intervening_blocks
+        if _bbox_intersects(block.bbox, connected_bbox)
+    ]
+    if len(connected_labels) < 4:
         return ""
     return compact_inline(label)
 
 
-def _independent_vector_bboxes(
-    bboxes: list[tuple[float, float, float, float]],
-) -> list[tuple[float, float, float, float]]:
-    """按高重叠/近包含聚类矢量包络，防止重复描边虚增对象数量。"""
+def _vector_graphic_bbox(
+    graphic: tuple[str, float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """取出矢量对象的 pdfplumber 包络。"""
 
-    independent: list[tuple[float, float, float, float]] = []
-    for bbox in sorted(bboxes, key=lambda item: (item[1], item[0], item[3], item[2])):
-        if any(_vector_bboxes_are_near_duplicates(bbox, kept) for kept in independent):
-            continue
-        independent.append(bbox)
-    return independent
+    return graphic[1], graphic[2], graphic[3], graphic[4]
 
 
-def _vector_bboxes_are_near_duplicates(
+def _bbox_intersects(
     first: tuple[float, float, float, float],
     second: tuple[float, float, float, float],
+    *,
+    tolerance: float = 1.5,
 ) -> bool:
-    """返回两个包络是否只是同一对象的轻微偏移/重复描边。"""
+    """判断两个包络是否相交或由一次普通描边间距连接。"""
 
-    intersection_width = max(0.0, min(first[2], second[2]) - max(first[0], second[0]))
-    intersection_height = max(0.0, min(first[3], second[3]) - max(first[1], second[1]))
-    intersection = intersection_width * intersection_height
-    first_area = (first[2] - first[0]) * (first[3] - first[1])
-    second_area = (second[2] - second[0]) * (second[3] - second[1])
-    if min(first_area, second_area) <= 0:
-        return True
-    overlap_of_smaller = intersection / min(first_area, second_area)
-    return overlap_of_smaller >= 0.90
+    return (
+        first[0] <= second[2] + tolerance
+        and first[2] >= second[0] - tolerance
+        and first[1] <= second[3] + tolerance
+        and first[3] >= second[1] - tolerance
+    )
+
+
+def _connected_vector_graphics(
+    graphics: list[tuple[str, float, float, float, float]],
+    seeds: list[tuple[str, float, float, float, float]],
+) -> list[tuple[str, float, float, float, float]]:
+    """从标签接触对象扩展同一连通图形区，保留对象类型而非计数猜测。"""
+
+    connected = list(dict.fromkeys(seeds))
+    pending = list(connected)
+    while pending:
+        current = pending.pop()
+        current_bbox = _vector_graphic_bbox(current)
+        for graphic in graphics:
+            if graphic in connected:
+                continue
+            if _bbox_intersects(current_bbox, _vector_graphic_bbox(graphic)):
+                connected.append(graphic)
+                pending.append(graphic)
+    return connected
+
+
+def _vector_graphics_envelope(
+    graphics: list[tuple[str, float, float, float, float]],
+) -> tuple[float, float, float, float]:
+    """返回已证明连通图形区的统一包络。"""
+
+    bboxes = [_vector_graphic_bbox(graphic) for graphic in graphics]
+    return (
+        min(bbox[0] for bbox in bboxes),
+        min(bbox[1] for bbox in bboxes),
+        max(bbox[2] for bbox in bboxes),
+        max(bbox[3] for bbox in bboxes),
+    )
 
 
 def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:

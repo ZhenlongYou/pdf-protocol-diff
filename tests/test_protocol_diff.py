@@ -7070,10 +7070,11 @@ class ProtocolDiffTests(unittest.TestCase):
                 page_number=1,
                 text=text,
                 blocks=blocks,
-                vector_graphic_bboxes=(
-                    (90.0, 82.0, 220.0, 118.0),
-                    (240.0, 90.0, 360.0, 122.0),
-                    (70.0, 104.0, 520.0, 132.0),
+                vector_graphics=(
+                    ("rect", 90.0, 82.0, 220.0, 118.0),
+                    ("rect", 240.0, 90.0, 360.0, 122.0),
+                    ("rect", 70.0, 104.0, 520.0, 132.0),
+                    ("curve", 70.0, 82.0, 520.0, 144.0),
                 ),
             )
 
@@ -7481,6 +7482,76 @@ class ProtocolDiffTests(unittest.TestCase):
         for rendered in reports:
             self.assertIn("31.3.17.2.1", rendered)
             self.assertIn("31.3.18.2.1", rendered)
+
+    def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
+        """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""
+
+        old_parent = "31.3.17.2 Host and Module input tolerance tests"
+        new_parent = "31.3.18.2 Host and Module input tolerance tests"
+        old_child = (
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        )
+        new_child = old_child.replace("31.3.17.2", "31.3.18.2")
+
+        def page_with_framed_version(parent: str, child: str) -> PageText:
+            lines = (
+                (parent, 20.0, 72.0, "Synthetic+Heading"),
+                ("Figure 31-6. Receiver overview", 55.0, 350.0, "Synthetic+Heading"),
+                ("TX", 75.0, 370.0, "Synthetic+Figure"),
+                ("RX", 88.0, 370.0, "Synthetic+Figure"),
+                ("CLK", 101.0, 370.0, "Synthetic+Figure"),
+                ("DATA", 114.0, 370.0, "Synthetic+Figure"),
+                ("Version", 126.0, 90.0, "Synthetic+Body"),
+                (child, 150.0, 72.0, "Synthetic+Heading"),
+            )
+            blocks = tuple(
+                DocumentBlock(
+                    page_number=1,
+                    bbox=(left, top, left + 170.0, top + 12.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text=line,
+                    reading_order=index,
+                    source_engine="pdfplumber",
+                    font_names=(font_name,),
+                )
+                for index, (line, top, left, font_name) in enumerate(lines)
+            )
+            return PageText(
+                page_number=1,
+                text="\n".join(line for line, _top, _left, _font in lines),
+                blocks=blocks,
+                # 三个左栏表格单元格包围 Version；右栏曲线属于无关 Figure。
+                vector_graphics=(
+                    ("rect", 70.0, 68.0, 250.0, 108.0),
+                    ("rect", 70.0, 108.0, 250.0, 142.0),
+                    ("rect", 70.0, 111.0, 250.0, 145.0),
+                    ("curve", 340.0, 65.0, 530.0, 126.0),
+                ),
+            )
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_framed_version.pdf"),
+                pages=[page_with_framed_version(old_parent, old_child)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_framed_version.pdf"),
+                pages=[page_with_framed_version(new_parent, new_child)],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+                paths["json"].read_text(encoding="utf-8"),
+                paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in reports:
+            self.assertIn("Version 31.3.17.2.1", rendered)
+            self.assertIn("Version 31.3.18.2.1", rendered)
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
