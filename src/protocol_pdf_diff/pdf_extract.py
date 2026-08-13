@@ -332,7 +332,7 @@ def _extract_pdf_text_with_pdfplumber(
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
                     running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
-                    vector_graphics=_page_vector_graphics(page),
+                    vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
     finally:
@@ -352,12 +352,12 @@ def _extract_pdf_text_with_pdfplumber(
     )  # 统一追加空页和低字符数警告。
 
 
-def _page_vector_graphics(
+def _page_vector_graphic_bboxes(
     page: object,
-) -> tuple[tuple[str, float, float, float, float], ...]:
-    """保留原生 PDF 矢量对象类型与有效包络，拒绝文字启发式伪造图形。"""
+) -> tuple[tuple[float, float, float, float], ...]:
+    """保留原生 PDF 矩形、曲线和线段的有效包络，拒绝文字启发式伪造图形。"""
 
-    graphics: list[tuple[str, float, float, float, float]] = []
+    bboxes: list[tuple[float, float, float, float]] = []
     for attribute in ("rects", "curves", "lines"):
         objects = getattr(page, attribute, ())
         if not isinstance(objects, list | tuple):
@@ -376,9 +376,9 @@ def _page_vector_graphics(
                 continue
             if x1 <= x0 or bottom <= top:
                 continue
-            graphics.append((attribute[:-1], x0, top, x1, bottom))
-    # PDF 常为同一描边/叠画重复发出完全相同对象；重复对象不能虚增图形证据。
-    return tuple(dict.fromkeys(graphics))
+            bboxes.append((x0, top, x1, bottom))
+    # PDF 常为同一描边/叠画重复发出完全相同对象；重复 bbox 不能虚增图形证据。
+    return tuple(dict.fromkeys(bboxes))
 
 def _extract_pdfplumber_page_text(
     page: object,

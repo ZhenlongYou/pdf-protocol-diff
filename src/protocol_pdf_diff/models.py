@@ -107,7 +107,7 @@ class PageText:
     ambiguous_line_number_sides: tuple[str, ...] = ()  # 疑似打印行号位于 left/right；数字保留，只供章节器抑制伪标题。
     visual_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 仅保存坐标已证明并从比较文字过滤的页脚/页边噪声区域，视觉哨兵可据此精确屏蔽。
     running_header_texts: tuple[str, ...] = ()  # 跨页坐标证明的运行页眉从正文分离，但原文仍进入版本间结构化比较。
-    vector_graphics: tuple[tuple[str, float, float, float, float], ...] = ()  # 原生 PDF 矩形/曲线/线段的类型和几何包络；只作图形区域正向证据，不改写正文。
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 原生 PDF 矩形/曲线/线段的几何包络；只作图形区域正向证据，不改写正文。
 
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
@@ -331,11 +331,11 @@ class Section:
         compare=False,
         repr=False,
     )  # 仅记录物理行首且字体与已接纳父标题一致的后代候选；普通 Version/ID 不得借行首形态获得标题身份。
-    proven_figure_label_heading_candidates: tuple[tuple[str, str], ...] = field(
+    proven_wrapped_label_heading_candidates: tuple[tuple[str, str], ...] = field(
         default=(),
         compare=False,
         repr=False,
-    )  # (图内标签, 后续编号标题) 必须由同一页图题、几何区间和父标题字体共同证明。
+    )  # (换行尾词, 后续编号标题) 必须由上一物理行的缩写释义完整证明。
 
     @property
     def location(self) -> str:

@@ -8347,7 +8347,7 @@ def _reader_change_without_proven_child_clause_renumber(
                     old_candidate_prefix.startswith(candidate)
                     or candidate.startswith(old_candidate_prefix)
                 )
-                for label, candidate in old_section.proven_figure_label_heading_candidates
+                for label, candidate in old_section.proven_wrapped_label_heading_candidates
             )
             and any(
                 label == new_prefix
@@ -8355,7 +8355,7 @@ def _reader_change_without_proven_child_clause_renumber(
                     new_candidate_prefix.startswith(candidate)
                     or candidate.startswith(new_candidate_prefix)
                 )
-                for label, candidate in new_section.proven_figure_label_heading_candidates
+                for label, candidate in new_section.proven_wrapped_label_heading_candidates
             )
         ):
             return False

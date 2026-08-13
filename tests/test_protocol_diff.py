@@ -7061,6 +7061,7 @@ class ProtocolDiffTests(unittest.TestCase):
                         ("Crosstalk Generator", 96.0, "Synthetic+Figure"),
                         ("Stressed signal calibration", 106.0, "Synthetic+Figure"),
                         ("Module under test", 116.0, "Synthetic+Figure"),
+                        ("UBHPJ = Uncorrelated Bounded High Probability", 119.0, "Synthetic+Figure"),
                         ("Jitter", 126.0, "Synthetic+Figure"),
                         (child_heading, 150.0, "Synthetic+Heading"),
                     )
@@ -7070,25 +7071,6 @@ class ProtocolDiffTests(unittest.TestCase):
                 page_number=1,
                 text=text,
                 blocks=blocks,
-                vector_graphics=(
-                    ("rect", 70.0, 82.0, 520.0, 144.0),
-                    *tuple(
-                        ("rect", 70.0, float(top), 71.0, float(top + 5))
-                        for top in range(84, 142, 10)
-                    ),
-                    *tuple(
-                        ("rect", 519.0, float(top), 520.0, float(top + 5))
-                        for top in range(84, 142, 10)
-                    ),
-                    *tuple(
-                        ("rect", float(left), 82.0, float(left + 5), 83.0)
-                        for left in range(72, 518, 10)
-                    ),
-                    *tuple(
-                        ("rect", float(left), 143.0, float(left + 5), 144.0)
-                        for left in range(72, 518, 10)
-                    ),
-                ),
             )
 
         old_parent_heading = "31.3.17.2 Host and Module input tolerance tests"
@@ -7533,13 +7515,8 @@ class ProtocolDiffTests(unittest.TestCase):
                 page_number=1,
                 text="\n".join(line for line, _top, _left, _font in lines),
                 blocks=blocks,
-                # 三个左栏表格单元格包围 Version；右栏曲线属于无关 Figure。
-                vector_graphics=(
-                    ("rect", 70.0, 68.0, 250.0, 108.0),
-                    ("rect", 70.0, 108.0, 250.0, 142.0),
-                    ("rect", 70.0, 111.0, 250.0, 145.0),
-                    ("curve", 340.0, 65.0, 530.0, 126.0),
-                ),
+                # 三个左栏表格单元格包围 Version；几何不再参与文字 provenance。
+                vector_graphic_bboxes=((70.0, 68.0, 250.0, 145.0),),
             )
 
         result = compare_extractions(

@@ -135,7 +135,7 @@ class _OpenSection:
     page_lines: dict[int, list[str]]
     heading_font_names: tuple[str, ...]
     proven_numbered_heading_candidates: list[str]
-    proven_figure_label_heading_candidates: list[tuple[str, str]]
+    proven_wrapped_label_heading_candidates: list[tuple[str, str]]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -378,7 +378,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         heading_candidate,
                     ),
                     proven_numbered_heading_candidates=[],
-                    proven_figure_label_heading_candidates=[],
+                    proven_wrapped_label_heading_candidates=[],
                 )
                 continue
 
@@ -395,7 +395,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     page_lines={},
                     heading_font_names=(),
                     proven_numbered_heading_candidates=[],
-                    proven_figure_label_heading_candidates=[],
+                    proven_wrapped_label_heading_candidates=[],
                 )
             current.end_page = page.page_number
             if candidate := _proven_numbered_heading_descendant_candidate(
@@ -404,13 +404,13 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 _physical_line_font_names(page, heading_candidate),
             ):
                 current.proven_numbered_heading_candidates.append(candidate)
-                if figure_label := _proven_figure_label_before_heading(
+                if wrapped_label := _proven_wrapped_label_before_heading(
                     page,
                     line_index,
                     heading_candidate,
                 ):
-                    current.proven_figure_label_heading_candidates.append(
-                        (figure_label, candidate)
+                    current.proven_wrapped_label_heading_candidates.append(
+                        (wrapped_label, candidate)
                     )
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
@@ -985,8 +985,8 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         proven_numbered_heading_candidates=tuple(
             open_section.proven_numbered_heading_candidates
         ),
-        proven_figure_label_heading_candidates=tuple(
-            open_section.proven_figure_label_heading_candidates
+        proven_wrapped_label_heading_candidates=tuple(
+            open_section.proven_wrapped_label_heading_candidates
         ),
     )
 
@@ -1089,28 +1089,18 @@ def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
     return matches[0]
 
 
-_FIGURE_CAPTION_LINE_RE = re.compile(
-    r"(?i)^(?:figure|fig\.|图)\s*[A-Z0-9]+(?:[.\-–—][A-Z0-9]+)*\b"
-)
-
-
-def _proven_figure_label_before_heading(
+def _proven_wrapped_label_before_heading(
     page: PageText,
     heading_line_index: int,
     heading_line: str,
 ) -> str:
-    """证明编号标题的上一物理行位于同页 Figure 图题与标题之间。"""
+    """证明标题前短词是上一物理行缩写释义被 PDF 换行拆出的尾词。"""
 
     page_lines = [normalize_line(line) for line in page.text.splitlines()]
     if heading_line_index <= 0 or heading_line_index >= len(page_lines):
         return ""
     label = page_lines[heading_line_index - 1]
-    if (
-        not label
-        or len(label) > 64
-        or not re.fullmatch(r"[A-Za-z][A-Za-z0-9 /()_.+\-]{0,63}", label)
-        or re.search(r"(?i)\b(?:is|are|shall|must|should|may|can|will)\b", label)
-    ):
+    if not label or not re.fullmatch(r"[A-Za-z]{3,24}", label):
         return ""
     label_blocks = _physical_line_blocks(page, label)
     heading_blocks = _physical_line_blocks(page, heading_line)
@@ -1123,154 +1113,30 @@ def _proven_figure_label_before_heading(
         and heading_block.bbox[1] - label_block.bbox[3] <= 45.0
     ):
         return ""
-    caption_blocks = [
+    preceding_blocks = [
         block
         for block in page.blocks
         if block.kind == DocumentBlockKind.TEXT
         and block.bbox[1] < label_block.bbox[1]
-        and label_block.bbox[1] - block.bbox[1] <= 360.0
-        and _FIGURE_CAPTION_LINE_RE.match(
-            _strip_edge_line_number(block.text)
-        )
-        and not re.search(
-            r"(?i)\b(?:shows?|illustrates?|depicts?|describes?|defines?|"
-            r"specifies?|contains?|lists?|is|are|shall|should|must|may|can|"
-            r"will|enabled|disabled|applies?)\b",
-            _strip_edge_line_number(block.text),
-        )
-    ]
-    if not caption_blocks:
-        return ""
-    caption = max(caption_blocks, key=lambda block: block.bbox[1])
-    intervening_blocks = [
-        block
-        for block in page.blocks
-        if block.kind == DocumentBlockKind.TEXT
-        and caption.bbox[1] < block.bbox[1] < heading_block.bbox[1]
+        and label_block.bbox[1] - block.bbox[3] <= 32.0
         and not re.fullmatch(r"\d{1,3}", compact_inline(block.text))
     ]
-    # 一个图题与单个普通标签不足以证明图形区域；真实图内应有多个短标签/说明。
-    if len(intervening_blocks) < 4:
+    if not preceding_blocks:
         return ""
-    if any(
-        len(compact_inline(block.text)) > 120
-        or re.search(
-            r"(?i)\b(?:shall|must|should|required|prohibited|specified|applies)\b",
-            block.text,
-        )
-        for block in intervening_blocks
-    ):
-        return ""
-    graphic_region = [
-        graphic
-        for graphic in page.vector_graphics
-        if graphic[2] >= caption.bbox[1] - 1.0
-        and graphic[4] <= heading_block.bbox[1] + 1.0
-    ]
-    # 真实 OIF 图内的末行 Jitter 位于“信号说明”虚线图例框中。只接受标签落在
-    # 四边均由多个短 dash 组成的同一大框内；普通实线表格、圆角文本框、外围
-    # 椭圆或仅 bbox 包含标签的 curve 都不能取得 Figure provenance。
-    legend_bbox = _dashed_legend_bbox_containing_label(
-        graphic_region,
-        label_block.bbox,
+    preceding = max(preceding_blocks, key=lambda block: block.bbox[1])
+    preceding_text = _strip_edge_line_number(preceding.text)
+    abbreviation_match = re.fullmatch(
+        r"(?P<abbr>[A-Z]{2,10})\s*=\s*(?P<definition>[A-Za-z][A-Za-z ]{3,160})",
+        preceding_text,
     )
-    if legend_bbox is None:
+    if abbreviation_match is None:
         return ""
-    legend_labels = [
-        block
-        for block in intervening_blocks
-        if _bbox_intersects(block.bbox, legend_bbox, tolerance=0.0)
-    ]
-    if len(legend_labels) < 4:
+    definition_words = abbreviation_match.group("definition").split()
+    full_definition_words = [*definition_words, label]
+    initials = "".join(word[0].upper() for word in full_definition_words)
+    if initials != abbreviation_match.group("abbr"):
         return ""
     return compact_inline(label)
-
-
-def _vector_graphic_bbox(
-    graphic: tuple[str, float, float, float, float],
-) -> tuple[float, float, float, float]:
-    """取出矢量对象的 pdfplumber 包络。"""
-
-    return graphic[1], graphic[2], graphic[3], graphic[4]
-
-
-def _bbox_intersects(
-    first: tuple[float, float, float, float],
-    second: tuple[float, float, float, float],
-    *,
-    tolerance: float = 1.5,
-) -> bool:
-    """判断两个包络是否相交或由一次普通描边间距连接。"""
-
-    return (
-        first[0] <= second[2] + tolerance
-        and first[2] >= second[0] - tolerance
-        and first[1] <= second[3] + tolerance
-        and first[3] >= second[1] - tolerance
-    )
-
-
-def _dashed_legend_bbox_containing_label(
-    graphics: list[tuple[str, float, float, float, float]],
-    label_bbox: tuple[float, float, float, float],
-) -> tuple[float, float, float, float] | None:
-    """证明标签位于四边均由重复短划线构成的大型图例框中。"""
-
-    label_left = max(label_bbox[0], 72.0)
-    label_right = label_bbox[2]
-    label_middle = (label_bbox[1] + label_bbox[3]) / 2.0
-    candidates: list[tuple[float, float, float, float]] = []
-    for graphic in graphics:
-        bbox = _vector_graphic_bbox(graphic)
-        width = bbox[2] - bbox[0]
-        height = bbox[3] - bbox[1]
-        if (
-            width < 100.0
-            or height < 50.0
-            or bbox[2] < label_left
-            or bbox[0] > label_right
-            or not bbox[1] <= label_middle <= bbox[3]
-        ):
-            continue
-        side_counts = _short_dash_side_counts(graphics, bbox)
-        if min(side_counts.values()) >= 4:
-            candidates.append(bbox)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda bbox: (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
-
-
-def _short_dash_side_counts(
-    graphics: list[tuple[str, float, float, float, float]],
-    frame: tuple[float, float, float, float],
-) -> dict[str, int]:
-    """统计候选框四边的独立短划线段，实线表格不会满足该形态。"""
-
-    counts = {"left": 0, "right": 0, "top": 0, "bottom": 0}
-    for graphic in graphics:
-        bbox = _vector_graphic_bbox(graphic)
-        width = bbox[2] - bbox[0]
-        height = bbox[3] - bbox[1]
-        if (
-            min(width, height) > 2.0
-            or max(width, height) > 8.0
-            or bbox[0] < frame[0] - 2.0
-            or bbox[2] > frame[2] + 2.0
-            or bbox[1] < frame[1] - 2.0
-            or bbox[3] > frame[3] + 2.0
-        ):
-            continue
-        center_x = (bbox[0] + bbox[2]) / 2.0
-        center_y = (bbox[1] + bbox[3]) / 2.0
-        if abs(center_x - frame[0]) <= 2.0:
-            counts["left"] += 1
-        if abs(center_x - frame[2]) <= 2.0:
-            counts["right"] += 1
-        if abs(center_y - frame[1]) <= 2.0:
-            counts["top"] += 1
-        if abs(center_y - frame[3]) <= 2.0:
-            counts["bottom"] += 1
-    return counts
 
 
 def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
@@ -1294,10 +1160,14 @@ def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
 
 
 def _strip_edge_line_number(value: str) -> str:
-    """仅为图题识别去除一个物理块边缘的打印行号。"""
+    """为已由版面约束的短行识别去除一个物理块边缘打印行号。"""
 
     candidate = compact_inline(value)
-    candidate = re.sub(r"^\d{1,3}\s+(?=(?:Figure|Fig\.|图)\b)", "", candidate)
+    candidate = re.sub(
+        r"^\d{1,3}\s+(?=(?:Figure\b|Fig\.|图|[A-Z]{2,10}\s*=))",
+        "",
+        candidate,
+    )
     return re.sub(r"(?<=\S)\s+\d{1,3}$", "", candidate)
 
 
