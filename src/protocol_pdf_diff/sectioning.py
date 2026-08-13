@@ -126,6 +126,7 @@ class _OpenSection:
     end_page: int
     lines: list[str]
     page_lines: dict[int, list[str]]
+    line_start_numbered_candidates: list[str]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -363,6 +364,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         if heading_candidate != line
                         else {}
                     ),
+                    line_start_numbered_candidates=[],
                 )
                 continue
 
@@ -377,8 +379,14 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     end_page=page.page_number,
                     lines=[],
                     page_lines={},
+                    line_start_numbered_candidates=[],
                 )
             current.end_page = page.page_number
+            if candidate := _line_start_numbered_descendant_candidate(
+                heading_candidate,
+                current,
+            ):
+                current.line_start_numbered_candidates.append(candidate)
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
 
@@ -948,7 +956,29 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
             for page_number, lines in sorted(open_section.page_lines.items())
             if any(line.strip() for line in lines)
         ),
+        line_start_numbered_candidates=tuple(
+            open_section.line_start_numbered_candidates
+        ),
     )
+
+
+def _line_start_numbered_descendant_candidate(
+    line: str,
+    open_section: _OpenSection,
+) -> str:
+    """保留物理行首、继承当前父号但未被章节器接纳的编号标题候选。"""
+
+    match = re.match(
+        r"^(?P<number>\d+(?:\.\d+){2,})\.?(?:\s+)(?P<title>\S.*)$",
+        compact_inline(line),
+    )
+    if match is None or not open_section.number_path:
+        return ""
+    parent_number = compact_inline(open_section.number_path[-1]).rstrip(".")
+    candidate_number = match.group("number")
+    if not candidate_number.startswith(parent_number + "."):
+        return ""
+    return f"{candidate_number} {compact_inline(match.group('title'))}"
 
 
 def _section_role(open_section: _OpenSection) -> str:

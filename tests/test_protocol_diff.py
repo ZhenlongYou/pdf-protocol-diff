@@ -7016,8 +7016,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "The module input is required to pass its Amplitude, Interference and "
             "Jitter tolerance tests specified in Table 31-2.\n"
             "Sinusoidal Interface\n"
-            "Jitter 31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test "
-            "methods To be updated.\n"
+            "Jitter\n"
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods\n"
+            "To be updated.\n"
             "31.3.17.2.1.1 Host input test signal calibration\n"
             "Calibration remains stable."
         )
@@ -7027,8 +7028,9 @@ class ProtocolDiffTests(unittest.TestCase):
             "Jitter tolerance tests specified in Section 31.3.15 and Table 31-10 "
             "and Table 31-11.\n"
             "Sinusoidal Interface TP4a\n"
-            "Jitter 31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test "
-            "methods To be updated.\n"
+            "Jitter\n"
+            "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods\n"
+            "To be updated.\n"
             "31.3.18.2.1.1 Host input test signal calibration\n"
             "Calibration remains stable."
         )
@@ -7227,6 +7229,91 @@ class ProtocolDiffTests(unittest.TestCase):
         for rendered in structural_collision_reports:
             self.assertIn("Firmware ID 31.3.17.2.1", rendered)
             self.assertIn("Firmware ID 31.3.18.2.1", rendered)
+
+        # 单词型未知技术标签也不能因“同号结构存在 + 后接完整父标题”而被猜成标题。
+        revision_collision_old = (
+            "31.3.17.2 Host and Module input tolerance tests\n"
+            "Revision 31.3.17.2.1 Host and Module input tolerance tests remains supported.\n"
+            "31.3.17.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
+        )
+        revision_collision_new = (
+            "31.3.18.2 Host and Module input tolerance tests\n"
+            "Revision 31.3.18.2.1 Host and Module input tolerance tests remains supported.\n"
+            "31.3.18.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
+        )
+        revision_collision_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_revision_collision.pdf"),
+                pages=[PageText(page_number=1, text=revision_collision_old)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_revision_collision.pdf"),
+                pages=[PageText(page_number=1, text=revision_collision_new)],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            revision_collision_paths = write_reports(
+                revision_collision_result,
+                temp_dir,
+                DiffOptions(),
+            )
+            revision_collision_reports = (
+                _visible_html_text(
+                    revision_collision_paths["html"].read_text(encoding="utf-8")
+                ),
+                revision_collision_paths["markdown"].read_text(encoding="utf-8"),
+                revision_collision_paths["text"].read_text(encoding="utf-8"),
+                revision_collision_paths["json"].read_text(encoding="utf-8"),
+                revision_collision_paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in revision_collision_reports:
+            self.assertIn("Revision 31.3.17.2.1", rendered)
+            self.assertIn("Revision 31.3.18.2.1", rendered)
+
+    def test_reader_hides_cross_card_mixed_reference_source_expansion(self) -> None:
+        """长引用来源扩展即使被底层拆卡，也不应回到读者差异。"""
+
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11 and Table 31-12 and Table 31-13 and Table 31-14 and "
+            "Table 31-15 and Table 31-16 and Table 31-17 and Table 31-18 and "
+            "Table 31-19."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_cross_card_mixed_refs.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_cross_card_mixed_refs.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+            ),
+            DiffOptions(),
+        )
+        # 该长度差应命中真实的 added/deleted 跨卡路径，而不是重复测试 replace 路径。
+        self.assertTrue(any(change.added_snippets for change in result.changes))
+        self.assertTrue(any(change.removed_snippets for change in result.changes))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reader_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+            audit_reports = (
+                paths["json"].read_text(encoding="utf-8"),
+                paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in reader_reports:
+            self.assertNotIn(old_sentence, rendered)
+            self.assertNotIn(new_sentence, rendered)
+        for rendered in audit_reports:
+            self.assertIn(old_sentence, rendered)
+            self.assertIn(new_sentence, rendered)
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""

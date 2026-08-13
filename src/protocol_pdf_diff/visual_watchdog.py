@@ -699,7 +699,6 @@ def _reader_visible_semantic_change_pages(
         _paired_table_visuals,
         _reader_changes_without_cross_card_locator_pairs,
         _reader_section_change,
-        _reader_structural_section_numbers,
         _reader_table_changes,
     )
 
@@ -711,8 +710,6 @@ def _reader_visible_semantic_change_pages(
     )
     table_changes = _ordered_table_changes(_build_table_changes(result))
     table_evidence = [*table_changes, *table_groups]
-    old_structural_numbers = _reader_structural_section_numbers(result.old_sections)
-    new_structural_numbers = _reader_structural_section_numbers(result.new_sections)
     reader_changes = []
     for change in result.changes:
         if change.role == "document_metadata":
@@ -720,8 +717,6 @@ def _reader_visible_semantic_change_pages(
         reader_change = _reader_section_change(
             change,
             table_evidence,
-            old_structural_numbers=old_structural_numbers,
-            new_structural_numbers=new_structural_numbers,
         )
         if reader_change is not None:
             reader_changes.append(reader_change)

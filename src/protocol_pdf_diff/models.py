@@ -320,6 +320,11 @@ class Section:
         compare=False,
         repr=False,
     )  # 报告降噪需把片段绑定回原页；不参与历史 Section 身份与相等性语义。
+    line_start_numbered_candidates: tuple[str, ...] = field(
+        default=(),
+        compare=False,
+        repr=False,
+    )  # 仅记录物理行首的后代编号候选，供读者层证明裸编号确来自标题式行而非句中 Version/ID。
 
     @property
     def location(self) -> str:

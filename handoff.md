@@ -43,9 +43,9 @@
 ## Acceptance Evidence
 
 - 2026-08-13 引用差异修复：旧句仅含 `Table 31-2`、新句扩展为 `Section 31.3.15 + Table 31-10/31-11` 时，两侧都由 `specified in` 正向证明为出处集合，读者报告不再把引用类别/数量变化当技术差异；同一已配对条款中完整继承父条款号的裸子条款 `31.3.17.2.1→31.3.18.2.1` 也只在读者层中和。`Sinusoidal Interface→Sinusoidal Interface TP4a`、子层级自身 `.1→.2`、`20→21 mV` 继续严格显示；JSON/CSV 保留所有原始引用事实。
-- 前两版父前缀中和均被两名 reviewer 独立否决：第一版会把 `Protocol Version/Firmware ID/Register identifier 31...` 误当子条款；第二版仅要求与父标题共享两个词，又会被普通技术句中的 `Host/Module/input/tolerance` 碰撞绕过。当前实现同时要求文档章节树中存在该子条款号，并采用严格的嵌入标题语法：较完整的父标题主干必须从子条款号之后立即开始，且编号之前只能有一个短标题主题词。后文才出现标题词的 `Firmware ID/Profile Code` 等未知技术标识保持五面可见，不依赖技术标签黑名单。
+- 前三版父前缀中和均被两名 reviewer 独立否决：第一版会把 `Protocol Version/Firmware ID/Register identifier 31...` 误当子条款；第二版仅要求与父标题共享两个词，会被普通技术句中的 `Host/Module/input/tolerance` 碰撞绕过；第三版增加“文档树中存在同号结构”仍无法证明句中 `Revision/Version` 正在引用它。当前实现把 provenance 绑定到该片段所属章节自身：只有源 PDF 的物理行确实从该后代编号开头、且后续标题主干与读者片段吻合，才允许中和；句内技术 ID 即使文档别处存在同号章节也保持五面可见，不依赖标签黑名单。
 - 该修复的目标 RED 已在公开 `compare_extractions + write_reports` 路径复现；标题词碰撞、完整父标题后置、子层级/工程值、大小写技术标识符及相邻引用矩阵已转绿，`compileall` 与 `git diff --check` 通过。最终全量及 exact commit 独立 review 仍待完成，不沿用已失败 SHA 的绿灯或 attestation。
-- 真实 OIF 532 结构证明候选报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复结构证明验收_20260813/532/protocol_diff_20260813_224210/protocol_diff_report.html`。浏览器可见文本中两条纯引用旧/新句均为 `0` 次，`Sinusoidal Interface TP4a` 为 `1` 次；JSON 审计仍含旧/新四个引用文本。整体计数保持 `35` 正文、`12` 表格、`7` 公式且结论仍为 `需人工复核`。
+- 真实 OIF 532 行级 provenance 候选报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复行证据验收_20260813/532/protocol_diff_20260813_231030/protocol_diff_report.html`。源 PDF 旧第22页、新第21页均证明 `31.3....2.1 Host...` 独占物理行；浏览器可见文本中两条纯引用旧/新句均为 `0` 次，`Sinusoidal Interface TP4a` 为 `1` 次；JSON 审计仍含旧/新四个引用文本。整体计数保持 `35` 正文、`12` 表格、`7` 公式且结论仍为 `需人工复核`。
 - 最终全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover`，`1035` 项通过、`0` 失败，耗时 `435.652s`；独立 regression reviewer 在 exact implementation commit 上再次得到 `1035/1035 PASS`。
 - 最终修复覆盖普通数值/CJK 数词、技术运算符、章节身份配对、重复显式字段、表格重复行、混合重排+值变化、宽表 Column 标签别名与物理抽取顺序。没有以 OIF/PCIe 出版方词表作为身份依据；证明不足时保留新增/删除或“需人工复核”，不猜 replacement。
 - 最终 GUI：`.venv/bin/python gui_app.py --smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`；真实 Tk 根窗口、控件树、页码输入、滚动路径和字体均被创建并验证后关闭。
@@ -72,7 +72,7 @@
 
 ## User-Facing Artifacts
 
-- 引用差异修复 OIF 候选 HTML：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复结构证明验收_20260813/532/protocol_diff_20260813_224210/protocol_diff_report.html`
+- 引用差异修复 OIF 候选 HTML：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复行证据验收_20260813/532/protocol_diff_20260813_231030/protocol_diff_report.html`
 - 最终验收根目录：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813`
 - OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
 - 非 OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie/protocol_diff_20260813_073717/protocol_diff_report.html`

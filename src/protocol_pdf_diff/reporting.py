@@ -298,8 +298,6 @@ def write_reports(
         *table_changes,
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
-    old_structural_numbers = _reader_structural_section_numbers(result.old_sections)
-    new_structural_numbers = _reader_structural_section_numbers(result.new_sections)
     reader_changes: list[SectionChange] = []
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
@@ -308,8 +306,6 @@ def write_reports(
         reader_change = _reader_section_change(
             change,
             reader_table_evidence,
-            old_structural_numbers=old_structural_numbers,
-            new_structural_numbers=new_structural_numbers,
         )
         if reader_change is not None:
             reader_changes.append(reader_change)
@@ -7926,22 +7922,29 @@ def _reader_changes_without_cross_card_locator_pairs(
         if change.omitted_snippet_count != 0:
             continue
         location_key = compact_inline(change.report_location)
-        # 新增句按其完整中和文本建索引；列表长度差异会落到与旧句相同的 key。
+        # 新增句按其完整中和文本建索引；明确出处语法还需同步折叠来源类别，
+        # 使 Table→Section+Tables 在底层拆成独立卡片时仍落到同一窄 key。
         for snippet_index, snippet in enumerate(change.added_snippets):
+            neutralized = _reader_neutralize_locator_numbers(snippet)
+            if _READER_EXPLICIT_CITATION_CONTEXT_RE.search(snippet):
+                neutralized = _reader_neutralize_locator_source_types(neutralized)
             key = (
                 change.role,
                 location_key,
-                _reader_neutralize_locator_numbers(snippet),
+                neutralized,
             )
             added_by_key.setdefault(key, []).append(
                 (change_index, snippet_index, snippet)
             )
         # 删除句使用同一 key 结构，后续只接受恰好一对的无歧义匹配。
         for snippet_index, snippet in enumerate(change.removed_snippets):
+            neutralized = _reader_neutralize_locator_numbers(snippet)
+            if _READER_EXPLICIT_CITATION_CONTEXT_RE.search(snippet):
+                neutralized = _reader_neutralize_locator_source_types(neutralized)
             key = (
                 change.role,
                 location_key,
-                _reader_neutralize_locator_numbers(snippet),
+                neutralized,
             )
             removed_by_key.setdefault(key, []).append(
                 (change_index, snippet_index, snippet)
@@ -8155,9 +8158,6 @@ def _reader_section_change(
         list[TableChange | _TableVisualGroup]
         | tuple[TableChange | _TableVisualGroup, ...]
     ) = (),
-    *,
-    old_structural_numbers: frozenset[str] = frozenset(),
-    new_structural_numbers: frozenset[str] = frozenset(),
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
@@ -8181,11 +8181,7 @@ def _reader_section_change(
     if change is None:
         return None
     # 同题条款已由章节器配对后，正文中以该条款号为完整前缀的裸子条款号也是定位引用。
-    change = _reader_change_without_proven_child_clause_renumber(
-        change,
-        old_structural_numbers=old_structural_numbers,
-        new_structural_numbers=new_structural_numbers,
-    )
+    change = _reader_change_without_proven_child_clause_renumber(change)
     if change is None:
         return None
     # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
@@ -8253,9 +8249,6 @@ def _reader_change_without_proven_heading_renumber(
 
 def _reader_change_without_proven_child_clause_renumber(
     change: SectionChange,
-    *,
-    old_structural_numbers: frozenset[str] = frozenset(),
-    new_structural_numbers: frozenset[str] = frozenset(),
 ) -> SectionChange | None:
     """隐藏已配对同题条款内、以父条款号开头的裸子条款号顺延。"""
 
@@ -8309,12 +8302,25 @@ def _reader_change_without_proven_child_clause_renumber(
             return False
         old_child_number = old_parent + old_suffixes[0]
         new_child_number = new_parent + new_suffixes[0]
-        # 句子形态本身不能证明点分数字是条款号；还必须由同版文档的实际章节树
-        # （含更深后代条款）证明该编号存在。技术 Version/ID 恰好长得像章节号时
-        # 不会仅凭文字相似度获得隐藏资格。
+        # 必须由该片段所属章节自身保存的“物理行首编号标题候选”证明出处。
+        # 文档别处存在同号章节不足以证明句中 Version/ID 正在引用它。
+        old_candidate_prefix = compact_inline(
+            f"{old_child_number} {pair.old[old_matches[0].end():]}"
+        )
+        new_candidate_prefix = compact_inline(
+            f"{new_child_number} {pair.new[new_matches[0].end():]}"
+        )
         if not (
-            old_child_number in old_structural_numbers
-            and new_child_number in new_structural_numbers
+            any(
+                old_candidate_prefix.startswith(candidate)
+                or candidate.startswith(old_candidate_prefix)
+                for candidate in old_section.line_start_numbered_candidates
+            )
+            and any(
+                new_candidate_prefix.startswith(candidate)
+                or candidate.startswith(new_candidate_prefix)
+                for candidate in new_section.line_start_numbered_candidates
+            )
         ):
             return False
         # 嵌入标题必须采用“单个标题主题词 + 子条款号 + 父条款完整标题…”结构。
@@ -8323,8 +8329,8 @@ def _reader_change_without_proven_child_clause_renumber(
         old_prefix = compact_inline(pair.old[: old_matches[0].start()])
         new_prefix = compact_inline(pair.new[: new_matches[0].start()])
         if not (
-            re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", old_prefix)
-            and re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", new_prefix)
+            old_prefix == new_prefix
+            and re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", old_prefix)
         ):
             return False
         old_trailing_tokens = _reader_clause_title_tokens(
@@ -8348,25 +8354,6 @@ def _reader_change_without_proven_child_clause_renumber(
         )
 
     return _reader_change_without_replaced_pairs(change, is_child_clause_renumbering)
-
-
-def _reader_structural_section_numbers(sections: Sequence[Section]) -> frozenset[str]:
-    """Return dotted section numbers proven by the parsed hierarchy."""
-
-    proven: set[str] = set()
-    for section in sections:
-        for raw_number in section.number_path:
-            number = compact_inline(raw_number).rstrip(".")
-            if not re.fullmatch(r"\d+(?:\.\d+)+", number):
-                continue
-            parts = number.split(".")
-            # A parsed 31.3.17.2.1.1 heading also proves the intermediate
-            # 31.3.17.2.1 container even when the PDF merged that heading into prose.
-            for end in range(2, len(parts) + 1):
-                proven.add(".".join(parts[:end]))
-    return frozenset(proven)
-
-
 _READER_CLAUSE_TITLE_STOP_WORDS = frozenset(
     {
         "a",
