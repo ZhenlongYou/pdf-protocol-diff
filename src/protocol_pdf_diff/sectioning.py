@@ -1172,11 +1172,12 @@ def _proven_figure_label_before_heading(
         and (bbox[2] - bbox[0] >= 8.0 or bbox[3] - bbox[1] >= 8.0)
     ]
     # 纯文字块不能伪造 Figure 区域；至少三个真实矢量对象必须位于图题与标题之间。
-    if len(graphic_region_bboxes) < 3:
+    independent_graphics = _independent_vector_bboxes(graphic_region_bboxes)
+    if len(independent_graphics) < 3:
         return ""
     label_intersecting_graphics = [
         bbox
-        for bbox in graphic_region_bboxes
+        for bbox in independent_graphics
         if bbox[0] <= label_block.bbox[2]
         and bbox[2] >= label_block.bbox[0]
         and bbox[1] <= label_block.bbox[3]
@@ -1186,6 +1187,36 @@ def _proven_figure_label_before_heading(
     if not label_intersecting_graphics:
         return ""
     return compact_inline(label)
+
+
+def _independent_vector_bboxes(
+    bboxes: list[tuple[float, float, float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """按高重叠/近包含聚类矢量包络，防止重复描边虚增对象数量。"""
+
+    independent: list[tuple[float, float, float, float]] = []
+    for bbox in sorted(bboxes, key=lambda item: (item[1], item[0], item[3], item[2])):
+        if any(_vector_bboxes_are_near_duplicates(bbox, kept) for kept in independent):
+            continue
+        independent.append(bbox)
+    return independent
+
+
+def _vector_bboxes_are_near_duplicates(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> bool:
+    """返回两个包络是否只是同一对象的轻微偏移/重复描边。"""
+
+    intersection_width = max(0.0, min(first[2], second[2]) - max(first[0], second[0]))
+    intersection_height = max(0.0, min(first[3], second[3]) - max(first[1], second[1]))
+    intersection = intersection_width * intersection_height
+    first_area = (first[2] - first[0]) * (first[3] - first[1])
+    second_area = (second[2] - second[0]) * (second[3] - second[1])
+    if min(first_area, second_area) <= 0:
+        return True
+    overlap_of_smaller = intersection / min(first_area, second_area)
+    return overlap_of_smaller >= 0.90
 
 
 def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
