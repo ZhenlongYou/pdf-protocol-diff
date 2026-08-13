@@ -331,11 +331,6 @@ class Section:
         compare=False,
         repr=False,
     )  # 仅记录物理行首且字体与已接纳父标题一致的后代候选；普通 Version/ID 不得借行首形态获得标题身份。
-    proven_wrapped_label_heading_candidates: tuple[tuple[str, str], ...] = field(
-        default=(),
-        compare=False,
-        repr=False,
-    )  # (换行尾词, 后续编号标题) 必须由上一物理行的缩写释义完整证明。
 
     @property
     def location(self) -> str:

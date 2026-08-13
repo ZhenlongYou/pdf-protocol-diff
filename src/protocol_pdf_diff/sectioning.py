@@ -16,7 +16,6 @@ from hashlib import sha1
 from math import ceil
 
 from .models import (
-    DocumentBlock,
     DocumentBlockKind,
     ExtractionResult,
     HeadingInfo,
@@ -135,7 +134,6 @@ class _OpenSection:
     page_lines: dict[int, list[str]]
     heading_font_names: tuple[str, ...]
     proven_numbered_heading_candidates: list[str]
-    proven_wrapped_label_heading_candidates: list[tuple[str, str]]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -378,7 +376,6 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         heading_candidate,
                     ),
                     proven_numbered_heading_candidates=[],
-                    proven_wrapped_label_heading_candidates=[],
                 )
                 continue
 
@@ -395,7 +392,6 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     page_lines={},
                     heading_font_names=(),
                     proven_numbered_heading_candidates=[],
-                    proven_wrapped_label_heading_candidates=[],
                 )
             current.end_page = page.page_number
             if candidate := _proven_numbered_heading_descendant_candidate(
@@ -404,14 +400,6 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 _physical_line_font_names(page, heading_candidate),
             ):
                 current.proven_numbered_heading_candidates.append(candidate)
-                if wrapped_label := _proven_wrapped_label_before_heading(
-                    page,
-                    line_index,
-                    heading_candidate,
-                ):
-                    current.proven_wrapped_label_heading_candidates.append(
-                        (wrapped_label, candidate)
-                    )
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
 
@@ -985,9 +973,6 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         proven_numbered_heading_candidates=tuple(
             open_section.proven_numbered_heading_candidates
         ),
-        proven_wrapped_label_heading_candidates=tuple(
-            open_section.proven_wrapped_label_heading_candidates
-        ),
     )
 
 
@@ -1089,105 +1074,6 @@ def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
     return matches[0]
 
 
-def _proven_wrapped_label_before_heading(
-    page: PageText,
-    heading_line_index: int,
-    heading_line: str,
-) -> str:
-    """证明标题前短词是上一物理行缩写释义被 PDF 换行拆出的尾词。"""
-
-    page_lines = [normalize_line(line) for line in page.text.splitlines()]
-    if heading_line_index <= 0 or heading_line_index >= len(page_lines):
-        return ""
-    label = page_lines[heading_line_index - 1]
-    if not label or not re.fullmatch(r"[A-Za-z]{3,24}", label):
-        return ""
-    label_blocks = _physical_line_blocks(page, label)
-    heading_blocks = _physical_line_blocks(page, heading_line)
-    if len(label_blocks) != 1 or len(heading_blocks) != 1:
-        return ""
-    label_block = label_blocks[0]
-    heading_block = heading_blocks[0]
-    if not (
-        label_block.bbox[1] < heading_block.bbox[1]
-        and heading_block.bbox[1] - label_block.bbox[3] <= 45.0
-        and abs(heading_block.bbox[0] - label_block.bbox[0]) <= 24.0
-    ):
-        return ""
-    preceding_blocks = [
-        block
-        for block in page.blocks
-        if block.kind == DocumentBlockKind.TEXT
-        and block.bbox[1] < label_block.bbox[1]
-        and label_block.bbox[1] - block.bbox[3] <= 32.0
-        and not re.fullmatch(r"\d{1,3}", compact_inline(block.text))
-    ]
-    if not preceding_blocks:
-        return ""
-    preceding = max(preceding_blocks, key=lambda block: block.bbox[1])
-    preceding_text = _strip_edge_line_number(preceding.text)
-    abbreviation_match = re.fullmatch(
-        r"(?P<abbr>[A-Z]{2,10})\s*=\s*(?P<definition>[A-Za-z][A-Za-z ]{3,160})",
-        preceding_text,
-    )
-    if abbreviation_match is None:
-        return ""
-    if not preceding.font_names or preceding.font_names != label_block.font_names:
-        return ""
-    # 换行尾词必须沿用上一释义行的同一栏起点。只靠纵向最近会把右栏缩写
-    # 与左栏 Version 等普通技术行拼在一起；长释义和短尾词无需横向重叠，
-    # 但视觉起点应保持在一个小缩进范围内。
-    if abs(preceding.bbox[0] - label_block.bbox[0]) > 18.0:
-        return ""
-    # 只接纳已明确识别的标准术语断行，不把任意首字母巧合扩展成隐藏权限。
-    # UBHPJ 的全称必然以 Jitter 收尾；PV=Protocol / Version 等未知词典项
-    # 即使首字母匹配也继续失败可见。
-    proven_expansion = (
-        abbreviation_match.group("abbr"),
-        abbreviation_match.group("definition").casefold(),
-        label.casefold(),
-    )
-    if proven_expansion != (
-        "UBHPJ",
-        "uncorrelated bounded high probability",
-        "jitter",
-    ):
-        return ""
-    return compact_inline(label)
-
-
-def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
-    """查找清洗正文行对应的唯一原生文字块，允许已证明页边行号。"""
-
-    target = compact_inline(line)
-    matches = []
-    for block in page.blocks:
-        if block.kind != DocumentBlockKind.TEXT:
-            continue
-        normalized = compact_inline(block.text)
-        if normalized == target:
-            matches.append(block)
-            continue
-        if re.fullmatch(rf"\d{{1,3}}\s+{re.escape(target)}", normalized) or re.fullmatch(
-            rf"{re.escape(target)}\s+\d{{1,3}}",
-            normalized,
-        ):
-            matches.append(block)
-    return matches
-
-
-def _strip_edge_line_number(value: str) -> str:
-    """为已由版面约束的短行识别去除一个物理块边缘打印行号。"""
-
-    candidate = compact_inline(value)
-    candidate = re.sub(
-        r"^\d{1,3}\s+(?=(?:Figure\b|Fig\.|图|[A-Z]{2,10}\s*=))",
-        "",
-        candidate,
-    )
-    return re.sub(r"(?<=\S)\s+\d{1,3}$", "", candidate)
-
-
 def _section_role(open_section: _OpenSection) -> str:
     """Separate document publishing metadata from technical requirements."""
 
@@ -1262,6 +1148,15 @@ def _fallback_identity_key(body: str) -> str:
 def _looks_like_table_row(line: str) -> bool:
     """Reject dense table rows that often begin with numbers."""
 
+    # 完整点分编号开头的物理行先交给标题语法逐项审查。标题中的 TP4a/TP1
+    # 会让宽松的“至少四个数字”表格启发式误判，继而把真实子条款黏回上一行。
+    # 这里只豁免无显式列分隔符的完整编号前缀；公式、单位、脚注和数值行仍由
+    # detect_heading 后续的 forbidden-candidate 门保守拒绝。
+    if not ("|" in line or "\t" in line) and re.match(
+        r"^\d+(?:\.\d+){2,}\s+\S",
+        line,
+    ):
+        return False
     separators = line.count("|") + line.count("\t")
     many_numbers = len(re.findall(r"\d+(?:\.\d+)?", line)) >= 4
     return separators >= 2 or (many_numbers and len(line) > 40)

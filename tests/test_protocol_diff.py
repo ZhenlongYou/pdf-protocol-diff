@@ -7037,71 +7037,14 @@ class ProtocolDiffTests(unittest.TestCase):
             "31.3.18.2.1.1 Host input test signal calibration\n"
             "Calibration remains stable."
         )
-        def page_with_heading_style(
-            text: str,
-            parent_heading: str,
-            child_heading: str,
-        ) -> PageText:
-            """为合成页提供与真实 PDF 相同的父/子标题字体证据。"""
-
-            blocks = tuple(
-                DocumentBlock(
-                    page_number=1,
-                    bbox=(72.0, top, 520.0, top + 12.0),
-                    kind=DocumentBlockKind.TEXT,
-                    text=line,
-                    reading_order=index,
-                    source_engine="pdfplumber",
-                    font_names=(font_name,),
-                )
-                for index, (line, top, font_name) in enumerate(
-                    (
-                        (parent_heading, 20.0, "Synthetic+Heading"),
-                        ("Figure 31-6. Module input test setup", 72.0, "Synthetic+Heading"),
-                        ("Sinusoidal Interface", 86.0, "Synthetic+Figure"),
-                        ("Crosstalk Generator", 96.0, "Synthetic+Figure"),
-                        ("Stressed signal calibration", 106.0, "Synthetic+Figure"),
-                        ("Module under test", 116.0, "Synthetic+Figure"),
-                        ("UBHPJ = Uncorrelated Bounded High Probability", 119.0, "Synthetic+Figure"),
-                        ("Jitter", 126.0, "Synthetic+Figure"),
-                        (child_heading, 150.0, "Synthetic+Heading"),
-                    )
-                )
-            )
-            return PageText(
-                page_number=1,
-                text=text,
-                blocks=blocks,
-            )
-
-        old_parent_heading = "31.3.17.2 Host and Module input tolerance tests"
-        new_parent_heading = "31.3.18.2 Host and Module input tolerance tests"
-        old_child_heading = (
-            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
-        )
-        new_child_heading = (
-            "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
-        )
         result = compare_extractions(
             ExtractionResult(
                 pdf_path=Path("old_mixed_reference_source.pdf"),
-                pages=[
-                    page_with_heading_style(
-                        old_text,
-                        old_parent_heading,
-                        old_child_heading,
-                    )
-                ],
+                pages=[PageText(page_number=1, text=old_text)],
             ),
             ExtractionResult(
                 pdf_path=Path("new_mixed_reference_source.pdf"),
-                pages=[
-                    page_with_heading_style(
-                        new_text,
-                        new_parent_heading,
-                        new_child_heading,
-                    )
-                ],
+                pages=[PageText(page_number=1, text=new_text)],
             ),
             DiffOptions(),
         )
@@ -7123,11 +7066,12 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertNotIn("Jitter 31.3.18.2.1 Host", rendered)
             self.assertIn("Sinusoidal Interface", rendered)
             self.assertIn("TP4a", rendered)
-        # JSON 继续保存全部原始引用与子条款号，读者降噪不改变机器审计事实。
+        # JSON 继续保存全部原始引用与子条款标题；物理行结构不再伪造
+        # ``Jitter + 编号`` 的合并审计事实。
         self.assertIn("specified in Table 31-2", audit)
         self.assertIn("specified in Section 31.3.15", audit)
-        self.assertIn("Jitter 31.3.17.2.1 Host", audit)
-        self.assertIn("Jitter 31.3.18.2.1 Host", audit)
+        self.assertIn("31.3.17.2.1 Host", audit)
+        self.assertIn("31.3.18.2.1 Host", audit)
 
         # 子层级自身改变或邻近工程数值改变都不是父条款顺延，必须继续显示。
         changed_child_result = compare_extractions(
@@ -7475,9 +7419,48 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["json"].read_text(encoding="utf-8"),
                 paths["csv"].read_text(encoding="utf-8"),
             )
-        for rendered in reports:
-            self.assertIn("31.3.17.2.1", rendered)
-            self.assertIn("31.3.18.2.1", rendered)
+        # Version 是两侧相同的独立正文行，拆出真实子章节后不应制造伪变化；
+        # 原始 JSON 仍分别保存 Version 和两个章节标题。
+        self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+        self.assertIn("Version", reports[3])
+        self.assertIn("31.3.17.2.1", reports[3])
+        self.assertIn("31.3.18.2.1", reports[3])
+
+    def test_numbered_heading_with_parenthesized_technical_points_is_not_a_table_row(self) -> None:
+        """标题内多个数字/TP 标识不能触发“数字多即表格”的粗粒度误判。"""
+
+        heading = (
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) "
+            "input tolerance test methods"
+        )
+        detected = detect_heading(heading)
+        self.assertIsNotNone(detected)
+        assert detected is not None
+        self.assertEqual("31.3.17.2.1", detected.number)
+        self.assertEqual(
+            "Host (TP4a) and Module (TP1) input tolerance test methods",
+            detected.title,
+        )
+
+        sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("numbered_heading_with_test_points.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Jitter\n"
+                            f"{heading}\n"
+                            "To be updated."
+                        ),
+                    )
+                ],
+            )
+        )
+        child = next(section for section in sections if section.heading == heading)
+        self.assertEqual(("31.3.17.2", "31.3.17.2.1"), child.number_path)
+        self.assertEqual("To be updated.", child.body)
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""
@@ -7540,9 +7523,10 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["json"].read_text(encoding="utf-8"),
                 paths["csv"].read_text(encoding="utf-8"),
             )
-        for rendered in reports:
-            self.assertIn("Version 31.3.17.2.1", rendered)
-            self.assertIn("Version 31.3.18.2.1", rendered)
+        self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+        self.assertIn("Version", reports[3])
+        self.assertIn("31.3.17.2.1", reports[3])
+        self.assertIn("31.3.18.2.1", reports[3])
 
     def test_reader_keeps_cross_column_abbreviation_and_technical_label(self) -> None:
         """未知缩写释义无论跨栏或同栏都不能与 Version 拼成伪换行尾词。"""
@@ -7616,10 +7600,12 @@ class ProtocolDiffTests(unittest.TestCase):
                         paths[format_name].read_text(encoding="utf-8")
                         for format_name in ("html", "markdown", "text", "json", "csv")
                     )
-                for rendered in reports:
-                    self.assertIn("Version", rendered)
-                    self.assertIn("31.3.17.2.1", rendered)
-                    self.assertIn("31.3.18.2.1", rendered)
+                # 独立 Version 行本身未变，不应凭邻接产生读者变化；JSON 原文
+                # 继续提供技术行及两个真实子章节标题的完整审计。
+                self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+                self.assertIn("Version", reports[3])
+                self.assertIn("31.3.17.2.1", reports[3])
+                self.assertIn("31.3.18.2.1", reports[3])
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
