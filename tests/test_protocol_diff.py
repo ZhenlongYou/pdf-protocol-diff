@@ -8465,10 +8465,16 @@ class ProtocolDiffTests(unittest.TestCase):
             ExtractionResult(
                 pdf_path=Path("old_long_reference_list.pdf"),
                 pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
             ),
             ExtractionResult(
                 pdf_path=Path("new_long_reference_list.pdf"),
                 pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
             ),
             DiffOptions(),
         )
