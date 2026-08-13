@@ -310,7 +310,11 @@ def write_reports(
         if reader_change is not None:
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
-    reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
+    reader_changes = _reader_changes_without_cross_card_locator_pairs(
+        reader_changes,
+        old_sections=result.old_sections,
+        new_sections=result.new_sections,
+    )
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
         for index, change in enumerate(
@@ -7961,8 +7965,35 @@ def _reader_neutralize_scoped_citation_source_types(value: str) -> str:
 
 def _reader_changes_without_cross_card_locator_pairs(
     changes: list[SectionChange],
+    *,
+    old_sections: Iterable[Section] | None = None,
+    new_sections: Iterable[Section] | None = None,
 ) -> list[SectionChange]:
     """在同一位置唯一配对 added/removed 引用句，并只修改读者副本。"""
+
+    # 相同 location 可能在一个文档中出现多次；这种情况下字符串位置并非
+    # occurrence 身份，跨卡清理必须关闭。未传完整集合的定向helper调用仍从
+    # change中的实际Section计算保守计数。
+    old_section_values = list(old_sections) if old_sections is not None else [
+        change.old_section for change in changes if change.old_section is not None
+    ]
+    new_section_values = list(new_sections) if new_sections is not None else [
+        change.new_section for change in changes if change.new_section is not None
+    ]
+    old_location_counts = Counter(
+        location
+        for location, _section_id in {
+            (compact_inline(section.location), section.section_id)
+            for section in old_section_values
+        }
+    )
+    new_location_counts = Counter(
+        location
+        for location, _section_id in {
+            (compact_inline(section.location), section.section_id)
+            for section in new_section_values
+        }
+    )
 
     # key 同时包含角色、报告位置和编号中和后的整句，防止跨章节或跨文档角色误配。
     added_by_key: dict[tuple[str, str, str], list[tuple[int, int, str]]] = {}
@@ -7974,6 +8005,8 @@ def _reader_changes_without_cross_card_locator_pairs(
         # 底层已经拆成 added/deleted 时没有可靠章节配对关系；只能在报告位置
         # 完全相同的卡片间消除出处句，不得再根据标题或编号猜测跨章节顺延。
         location_key = compact_inline(change.report_location)
+        if old_location_counts[location_key] > 1 or new_location_counts[location_key] > 1:
+            continue
         # 新增句按其完整中和文本建索引；明确出处语法还需同步折叠来源类别，
         # 使 Table→Section+Tables 在底层拆成独立卡片时仍落到同一窄 key。
         for snippet_index, snippet in enumerate(change.added_snippets):
