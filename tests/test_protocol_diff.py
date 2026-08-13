@@ -7543,6 +7543,53 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("Version 31.3.17.2.1", rendered)
             self.assertIn("Version 31.3.18.2.1", rendered)
 
+    def test_reader_keeps_cross_column_abbreviation_and_technical_label(self) -> None:
+        """右栏缩写释义不能与左栏 Version 拼成伪换行尾词。"""
+
+        def page(parent: str, child: str) -> PageText:
+            lines = (
+                (parent, 20.0, 72.0, "Synthetic+Heading"),
+                ("PV = Protocol", 102.0, 350.0, "Synthetic+Body"),
+                ("Version", 122.0, 72.0, "Synthetic+Body"),
+                (child, 150.0, 72.0, "Synthetic+Heading"),
+            )
+            return PageText(
+                page_number=1,
+                text="\n".join(line for line, _top, _left, _font in lines),
+                blocks=tuple(
+                    DocumentBlock(
+                        page_number=1,
+                        bbox=(left, top, left + 180.0, top + 12.0),
+                        kind=DocumentBlockKind.TEXT,
+                        text=line,
+                        reading_order=index,
+                        source_engine="pdfplumber",
+                        font_names=(font,),
+                    )
+                    for index, (line, top, left, font) in enumerate(lines)
+                ),
+            )
+
+        old_parent = "31.3.17.2 Host and Module input tolerance tests"
+        new_parent = "31.3.18.2 Host and Module input tolerance tests"
+        old_child = "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        new_child = old_child.replace("31.3.17.2", "31.3.18.2")
+        result = compare_extractions(
+            ExtractionResult(Path("old_cross_column.pdf"), [page(old_parent, old_child)]),
+            ExtractionResult(Path("new_cross_column.pdf"), [page(new_parent, new_child)]),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reports = tuple(
+                paths[format_name].read_text(encoding="utf-8")
+                for format_name in ("html", "markdown", "text", "json", "csv")
+            )
+        for rendered in reports:
+            self.assertIn("Version", rendered)
+            self.assertIn("31.3.17.2.1", rendered)
+            self.assertIn("31.3.18.2.1", rendered)
+
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
 

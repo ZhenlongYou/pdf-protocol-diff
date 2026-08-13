@@ -1131,6 +1131,11 @@ def _proven_wrapped_label_before_heading(
     )
     if abbreviation_match is None:
         return ""
+    # 换行尾词必须沿用上一释义行的同一栏起点。只靠纵向最近会把右栏缩写
+    # 与左栏 Version 等普通技术行拼在一起；长释义和短尾词无需横向重叠，
+    # 但视觉起点应保持在一个小缩进范围内。
+    if abs(preceding.bbox[0] - label_block.bbox[0]) > 18.0:
+        return ""
     definition_words = abbreviation_match.group("definition").split()
     full_definition_words = [*definition_words, label]
     initials = "".join(word[0].upper() for word in full_definition_words)
