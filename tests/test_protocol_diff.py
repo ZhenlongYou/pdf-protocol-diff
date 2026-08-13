@@ -7551,7 +7551,7 @@ class ProtocolDiffTests(unittest.TestCase):
             lines = (
                 (parent, 20.0, 72.0, "Synthetic+Heading"),
                 ("PV = Protocol", 102.0, 350.0, "Synthetic+Body"),
-                ("Version", 122.0, 72.0, "Synthetic+Body"),
+                ("Version", 122.0, 72.0, "Synthetic+Field"),
                 (child, 150.0, 72.0, "Synthetic+Heading"),
             )
             return PageText(
@@ -7575,8 +7575,8 @@ class ProtocolDiffTests(unittest.TestCase):
         new_parent = "31.3.18.2 Host and Module input tolerance tests"
         old_child = "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
         new_child = old_child.replace("31.3.17.2", "31.3.18.2")
-        for technical_left in (72.0, 350.0):
-            with self.subTest(technical_left=technical_left):
+        for technical_left, heading_left in ((72.0, 72.0), (350.0, 72.0), (350.0, 350.0)):
+            with self.subTest(technical_left=technical_left, heading_left=heading_left):
                 def adjusted_page(parent: str, child: str) -> PageText:
                     candidate = page(parent, child)
                     adjusted_blocks = tuple(
@@ -7590,6 +7590,16 @@ class ProtocolDiffTests(unittest.TestCase):
                             ),
                         )
                         if block.text.strip() == "Version"
+                        else replace(
+                            block,
+                            bbox=(
+                                heading_left,
+                                block.bbox[1],
+                                heading_left + 180.0,
+                                block.bbox[3],
+                            ),
+                        )
+                        if block.text.strip() == child
                         else block
                         for block in candidate.blocks
                     )

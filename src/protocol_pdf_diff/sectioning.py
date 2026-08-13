@@ -1111,6 +1111,7 @@ def _proven_wrapped_label_before_heading(
     if not (
         label_block.bbox[1] < heading_block.bbox[1]
         and heading_block.bbox[1] - label_block.bbox[3] <= 45.0
+        and abs(heading_block.bbox[0] - label_block.bbox[0]) <= 24.0
     ):
         return ""
     preceding_blocks = [
@@ -1130,6 +1131,8 @@ def _proven_wrapped_label_before_heading(
         preceding_text,
     )
     if abbreviation_match is None:
+        return ""
+    if not preceding.font_names or preceding.font_names != label_block.font_names:
         return ""
     # 换行尾词必须沿用上一释义行的同一栏起点。只靠纵向最近会把右栏缩写
     # 与左栏 Version 等普通技术行拼在一起；长释义和短尾词无需横向重叠，
