@@ -7006,6 +7006,106 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Section 31.3.10", audit_pair["old"])
         self.assertIn("Table 31-6", audit_pair["new"])
 
+    def test_reader_hides_mixed_reference_source_and_child_clause_renumbering(self) -> None:
+        """引用来源扩展与已配对章节的子条款顺延不应掩盖真实技术文字。"""
+
+        # 复刻真实 OIF 报告：引用从一个 Table 扩展成 Section + 两个 Table，
+        # 同一已配对章节内的裸子条款号也随父章节顺延；TP4a 则是真实新增事实。
+        old_text = (
+            "31.3.17.2 Host and Module input tolerance tests\n"
+            "The module input is required to pass its Amplitude, Interference and "
+            "Jitter tolerance tests specified in Table 31-2.\n"
+            "Sinusoidal Interface\n"
+            "Jitter 31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test "
+            "methods To be updated."
+        )
+        new_text = (
+            "31.3.18.2 Host and Module input tolerance tests\n"
+            "The module input is required to pass its Amplitude, Interference and "
+            "Jitter tolerance tests specified in Section 31.3.15 and Table 31-10 "
+            "and Table 31-11.\n"
+            "Sinusoidal Interface TP4a\n"
+            "Jitter 31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test "
+            "methods To be updated."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_mixed_reference_source.pdf"),
+                pages=[PageText(page_number=1, text=old_text)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_mixed_reference_source.pdf"),
+                pages=[PageText(page_number=1, text=new_text)],
+            ),
+            DiffOptions(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            rendered_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+            audit = paths["json"].read_text(encoding="utf-8")
+
+        # 人读报告只显示真实新增的 TP4a，不再把两种纯出处变化列为技术差异。
+        for rendered in rendered_reports:
+            self.assertNotIn("specified in Table 31-2", rendered)
+            self.assertNotIn("specified in Section 31.3.15", rendered)
+            self.assertNotIn("Jitter 31.3.17.2.1 Host", rendered)
+            self.assertNotIn("Jitter 31.3.18.2.1 Host", rendered)
+            self.assertIn("Sinusoidal Interface", rendered)
+            self.assertIn("TP4a", rendered)
+        # JSON 继续保存全部原始引用与子条款号，读者降噪不改变机器审计事实。
+        self.assertIn("specified in Table 31-2", audit)
+        self.assertIn("specified in Section 31.3.15", audit)
+        self.assertIn("Jitter 31.3.17.2.1 Host", audit)
+        self.assertIn("Jitter 31.3.18.2.1 Host", audit)
+
+        # 子层级自身改变或邻近工程数值改变都不是父条款顺延，必须继续显示。
+        changed_child_result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_changed_child.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Jitter 31.3.17.2.1 limit is 20 mV."
+                        ),
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_changed_child.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.18.2 Host and Module input tolerance tests\n"
+                            "Jitter 31.3.18.2.2 limit is 21 mV."
+                        ),
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            changed_paths = write_reports(changed_child_result, temp_dir, DiffOptions())
+            changed_reports = (
+                _visible_html_text(
+                    changed_paths["html"].read_text(encoding="utf-8")
+                ),
+                changed_paths["markdown"].read_text(encoding="utf-8"),
+                changed_paths["text"].read_text(encoding="utf-8"),
+            )
+        for rendered in changed_reports:
+            self.assertIn("31.3.17.2.1", rendered)
+            self.assertIn("31.3.18.2.2", rendered)
+            self.assertIn("20 mV", rendered)
+            self.assertIn("21 mV", rendered)
+
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
 

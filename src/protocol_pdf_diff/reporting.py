@@ -7820,6 +7820,18 @@ _READER_EMPTY_TYPED_LOCATOR_RES = tuple(
 _READER_BARE_SEE_REFERENCE_RE = re.compile(
     rf"(?i)\bsee\s+\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
 )
+# 当一句话明确把编号作为出处时，Section/Table/Figure 等类别本身也只是引用来源。
+# 只有旧、新两侧都具备这种正向语法，才允许把不同类型和不同数量的引用折叠为同一占位符。
+_READER_EXPLICIT_CITATION_CONTEXT_RE = re.compile(
+    r"(?i)\b(?:see|refer(?:red)?\s+to|according\s+to|"
+    r"(?:specified|shown|defined|described|listed|found|given|provided)\s+in)\b"
+)
+_READER_TYPED_REFERENCE_PLACEHOLDER_RE = re.compile(
+    r"<(?:section|figure|table|condition|equation|page)-references>"
+)
+_READER_GENERIC_REFERENCE_SEQUENCE_RE = re.compile(
+    rf"<locator-references>(?:{_READER_LOCATOR_JOIN_PATTERN}<locator-references>)+"
+)
 
 
 def _reader_neutralize_locator_numbers(value: str) -> str:
@@ -7861,9 +7873,37 @@ def _reader_values_match_after_locator_renumbering(
     """判断完整文本是否只改变了显式定位引用列表或范围。"""
 
     # 只有除定位出处外的所有字符都一致时才隐藏，0.023→0.025 UI 会继续失败并保留。
-    return old_value != new_value and _reader_neutralize_locator_numbers(
-        old_value
-    ) == _reader_neutralize_locator_numbers(new_value)
+    if old_value == new_value:
+        return False
+    old_neutralized = _reader_neutralize_locator_numbers(old_value)
+    new_neutralized = _reader_neutralize_locator_numbers(new_value)
+    if old_neutralized == new_neutralized:
+        return True
+    # ``specified in Table 2`` → ``specified in Section 3 and Tables 10/11``
+    # 仍是出处集合变化。只有两侧都有明确引用谓语时才忽略类别和数量，避免把表题
+    # ``Table 1 Limits`` 与图题 ``Figure 2 Limits`` 误判为读者等价。
+    if not (
+        _READER_EXPLICIT_CITATION_CONTEXT_RE.search(old_value)
+        and _READER_EXPLICIT_CITATION_CONTEXT_RE.search(new_value)
+    ):
+        return False
+    old_sources_neutralized = _reader_neutralize_locator_source_types(old_neutralized)
+    new_sources_neutralized = _reader_neutralize_locator_source_types(new_neutralized)
+    return old_sources_neutralized == new_sources_neutralized
+
+
+def _reader_neutralize_locator_source_types(value: str) -> str:
+    """折叠明确出处句中的引用类别和引用项数量。"""
+
+    neutralized = _READER_TYPED_REFERENCE_PLACEHOLDER_RE.sub(
+        "<locator-references>",
+        value,
+    )
+    # Section 与多个 Table 被前序规则分别原子中和后，在这里合并为一个“出处集合”。
+    return _READER_GENERIC_REFERENCE_SEQUENCE_RE.sub(
+        "<locator-references>",
+        neutralized,
+    )
 
 
 def _reader_changes_without_cross_card_locator_pairs(
@@ -8130,6 +8170,10 @@ def _reader_section_change(
     change = _reader_change_without_proven_heading_renumber(change)
     if change is None:
         return None
+    # 同题条款已由章节器配对后，正文中以该条款号为完整前缀的裸子条款号也是定位引用。
+    change = _reader_change_without_proven_child_clause_renumber(change)
+    if change is None:
+        return None
     # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
     change = _reader_change_without_locator_renumbering(change)
     if change is None:
@@ -8191,6 +8235,63 @@ def _reader_change_without_proven_heading_renumber(
 
     # 共用 occurrence 过滤器负责读者副本和省略数量，原始结果仍保持完整。
     return _reader_change_without_replaced_pairs(change, is_heading_renumbering)
+
+
+def _reader_change_without_proven_child_clause_renumber(
+    change: SectionChange,
+) -> SectionChange | None:
+    """隐藏已配对同题条款内、以父条款号开头的裸子条款号顺延。"""
+
+    old_section = change.old_section
+    new_section = change.new_section
+    if (
+        change.change_type != "modified"
+        or old_section is None
+        or new_section is None
+        or not old_section.number_path
+        or not new_section.number_path
+        or old_section.number_path == new_section.number_path
+        or compact_inline(old_section.title) != compact_inline(new_section.title)
+    ):
+        return change
+    old_parent = compact_inline(old_section.number_path[-1])
+    new_parent = compact_inline(new_section.number_path[-1])
+    # 当前证据只覆盖规范中通用的点分层级；字母编号或破折号编号继续保守可见。
+    if not (
+        re.fullmatch(r"\d+(?:\.\d+)+", old_parent)
+        and re.fullmatch(r"\d+(?:\.\d+)+", new_parent)
+    ):
+        return change
+    old_child_re = re.compile(
+        rf"(?<![A-Za-z0-9_.]){re.escape(old_parent)}(?P<child_suffix>(?:\.\d+)+)"
+        rf"(?![A-Za-z0-9_.])"
+    )
+    new_child_re = re.compile(
+        rf"(?<![A-Za-z0-9_.]){re.escape(new_parent)}(?P<child_suffix>(?:\.\d+)+)"
+        rf"(?![A-Za-z0-9_.])"
+    )
+
+    def is_child_clause_renumbering(pair: SnippetPair) -> bool:
+        """只中和两侧都实际出现、且完整继承已配对父条款号的子条款编号。"""
+
+        old_suffixes = [
+            match.group("child_suffix") for match in old_child_re.finditer(pair.old)
+        ]
+        new_suffixes = [
+            match.group("child_suffix") for match in new_child_re.finditer(pair.new)
+        ]
+        # 父条款顺延可以中和，子层级自身从 .1→.2 仍是可复核的定位变化。
+        if not old_suffixes or old_suffixes != new_suffixes:
+            return False
+        return old_child_re.sub(
+            "<child-clause-reference>",
+            compact_inline(pair.old),
+        ) == new_child_re.sub(
+            "<child-clause-reference>",
+            compact_inline(pair.new),
+        )
+
+    return _reader_change_without_replaced_pairs(change, is_child_clause_renumbering)
 
 
 def _reader_change_without_replaced_pairs(

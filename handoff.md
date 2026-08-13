@@ -42,6 +42,9 @@
 
 ## Acceptance Evidence
 
+- 2026-08-13 引用差异修复：旧句仅含 `Table 31-2`、新句扩展为 `Section 31.3.15 + Table 31-10/31-11` 时，两侧都由 `specified in` 正向证明为出处集合，读者报告不再把引用类别/数量变化当技术差异；同一已配对条款中完整继承父条款号的裸子条款 `31.3.17.2.1→31.3.18.2.1` 也只在读者层中和。`Sinusoidal Interface→Sinusoidal Interface TP4a`、子层级自身 `.1→.2`、`20→21 mV` 继续严格显示；JSON/CSV 保留所有原始引用事实。
+- 该修复的目标 RED 已在公开 `compare_extractions + write_reports` 路径复现，GREEN 后相邻引用/单位/标识符矩阵 `5/5 PASS`、reader/table 定向 `149/149 PASS`、最终全量 `1036/1036 PASS`（`461.766s`），`compileall` 与 `git diff --check` 通过。
+- 真实 OIF 532 重跑报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复验收_20260813/532/protocol_diff_20260813_214848/protocol_diff_report.html`。浏览器可见文本中两条纯引用旧/新句均为 `0` 次，`Sinusoidal Interface TP4a` 为 `1` 次；JSON 审计仍含旧/新四个引用文本。整体计数保持 `35` 正文、`12` 表格、`7` 公式且结论仍为 `需人工复核`。
 - 最终全量：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover`，`1035` 项通过、`0` 失败，耗时 `435.652s`；独立 regression reviewer 在 exact implementation commit 上再次得到 `1035/1035 PASS`。
 - 最终修复覆盖普通数值/CJK 数词、技术运算符、章节身份配对、重复显式字段、表格重复行、混合重排+值变化、宽表 Column 标签别名与物理抽取顺序。没有以 OIF/PCIe 出版方词表作为身份依据；证明不足时保留新增/删除或“需人工复核”，不猜 replacement。
 - 最终 GUI：`.venv/bin/python gui_app.py --smoke-test` 与系统入口 `python3 gui_app.py --smoke-test` 均退出 `0`；真实 Tk 根窗口、控件树、页码输入、滚动路径和字体均被创建并验证后关闭。
@@ -68,6 +71,7 @@
 
 ## User-Facing Artifacts
 
+- 引用差异修复 OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复验收_20260813/532/protocol_diff_20260813_214848/protocol_diff_report.html`
 - 最终验收根目录：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813`
 - OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
 - 非 OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie/protocol_diff_20260813_073717/protocol_diff_report.html`
