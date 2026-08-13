@@ -473,9 +473,13 @@ def _render_markdown(
     # write_reports 已把元信息从读者副本剔除；此处只渲染技术正文，避免空板块和零值指标占空间。
     technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
-        change.change_type == "review" for change in technical_changes
+        len(change.review_replaced_snippets)
+        or (1 if change.change_type == "review" else 0)
+        for change in technical_changes
     )
-    material_technical_count = len(technical_changes) - technical_review_count
+    material_technical_count = sum(
+        change.change_type != "review" for change in technical_changes
+    )
     table_changes = _ordered_table_changes(table_changes)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     comparison_note = _comparison_method_note(result)
@@ -710,6 +714,11 @@ def _append_markdown_changes(
                 )
                 if glyph_note := _unverified_pua_mapping_note(pair.old, pair.new):
                     lines.append(f"    说明: {glyph_note}")
+        if change.review_replaced_snippets:
+            lines.append("- 结构顺延复核（不计入核心差异，保留原文供核对）:")
+            for pair in change.review_replaced_snippets:
+                lines.append(f"  - 旧: {_reader_snippet_text(pair.old)}")
+                lines.append(f"    新: {_reader_snippet_text(pair.new)}")
         if change.added_snippets:
             lines.append("- 新增片段:")
             for snippet in _reader_single_list_groups(change.added_snippets):
@@ -789,9 +798,13 @@ def _render_html(
     # HTML 与 Markdown 共用技术正文口径，元信息只留在机器审计文件。
     technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
-        change.change_type == "review" for change in technical_changes
+        len(change.review_replaced_snippets)
+        or (1 if change.change_type == "review" else 0)
+        for change in technical_changes
     )
-    material_technical_count = len(technical_changes) - technical_review_count
+    material_technical_count = sum(
+        change.change_type != "review" for change in technical_changes
+    )
     table_changes = _ordered_table_changes(table_changes)
     indexed_technical = list(enumerate(technical_changes, start=1))
     # 公式先绑定到正文条款，后续导航、顶部索引和正文卡共用同一份稳定归属结果。
@@ -1379,10 +1392,12 @@ def _render_change_html(
             '（结构证据授权；相似度仍为全文实际值）</div>'
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
+    review_pairs = _render_review_pairs_html(change.review_replaced_snippets)
     added = _render_single_list("新增片段", change.added_snippets, "ins")
     removed = _render_single_list("删除片段", change.removed_snippets, "del")
     omitted = _render_omitted_html(change.omitted_snippet_count)
     body = pairs or ""
+    body += review_pairs
     body += added
     body += removed
     body += omitted
@@ -6979,6 +6994,8 @@ def _change_summary(change: SectionChange) -> str:
     parts: list[str] = []
     if change.replaced_snippets:
         parts.append(f"{len(change.replaced_snippets)} 处替换")
+    if change.review_replaced_snippets:
+        parts.append(f"{len(change.review_replaced_snippets)} 处结构顺延复核")
     if change.added_snippets:
         parts.append(f"{len(_reader_single_list_groups(change.added_snippets))} 段新增")
     if change.removed_snippets:
@@ -7066,6 +7083,34 @@ def _render_pair_html(old_text: str, new_text: str) -> str:
           </div>
         </div>
     """
+
+
+def _render_review_pairs_html(pairs: list[SnippetPair]) -> str:
+    """Render ambiguous structural renumbering without red/green change emphasis."""
+
+    if not pairs:
+        return ""
+    rendered: list[str] = [
+        '<div class="match-basis">结构顺延复核（不计入核心技术差异；旧、新原文保留供核对）</div>'
+    ]
+    for pair in pairs:
+        old_html = _render_collapsible_snippet_html(pair.old, _escape(pair.old))
+        new_html = _render_collapsible_snippet_html(pair.new, _escape(pair.new))
+        rendered.append(
+            f"""
+        <div class="compare-grid review-evidence">
+          <div class="pane">
+            <h4>旧协议（复核）</h4>
+            <div class="snippet">{old_html}</div>
+          </div>
+          <div class="pane">
+            <h4>新协议（复核）</h4>
+            <div class="snippet">{new_html}</div>
+          </div>
+        </div>
+        """
+        )
+    return "\n".join(rendered)
 
 
 def _unverified_pua_mapping_note(
@@ -8017,6 +8062,7 @@ def _reader_changes_without_cross_card_locator_pairs(
             not cleaned.added_snippets
             and not cleaned.removed_snippets
             and not cleaned.replaced_snippets
+            and not cleaned.review_replaced_snippets
             and cleaned.omitted_snippet_count == 0
         ):
             continue
@@ -8190,12 +8236,15 @@ def _reader_section_change(
     if change is None:
         return None
     # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
+    # helper 会保留已经移入中性复核区的双侧原文。
     change = _reader_change_without_locator_renumbering(change)
     if change is None:
         return None
     change = _reader_change_without_covered_standalone_table_references(change)
     if change is None:
         return None
+    if change.review_replaced_snippets:
+        return change
     if _reader_change_is_layout_reorder_only(change):
         return replace(change, change_type="review")
     return change
@@ -8248,7 +8297,19 @@ def _reader_change_without_proven_heading_renumber(
             and compact_inline(pair.new) == new_heading_fact
         )
 
-    # 共用 occurrence 过滤器负责读者副本和省略数量，原始结果仍保持完整。
+    # 稠密编号标题的章节身份来自保守恢复：它可避免把整段正文误拆，却不足以
+    # 静默中和 Firmware/Version 等技术编号。此时转成中性复核；原生标题仍按
+    # 已配对章节的定位编号处理。
+    if (
+        old_section.heading_provenance == "dense-outline-review"
+        or new_section.heading_provenance == "dense-outline-review"
+        or old_section.inherited_heading_provenance
+        or new_section.inherited_heading_provenance
+    ):
+        return _reader_change_with_replaced_pair_review(
+            change,
+            is_heading_renumbering,
+        )
     return _reader_change_without_replaced_pairs(change, is_heading_renumbering)
 
 
@@ -8285,14 +8346,8 @@ def _reader_change_without_proven_child_clause_renumber(
         rf"(?<![A-Za-z0-9_.]){re.escape(new_parent)}(?P<child_suffix>(?:\.\d+)+)"
         rf"(?![A-Za-z0-9_.])"
     )
-    section_title_tokens = _reader_clause_title_tokens(old_section.title)
-    # 裸编号没有 Section/Clause 前缀。只有较完整的父标题结构可用于证明嵌入标题；
-    # 短标题继续失败可见，避免把普通技术 ID 的偶然词汇交集当作条款身份。
-    if len(section_title_tokens) < 4:
-        return change
-
     def is_child_clause_renumbering(pair: SnippetPair) -> bool:
-        """只中和两侧都实际出现、且完整继承已配对父条款号的子条款编号。"""
+        """识别物理行首候选中的父号顺延，交给中性复核而非静默中和。"""
 
         old_matches = list(old_child_re.finditer(pair.old))
         new_matches = list(new_child_re.finditer(pair.new))
@@ -8300,56 +8355,39 @@ def _reader_change_without_proven_child_clause_renumber(
         new_suffixes = [match.group("child_suffix") for match in new_matches]
         # 父条款顺延可以中和，子层级自身从 .1→.2 仍是可复核的定位变化。
         if (
-            len(old_matches) != 1
-            or len(new_matches) != 1
+            not old_matches
+            or len(old_matches) != len(new_matches)
             or old_suffixes != new_suffixes
         ):
             return False
-        old_child_number = old_parent + old_suffixes[0]
-        new_child_number = new_parent + new_suffixes[0]
         # 必须由该片段所属章节自身保存的“物理行首编号标题候选”证明出处。
         # 文档别处存在同号章节不足以证明句中 Version/ID 正在引用它。
-        old_candidate_prefix = compact_inline(
-            f"{old_child_number} {pair.old[old_matches[0].end():]}"
-        )
-        new_candidate_prefix = compact_inline(
-            f"{new_child_number} {pair.new[new_matches[0].end():]}"
-        )
-        if not (
-            any(
-                old_candidate_prefix.startswith(candidate)
-                or candidate.startswith(old_candidate_prefix)
-                for candidate in old_section.proven_numbered_heading_candidates
+        def matches_have_physical_candidate_evidence(
+            value: str,
+            matches: list[re.Match[str]],
+            parent: str,
+            candidates: tuple[str, ...],
+        ) -> bool:
+            compact_value = compact_inline(value)
+            return all(
+                any(candidate in compact_value for candidate in candidates)
+                for _match in matches[:1]
             )
-            and any(
-                new_candidate_prefix.startswith(candidate)
-                or candidate.startswith(new_candidate_prefix)
-                for candidate in new_section.proven_numbered_heading_candidates
-            )
+
+        if not matches_have_physical_candidate_evidence(
+            pair.old,
+            old_matches,
+            old_parent,
+            old_section.proven_numbered_heading_candidates,
+        ) or not matches_have_physical_candidate_evidence(
+            pair.new,
+            new_matches,
+            new_parent,
+            new_section.proven_numbered_heading_candidates,
         ):
             return False
-        # 嵌入标题必须采用“单个标题主题词 + 子条款号 + 父条款完整标题…”结构。
-        # 关键是父标题需从编号后立即开始；出现在普通技术句后部的 Host/Module
-        # 等词不能反向授权 Firmware ID、Version 或未知技术标识符被隐藏。
-        old_prefix = compact_inline(pair.old[: old_matches[0].start()])
-        new_prefix = compact_inline(pair.new[: new_matches[0].start()])
-        if not (
-            old_prefix == new_prefix
-            and re.fullmatch(r"[A-Z][A-Za-z0-9-]{1,31}", old_prefix)
-        ):
-            return False
-        old_trailing_tokens = _reader_clause_title_tokens(
-            pair.old[old_matches[0].end() :]
-        )
-        new_trailing_tokens = _reader_clause_title_tokens(
-            pair.new[new_matches[0].end() :]
-        )
-        title_length = len(section_title_tokens)
-        if not (
-            old_trailing_tokens[:title_length] == section_title_tokens
-            and new_trailing_tokens[:title_length] == section_title_tokens
-        ):
-            return False
+        # 技术 Version/ID 可能采用完全相同的形态，所以这里不再用词形把它
+        # 判成“已证明引用”；只确认除父号外双侧逐字一致，然后保留为复核事实。
         return old_child_re.sub(
             "<child-clause-reference>",
             compact_inline(pair.old),
@@ -8358,51 +8396,12 @@ def _reader_change_without_proven_child_clause_renumber(
             compact_inline(pair.new),
         )
 
-    return _reader_change_without_replaced_pairs(change, is_child_clause_renumbering)
-_READER_CLAUSE_TITLE_STOP_WORDS = frozenset(
-    {
-        "a",
-        "an",
-        "and",
-        "are",
-        "as",
-        "at",
-        "be",
-        "by",
-        "for",
-        "from",
-        "in",
-        "is",
-        "of",
-        "on",
-        "or",
-        "the",
-        "to",
-        "with",
-    }
-)
-
-
-def _reader_clause_title_tokens(value: str) -> tuple[str, ...]:
-    """提取可用于验证嵌入子条款标题的有序、轻量归一化英文词。"""
-
-    # 测试点等括号限定词可以插在标题词之间，不改变标题主干。
-    without_parentheticals = re.sub(r"\([^()\r\n]{0,80}\)", " ", compact_inline(value))
-    tokens: list[str] = []
-    for raw_word in re.findall(
-        r"[A-Za-z][A-Za-z0-9-]*",
-        without_parentheticals.casefold(),
-    ):
-        if raw_word in _READER_CLAUSE_TITLE_STOP_WORDS:
-            continue
-        # 这里只消除规范标题中常见的单复数排版漂移（test/tests）；不做词典推断。
-        word = raw_word
-        if len(word) >= 5 and word.endswith("s") and not word.endswith("ss"):
-            word = word[:-1]
-        tokens.append(word)
-    return tuple(tokens)
-
-
+    # 物理行首、字体和父号只能证明“很像嵌入子标题”，仍不能排除技术
+    # Version/ID。读者层不再把它算核心技术差异，但保留双侧原文供复核。
+    return _reader_change_with_replaced_pair_review(
+        change,
+        is_child_clause_renumbering,
+    )
 def _reader_change_without_replaced_pairs(
     change: SectionChange,
     should_hide: Callable[[SnippetPair], bool],
@@ -8448,10 +8447,43 @@ def _reader_change_without_replaced_pairs(
         not cleaned.removed_snippets
         and not cleaned.added_snippets
         and not cleaned.replaced_snippets
+        and not cleaned.review_replaced_snippets
         and cleaned.omitted_snippet_count == 0
     ):
         return None
     return cleaned
+
+
+def _reader_change_with_replaced_pair_review(
+    change: SectionChange,
+    should_review: Callable[[SnippetPair], bool],
+) -> SectionChange | None:
+    """Move ambiguous renumber-only pairs out of core changes into neutral review."""
+
+    review_pairs = [
+        pair for pair in change.replaced_snippets if should_review(pair)
+    ]
+    if not review_pairs:
+        return change
+    cleaned = _reader_change_without_replaced_pairs(change, should_review)
+    if cleaned is None:
+        return replace(
+            change,
+            change_type="review",
+            replaced_snippets=[],
+            audit_replaced_snippets=(
+                [] if change.audit_replaced_snippets is not None else None
+            ),
+            omitted_snippet_count=0,
+            review_replaced_snippets=review_pairs,
+        )
+    return replace(
+        cleaned,
+        review_replaced_snippets=[
+            *cleaned.review_replaced_snippets,
+            *review_pairs,
+        ],
+    )
 
 
 def _reader_change_without_evidenced_table_body_fragments(
@@ -9053,6 +9085,9 @@ def _reader_change_without_covered_standalone_table_references(
     change: SectionChange,
 ) -> SectionChange | None:
     """Hide context-free table renumbers only in reader-facing formats."""
+
+    if change.review_replaced_snippets:
+        return change  # 结构复核已移出核心列表，不能因核心列表为空而把复核卡删除。
 
     kept_pairs = [
         pair

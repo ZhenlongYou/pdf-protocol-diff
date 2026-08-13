@@ -134,6 +134,8 @@ class _OpenSection:
     page_lines: dict[int, list[str]]
     heading_font_names: tuple[str, ...]
     proven_numbered_heading_candidates: list[str]
+    heading_provenance: str
+    inherited_heading_provenance: bool
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -159,6 +161,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     prose_list_expected_count: int | None = None
     prose_list_item_open = False
     saw_heading = False
+    dense_review_number_prefixes: set[str] = set()
     opening_label = _opening_section_label(extraction)
 
     for page_index, page in enumerate(cleaned_pages):
@@ -174,6 +177,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            dense_heading_was_recovered = False
             if (
                 heading is None
                 and _looks_like_table_row(heading_candidate)
@@ -191,6 +195,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 is not None
             ):
                 heading = dense_heading
+                dense_heading_was_recovered = True
+                if dense_heading.number:
+                    dense_review_number_prefixes.add(
+                        canonical_number_identity(dense_heading.number)
+                    )
             next_physical_line = (
                 normalize_line(page_lines[line_index + 1])
                 if line_index + 1 < len(page_lines)
@@ -393,6 +402,30 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         heading_candidate,
                     ),
                     proven_numbered_heading_candidates=[],
+                    heading_provenance=(
+                        "dense-outline-review"
+                        if dense_heading_was_recovered
+                        or (
+                            bool(heading.number)
+                            and any(
+                                canonical_number_identity(heading.number).startswith(
+                                    prefix + "."
+                                )
+                                for prefix in dense_review_number_prefixes
+                            )
+                        )
+                        else "native"
+                    ),
+                    inherited_heading_provenance=(
+                        not dense_heading_was_recovered
+                        and bool(heading.number)
+                        and any(
+                            canonical_number_identity(heading.number).startswith(
+                                prefix + "."
+                            )
+                            for prefix in dense_review_number_prefixes
+                        )
+                    ),
                 )
                 continue
 
@@ -409,6 +442,8 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     page_lines={},
                     heading_font_names=(),
                     proven_numbered_heading_candidates=[],
+                    heading_provenance="native",
+                    inherited_heading_provenance=False,
                 )
             current.end_page = page.page_number
             if candidate := _proven_numbered_heading_descendant_candidate(
@@ -990,6 +1025,8 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         proven_numbered_heading_candidates=tuple(
             open_section.proven_numbered_heading_candidates
         ),
+        heading_provenance=open_section.heading_provenance,
+        inherited_heading_provenance=open_section.inherited_heading_provenance,
     )
 
 
@@ -1327,7 +1364,6 @@ def _has_two_outline_backed_direct_children(
     if len(expected_child_titles) < 2:
         return False
     canonical_parent = canonical_number_identity(parent_number)
-    parent_words = _meaningful_heading_words(parent_title_key)
     found_titles: set[str] = set()
     inspected_nonempty = 0
     for candidate_page_index in range(page_index, len(pages)):
@@ -1354,7 +1390,6 @@ def _has_two_outline_backed_direct_children(
                 and _physical_line_font_names(candidate_page, candidate_line)
                 == parent_fonts
                 and title_key in expected_child_titles
-                and len(parent_words & _meaningful_heading_words(title_key)) >= 2
             ):
                 found_titles.add(title_key)
                 if len(found_titles) >= 2:

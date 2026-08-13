@@ -333,6 +333,16 @@ class Section:
         compare=False,
         repr=False,
     )  # 仅记录物理行首且字体与已接纳父标题一致的后代候选；普通 Version/ID 不得借行首形态获得标题身份。
+    heading_provenance: str = field(
+        default="native",
+        compare=False,
+        repr=False,
+    )  # dense-outline-review 表示章节身份来自歧义恢复，只能作为中性复核证据。
+    inherited_heading_provenance: bool = field(
+        default=False,
+        compare=False,
+        repr=False,
+    )  # 直接标题位于歧义恢复章节之下时也只能作为结构复核证据。
 
     @property
     def location(self) -> str:
@@ -433,6 +443,11 @@ class SectionChange:
     audit_added_snippets: list[str] | None = None  # 机器审计保存限流前的全部 occurrence；None 表示旧调用沿用可见列表。
     audit_removed_snippets: list[str] | None = None
     audit_replaced_snippets: list[SnippetPair] | None = None
+    review_replaced_snippets: list[SnippetPair] = field(
+        default_factory=list,
+        compare=False,
+        repr=False,
+    )  # 读者层中性复核证据；不计入核心差异，JSON/CSV 原始审计仍使用 audit_* 字段。
 
     @property
     def role(self) -> str:

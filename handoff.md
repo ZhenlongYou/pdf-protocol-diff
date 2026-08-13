@@ -6,8 +6,8 @@
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `86e1a26e6cc7c20abf7905fbddd3935ce6e41165`
-- implementation_commit: `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95`
-- status: `validated_and_dual_attested`
+- implementation_commit: `pending-current-review`
+- status: `citation_renumber_review_candidate`
 - oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532`
 - non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie`
 - accepted_oif_report: `/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
@@ -41,6 +41,9 @@
 - Docling 保持显式可选和快照哈希绑定，但当前只接受与原生抽取逐字符完全一致的候选。复杂多栏重排的所有者绑定仍未证明，相关增强继续延期。
 
 ## Acceptance Evidence
+
+- 2026-08-14 引用与编号复核边界：`specified in Table 31-2` → `specified in Section 31.3.15 and Table 31-10 and Table 31-11` 继续仅在读者层中和，HTML/MD/TXT 不再列为技术差异，JSON/CSV 保留原始审计；`Sinusoidal Interface` → `Sinusoidal Interface TP4a` 仍作为核心技术变化。物理行首、字体、层级和 outline 即使同时满足，也不能排除 Firmware/Version/Profile 等技术记录，因此稠密编号章节及其后代的纯父号顺延不再静默隐藏，而以黄色“结构顺延复核”保留双侧完整原文并从核心变化计数中分离。最新真实 OIF 532 候选报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异中性复核_20260814/protocol_diff_20260814_042151/protocol_diff_report.html`。
+- 回归证据：`PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` 共 1043 项，仅因运行中的另一测试进程暂时持有 PyMuPDF 二进制模块而出现一次瞬时 import error；同一 venv 随后独立运行该用例通过。`.venv/bin/python -m unittest tests.test_protocol_diff` 为 465/465 PASS；截图定向、Version/Firmware、跨栏/同栏伪标签、表格/公式/引用矩阵均通过。最终 exact commit 双审与交付门仍待完成。
 
 - 2026-08-13 引用差异修复：旧句仅含 `Table 31-2`、新句扩展为 `Section 31.3.15 + Table 31-10/31-11` 时，两侧都由 `specified in` 正向证明为出处集合，读者报告不再把引用类别/数量变化当技术差异；同一已配对条款中完整继承父条款号的裸子条款 `31.3.17.2.1→31.3.18.2.1` 也只在读者层中和。`Sinusoidal Interface→Sinusoidal Interface TP4a`、子层级自身 `.1→.2`、`20→21 mV` 继续严格显示；JSON/CSV 保留所有原始引用事实。
 - 前三版父前缀中和均被两名 reviewer 独立否决：第一版会把 `Protocol Version/Firmware ID/Register identifier 31...` 误当子条款；第二版仅要求与父标题共享两个词，会被普通技术句中的 `Host/Module/input/tolerance` 碰撞绕过；第三版增加“文档树中存在同号结构”仍无法证明句中 `Revision/Version` 正在引用它。当前实现把 provenance 绑定到该片段所属章节自身：只有源 PDF 的物理行确实从该后代编号开头、且后续标题主干与读者片段吻合，才允许中和；句内技术 ID 即使文档别处存在同号章节也保持五面可见，不依赖标签黑名单。

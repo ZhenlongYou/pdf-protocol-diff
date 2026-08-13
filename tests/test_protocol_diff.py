@@ -7136,20 +7136,61 @@ class ProtocolDiffTests(unittest.TestCase):
             )
             audit = paths["json"].read_text(encoding="utf-8")
 
-        # 人读报告只显示真实新增的 TP4a，不再把两种纯出处变化列为技术差异。
+        # 人读报告只把 TP4a 计为核心变化。引用来源直接消噪；缺少可靠结构
+        # provenance 的裸子号顺延改为中性复核，避免误吞 Firmware/Version。
         for rendered in rendered_reports:
             self.assertNotIn("specified in Table 31-2", rendered)
             self.assertNotIn("specified in Section 31.3.15", rendered)
-            self.assertNotIn("Jitter 31.3.17.2.1 Host", rendered)
-            self.assertNotIn("Jitter 31.3.18.2.1 Host", rendered)
+            self.assertIn("结构顺延复核", rendered)
+            self.assertIn("Jitter 31.3.17.2.1 Host", rendered)
+            self.assertIn("Jitter 31.3.18.2.1 Host", rendered)
             self.assertIn("Sinusoidal Interface", rendered)
             self.assertIn("TP4a", rendered)
+        self.assertIn("1核心技术变化", rendered_reports[0])
+        self.assertIn("2正文字符复核项", rendered_reports[0])
         # JSON 继续保存全部原始引用与子条款标题；物理行结构不再伪造
         # ``Jitter + 编号`` 的合并审计事实。
         self.assertIn("specified in Table 31-2", audit)
         self.assertIn("specified in Section 31.3.15", audit)
         self.assertIn("31.3.17.2.1 Host", audit)
         self.assertIn("31.3.18.2.1 Host", audit)
+
+        # 恶意/错误 outline 即使把技术记录伪装成完整章节树，也只能
+        # 进入中性结构复核；不得从 HTML/MD/TXT 静默消失。
+        def technical_tree(version: str) -> ExtractionResult:
+            parent = f"{version} Host and Module input tolerance tests"
+            record = f"{version}.7 Host Module input tolerance profile record 2024"
+            child_a = f"{version}.7.1 Host Module input tolerance profile status"
+            child_b = f"{version}.7.2 Host Module input tolerance profile control"
+            lines = (parent, record, child_a, child_b)
+            return ExtractionResult(
+                pdf_path=Path(f"technical-tree-{version}.pdf"),
+                pages=[page_with_heading_fonts("\n".join(lines))],
+                outline_heading_paths=(
+                    (parent, record, child_a),
+                    (parent, record, child_b),
+                ),
+            )
+
+        technical_result = compare_extractions(
+            technical_tree("31.3.17.2"),
+            technical_tree("31.3.18.2"),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            technical_paths = write_reports(technical_result, temp_dir, DiffOptions())
+            technical_reports = (
+                _visible_html_text(
+                    technical_paths["html"].read_text(encoding="utf-8")
+                ),
+                technical_paths["markdown"].read_text(encoding="utf-8"),
+                technical_paths["text"].read_text(encoding="utf-8"),
+            )
+        for rendered in technical_reports:
+            self.assertIn("profile record 2024", rendered)
+            self.assertIn("profile status", rendered)
+            self.assertIn("31.3.17.2.7", rendered)
+            self.assertIn("31.3.18.2.7", rendered)
 
         # 子层级自身改变或邻近工程数值改变都不是父条款顺延，必须继续显示。
         changed_child_result = compare_extractions(
@@ -7497,9 +7538,12 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["json"].read_text(encoding="utf-8"),
                 paths["csv"].read_text(encoding="utf-8"),
             )
-        # Version 是两侧相同的独立正文行，拆出真实子章节后不应制造伪变化；
-        # 原始 JSON 仍分别保存 Version 和两个章节标题。
-        self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+        # Version 与编号的物理关系无法可靠证明；读者层以中性结构复核保留，
+        # 不再把它标成核心红绿变化，也不静默吞掉技术编号。
+        for rendered in reports[:3]:
+            self.assertIn("结构顺延复核", rendered)
+            self.assertIn("Version 31.3.17.2.1", rendered)
+            self.assertIn("Version 31.3.18.2.1", rendered)
         self.assertIn("Version", reports[3])
         self.assertIn("31.3.17.2.1", reports[3])
         self.assertIn("31.3.18.2.1", reports[3])
@@ -7850,7 +7894,10 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["json"].read_text(encoding="utf-8"),
                 paths["csv"].read_text(encoding="utf-8"),
             )
-        self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+        for rendered in reports[:3]:
+            self.assertIn("结构顺延复核", rendered)
+            self.assertIn("Version 31.3.17.2.1", rendered)
+            self.assertIn("Version 31.3.18.2.1", rendered)
         self.assertIn("Version", reports[3])
         self.assertIn("31.3.17.2.1", reports[3])
         self.assertIn("31.3.18.2.1", reports[3])
@@ -7927,9 +7974,12 @@ class ProtocolDiffTests(unittest.TestCase):
                         paths[format_name].read_text(encoding="utf-8")
                         for format_name in ("html", "markdown", "text", "json", "csv")
                     )
-                # 独立 Version 行本身未变，不应凭邻接产生读者变化；JSON 原文
-                # 继续提供技术行及两个真实子章节标题的完整审计。
-                self.assertTrue(all("Version 31.3." not in rendered for rendered in reports[:3]))
+                # 邻接关系不足以证明 Version 与编号是同一标题；进入中性复核并
+                # 保留双侧事实，JSON 继续提供原始审计。
+                for rendered in reports[:3]:
+                    self.assertIn("结构顺延复核", rendered)
+                    self.assertIn("Version 31.3.17.2.1", rendered)
+                    self.assertIn("Version 31.3.18.2.1", rendered)
                 self.assertIn("Version", reports[3])
                 self.assertIn("31.3.17.2.1", reports[3])
                 self.assertIn("31.3.18.2.1", reports[3])
