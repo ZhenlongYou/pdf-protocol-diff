@@ -8270,6 +8270,11 @@ def _reader_change_without_proven_child_clause_renumber(
         rf"(?<![A-Za-z0-9_.]){re.escape(new_parent)}(?P<child_suffix>(?:\.\d+)+)"
         rf"(?![A-Za-z0-9_.])"
     )
+    section_title_words = _reader_clause_title_words(old_section.title)
+    # 裸编号没有 Section/Clause 前缀，只在编号后正文复用了已配对父条款标题的
+    # 至少两个实质词时，才有足够正向证据认定它是嵌入正文的子条款标题。
+    if len(section_title_words) < 2:
+        return change
 
     def is_child_clause_renumbering(pair: SnippetPair) -> bool:
         """只中和两侧都实际出现、且完整继承已配对父条款号的子条款编号。"""
@@ -8283,6 +8288,17 @@ def _reader_change_without_proven_child_clause_renumber(
         # 父条款顺延可以中和，子层级自身从 .1→.2 仍是可复核的定位变化。
         if not old_suffixes or old_suffixes != new_suffixes:
             return False
+        old_trailing_words = _reader_clause_title_words(
+            old_child_re.split(pair.old, maxsplit=1)[-1]
+        )
+        new_trailing_words = _reader_clause_title_words(
+            new_child_re.split(pair.new, maxsplit=1)[-1]
+        )
+        shared_title_words = (
+            section_title_words & old_trailing_words & new_trailing_words
+        )
+        if len(shared_title_words) < 2:
+            return False
         return old_child_re.sub(
             "<child-clause-reference>",
             compact_inline(pair.old),
@@ -8292,6 +8308,40 @@ def _reader_change_without_proven_child_clause_renumber(
         )
 
     return _reader_change_without_replaced_pairs(change, is_child_clause_renumbering)
+
+
+_READER_CLAUSE_TITLE_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
+
+
+def _reader_clause_title_words(value: str) -> set[str]:
+    """提取父条款标题与正文中可交叉证明身份的实质英文词。"""
+
+    return {
+        word
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9-]*", compact_inline(value).casefold())
+        if word not in _READER_CLAUSE_TITLE_STOP_WORDS
+    }
 
 
 def _reader_change_without_replaced_pairs(

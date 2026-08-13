@@ -7106,6 +7106,59 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("20 mV", rendered)
             self.assertIn("21 mV", rendered)
 
+        # 点分技术版本/固件/寄存器标识即使恰好继承章节数字，也不是子条款引用。
+        for technical_label in ("Protocol Version", "Firmware ID", "Register identifier"):
+            with self.subTest(technical_label=technical_label):
+                technical_id_result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old_technical_id.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=(
+                                    "31.3.17.2 Host and Module input tolerance tests\n"
+                                    f"{technical_label} 31.3.17.2.1 remains supported."
+                                ),
+                            )
+                        ],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new_technical_id.pdf"),
+                        pages=[
+                            PageText(
+                                page_number=1,
+                                text=(
+                                    "31.3.18.2 Host and Module input tolerance tests\n"
+                                    f"{technical_label} 31.3.18.2.1 remains supported."
+                                ),
+                            )
+                        ],
+                    ),
+                    DiffOptions(),
+                )
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    technical_id_paths = write_reports(
+                        technical_id_result,
+                        temp_dir,
+                        DiffOptions(),
+                    )
+                    technical_id_reports = (
+                        _visible_html_text(
+                            technical_id_paths["html"].read_text(encoding="utf-8")
+                        ),
+                        technical_id_paths["markdown"].read_text(encoding="utf-8"),
+                        technical_id_paths["text"].read_text(encoding="utf-8"),
+                    )
+                for rendered in technical_id_reports:
+                    self.assertIn(
+                        f"{technical_label} 31.3.17.2.1",
+                        rendered,
+                    )
+                    self.assertIn(
+                        f"{technical_label} 31.3.18.2.1",
+                        rendered,
+                    )
+
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
 
