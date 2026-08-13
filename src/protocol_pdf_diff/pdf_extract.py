@@ -332,6 +332,7 @@ def _extract_pdf_text_with_pdfplumber(
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
                     running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
+                    vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
     finally:
@@ -350,6 +351,33 @@ def _extract_pdf_text_with_pdfplumber(
         source_sha256=source_digest.hexdigest(),
     )  # 统一追加空页和低字符数警告。
 
+
+def _page_vector_graphic_bboxes(
+    page: object,
+) -> tuple[tuple[float, float, float, float], ...]:
+    """保留原生 PDF 矩形、曲线和线段的有效包络，拒绝文字启发式伪造图形。"""
+
+    bboxes: list[tuple[float, float, float, float]] = []
+    for attribute in ("rects", "curves", "lines"):
+        objects = getattr(page, attribute, ())
+        if not isinstance(objects, list | tuple):
+            continue
+        for item in objects:
+            if not isinstance(item, dict):
+                continue
+            try:
+                x0 = float(item.get("x0"))
+                x1 = float(item.get("x1"))
+                top = float(item.get("top"))
+                bottom = float(item.get("bottom"))
+            except (TypeError, ValueError):
+                continue
+            if not all(math.isfinite(value) for value in (x0, top, x1, bottom)):
+                continue
+            if x1 <= x0 or bottom <= top:
+                continue
+            bboxes.append((x0, top, x1, bottom))
+    return tuple(bboxes)
 
 def _extract_pdfplumber_page_text(
     page: object,

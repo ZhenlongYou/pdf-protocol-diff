@@ -1133,6 +1133,12 @@ def _proven_figure_label_before_heading(
         and _FIGURE_CAPTION_LINE_RE.match(
             _strip_edge_line_number(block.text)
         )
+        and not re.search(
+            r"(?i)\b(?:shows?|illustrates?|depicts?|describes?|defines?|"
+            r"specifies?|contains?|lists?|is|are|shall|should|must|may|can|"
+            r"will|enabled|disabled|applies?)\b",
+            _strip_edge_line_number(block.text),
+        )
     ]
     if not caption_blocks:
         return ""
@@ -1155,6 +1161,18 @@ def _proven_figure_label_before_heading(
         )
         for block in intervening_blocks
     ):
+        return ""
+    graphic_region_bboxes = [
+        bbox
+        for bbox in page.vector_graphic_bboxes
+        if bbox[1] >= caption.bbox[1] - 1.0
+        and bbox[3] <= heading_block.bbox[1] + 1.0
+        and bbox[0] <= label_block.bbox[2]
+        and bbox[2] >= label_block.bbox[0]
+        and (bbox[2] - bbox[0] >= 8.0 or bbox[3] - bbox[1] >= 8.0)
+    ]
+    # 纯文字块不能伪造 Figure 区域；至少三个真实矢量对象必须位于图题与标题之间。
+    if len(graphic_region_bboxes) < 3:
         return ""
     return compact_inline(label)
 

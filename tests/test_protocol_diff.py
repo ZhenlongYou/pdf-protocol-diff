@@ -7066,7 +7066,16 @@ class ProtocolDiffTests(unittest.TestCase):
                     )
                 )
             )
-            return PageText(page_number=1, text=text, blocks=blocks)
+            return PageText(
+                page_number=1,
+                text=text,
+                blocks=blocks,
+                vector_graphic_bboxes=(
+                    (90.0, 82.0, 220.0, 118.0),
+                    (240.0, 90.0, 360.0, 122.0),
+                    (160.0, 104.0, 420.0, 132.0),
+                ),
+            )
 
         old_parent_heading = "31.3.17.2 Host and Module input tolerance tests"
         new_parent_heading = "31.3.18.2 Host and Module input tolerance tests"
