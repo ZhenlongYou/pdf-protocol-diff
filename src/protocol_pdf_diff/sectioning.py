@@ -1164,7 +1164,8 @@ def _looks_like_table_row(line: str) -> bool:
         re.match(r"^\d+(?:\.\d+){2,}\s+", line)
         and re.search(
             r"(?:^|\s)[+-]?\d+(?:\.\d+)?"
-            r"(?:\s+[+-]?\d+(?:\.\d+)?){2,}"
+            r"(?:\s+[—–·-]\s*)?\s+[+-]?\d+(?:\.\d+)?"
+            r"(?:\s+[+-]?\d+(?:\.\d+)?)*"
             r"(?:\s+[A-Za-zµμΩ%/]+)?\s*$",
             line,
         )
@@ -1195,14 +1196,28 @@ def _detect_dense_numbered_heading_under_parent(
     )
     if parent is None or canonical_number_identity(parent.number) != number.rsplit(".", 1)[0].casefold():
         return None
-    # 空格分列表格的数值通常密集落在标题尾部；直接父章节也不能把这些
-    # parameter/min/typ/max/unit 行改写成子条款。括号中的 TP4a/TP1 属于
-    # 标题名词，不形成连续数值尾部。
-    if re.search(
-        r"(?:^|\s)[+-]?\d+(?:\.\d+)?(?:\s+[+-]?\d+(?:\.\d+)?){2,}"
-        r"(?:\s+[A-Za-zµμΩ%/]+)?\s*$",
-        title,
-    ):
+    # 父号相符只证明层级可能成立。此恢复分支专门处理标题中括号化的
+    # 技术点标识：移除 ``(TP4a)/(TP1)`` 后不得再有数字，且标题必须与
+    # 已接纳父标题共享至少两个实质词。这样 Firmware build、Version、
+    # MIN/MAX 表值都不能借父号获得标题身份。
+    technical_points = re.findall(r"\([A-Za-z]{1,8}\d+[A-Za-z0-9-]*\)", title)
+    title_without_points = title
+    for technical_point in technical_points:
+        title_without_points = title_without_points.replace(technical_point, " ")
+    if not technical_points or re.search(r"\d", title_without_points):
+        return None
+    stop_words = {"and", "or", "the", "a", "an", "of", "to", "for", "in"}
+    title_words = {
+        word.casefold()
+        for word in re.findall(r"[A-Za-z]{3,}", title_without_points)
+        if word.casefold() not in stop_words
+    }
+    parent_words = {
+        word.casefold()
+        for word in re.findall(r"[A-Za-z]{3,}", parent.title)
+        if word.casefold() not in stop_words
+    }
+    if len(title_words & parent_words) < 2:
         return None
     candidate = HeadingInfo(
         raw=compact_inline(line),

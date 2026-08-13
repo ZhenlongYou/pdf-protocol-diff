@@ -7478,10 +7478,47 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("Receiver voltage 20 21 22 mV", table_sections[0].body)
         self.assertIn("Values are measured at TP4a.", table_sections[0].body)
 
+        two_value_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("space_delimited_two_value_table_row.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Profile ID Description MIN MAX Unit\n"
+                            "31.3.17.2.7 Receiver voltage 20 22 mV\n"
+                            "Values are measured at TP4a."
+                        ),
+                    )
+                ],
+            )
+        )
+        self.assertEqual(1, len(two_value_sections))
+        self.assertIn("Receiver voltage 20 22 mV", two_value_sections[0].body)
+
         # 没有父章节的 Firmware Version 行继续失败可见，不能被当作纯章节顺延。
         self.assertIsNone(
             detect_heading("1.2.3 Firmware Version for Ports 4 and 8 build 2024")
         )
+        firmware_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("firmware_version_under_parent.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Firmware records\n"
+                            "31.3.17.2.7 Firmware Version for Ports 4 and 8 build 2024\n"
+                            "Mode PAM4 remains enabled."
+                        ),
+                    )
+                ],
+            )
+        )
+        self.assertEqual(1, len(firmware_sections))
+        self.assertIn("Firmware Version for Ports 4 and 8 build 2024", firmware_sections[0].body)
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""
