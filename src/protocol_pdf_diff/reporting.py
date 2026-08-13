@@ -8066,6 +8066,14 @@ def _reader_changes_without_cross_card_locator_pairs(
             and cleaned.omitted_snippet_count == 0
         ):
             continue
+        if (
+            cleaned.review_replaced_snippets
+            and not cleaned.added_snippets
+            and not cleaned.removed_snippets
+            and not cleaned.replaced_snippets
+            and cleaned.omitted_snippet_count == 0
+        ):
+            cleaned = replace(cleaned, change_type="review")
         reader_changes.append(cleaned)
     # 返回新的读者卡片序列，调用者仍持有完全未修改的原始 DiffResult。
     return reader_changes

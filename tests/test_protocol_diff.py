@@ -87,6 +87,7 @@ from protocol_pdf_diff.pdf_extract import (
 from protocol_pdf_diff.reporting import (
     _inline_diff_html,
     _paired_table_visuals,
+    _reader_changes_without_cross_card_locator_pairs,
     _reader_pair_difference_hint,
     _reader_snippet_collapse_kind,
     _reader_snippet_text,
@@ -7437,6 +7438,53 @@ class ProtocolDiffTests(unittest.TestCase):
         for rendered in audit_reports:
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
+
+    def test_cross_card_citation_cleanup_reclassifies_review_only_card(self) -> None:
+        """跨卡引用消噪后只剩结构复核时不得继续计作核心变化。"""
+
+        section = Section(
+            section_id="S0001",
+            heading="1 Scope",
+            title="Scope",
+            level=1,
+            heading_path=("1 Scope",),
+            number_path=("1",),
+            start_page=1,
+            end_page=1,
+            body="",
+        )
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11."
+        )
+        review_pair = SnippetPair(
+            old="Version 31.3.17.2.1 remains supported.",
+            new="Version 31.3.18.2.1 remains supported.",
+        )
+        changes = _reader_changes_without_cross_card_locator_pairs(
+            [
+                SectionChange(
+                    change_type="modified",
+                    old_section=section,
+                    new_section=section,
+                    similarity=0.9,
+                    removed_snippets=[old_sentence],
+                    review_replaced_snippets=[review_pair],
+                ),
+                SectionChange(
+                    change_type="added",
+                    old_section=None,
+                    new_section=section,
+                    similarity=0.0,
+                    added_snippets=[new_sentence],
+                ),
+            ]
+        )
+        self.assertEqual(1, len(changes))
+        self.assertEqual("review", changes[0].change_type)
+        self.assertEqual([review_pair], changes[0].review_replaced_snippets)
+        self.assertEqual([], changes[0].removed_snippets)
 
     def test_reader_keeps_non_citation_table_and_figure_facts(self) -> None:
         """引用类别降噪只能作用于谓语直接支配的连续出处片段。"""
