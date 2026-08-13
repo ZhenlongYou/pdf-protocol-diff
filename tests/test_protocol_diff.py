@@ -7685,6 +7685,44 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
 
+    def test_cross_card_citation_cleanup_is_disabled_for_partial_page_ranges(self) -> None:
+        """局部页范围无法证明location唯一，跨卡引用必须保守显示。"""
+
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11 and Table 31-12 and Table 31-13 and Table 31-14 and "
+            "Table 31-15 and Table 31-16 and Table 31-17 and Table 31-18 and "
+            "Table 31-19."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_partial_range.pdf"),
+                pages=[PageText(page_number=2, text=f"1 Scope\n{old_sentence}")],
+                total_pages=10,
+                selected_start_page=2,
+                selected_end_page=2,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_partial_range.pdf"),
+                pages=[PageText(page_number=8, text=f"1 Scope\n{new_sentence}")],
+                total_pages=10,
+                selected_start_page=8,
+                selected_end_page=8,
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reader_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+        for rendered in reader_reports:
+            self.assertIn(old_sentence, rendered)
+            self.assertIn(new_sentence, rendered)
+
     def test_cross_card_citation_cleanup_reclassifies_review_only_card(self) -> None:
         """跨卡引用消噪后只剩结构复核时不得继续计作核心变化。"""
 

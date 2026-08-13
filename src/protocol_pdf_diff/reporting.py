@@ -314,6 +314,7 @@ def write_reports(
         reader_changes,
         old_sections=result.old_sections,
         new_sections=result.new_sections,
+        full_document_selected=_full_document_selected_for_reader_cleanup(result),
     )
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
@@ -7968,8 +7969,13 @@ def _reader_changes_without_cross_card_locator_pairs(
     *,
     old_sections: Iterable[Section] | None = None,
     new_sections: Iterable[Section] | None = None,
+    full_document_selected: bool = True,
 ) -> list[SectionChange]:
     """在同一位置唯一配对 added/removed 引用句，并只修改读者副本。"""
+
+    # 局部页范围无法证明未选页面没有同名section occurrence；跨卡清理需停用。
+    if not full_document_selected:
+        return changes
 
     # 相同 location 可能在一个文档中出现多次；这种情况下字符串位置并非
     # occurrence 身份，跨卡清理必须关闭。未传完整集合的定向helper调用仍从
@@ -8112,6 +8118,25 @@ def _reader_changes_without_cross_card_locator_pairs(
         reader_changes.append(cleaned)
     # 返回新的读者卡片序列，调用者仍持有完全未修改的原始 DiffResult。
     return reader_changes
+
+
+def _full_document_selected_for_reader_cleanup(result: DiffResult) -> bool:
+    """Return whether both inputs cover their complete known page ranges."""
+
+    def side_is_full(total: int, start: int | None, end: int | None) -> bool:
+        if total <= 0:
+            return False
+        return (start in {None, 1}) and (end is None or end >= total)
+
+    return side_is_full(
+        result.old_total_pages,
+        result.old_selected_start_page,
+        result.old_selected_end_page,
+    ) and side_is_full(
+        result.new_total_pages,
+        result.new_selected_start_page,
+        result.new_selected_end_page,
+    )
 
 
 def _reader_audit_without_occurrences(
