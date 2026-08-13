@@ -215,6 +215,8 @@ def _extract_pdf_text_with_pdfplumber(
                 source_digest.update(chunk)
                 source_snapshot.write(chunk)
         source_snapshot.seek(0)
+        outline_heading_paths = _pdf_outline_heading_paths(source_snapshot)
+        source_snapshot.seek(0)
         pdf = pdfplumber.open(source_snapshot)
     except Exception as exc:  # 快照或 PDF 解析失败时给出包含文件名的错误。
         source_snapshot.close()
@@ -349,6 +351,7 @@ def _extract_pdf_text_with_pdfplumber(
         table_visuals=table_visuals,
         formula_visuals=formula_visuals,
         source_sha256=source_digest.hexdigest(),
+        outline_heading_paths=outline_heading_paths,
     )  # 统一追加空页和低字符数警告。
 
 
@@ -6664,6 +6667,7 @@ def _finalize_extraction_result(
     table_visuals: list[TableVisual] | None = None,
     formula_visuals: list[FormulaVisual] | None = None,
     source_sha256: str | None = None,
+    outline_heading_paths: tuple[tuple[str, ...], ...] = (),
 ) -> ExtractionResult:
     """Add common extraction warnings and build the final result object."""
 
@@ -6692,7 +6696,42 @@ def _finalize_extraction_result(
         table_visuals=list(table_visuals or []),
         formula_visuals=list(formula_visuals or []),
         source_sha256=source_sha256,
+        outline_heading_paths=outline_heading_paths,
     )
+
+
+def _pdf_outline_heading_paths(source_snapshot: object) -> tuple[tuple[str, ...], ...]:
+    """从同一字节快照读取原生 PDF outline，失败时保守返回空集合。"""
+
+    try:
+        from pypdf import PdfReader
+
+        source_snapshot.seek(0)  # type: ignore[attr-defined]
+        outline = PdfReader(source_snapshot).outline
+        paths: list[tuple[str, ...]] = []
+
+        def collect(items: object, ancestors: tuple[str, ...] = ()) -> None:
+            if not isinstance(items, list):
+                return
+            previous_title = ""
+            for item in items:
+                if isinstance(item, list):
+                    collect(
+                        item,
+                        ancestors + ((previous_title,) if previous_title else ()),
+                    )
+                    continue
+                title = normalize_line(str(getattr(item, "title", "")))
+                if title:
+                    paths.append((*ancestors, title))
+                    previous_title = title
+
+        collect(outline)
+        return tuple(dict.fromkeys(paths))
+    except Exception:
+        return ()
+    finally:
+        source_snapshot.seek(0)  # type: ignore[attr-defined]
 
 
 def _resolve_page_range(

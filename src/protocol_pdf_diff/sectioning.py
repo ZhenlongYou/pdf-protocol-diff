@@ -181,10 +181,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading_candidate,
                     heading_stack,
                     current,
-                    page,
-                    cleaned_pages,
-                    page_index,
-                    line_index,
+                    extraction.outline_heading_paths,
                 ))
                 is not None
             ):
@@ -1182,17 +1179,13 @@ def _detect_dense_numbered_heading_under_parent(
     line: str,
     heading_stack: list[HeadingInfo],
     open_section: _OpenSection | None,
-    page: PageText,
-    cleaned_pages: list[PageText],
-    page_index: int,
-    line_index: int,
+    outline_heading_paths: tuple[tuple[str, ...], ...],
 ) -> HeadingInfo | None:
     """用真实章节树证据恢复被多数字门挡住的完整子标题。
 
     点分数字、标题词和 ``TP4a`` 等技术记号都可能出现在表格、版本号或
-    寄存器记录中，不能单独证明章节身份。这里要求候选继承当前父章节、
-    物理字体与父标题一致，并由后续两个同字体的直接子标题共同证明它确实
-    是一个章节容器。证明不足时保留为正文，宁可显示差异也不猜测。
+    寄存器记录中，不能单独证明章节身份。这里要求候选完整命中 PDF 自带
+    outline/bookmark；没有原生结构证据时保留为正文，宁可显示也不猜测。
     """
 
     if "|" in line or "\t" in line:
@@ -1220,21 +1213,17 @@ def _detect_dense_numbered_heading_under_parent(
         != canonical_number_identity(parent.number)
     ):
         return None
-    candidate_fonts = _physical_line_font_names(page, line)
-    if (
-        not candidate_fonts
-        or not open_section.heading_font_names
-        or candidate_fonts != open_section.heading_font_names
-    ):
-        return None
-    if not _has_two_following_direct_heading_children(
-        number,
-        level,
-        candidate_fonts,
-        cleaned_pages,
-        page_index,
-        line_index,
-    ):
+    parent_title_key = normalize_for_similarity(parent.title)
+    title_key = normalize_for_similarity(title)
+    outline_pairs = {
+        (
+            normalize_for_similarity(_outline_numeric_title(path[-2])),
+            normalize_for_similarity(_outline_numeric_title(path[-1])),
+        )
+        for path in outline_heading_paths
+        if len(path) >= 2
+    }
+    if (parent_title_key, title_key) not in outline_pairs:
         return None
     candidate = HeadingInfo(
         raw=compact_inline(line),
@@ -1253,47 +1242,11 @@ def _detect_dense_numbered_heading_under_parent(
     return candidate
 
 
-def _has_two_following_direct_heading_children(
-    parent_number: str,
-    parent_level: int,
-    parent_fonts: tuple[str, ...],
-    pages: list[PageText],
-    page_index: int,
-    line_index: int,
-) -> bool:
-    """前瞻寻找两个同字体的直接子标题，形成可审计的章节树证明。"""
+def _outline_numeric_title(value: str) -> str:
+    """去掉 outline 数字前缀，只保留用于父子路径配对的原始标题正文。"""
 
-    child_numbers: set[str] = set()
-    inspected_nonempty_lines = 0
-    canonical_parent = canonical_number_identity(parent_number)
-    for candidate_page_index in range(page_index, len(pages)):
-        candidate_page = pages[candidate_page_index]
-        candidate_lines = candidate_page.text.splitlines()
-        start_index = line_index + 1 if candidate_page_index == page_index else 0
-        for candidate_line_index in range(start_index, len(candidate_lines)):
-            candidate_line = normalize_line(candidate_lines[candidate_line_index])
-            if not candidate_line:
-                continue
-            inspected_nonempty_lines += 1
-            if inspected_nonempty_lines > 256:
-                return False
-            heading = detect_heading(candidate_line)
-            if heading is None or not heading.number:
-                continue
-            canonical_number = canonical_number_identity(heading.number)
-            if heading.level <= parent_level:
-                return False
-            if (
-                heading.level == parent_level + 1
-                and canonical_number.startswith(canonical_parent + ".")
-                and canonical_number.count(".") == canonical_parent.count(".") + 1
-                and _physical_line_font_names(candidate_page, candidate_line)
-                == parent_fonts
-            ):
-                child_numbers.add(canonical_number)
-                if len(child_numbers) >= 2:
-                    return True
-    return False
+    match = re.match(r"^\d+(?:\.\d+)+\s+(.+)$", compact_inline(value))
+    return match.group(1) if match else compact_inline(value)
 
 
 def _looks_like_forbidden_heading_candidate(
@@ -2463,7 +2416,22 @@ def _has_inconsistent_numeric_parent(
         None,
     )
     if parent is None or not parent.number:
-        return False  # 选定页段可能从深层条款开始，没有父上下文时不能凭空拒绝。
+        nearest_ancestor = next(
+            (
+                item
+                for item in reversed(heading_stack)
+                if item.number and item.level < heading.level
+            ),
+            None,
+        )
+        if nearest_ancestor is None:
+            return False  # 选定页段可能从深层条款开始，没有任何父上下文时不能凭空拒绝。
+        ancestor_number = canonical_number_identity(nearest_ancestor.number)
+        heading_number = canonical_number_identity(heading.number)
+        return bool(
+            heading.level > nearest_ancestor.level + 1
+            and heading_number.startswith(ancestor_number + ".")
+        )  # 已有祖先却跳过中间父层级时，技术记录比章节更可信；原生 outline 恢复会先补齐真实父层级。
     parent_number = re.sub(
         r"(?i)^(?:annex|appendix)\s+",
         "",

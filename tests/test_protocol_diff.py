@@ -1416,6 +1416,47 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(parsed_digest, result.provenance.old_input.sha256)
         self.assertEqual(parsed_digest, result.provenance.new_input.sha256)
 
+    def test_extraction_preserves_native_outline_parent_child_paths(self) -> None:
+        """Dense 标题恢复只消费同一 PDF 字节快照里的原生 outline 父子路径。"""
+
+        from pypdf import PdfReader, PdfWriter
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            base_pdf = write_multipage_text_pdf(
+                temp_path / "base.pdf",
+                [[
+                    "31.3.18.2 Host and Module input tolerance tests",
+                    "31.3.18.2.1 Host and Module input tolerance test methods",
+                ]],
+            )
+            outlined_pdf = temp_path / "outlined.pdf"
+            reader = PdfReader(str(base_pdf))
+            writer = PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
+            parent = writer.add_outline_item(
+                "31.3.18.2 Host and Module input tolerance tests",
+                0,
+            )
+            writer.add_outline_item(
+                "31.3.18.2.1 Host and Module input tolerance test methods",
+                0,
+                parent=parent,
+            )
+            with outlined_pdf.open("wb") as output:
+                writer.write(output)
+
+            extraction = extract_pdf_text(outlined_pdf)
+
+        self.assertIn(
+            (
+                "31.3.18.2 Host and Module input tolerance tests",
+                "31.3.18.2.1 Host and Module input tolerance test methods",
+            ),
+            extraction.outline_heading_paths,
+        )
+
     def test_visual_watchdog_pixels_cannot_come_from_bytes_after_extraction_snapshot(self) -> None:
         """Replacing a path after extraction must fail closed instead of forging visual evidence."""
 
@@ -7064,6 +7105,10 @@ class ProtocolDiffTests(unittest.TestCase):
             ExtractionResult(
                 pdf_path=Path("new_mixed_reference_source.pdf"),
                 pages=[page_with_heading_fonts(new_text)],
+                outline_heading_paths=((
+                    "31.3.18.2 Host and Module input tolerance tests",
+                    "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods",
+                ),),
             ),
             DiffOptions(),
         )
@@ -7496,6 +7541,10 @@ class ProtocolDiffTests(unittest.TestCase):
                         ),
                     )
                 ],
+                outline_heading_paths=((
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    heading,
+                ),),
             )
         )
         child = next(section for section in sections if section.heading == heading)
@@ -7537,6 +7586,10 @@ class ProtocolDiffTests(unittest.TestCase):
                         ),
                     )
                 ],
+                outline_heading_paths=((
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    numbered_title,
+                ),),
             )
         )
         numbered_child = next(
@@ -7652,6 +7705,41 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual(1, len(profile_sections))
         self.assertIn("input tolerance tests profile", profile_sections[0].body)
+
+        # 即使 technical record 伪造出完整 .1/.2 层级并使用相同字体，
+        # 没有原生 outline 父子路径仍保持正文，不能被章节顺延降噪吞掉。
+        record_lines = (
+            "31.3.17.2 Host and Module input tolerance tests",
+            "31.3.17.2.7 Firmware Version for Ports 4 and 8 build 2024",
+            "31.3.17.2.7.1 Register status record",
+            "31.3.17.2.7.2 Register control record",
+        )
+        record_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("hierarchical_technical_records.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="\n".join(record_lines),
+                        blocks=tuple(
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 20.0 + index * 18.0, 540.0, 32.0 + index * 18.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text=line,
+                                reading_order=index,
+                                source_engine="pdfplumber",
+                                font_names=("Helvetica",),
+                            )
+                            for index, line in enumerate(record_lines)
+                        ),
+                    )
+                ],
+            )
+        )
+        self.assertEqual(1, len(record_sections))
+        self.assertIn("Firmware Version", record_sections[0].body)
+        self.assertIn("Register status record", record_sections[0].body)
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""

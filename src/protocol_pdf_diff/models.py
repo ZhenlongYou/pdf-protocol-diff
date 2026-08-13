@@ -160,6 +160,7 @@ class ExtractionResult:
     table_visuals: list["TableVisual"] = field(default_factory=list)  # 保存表格截图和识别摘要，供 HTML 报告展示视觉证据。
     source_sha256: str | None = None  # 解析入口对实际快照字节计算；禁止报告层事后重读路径伪装成同一输入。
     formula_visuals: list["FormulaVisual"] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存显示公式源截图和坐标语义。
+    outline_heading_paths: tuple[tuple[str, ...], ...] = ()  # PDF 原生 outline/bookmark 路径；为空时章节器不得猜测 dense 编号行身份。
 
 
 def snapshot_page_extraction_audit(
