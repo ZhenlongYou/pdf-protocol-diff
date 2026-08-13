@@ -8132,11 +8132,11 @@ def _full_document_selected_for_reader_cleanup(result: DiffResult) -> bool:
         result.old_total_pages,
         result.old_selected_start_page,
         result.old_selected_end_page,
-    ) and side_is_full(
+    ) and result.old_total_pages_known and side_is_full(
         result.new_total_pages,
         result.new_selected_start_page,
         result.new_selected_end_page,
-    )
+    ) and result.new_total_pages_known
 
 
 def _reader_audit_without_occurrences(

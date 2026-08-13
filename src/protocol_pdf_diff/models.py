@@ -492,6 +492,8 @@ class DiffResult:
     new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
     formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
     visual_review_items: list[VisualReviewItem] = field(default_factory=list)  # 语义层未覆盖的页级视觉变化，只作漏检哨兵。
+    old_total_pages_known: bool = False  # 追加在历史位置参数之后；True仅表示抽取入口明确读到源PDF总页数。
+    new_total_pages_known: bool = False  # 测试或局部页面推断出的数值不能授权全篇消噪。
 
 
 def _normalize_key(value: str) -> str:

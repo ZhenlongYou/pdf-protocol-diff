@@ -7411,10 +7411,16 @@ class ProtocolDiffTests(unittest.TestCase):
             ExtractionResult(
                 pdf_path=Path("old_cross_card_mixed_refs.pdf"),
                 pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
             ),
             ExtractionResult(
                 pdf_path=Path("new_cross_card_mixed_refs.pdf"),
                 pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
             ),
             DiffOptions(),
         )
@@ -7712,6 +7718,40 @@ class ProtocolDiffTests(unittest.TestCase):
             ),
             DiffOptions(),
         )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reader_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+        for rendered in reader_reports:
+            self.assertIn(old_sentence, rendered)
+            self.assertIn(new_sentence, rendered)
+
+    def test_cross_card_citation_cleanup_requires_known_total_pages(self) -> None:
+        """由已抽页面推断的总页数不构成完整文档provenance。"""
+
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11 and Table 31-12 and Table 31-13 and Table 31-14 and "
+            "Table 31-15 and Table 31-16 and Table 31-17 and Table 31-18 and "
+            "Table 31-19."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_unknown_total.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_unknown_total.pdf"),
+                pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+            ),
+            DiffOptions(),
+        )
+        self.assertFalse(result.old_total_pages_known)
+        self.assertFalse(result.new_total_pages_known)
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = write_reports(result, temp_dir, DiffOptions())
             reader_reports = (

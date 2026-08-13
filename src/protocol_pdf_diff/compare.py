@@ -336,6 +336,8 @@ def compare_extractions(
         warnings=warnings,
         old_total_pages=_source_page_count(old_extraction),
         new_total_pages=_source_page_count(new_extraction),
+        old_total_pages_known=old_extraction.total_pages > 0,
+        new_total_pages_known=new_extraction.total_pages > 0,
         old_selected_start_page=_selected_start_page(old_extraction),
         old_selected_end_page=_selected_end_page(old_extraction),
         new_selected_start_page=_selected_start_page(new_extraction),
