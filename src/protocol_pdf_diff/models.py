@@ -76,6 +76,11 @@ class DocumentBlock:
     reading_order: int  # 页内稳定序号从零开始连续编号，供后续版面解析器对照。
     source_engine: str  # 记录证据生产引擎，例如 pdfplumber 或 tesseract。
     confidence: float | None = None  # 未取得可靠置信度时必须为 None，禁止猜测 OCR 分数。
+    font_names: tuple[str, ...] = field(
+        default=(),
+        compare=False,
+        repr=False,
+    )  # 原生文字行保留实际字体集合；OCR/表格默认为空，禁止据此猜测标题样式。
 
 
 @dataclass(frozen=True)
@@ -320,11 +325,11 @@ class Section:
         compare=False,
         repr=False,
     )  # 报告降噪需把片段绑定回原页；不参与历史 Section 身份与相等性语义。
-    line_start_numbered_candidates: tuple[str, ...] = field(
+    proven_numbered_heading_candidates: tuple[str, ...] = field(
         default=(),
         compare=False,
         repr=False,
-    )  # 仅记录物理行首的后代编号候选，供读者层证明裸编号确来自标题式行而非句中 Version/ID。
+    )  # 仅记录物理行首且字体与已接纳父标题一致的后代候选；普通 Version/ID 不得借行首形态获得标题身份。
 
     @property
     def location(self) -> str:

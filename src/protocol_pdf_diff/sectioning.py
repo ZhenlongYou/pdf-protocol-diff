@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
 
-from .models import ExtractionResult, HeadingInfo, PageText, Section
+from .models import DocumentBlockKind, ExtractionResult, HeadingInfo, PageText, Section
 from .text_utils import (
     compact_inline,
     normalize_for_similarity,
@@ -126,7 +126,8 @@ class _OpenSection:
     end_page: int
     lines: list[str]
     page_lines: dict[int, list[str]]
-    line_start_numbered_candidates: list[str]
+    heading_font_names: tuple[str, ...]
+    proven_numbered_heading_candidates: list[str]
 
 
 def section_document(extraction: ExtractionResult) -> list[Section]:
@@ -364,7 +365,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                         if heading_candidate != line
                         else {}
                     ),
-                    line_start_numbered_candidates=[],
+                    heading_font_names=_physical_line_font_names(
+                        page,
+                        heading_candidate,
+                    ),
+                    proven_numbered_heading_candidates=[],
                 )
                 continue
 
@@ -379,14 +384,16 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     end_page=page.page_number,
                     lines=[],
                     page_lines={},
-                    line_start_numbered_candidates=[],
+                    heading_font_names=(),
+                    proven_numbered_heading_candidates=[],
                 )
             current.end_page = page.page_number
-            if candidate := _line_start_numbered_descendant_candidate(
+            if candidate := _proven_numbered_heading_descendant_candidate(
                 heading_candidate,
                 current,
+                _physical_line_font_names(page, heading_candidate),
             ):
-                current.line_start_numbered_candidates.append(candidate)
+                current.proven_numbered_heading_candidates.append(candidate)
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
 
@@ -755,7 +762,8 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
                 repeated_dynamic,
             )
         ]
-        cleaned.append(PageText(page_number=page.page_number, text="\n".join(kept_lines)))
+        # 只改正文视图；坐标块、字体和页边证据必须继续绑定同一物理页。
+        cleaned.append(replace(page, text="\n".join(kept_lines)))
     return cleaned
 
 
@@ -956,29 +964,109 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
             for page_number, lines in sorted(open_section.page_lines.items())
             if any(line.strip() for line in lines)
         ),
-        line_start_numbered_candidates=tuple(
-            open_section.line_start_numbered_candidates
+        proven_numbered_heading_candidates=tuple(
+            open_section.proven_numbered_heading_candidates
         ),
     )
 
 
-def _line_start_numbered_descendant_candidate(
+def _proven_numbered_heading_descendant_candidate(
     line: str,
     open_section: _OpenSection,
+    line_font_names: tuple[str, ...],
 ) -> str:
-    """保留物理行首、继承当前父号但未被章节器接纳的编号标题候选。"""
+    """保留物理行首、继承父号且字体与已接纳父标题相同的编号候选。"""
 
     match = re.match(
         r"^(?P<number>\d+(?:\.\d+){2,})\.?(?:\s+)(?P<title>\S.*)$",
         compact_inline(line),
     )
-    if match is None or not open_section.number_path:
+    if (
+        match is None
+        or not open_section.number_path
+        or not line_font_names
+        or line_font_names != open_section.heading_font_names
+    ):
         return ""
     parent_number = compact_inline(open_section.number_path[-1]).rstrip(".")
     candidate_number = match.group("number")
     if not candidate_number.startswith(parent_number + "."):
         return ""
     return f"{candidate_number} {compact_inline(match.group('title'))}"
+
+
+def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
+    """把清洗后的物理行绑定回唯一原生文字块的实际字体集合。"""
+
+    target = compact_inline(line)
+    matches: list[tuple[str, ...]] = []
+    for block in page.blocks:
+        if block.kind != DocumentBlockKind.TEXT or not block.font_names:
+            continue
+        normalized_block_line = normalize_line(block.text)
+        block_line = _line_without_ambiguous_margin_number(
+            normalized_block_line,
+            page.ambiguous_line_number_sides,
+        )
+        margin_number = ""
+        if compact_inline(block_line) != target:
+            # 抽取层已证明并从正文删除的页边行号仍保留在审计块中。只允许
+            # ``整数 + 完整目标行`` 或 ``完整目标行 + 整数``，不做任意子串匹配。
+            matched: re.Match[str] | None = None
+            # 目标本身可能以数字开头，因此左右方向不能靠一个宽松正则择优。
+            # 直接验证完整前/后缀可避免把标题首段误认成页边行号。
+            for margin_match in re.finditer(r"(?<!\d)\d{1,3}(?!\d)", normalized_block_line):
+                number = margin_match.group(0)
+                left_body = compact_inline(normalized_block_line[margin_match.end() :])
+                right_body = compact_inline(normalized_block_line[: margin_match.start()])
+                if left_body == target or right_body == target:
+                    matched = margin_match
+                    break
+            if matched is None:
+                continue
+            margin_number = matched.group(0)
+            block_line = target
+        if compact_inline(block_line) == target:
+            # 坐标块可能同时包含页边行号及正文。行号字体不能污染正文标题样式；
+            # 只有正文单字体可直接采用，混合字体时仅接受唯一非页边数字字体。
+            font_names = block.font_names
+            if normalized_block_line != block_line and len(font_names) == 2:
+                if not margin_number:
+                    margin_number_match = (
+                        re.match(r"^\d{1,3}\s+", normalized_block_line)
+                        if "left" in page.ambiguous_line_number_sides
+                        else re.search(r"\s+\d{1,3}$", normalized_block_line)
+                    )
+                    margin_number = (
+                        margin_number_match.group(0).strip()
+                        if margin_number_match
+                        else ""
+                    )
+                margin_fonts = {
+                    candidate.font_names[0]
+                    for candidate in page.blocks
+                    if candidate.kind == DocumentBlockKind.TEXT
+                    and len(candidate.font_names) == 1
+                    and (
+                        compact_inline(candidate.text) == margin_number
+                        or (
+                            margin_number.isdigit()
+                            and compact_inline(candidate.text).isdigit()
+                            and len(compact_inline(candidate.text))
+                            == len(margin_number)
+                        )
+                    )
+                }
+                remaining_fonts = tuple(
+                    font_name for font_name in font_names if font_name not in margin_fonts
+                )
+                if len(remaining_fonts) == 1:
+                    font_names = remaining_fonts
+            matches.append(font_names)
+    # 同一清洗文本落到多个物理块时无法唯一证明来源，必须失败可见。
+    if len(matches) != 1:
+        return ()
+    return matches[0]
 
 
 def _section_role(open_section: _OpenSection) -> str:

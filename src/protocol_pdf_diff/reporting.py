@@ -7823,17 +7823,27 @@ _READER_EMPTY_TYPED_LOCATOR_RES = tuple(
 _READER_BARE_SEE_REFERENCE_RE = re.compile(
     rf"(?i)\bsee\s+\(?{_READER_LOCATOR_NUMBER_PATTERN}\)?"
 )
-# 当一句话明确把编号作为出处时，Section/Table/Figure 等类别本身也只是引用来源。
-# 只有旧、新两侧都具备这种正向语法，才允许把不同类型和不同数量的引用折叠为同一占位符。
-_READER_EXPLICIT_CITATION_CONTEXT_RE = re.compile(
-    r"(?i)\b(?:see|refer(?:red)?\s+to|according\s+to|"
-    r"(?:specified|shown|defined|described|listed|found|given|provided)\s+in)\b"
-)
 _READER_TYPED_REFERENCE_PLACEHOLDER_RE = re.compile(
     r"<(?:section|figure|table|condition|equation|page)-references>"
 )
-_READER_GENERIC_REFERENCE_SEQUENCE_RE = re.compile(
-    rf"<locator-references>(?:{_READER_LOCATOR_JOIN_PATTERN}<locator-references>)+"
+# 不同来源类型只能在明确引用谓语紧邻支配的连续 locator span 内折叠。
+# 普通谓语 ``can see Table 1 markers`` 及句中其它 Table/Figure 事实不会进入该范围。
+_READER_CITATION_PROSE_LEAD_PATTERN = (
+    r"(?:refer(?:red)?\s+to|according\s+to|"
+    r"(?:specified|shown|defined|described|listed|found|given|provided)\s+in)"
+)
+_READER_CITATION_PLACEHOLDER_SEQUENCE_PATTERN = (
+    rf"{_READER_TYPED_REFERENCE_PLACEHOLDER_RE.pattern}"
+    rf"(?:{_READER_LOCATOR_JOIN_PATTERN}{_READER_TYPED_REFERENCE_PLACEHOLDER_RE.pattern})*"
+)
+_READER_SCOPED_CITATION_SOURCE_RE = re.compile(
+    rf"(?i)(?P<lead>\b{_READER_CITATION_PROSE_LEAD_PATTERN}\s+)"
+    rf"(?P<references>{_READER_CITATION_PLACEHOLDER_SEQUENCE_PATTERN})"
+)
+_READER_IMPERATIVE_SEE_CITATION_SOURCE_RE = re.compile(
+    rf"(?i)(?P<boundary>^|(?<=[.!?;:])\s+)"
+    rf"(?P<lead>see\s+)"
+    rf"(?P<references>{_READER_CITATION_PLACEHOLDER_SEQUENCE_PATTERN})"
 )
 
 
@@ -7883,30 +7893,25 @@ def _reader_values_match_after_locator_renumbering(
     if old_neutralized == new_neutralized:
         return True
     # ``specified in Table 2`` → ``specified in Section 3 and Tables 10/11``
-    # 仍是出处集合变化。只有两侧都有明确引用谓语时才忽略类别和数量，避免把表题
-    # ``Table 1 Limits`` 与图题 ``Figure 2 Limits`` 误判为读者等价。
-    if not (
-        _READER_EXPLICIT_CITATION_CONTEXT_RE.search(old_value)
-        and _READER_EXPLICIT_CITATION_CONTEXT_RE.search(new_value)
-    ):
-        return False
-    old_sources_neutralized = _reader_neutralize_locator_source_types(old_neutralized)
-    new_sources_neutralized = _reader_neutralize_locator_source_types(new_neutralized)
+    # 仍是出处集合变化，但只中和该谓语紧邻支配的引用 span，不改写句中其它事实。
+    old_sources_neutralized = _reader_neutralize_scoped_citation_source_types(
+        old_neutralized
+    )
+    new_sources_neutralized = _reader_neutralize_scoped_citation_source_types(
+        new_neutralized
+    )
     return old_sources_neutralized == new_sources_neutralized
 
 
-def _reader_neutralize_locator_source_types(value: str) -> str:
-    """折叠明确出处句中的引用类别和引用项数量。"""
+def _reader_neutralize_scoped_citation_source_types(value: str) -> str:
+    """只折叠明确引用谓语直接支配的连续出处片段。"""
 
-    neutralized = _READER_TYPED_REFERENCE_PLACEHOLDER_RE.sub(
-        "<locator-references>",
-        value,
-    )
-    # Section 与多个 Table 被前序规则分别原子中和后，在这里合并为一个“出处集合”。
-    return _READER_GENERIC_REFERENCE_SEQUENCE_RE.sub(
-        "<locator-references>",
-        neutralized,
-    )
+    def collapse(match: re.Match[str]) -> str:
+        # 保留原谓语和句界；只把其后的 locator sequence 变成统一出处占位符。
+        return f"{match.groupdict().get('boundary', '')}{match.group('lead')}<locator-references>"
+
+    neutralized = _READER_SCOPED_CITATION_SOURCE_RE.sub(collapse, value)
+    return _READER_IMPERATIVE_SEE_CITATION_SOURCE_RE.sub(collapse, neutralized)
 
 
 def _reader_changes_without_cross_card_locator_pairs(
@@ -7925,9 +7930,9 @@ def _reader_changes_without_cross_card_locator_pairs(
         # 新增句按其完整中和文本建索引；明确出处语法还需同步折叠来源类别，
         # 使 Table→Section+Tables 在底层拆成独立卡片时仍落到同一窄 key。
         for snippet_index, snippet in enumerate(change.added_snippets):
-            neutralized = _reader_neutralize_locator_numbers(snippet)
-            if _READER_EXPLICIT_CITATION_CONTEXT_RE.search(snippet):
-                neutralized = _reader_neutralize_locator_source_types(neutralized)
+            neutralized = _reader_neutralize_scoped_citation_source_types(
+                _reader_neutralize_locator_numbers(snippet)
+            )
             key = (
                 change.role,
                 location_key,
@@ -7938,9 +7943,9 @@ def _reader_changes_without_cross_card_locator_pairs(
             )
         # 删除句使用同一 key 结构，后续只接受恰好一对的无歧义匹配。
         for snippet_index, snippet in enumerate(change.removed_snippets):
-            neutralized = _reader_neutralize_locator_numbers(snippet)
-            if _READER_EXPLICIT_CITATION_CONTEXT_RE.search(snippet):
-                neutralized = _reader_neutralize_locator_source_types(neutralized)
+            neutralized = _reader_neutralize_scoped_citation_source_types(
+                _reader_neutralize_locator_numbers(snippet)
+            )
             key = (
                 change.role,
                 location_key,
@@ -8314,12 +8319,12 @@ def _reader_change_without_proven_child_clause_renumber(
             any(
                 old_candidate_prefix.startswith(candidate)
                 or candidate.startswith(old_candidate_prefix)
-                for candidate in old_section.line_start_numbered_candidates
+                for candidate in old_section.proven_numbered_heading_candidates
             )
             and any(
                 new_candidate_prefix.startswith(candidate)
                 or candidate.startswith(new_candidate_prefix)
-                for candidate in new_section.line_start_numbered_candidates
+                for candidate in new_section.proven_numbered_heading_candidates
             )
         ):
             return False

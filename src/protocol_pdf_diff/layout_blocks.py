@@ -51,7 +51,7 @@ def extract_pdfplumber_coordinate_words(
         raw_words = page.extract_words(
             keep_blank_chars=False,
             use_text_flow=False,
-            extra_attrs=["size"],
+            extra_attrs=["size", "fontname"],
         ) or []
     except Exception as exc:
         # 同时返回布局检查可复用的错误文字，避免第二次调用页面方法。
@@ -281,6 +281,12 @@ def _validated_coordinate_word(
             size = 0.0
         if math.isfinite(size) and size > 0:
             validated_word["size"] = size
+    # 字体名只作为同一文档内的版式证据，不解释具体厂商前缀或伪造粗体语义。
+    raw_fontname = raw_word.get("fontname")
+    if isinstance(raw_fontname, str):
+        fontname = raw_fontname.strip()
+        if fontname:
+            validated_word["fontname"] = fontname
     return validated_word, None
 
 
@@ -371,6 +377,16 @@ def _text_block_from_word_line(
         reading_order=reading_order,
         source_engine="pdfplumber",
         confidence=None,
+        font_names=tuple(
+            sorted(
+                {
+                    str(word["fontname"])
+                    for word in word_line
+                    if isinstance(word.get("fontname"), str)
+                    and str(word["fontname"]).strip()
+                }
+            )
+        ),
     )
 
 

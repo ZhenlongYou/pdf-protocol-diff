@@ -51,6 +51,8 @@ from protocol_pdf_diff.desktop_gui import (
     run_smoke_test,
 )
 from protocol_pdf_diff.models import (
+    DocumentBlock,
+    DocumentBlockKind,
     DiffOptions,
     DiffResult,
     ExtractionResult,
@@ -7034,14 +7036,61 @@ class ProtocolDiffTests(unittest.TestCase):
             "31.3.18.2.1.1 Host input test signal calibration\n"
             "Calibration remains stable."
         )
+        def page_with_heading_style(
+            text: str,
+            parent_heading: str,
+            child_heading: str,
+        ) -> PageText:
+            """为合成页提供与真实 PDF 相同的父/子标题字体证据。"""
+
+            blocks = tuple(
+                DocumentBlock(
+                    page_number=1,
+                    bbox=(72.0, top, 520.0, top + 12.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text=line,
+                    reading_order=index,
+                    source_engine="pdfplumber",
+                    font_names=(font_name,),
+                )
+                for index, (line, top, font_name) in enumerate(
+                    (
+                        (parent_heading, 72.0, "Synthetic+Heading"),
+                        ("Jitter", 110.0, "Synthetic+Figure"),
+                        (child_heading, 140.0, "Synthetic+Heading"),
+                    )
+                )
+            )
+            return PageText(page_number=1, text=text, blocks=blocks)
+
+        old_parent_heading = "31.3.17.2 Host and Module input tolerance tests"
+        new_parent_heading = "31.3.18.2 Host and Module input tolerance tests"
+        old_child_heading = (
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        )
+        new_child_heading = (
+            "31.3.18.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
+        )
         result = compare_extractions(
             ExtractionResult(
                 pdf_path=Path("old_mixed_reference_source.pdf"),
-                pages=[PageText(page_number=1, text=old_text)],
+                pages=[
+                    page_with_heading_style(
+                        old_text,
+                        old_parent_heading,
+                        old_child_heading,
+                    )
+                ],
             ),
             ExtractionResult(
                 pdf_path=Path("new_mixed_reference_source.pdf"),
-                pages=[PageText(page_number=1, text=new_text)],
+                pages=[
+                    page_with_heading_style(
+                        new_text,
+                        new_parent_heading,
+                        new_child_heading,
+                    )
+                ],
             ),
             DiffOptions(),
         )
@@ -7314,6 +7363,81 @@ class ProtocolDiffTests(unittest.TestCase):
         for rendered in audit_reports:
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
+
+    def test_reader_keeps_non_citation_table_and_figure_facts(self) -> None:
+        """引用类别降噪只能作用于谓语直接支配的连续出处片段。"""
+
+        cases = (
+            (
+                "The camera can see Table 1 markers.",
+                "The camera can see Figure 2 markers.",
+            ),
+            (
+                "Table 1 is normative, while calibration is specified in Table 3.",
+                "Figure 2 is normative, while calibration is specified in Figure 4.",
+            ),
+        )
+        for old_sentence, new_sentence in cases:
+            with self.subTest(old_sentence=old_sentence):
+                result = compare_extractions(
+                    ExtractionResult(
+                        pdf_path=Path("old_non_citation_fact.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Scope\n{old_sentence}")],
+                    ),
+                    ExtractionResult(
+                        pdf_path=Path("new_non_citation_fact.pdf"),
+                        pages=[PageText(page_number=1, text=f"1 Scope\n{new_sentence}")],
+                    ),
+                    DiffOptions(),
+                )
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    paths = write_reports(result, temp_dir, DiffOptions())
+                    reports = (
+                        _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                        paths["markdown"].read_text(encoding="utf-8"),
+                        paths["text"].read_text(encoding="utf-8"),
+                        paths["json"].read_text(encoding="utf-8"),
+                        paths["csv"].read_text(encoding="utf-8"),
+                    )
+                for rendered in reports:
+                    self.assertIn("Table 1", rendered)
+                    self.assertIn("Figure 2", rendered)
+
+    def test_reader_keeps_split_line_technical_label_before_numbered_candidate(self) -> None:
+        """上一物理行的普通技术标签不能借后续裸编号候选获得标题身份。"""
+
+        old_text = (
+            "31.3.17.2 Host and Module input tolerance tests\n"
+            "Version\n"
+            "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods\n"
+            "To be updated.\n"
+            "31.3.17.2.1.1 Host input test signal calibration\n"
+            "Calibration remains stable."
+        )
+        new_text = old_text.replace("31.3.17.2", "31.3.18.2")
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_split_technical_label.pdf"),
+                pages=[PageText(page_number=1, text=old_text)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_split_technical_label.pdf"),
+                pages=[PageText(page_number=1, text=new_text)],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+                paths["json"].read_text(encoding="utf-8"),
+                paths["csv"].read_text(encoding="utf-8"),
+            )
+        for rendered in reports:
+            self.assertIn("31.3.17.2.1", rendered)
+            self.assertIn("31.3.18.2.1", rendered)
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""
