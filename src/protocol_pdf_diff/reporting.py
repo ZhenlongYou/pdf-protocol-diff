@@ -310,11 +310,7 @@ def write_reports(
         if reader_change is not None:
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
-    reader_changes = _reader_changes_without_cross_card_locator_pairs(
-        reader_changes,
-        old_sections=result.old_sections,
-        new_sections=result.new_sections,
-    )
+    reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
         for index, change in enumerate(
@@ -7965,24 +7961,8 @@ def _reader_neutralize_scoped_citation_source_types(value: str) -> str:
 
 def _reader_changes_without_cross_card_locator_pairs(
     changes: list[SectionChange],
-    *,
-    old_sections: Iterable[Section] | None = None,
-    new_sections: Iterable[Section] | None = None,
 ) -> list[SectionChange]:
     """在同一位置唯一配对 added/removed 引用句，并只修改读者副本。"""
-
-    old_section_values = list(old_sections) if old_sections is not None else [
-        change.old_section for change in changes if change.old_section is not None
-    ]
-    new_section_values = list(new_sections) if new_sections is not None else [
-        change.new_section for change in changes if change.new_section is not None
-    ]
-    old_location_counts = Counter(
-        _reader_section_location_key(section) for section in old_section_values
-    )
-    new_location_counts = Counter(
-        _reader_section_location_key(section) for section in new_section_values
-    )
 
     # key 同时包含角色、报告位置和编号中和后的整句，防止跨章节或跨文档角色误配。
     added_by_key: dict[tuple[str, str, str], list[tuple[int, int, str]]] = {}
@@ -7991,7 +7971,9 @@ def _reader_changes_without_cross_card_locator_pairs(
     for change_index, change in enumerate(changes):
         if change.omitted_snippet_count != 0:
             continue
-        location_key = _reader_cross_card_location_key(change)
+        # 底层已经拆成 added/deleted 时没有可靠章节配对关系；只能在报告位置
+        # 完全相同的卡片间消除出处句，不得再根据标题或编号猜测跨章节顺延。
+        location_key = compact_inline(change.report_location)
         # 新增句按其完整中和文本建索引；明确出处语法还需同步折叠来源类别，
         # 使 Table→Section+Tables 在底层拆成独立卡片时仍落到同一窄 key。
         for snippet_index, snippet in enumerate(change.added_snippets):
@@ -8030,13 +8012,6 @@ def _reader_changes_without_cross_card_locator_pairs(
             continue
         added_change_index, added_snippet_index, new_value = added_occurrences[0]
         removed_change_index, removed_snippet_index, old_value = removed_occurrences[0]
-        if not _reader_cross_card_locations_match(
-            changes[removed_change_index],
-            changes[added_change_index],
-            old_location_counts=old_location_counts,
-            new_location_counts=new_location_counts,
-        ):
-            continue
         # 再次使用完整旧/新严格判据，确保 key 构造没有把相同原句或技术变化误判为引用变化。
         if not _reader_values_match_after_locator_renumbering(old_value, new_value):
             continue
@@ -8104,90 +8079,6 @@ def _reader_changes_without_cross_card_locator_pairs(
         reader_changes.append(cleaned)
     # 返回新的读者卡片序列，调用者仍持有完全未修改的原始 DiffResult。
     return reader_changes
-
-
-def _reader_cross_card_location_key(change: SectionChange) -> str:
-    """Return a location key that ignores only proven structural heading numbers."""
-
-    section = change.new_section or change.old_section
-    if section is None:
-        return compact_inline(change.report_location)
-
-    return _reader_section_location_key(section)
-
-
-def _reader_section_location_key(section: Section) -> str:
-    """Remove only number_path-proven prefixes from one section location."""
-
-    # Cross-card add/delete pairs can be the same semantic section after a document-wide
-    # renumbering.  Build the key from the complete heading path, but remove a prefix only
-    # when that exact token is present in Section.number_path.  This is narrower than
-    # erasing arbitrary dotted values from a location and keeps unrelated technical IDs
-    # separated.
-    normalized_parts: list[str] = []
-    structural_numbers = sorted(
-        (compact_inline(number) for number in section.number_path if compact_inline(number)),
-        key=len,
-        reverse=True,
-    )
-    for raw_part in section.heading_path or (section.heading,):
-        part = compact_inline(raw_part)
-        for number in structural_numbers:
-            prefix = re.compile(
-                rf"(?i)^(?:(?:chapter|section|clause)\s+)?{re.escape(number)}"
-                r"(?=\s|[-:.)]|$)\s*[-:.)]?\s*"
-            )
-            stripped = prefix.sub("", part, count=1)
-            if stripped != part:
-                part = stripped
-                break
-        # 标题中的大小写可能属于 CMIS-LT、NRZ 等技术标识符语义。位置键只忽略
-        # 已由 number_path 证明的结构编号，不得顺手折叠标题大小写。
-        normalized_parts.append(part)
-    return " / ".join(normalized_parts)
-
-
-def _reader_cross_card_locations_match(
-    old_change: SectionChange,
-    new_change: SectionChange,
-    *,
-    old_location_counts: Counter[str],
-    new_location_counts: Counter[str],
-) -> bool:
-    """Require exact location or one propagated structural-number shift."""
-
-    old_section = old_change.old_section or old_change.new_section
-    new_section = new_change.new_section or new_change.old_section
-    if old_section is None or new_section is None:
-        return compact_inline(old_change.report_location) == compact_inline(
-            new_change.report_location
-        )
-    if compact_inline(old_section.location) == compact_inline(new_section.location):
-        return True
-    location_key = _reader_cross_card_location_key(old_change)
-    if location_key != _reader_cross_card_location_key(new_change):
-        return False
-    # A stripped title path is safe evidence only when it identifies exactly one section
-    # on each side of the full document.  This prevents 2.1/2.3 same-named siblings, or
-    # 2/8 same-named parent trees, from donating citation occurrences to each other.
-    if old_location_counts[location_key] != 1 or new_location_counts[location_key] != 1:
-        return False
-    if not old_section.number_path or not new_section.number_path:
-        return False
-
-    old_leaf = compact_inline(old_section.number_path[-1])
-    new_leaf = compact_inline(new_section.number_path[-1])
-    old_components = old_leaf.split(".")
-    new_components = new_leaf.split(".")
-    if (
-        len(old_components) != len(new_components)
-        or not all(component.isdigit() for component in (*old_components, *new_components))
-    ):
-        return False
-    # A document-wide renumber such as 31.3.17.2→31.3.18.2 changes one
-    # structural component.  2.1→8.3 changes two components and can instead be
-    # a citation moving between distinct same-named sections, so it must remain visible.
-    return sum(old != new for old, new in zip(old_components, new_components)) == 1
 
 
 def _reader_audit_without_occurrences(

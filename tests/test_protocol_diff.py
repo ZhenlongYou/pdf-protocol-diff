@@ -7439,8 +7439,8 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
 
-    def test_cross_card_citation_cleanup_matches_renumbered_section_location(self) -> None:
-        """章节本身顺延时，纯出处扩展仍应只留在机器审计中。"""
+    def test_cross_card_citation_cleanup_keeps_unpaired_renumbered_location(self) -> None:
+        """章节未可靠配对时不得仅凭同题改号跨卡消除出处。"""
 
         old_sentence = "The method is specified in Table 31-2."
         new_sentence = (
@@ -7484,8 +7484,8 @@ class ProtocolDiffTests(unittest.TestCase):
                 paths["csv"].read_text(encoding="utf-8"),
             )
         for rendered in reader_reports:
-            self.assertNotIn(old_sentence, rendered)
-            self.assertNotIn(new_sentence, rendered)
+            self.assertIn(old_sentence, rendered)
+            self.assertIn(new_sentence, rendered)
         for rendered in audit_reports:
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
