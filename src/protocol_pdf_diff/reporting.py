@@ -8010,6 +8010,11 @@ def _reader_changes_without_cross_card_locator_pairs(
             continue
         added_change_index, added_snippet_index, new_value = added_occurrences[0]
         removed_change_index, removed_snippet_index, old_value = removed_occurrences[0]
+        if not _reader_cross_card_locations_match(
+            changes[removed_change_index],
+            changes[added_change_index],
+        ):
+            continue
         # 再次使用完整旧/新严格判据，确保 key 构造没有把相同原句或技术变化误判为引用变化。
         if not _reader_values_match_after_locator_renumbering(old_value, new_value):
             continue
@@ -8112,6 +8117,42 @@ def _reader_cross_card_location_key(change: SectionChange) -> str:
         # 已由 number_path 证明的结构编号，不得顺手折叠标题大小写。
         normalized_parts.append(part)
     return " / ".join(normalized_parts)
+
+
+def _reader_cross_card_locations_match(
+    old_change: SectionChange,
+    new_change: SectionChange,
+) -> bool:
+    """Require exact location or one propagated structural-number shift."""
+
+    old_section = old_change.old_section or old_change.new_section
+    new_section = new_change.new_section or new_change.old_section
+    if old_section is None or new_section is None:
+        return compact_inline(old_change.report_location) == compact_inline(
+            new_change.report_location
+        )
+    if compact_inline(old_section.location) == compact_inline(new_section.location):
+        return True
+    if _reader_cross_card_location_key(old_change) != _reader_cross_card_location_key(
+        new_change
+    ):
+        return False
+    if not old_section.number_path or not new_section.number_path:
+        return False
+
+    old_leaf = compact_inline(old_section.number_path[-1])
+    new_leaf = compact_inline(new_section.number_path[-1])
+    old_components = old_leaf.split(".")
+    new_components = new_leaf.split(".")
+    if (
+        len(old_components) != len(new_components)
+        or not all(component.isdigit() for component in (*old_components, *new_components))
+    ):
+        return False
+    # A document-wide renumber such as 31.3.17.2→31.3.18.2 changes one
+    # structural component.  2.1→8.3 changes two components and can instead be
+    # a citation moving between distinct same-named sections, so it must remain visible.
+    return sum(old != new for old, new in zip(old_components, new_components)) == 1
 
 
 def _reader_audit_without_occurrences(
