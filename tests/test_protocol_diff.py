@@ -7558,7 +7558,15 @@ class ProtocolDiffTests(unittest.TestCase):
                 outline_heading_paths=((
                     "31.3.17.2 Host and Module input tolerance tests",
                     heading,
-                ),),
+                ), (
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    heading,
+                    "31.3.17.2.1.1 Host input test signal calibration",
+                ), (
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    heading,
+                    "31.3.17.2.1.2 Module input test signal calibration",
+                )),
             )
         )
         child = next(section for section in sections if section.heading == heading)
@@ -7572,8 +7580,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "31.3.17.2 Host and Module input tolerance tests",
             numbered_title,
             "General requirements remain stable.",
-            "31.3.17.2.1.1 Phase 2 host calibration",
-            "31.3.17.2.1.2 Gen 5 module calibration",
+            "31.3.17.2.1.1 Host input tolerance calibration phase two",
+            "31.3.17.2.1.2 Module input tolerance calibration generation five",
         )
         numbered_sections = section_document(
             ExtractionResult(
@@ -7603,7 +7611,15 @@ class ProtocolDiffTests(unittest.TestCase):
                 outline_heading_paths=((
                     "31.3.17.2 Host and Module input tolerance tests",
                     numbered_title,
-                ),),
+                ), (
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    numbered_title,
+                    "31.3.17.2.1.1 Host input tolerance calibration phase two",
+                ), (
+                    "31.3.17.2 Host and Module input tolerance tests",
+                    numbered_title,
+                    "31.3.17.2.1.2 Module input tolerance calibration generation five",
+                )),
             )
         )
         numbered_child = next(
@@ -7754,6 +7770,24 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, len(record_sections))
         self.assertIn("Firmware Version", record_sections[0].body)
         self.assertIn("Register status record", record_sections[0].body)
+
+        # 过期/损坏 outline 即使标题文字碰撞，只要编号与正文不同，也不能
+        # 给 Firmware 技术记录授予章节身份。
+        stale_outline_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("stale_outline_technical_record.pdf"),
+                pages=[PageText(
+                    page_number=1,
+                    text="\n".join(record_lines),
+                )],
+                outline_heading_paths=((
+                    "99.8.4 Host and Module input tolerance tests",
+                    "99.8.4.9 Firmware Version for Ports 4 and 8 build 2024",
+                ),),
+            )
+        )
+        self.assertEqual(1, len(stale_outline_sections))
+        self.assertIn("Firmware Version", stale_outline_sections[0].body)
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""

@@ -1226,42 +1226,65 @@ def _detect_dense_numbered_heading_under_parent(
         return None
     parent_title_key = normalize_for_similarity(parent.title)
     title_key = normalize_for_similarity(title)
-    own_outline_pairs = {
+    if len(
+        _meaningful_heading_words(parent_title_key)
+        & _meaningful_heading_words(title_key)
+    ) < 2:
+        return None  # outline 里的技术记录若偏离当前父章节主题，不能借层级外形获得章节身份。
+    own_outline_records = {
         (
-            normalize_for_similarity(_outline_numeric_title(path[-2])),
-            normalize_for_similarity(_outline_numeric_title(path[-1])),
+            canonical_number_identity(parent_record[0]),
+            normalize_for_similarity(parent_record[1]),
+            canonical_number_identity(child_record[0]),
+            normalize_for_similarity(child_record[1]),
         )
         for path in outline_heading_paths
         if len(path) >= 2
+        and (parent_record := _outline_number_and_title(path[-2])) is not None
+        and (child_record := _outline_number_and_title(path[-1])) is not None
+        and canonical_number_identity(child_record[0]).rsplit(".", 1)[0]
+        == canonical_number_identity(parent_record[0])
     }
-    title_pair = (parent_title_key, title_key)
-    if title_pair not in own_outline_pairs:
+    own_record = (
+        canonical_number_identity(parent.number),
+        parent_title_key,
+        canonical_number_identity(number),
+        title_key,
+    )
+    proof_outline_paths = outline_heading_paths
+    if own_record not in own_outline_records:
         peer_outline_pairs = {
             (
-                normalize_for_similarity(_outline_numeric_title(path[-2])),
-                normalize_for_similarity(_outline_numeric_title(path[-1])),
+                normalize_for_similarity(parent_record[1]),
+                normalize_for_similarity(child_record[1]),
             )
             for path in peer_outline_heading_paths
             if len(path) >= 3
+            and (parent_record := _outline_number_and_title(path[-2])) is not None
+            and (child_record := _outline_number_and_title(path[-1])) is not None
+            and canonical_number_identity(child_record[0]).rsplit(".", 1)[0]
+            == canonical_number_identity(parent_record[0])
         }
-        candidate_fonts = _physical_line_font_names(page, line)
-        if (
-            title_pair not in peer_outline_pairs
-            or not candidate_fonts
-            or not open_section.heading_font_names
-            or candidate_fonts != open_section.heading_font_names
-            or not _has_two_peer_outline_backed_direct_children(
-                number,
-                level,
-                candidate_fonts,
-                cleaned_pages,
-                page_index,
-                line_index,
-                title_key,
-                peer_outline_heading_paths,
-            )
-        ):
+        if (parent_title_key, title_key) not in peer_outline_pairs:
             return None
+        proof_outline_paths = peer_outline_heading_paths
+    candidate_fonts = _physical_line_font_names(page, line)
+    if (
+        not candidate_fonts
+        or not open_section.heading_font_names
+        or candidate_fonts != open_section.heading_font_names
+        or not _has_two_outline_backed_direct_children(
+            number,
+            level,
+            candidate_fonts,
+            cleaned_pages,
+            page_index,
+            line_index,
+            title_key,
+            proof_outline_paths,
+        )
+    ):
+        return None
     candidate = HeadingInfo(
         raw=compact_inline(line),
         number=number,
@@ -1279,7 +1302,7 @@ def _detect_dense_numbered_heading_under_parent(
     return candidate
 
 
-def _has_two_peer_outline_backed_direct_children(
+def _has_two_outline_backed_direct_children(
     parent_number: str,
     parent_level: int,
     parent_fonts: tuple[str, ...],
@@ -1289,18 +1312,22 @@ def _has_two_peer_outline_backed_direct_children(
     parent_title_key: str,
     peer_outline_paths: tuple[tuple[str, ...], ...],
 ) -> bool:
-    """当前 PDF 的两个后代行须逐一命中对侧 outline 的同一父路径。"""
+    """当前 PDF 的两个后代行须逐一命中同一条 outline 父路径。"""
 
     expected_child_titles = {
-        normalize_for_similarity(_outline_numeric_title(path[-1]))
+        normalize_for_similarity(child_record[1])
         for path in peer_outline_paths
         if len(path) >= 2
-        and normalize_for_similarity(_outline_numeric_title(path[-2]))
-        == parent_title_key
+        and (parent_record := _outline_number_and_title(path[-2])) is not None
+        and (child_record := _outline_number_and_title(path[-1])) is not None
+        and canonical_number_identity(child_record[0]).rsplit(".", 1)[0]
+        == canonical_number_identity(parent_record[0])
+        and normalize_for_similarity(parent_record[1]) == parent_title_key
     }
     if len(expected_child_titles) < 2:
         return False
     canonical_parent = canonical_number_identity(parent_number)
+    parent_words = _meaningful_heading_words(parent_title_key)
     found_titles: set[str] = set()
     inspected_nonempty = 0
     for candidate_page_index in range(page_index, len(pages)):
@@ -1327,6 +1354,7 @@ def _has_two_peer_outline_backed_direct_children(
                 and _physical_line_font_names(candidate_page, candidate_line)
                 == parent_fonts
                 and title_key in expected_child_titles
+                and len(parent_words & _meaningful_heading_words(title_key)) >= 2
             ):
                 found_titles.add(title_key)
                 if len(found_titles) >= 2:
@@ -1334,11 +1362,27 @@ def _has_two_peer_outline_backed_direct_children(
     return False
 
 
-def _outline_numeric_title(value: str) -> str:
-    """去掉 outline 数字前缀，只保留用于父子路径配对的原始标题正文。"""
+def _meaningful_heading_words(value: str) -> set[str]:
+    """提取标题主干词，只用于证明父/子标题属于同一技术主题。"""
 
-    match = re.match(r"^\d+(?:\.\d+)+\s+(.+)$", compact_inline(value))
-    return match.group(1) if match else compact_inline(value)
+    stop_words = {"and", "or", "the", "a", "an", "of", "to", "for", "in"}
+    return {
+        word.casefold()
+        for word in re.findall(r"[A-Za-z]{3,}", value)
+        if word.casefold() not in stop_words
+    }
+
+
+def _outline_number_and_title(value: str) -> tuple[str, str] | None:
+    """解析 outline 的点分编号与标题正文；两者缺一时不能证明章节。"""
+
+    match = re.match(
+        r"^(?P<number>\d+(?:\.\d+)+)\s+(?P<title>\S.*)$",
+        compact_inline(value),
+    )
+    if match is None:
+        return None
+    return match.group("number"), match.group("title")
 
 
 def _looks_like_forbidden_heading_candidate(
