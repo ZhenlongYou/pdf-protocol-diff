@@ -7071,10 +7071,23 @@ class ProtocolDiffTests(unittest.TestCase):
                 text=text,
                 blocks=blocks,
                 vector_graphics=(
-                    ("rect", 90.0, 82.0, 220.0, 118.0),
-                    ("rect", 240.0, 90.0, 360.0, 122.0),
-                    ("rect", 70.0, 104.0, 520.0, 132.0),
-                    ("curve", 70.0, 82.0, 520.0, 144.0),
+                    ("rect", 70.0, 82.0, 520.0, 144.0),
+                    *tuple(
+                        ("rect", 70.0, float(top), 71.0, float(top + 5))
+                        for top in range(84, 142, 10)
+                    ),
+                    *tuple(
+                        ("rect", 519.0, float(top), 520.0, float(top + 5))
+                        for top in range(84, 142, 10)
+                    ),
+                    *tuple(
+                        ("rect", float(left), 82.0, float(left + 5), 83.0)
+                        for left in range(72, 518, 10)
+                    ),
+                    *tuple(
+                        ("rect", float(left), 143.0, float(left + 5), 144.0)
+                        for left in range(72, 518, 10)
+                    ),
                 ),
             )
 

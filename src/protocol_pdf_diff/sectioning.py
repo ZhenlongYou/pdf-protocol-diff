@@ -1167,33 +1167,21 @@ def _proven_figure_label_before_heading(
         if graphic[2] >= caption.bbox[1] - 1.0
         and graphic[4] <= heading_block.bbox[1] + 1.0
     ]
-    label_intersecting_graphics = [
-        graphic
-        for graphic in graphic_region
-        if _bbox_intersects(_vector_graphic_bbox(graphic), label_block.bbox)
-    ]
-    if not label_intersecting_graphics:
-        return ""
-    # 从标签真正接触的对象出发建立同栏连通图形区，禁止把右栏无关 Figure 图题
-    # 与左栏普通表格框拼成伪 provenance。矩形/直线网格本身仍不证明 Figure；
-    # 区域必须连到至少一个原生 curve，且应覆盖多个非正文图内标签。
-    connected_graphics = _connected_vector_graphics(
+    # 真实 OIF 图内的末行 Jitter 位于“信号说明”虚线图例框中。只接受标签落在
+    # 四边均由多个短 dash 组成的同一大框内；普通实线表格、圆角文本框、外围
+    # 椭圆或仅 bbox 包含标签的 curve 都不能取得 Figure provenance。
+    legend_bbox = _dashed_legend_bbox_containing_label(
         graphic_region,
-        label_intersecting_graphics,
+        label_block.bbox,
     )
-    if not any(
-        graphic[0] == "curve"
-        and (graphic[3] - graphic[1] >= 1.0 or graphic[4] - graphic[2] >= 1.0)
-        for graphic in connected_graphics
-    ):
+    if legend_bbox is None:
         return ""
-    connected_bbox = _vector_graphics_envelope(connected_graphics)
-    connected_labels = [
+    legend_labels = [
         block
         for block in intervening_blocks
-        if _bbox_intersects(block.bbox, connected_bbox)
+        if _bbox_intersects(block.bbox, legend_bbox, tolerance=0.0)
     ]
-    if len(connected_labels) < 4:
+    if len(legend_labels) < 4:
         return ""
     return compact_inline(label)
 
@@ -1222,38 +1210,67 @@ def _bbox_intersects(
     )
 
 
-def _connected_vector_graphics(
+def _dashed_legend_bbox_containing_label(
     graphics: list[tuple[str, float, float, float, float]],
-    seeds: list[tuple[str, float, float, float, float]],
-) -> list[tuple[str, float, float, float, float]]:
-    """从标签接触对象扩展同一连通图形区，保留对象类型而非计数猜测。"""
+    label_bbox: tuple[float, float, float, float],
+) -> tuple[float, float, float, float] | None:
+    """证明标签位于四边均由重复短划线构成的大型图例框中。"""
 
-    connected = list(dict.fromkeys(seeds))
-    pending = list(connected)
-    while pending:
-        current = pending.pop()
-        current_bbox = _vector_graphic_bbox(current)
-        for graphic in graphics:
-            if graphic in connected:
-                continue
-            if _bbox_intersects(current_bbox, _vector_graphic_bbox(graphic)):
-                connected.append(graphic)
-                pending.append(graphic)
-    return connected
+    label_left = max(label_bbox[0], 72.0)
+    label_right = label_bbox[2]
+    label_middle = (label_bbox[1] + label_bbox[3]) / 2.0
+    candidates: list[tuple[float, float, float, float]] = []
+    for graphic in graphics:
+        bbox = _vector_graphic_bbox(graphic)
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if (
+            width < 100.0
+            or height < 50.0
+            or bbox[2] < label_left
+            or bbox[0] > label_right
+            or not bbox[1] <= label_middle <= bbox[3]
+        ):
+            continue
+        side_counts = _short_dash_side_counts(graphics, bbox)
+        if min(side_counts.values()) >= 4:
+            candidates.append(bbox)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda bbox: (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
 
 
-def _vector_graphics_envelope(
+def _short_dash_side_counts(
     graphics: list[tuple[str, float, float, float, float]],
-) -> tuple[float, float, float, float]:
-    """返回已证明连通图形区的统一包络。"""
+    frame: tuple[float, float, float, float],
+) -> dict[str, int]:
+    """统计候选框四边的独立短划线段，实线表格不会满足该形态。"""
 
-    bboxes = [_vector_graphic_bbox(graphic) for graphic in graphics]
-    return (
-        min(bbox[0] for bbox in bboxes),
-        min(bbox[1] for bbox in bboxes),
-        max(bbox[2] for bbox in bboxes),
-        max(bbox[3] for bbox in bboxes),
-    )
+    counts = {"left": 0, "right": 0, "top": 0, "bottom": 0}
+    for graphic in graphics:
+        bbox = _vector_graphic_bbox(graphic)
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        if (
+            min(width, height) > 2.0
+            or max(width, height) > 8.0
+            or bbox[0] < frame[0] - 2.0
+            or bbox[2] > frame[2] + 2.0
+            or bbox[1] < frame[1] - 2.0
+            or bbox[3] > frame[3] + 2.0
+        ):
+            continue
+        center_x = (bbox[0] + bbox[2]) / 2.0
+        center_y = (bbox[1] + bbox[3]) / 2.0
+        if abs(center_x - frame[0]) <= 2.0:
+            counts["left"] += 1
+        if abs(center_x - frame[2]) <= 2.0:
+            counts["right"] += 1
+        if abs(center_y - frame[1]) <= 2.0:
+            counts["top"] += 1
+        if abs(center_y - frame[3]) <= 2.0:
+            counts["bottom"] += 1
+    return counts
 
 
 def _physical_line_blocks(page: PageText, line: str) -> list[DocumentBlock]:
