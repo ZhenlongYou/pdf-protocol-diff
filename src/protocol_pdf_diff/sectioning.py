@@ -1174,6 +1174,17 @@ def _proven_figure_label_before_heading(
     # 纯文字块不能伪造 Figure 区域；至少三个真实矢量对象必须位于图题与标题之间。
     if len(graphic_region_bboxes) < 3:
         return ""
+    label_intersecting_graphics = [
+        bbox
+        for bbox in graphic_region_bboxes
+        if bbox[0] <= label_block.bbox[2]
+        and bbox[2] >= label_block.bbox[0]
+        and bbox[1] <= label_block.bbox[3]
+        and bbox[3] >= label_block.bbox[1]
+    ]
+    # 标签本身还必须与图形对象包络相交；仅在同一纵向区间存在无关矢量不够。
+    if not label_intersecting_graphics:
+        return ""
     return compact_inline(label)
 
 
