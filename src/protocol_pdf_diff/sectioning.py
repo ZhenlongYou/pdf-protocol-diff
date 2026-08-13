@@ -174,6 +174,16 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            if (
+                heading is None
+                and _looks_like_table_row(heading_candidate)
+                and (dense_heading := _detect_dense_numbered_heading_under_parent(
+                    heading_candidate,
+                    heading_stack,
+                ))
+                is not None
+            ):
+                heading = dense_heading
             next_physical_line = (
                 normalize_line(page_lines[line_index + 1])
                 if line_index + 1 < len(page_lines)
@@ -1148,18 +1158,67 @@ def _fallback_identity_key(body: str) -> str:
 def _looks_like_table_row(line: str) -> bool:
     """Reject dense table rows that often begin with numbers."""
 
-    # 完整点分编号开头的物理行先交给标题语法逐项审查。标题中的 TP4a/TP1
-    # 会让宽松的“至少四个数字”表格启发式误判，继而把真实子条款黏回上一行。
-    # 这里只豁免无显式列分隔符的完整编号前缀；公式、单位、脚注和数值行仍由
-    # detect_heading 后续的 forbidden-candidate 门保守拒绝。
-    if not ("|" in line or "\t" in line) and re.match(
-        r"^\d+(?:\.\d+){2,}\s+\S",
-        line,
-    ):
-        return False
     separators = line.count("|") + line.count("\t")
     many_numbers = len(re.findall(r"\d+(?:\.\d+)?", line)) >= 4
-    return separators >= 2 or (many_numbers and len(line) > 40)
+    dense_numeric_tail = bool(
+        re.match(r"^\d+(?:\.\d+){2,}\s+", line)
+        and re.search(
+            r"(?:^|\s)[+-]?\d+(?:\.\d+)?"
+            r"(?:\s+[+-]?\d+(?:\.\d+)?){2,}"
+            r"(?:\s+[A-Za-zµμΩ%/]+)?\s*$",
+            line,
+        )
+    )
+    return separators >= 2 or dense_numeric_tail or (many_numbers and len(line) > 40)
+
+
+def _detect_dense_numbered_heading_under_parent(
+    line: str,
+    heading_stack: list[HeadingInfo],
+) -> HeadingInfo | None:
+    """只在已接纳的直接父章节下恢复被多数字门挡住的完整子标题。"""
+
+    if "|" in line or "\t" in line:
+        return None
+    match = re.match(
+        r"^(?P<number>\d+(?:\.\d+){2,})\s+(?P<title>\S.{0,120})$",
+        compact_inline(line),
+    )
+    if match is None:
+        return None
+    number = match.group("number")
+    title = match.group("title")
+    level = number.count(".") + 1
+    parent = next(
+        (item for item in reversed(heading_stack) if item.level == level - 1),
+        None,
+    )
+    if parent is None or canonical_number_identity(parent.number) != number.rsplit(".", 1)[0].casefold():
+        return None
+    # 空格分列表格的数值通常密集落在标题尾部；直接父章节也不能把这些
+    # parameter/min/typ/max/unit 行改写成子条款。括号中的 TP4a/TP1 属于
+    # 标题名词，不形成连续数值尾部。
+    if re.search(
+        r"(?:^|\s)[+-]?\d+(?:\.\d+)?(?:\s+[+-]?\d+(?:\.\d+)?){2,}"
+        r"(?:\s+[A-Za-zµμΩ%/]+)?\s*$",
+        title,
+    ):
+        return None
+    candidate = HeadingInfo(
+        raw=compact_inline(line),
+        number=number,
+        title=title,
+        level=level,
+    )
+    # 父层级只证明编号归属，仍不能覆盖公式、单位、脚注或稠密数值行本身。
+    if _looks_like_forbidden_heading_candidate(
+        candidate.raw,
+        candidate.number,
+        candidate.title,
+        "numeric",
+    ):
+        return None
+    return candidate
 
 
 def _looks_like_forbidden_heading_candidate(

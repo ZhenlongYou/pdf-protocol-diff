@@ -7433,14 +7433,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "31.3.17.2.1 Host (TP4a) and Module (TP1) "
             "input tolerance test methods"
         )
-        detected = detect_heading(heading)
-        self.assertIsNotNone(detected)
-        assert detected is not None
-        self.assertEqual("31.3.17.2.1", detected.number)
-        self.assertEqual(
-            "Host (TP4a) and Module (TP1) input tolerance test methods",
-            detected.title,
-        )
+        # 无父上下文时仍保守拒绝：单行点分版本/技术 ID 不能自证章节。
+        self.assertIsNone(detect_heading(heading))
 
         sections = section_document(
             ExtractionResult(
@@ -7461,6 +7455,33 @@ class ProtocolDiffTests(unittest.TestCase):
         child = next(section for section in sections if section.heading == heading)
         self.assertEqual(("31.3.17.2", "31.3.17.2.1"), child.number_path)
         self.assertEqual("To be updated.", child.body)
+
+        # 即使编号与父章节吻合，空格分列的稠密数值行仍是表格事实，不能
+        # 借父层级变成章节；后续 TP4a 表注也必须留在父正文。
+        table_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("space_delimited_table_row.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Profile ID Description MIN TYP MAX Unit\n"
+                            "31.3.17.2.7 Receiver voltage 20 21 22 mV\n"
+                            "Values are measured at TP4a."
+                        ),
+                    )
+                ],
+            )
+        )
+        self.assertEqual(1, len(table_sections))
+        self.assertIn("Receiver voltage 20 21 22 mV", table_sections[0].body)
+        self.assertIn("Values are measured at TP4a.", table_sections[0].body)
+
+        # 没有父章节的 Firmware Version 行继续失败可见，不能被当作纯章节顺延。
+        self.assertIsNone(
+            detect_heading("1.2.3 Firmware Version for Ports 4 and 8 build 2024")
+        )
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""
