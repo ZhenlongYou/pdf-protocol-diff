@@ -8084,7 +8084,7 @@ def _reader_cross_card_location_key(change: SectionChange) -> str:
 
     section = change.new_section or change.old_section
     if section is None:
-        return compact_inline(change.report_location).casefold()
+        return compact_inline(change.report_location)
 
     # Cross-card add/delete pairs can be the same semantic section after a document-wide
     # renumbering.  Build the key from the complete heading path, but remove a prefix only
@@ -8108,7 +8108,9 @@ def _reader_cross_card_location_key(change: SectionChange) -> str:
             if stripped != part:
                 part = stripped
                 break
-        normalized_parts.append(part.casefold())
+        # 标题中的大小写可能属于 CMIS-LT、NRZ 等技术标识符语义。位置键只忽略
+        # 已由 number_path 证明的结构编号，不得顺手折叠标题大小写。
+        normalized_parts.append(part)
     return " / ".join(normalized_parts)
 
 

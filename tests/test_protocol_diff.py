@@ -7490,6 +7490,48 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn(old_sentence, rendered)
             self.assertIn(new_sentence, rendered)
 
+    def test_cross_card_citation_cleanup_keeps_technical_title_case_change(self) -> None:
+        """引用扩展不得借位置折叠吞掉章节标题中的技术大小写变化。"""
+
+        old_sentence = "The method is specified in Table 31-2."
+        new_sentence = (
+            "The method is specified in Section 31.3.15 and Table 31-10 and "
+            "Table 31-11 and Table 31-12 and Table 31-13 and Table 31-14 and "
+            "Table 31-15 and Table 31-16 and Table 31-17 and Table 31-18 and "
+            "Table 31-19."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old_cross_card_title_case.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=f"31.3.17.2 CMIS-LT Profile\n{old_sentence}",
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new_cross_card_title_case.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=f"31.3.18.2 cmis-lt Profile\n{new_sentence}",
+                    )
+                ],
+            ),
+            DiffOptions(),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reader_reports = (
+                _visible_html_text(paths["html"].read_text(encoding="utf-8")),
+                paths["markdown"].read_text(encoding="utf-8"),
+                paths["text"].read_text(encoding="utf-8"),
+            )
+        for rendered in reader_reports:
+            self.assertIn("CMIS-LT Profile", rendered)
+            self.assertIn("cmis-lt Profile", rendered)
+
     def test_cross_card_citation_cleanup_reclassifies_review_only_card(self) -> None:
         """跨卡引用消噪后只剩结构复核时不得继续计作核心变化。"""
 
