@@ -180,6 +180,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 and (dense_heading := _detect_dense_numbered_heading_under_parent(
                     heading_candidate,
                     heading_stack,
+                    current,
+                    page,
+                    cleaned_pages,
+                    page_index,
+                    line_index,
                 ))
                 is not None
             ):
@@ -1176,8 +1181,19 @@ def _looks_like_table_row(line: str) -> bool:
 def _detect_dense_numbered_heading_under_parent(
     line: str,
     heading_stack: list[HeadingInfo],
+    open_section: _OpenSection | None,
+    page: PageText,
+    cleaned_pages: list[PageText],
+    page_index: int,
+    line_index: int,
 ) -> HeadingInfo | None:
-    """只在已接纳的直接父章节下恢复被多数字门挡住的完整子标题。"""
+    """用真实章节树证据恢复被多数字门挡住的完整子标题。
+
+    点分数字、标题词和 ``TP4a`` 等技术记号都可能出现在表格、版本号或
+    寄存器记录中，不能单独证明章节身份。这里要求候选继承当前父章节、
+    物理字体与父标题一致，并由后续两个同字体的直接子标题共同证明它确实
+    是一个章节容器。证明不足时保留为正文，宁可显示差异也不猜测。
+    """
 
     if "|" in line or "\t" in line:
         return None
@@ -1194,30 +1210,31 @@ def _detect_dense_numbered_heading_under_parent(
         (item for item in reversed(heading_stack) if item.level == level - 1),
         None,
     )
-    if parent is None or canonical_number_identity(parent.number) != number.rsplit(".", 1)[0].casefold():
+    if (
+        parent is None
+        or open_section is None
+        or canonical_number_identity(parent.number)
+        != number.rsplit(".", 1)[0].casefold()
+        or not open_section.number_path
+        or canonical_number_identity(open_section.number_path[-1])
+        != canonical_number_identity(parent.number)
+    ):
         return None
-    # 父号相符只证明层级可能成立。此恢复分支专门处理标题中括号化的
-    # 技术点标识：移除 ``(TP4a)/(TP1)`` 后不得再有数字，且标题必须与
-    # 已接纳父标题共享至少两个实质词。这样 Firmware build、Version、
-    # MIN/MAX 表值都不能借父号获得标题身份。
-    technical_points = re.findall(r"\([A-Za-z]{1,8}\d+[A-Za-z0-9-]*\)", title)
-    title_without_points = title
-    for technical_point in technical_points:
-        title_without_points = title_without_points.replace(technical_point, " ")
-    if not technical_points or re.search(r"\d", title_without_points):
+    candidate_fonts = _physical_line_font_names(page, line)
+    if (
+        not candidate_fonts
+        or not open_section.heading_font_names
+        or candidate_fonts != open_section.heading_font_names
+    ):
         return None
-    stop_words = {"and", "or", "the", "a", "an", "of", "to", "for", "in"}
-    title_words = {
-        word.casefold()
-        for word in re.findall(r"[A-Za-z]{3,}", title_without_points)
-        if word.casefold() not in stop_words
-    }
-    parent_words = {
-        word.casefold()
-        for word in re.findall(r"[A-Za-z]{3,}", parent.title)
-        if word.casefold() not in stop_words
-    }
-    if len(title_words & parent_words) < 2:
+    if not _has_two_following_direct_heading_children(
+        number,
+        level,
+        candidate_fonts,
+        cleaned_pages,
+        page_index,
+        line_index,
+    ):
         return None
     candidate = HeadingInfo(
         raw=compact_inline(line),
@@ -1234,6 +1251,49 @@ def _detect_dense_numbered_heading_under_parent(
     ):
         return None
     return candidate
+
+
+def _has_two_following_direct_heading_children(
+    parent_number: str,
+    parent_level: int,
+    parent_fonts: tuple[str, ...],
+    pages: list[PageText],
+    page_index: int,
+    line_index: int,
+) -> bool:
+    """前瞻寻找两个同字体的直接子标题，形成可审计的章节树证明。"""
+
+    child_numbers: set[str] = set()
+    inspected_nonempty_lines = 0
+    canonical_parent = canonical_number_identity(parent_number)
+    for candidate_page_index in range(page_index, len(pages)):
+        candidate_page = pages[candidate_page_index]
+        candidate_lines = candidate_page.text.splitlines()
+        start_index = line_index + 1 if candidate_page_index == page_index else 0
+        for candidate_line_index in range(start_index, len(candidate_lines)):
+            candidate_line = normalize_line(candidate_lines[candidate_line_index])
+            if not candidate_line:
+                continue
+            inspected_nonempty_lines += 1
+            if inspected_nonempty_lines > 256:
+                return False
+            heading = detect_heading(candidate_line)
+            if heading is None or not heading.number:
+                continue
+            canonical_number = canonical_number_identity(heading.number)
+            if heading.level <= parent_level:
+                return False
+            if (
+                heading.level == parent_level + 1
+                and canonical_number.startswith(canonical_parent + ".")
+                and canonical_number.count(".") == canonical_parent.count(".") + 1
+                and _physical_line_font_names(candidate_page, candidate_line)
+                == parent_fonts
+            ):
+                child_numbers.add(canonical_number)
+                if len(child_numbers) >= 2:
+                    return True
+    return False
 
 
 def _looks_like_forbidden_heading_candidate(

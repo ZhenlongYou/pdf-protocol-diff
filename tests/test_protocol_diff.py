@@ -7037,14 +7037,33 @@ class ProtocolDiffTests(unittest.TestCase):
             "31.3.18.2.1.1 Host input test signal calibration\n"
             "Calibration remains stable."
         )
+        def page_with_heading_fonts(text: str) -> PageText:
+            blocks = tuple(
+                DocumentBlock(
+                    page_number=1,
+                    bbox=(72.0, 20.0 + index * 18.0, 540.0, 32.0 + index * 18.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text=line,
+                    reading_order=index,
+                    source_engine="pdfplumber",
+                    font_names=(
+                        ("Synthetic+Heading",)
+                        if re.match(r"^31\.3\.\d+\.2(?:\.1(?:\.\d+)?)?\s", line)
+                        else ("Synthetic+Body",)
+                    ),
+                )
+                for index, line in enumerate(text.splitlines())
+            )
+            return PageText(page_number=1, text=text, blocks=blocks)
+
         result = compare_extractions(
             ExtractionResult(
                 pdf_path=Path("old_mixed_reference_source.pdf"),
-                pages=[PageText(page_number=1, text=old_text)],
+                pages=[page_with_heading_fonts(old_text)],
             ),
             ExtractionResult(
                 pdf_path=Path("new_mixed_reference_source.pdf"),
-                pages=[PageText(page_number=1, text=new_text)],
+                pages=[page_with_heading_fonts(new_text)],
             ),
             DiffOptions(),
         )
@@ -7446,7 +7465,34 @@ class ProtocolDiffTests(unittest.TestCase):
                             "31.3.17.2 Host and Module input tolerance tests\n"
                             "Jitter\n"
                             f"{heading}\n"
-                            "To be updated."
+                            "To be updated.\n"
+                            "31.3.17.2.1.1 Host input test signal calibration\n"
+                            "31.3.17.2.1.2 Module input test signal calibration"
+                        ),
+                        blocks=tuple(
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 20.0 + index * 18.0, 540.0, 32.0 + index * 18.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text=line,
+                                reading_order=index,
+                                source_engine="pdfplumber",
+                                font_names=(
+                                    ("Synthetic+Heading",)
+                                    if line.startswith("31.3.")
+                                    else ("Synthetic+Body",)
+                                ),
+                            )
+                            for index, line in enumerate(
+                                (
+                                    "31.3.17.2 Host and Module input tolerance tests",
+                                    "Jitter",
+                                    heading,
+                                    "To be updated.",
+                                    "31.3.17.2.1.1 Host input test signal calibration",
+                                    "31.3.17.2.1.2 Module input test signal calibration",
+                                )
+                            )
                         ),
                     )
                 ],
@@ -7455,6 +7501,48 @@ class ProtocolDiffTests(unittest.TestCase):
         child = next(section for section in sections if section.heading == heading)
         self.assertEqual(("31.3.17.2", "31.3.17.2.1"), child.number_path)
         self.assertEqual("To be updated.", child.body)
+
+        # 恢复条件不依赖 TP4a/OIF 词面；带 100G、Gen 5 等数字的通用标题，
+        # 只要后续形成两个真实直接子标题，也应保持章节结构。
+        numbered_title = "31.3.17.2.1 100G Host and Module input tolerance test methods"
+        numbered_lines = (
+            "31.3.17.2 Host and Module input tolerance tests",
+            numbered_title,
+            "General requirements remain stable.",
+            "31.3.17.2.1.1 Phase 2 host calibration",
+            "31.3.17.2.1.2 Gen 5 module calibration",
+        )
+        numbered_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("non_oif_numeric_heading.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="\n".join(numbered_lines),
+                        blocks=tuple(
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 20.0 + index * 18.0, 540.0, 32.0 + index * 18.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text=line,
+                                reading_order=index,
+                                source_engine="pdfplumber",
+                                font_names=(
+                                    ("Synthetic+Heading",)
+                                    if line.startswith("31.3.")
+                                    else ("Synthetic+Body",)
+                                ),
+                            )
+                            for index, line in enumerate(numbered_lines)
+                        ),
+                    )
+                ],
+            )
+        )
+        numbered_child = next(
+            section for section in numbered_sections if section.heading == numbered_title
+        )
+        self.assertEqual("General requirements remain stable.", numbered_child.body)
 
         # 即使编号与父章节吻合，空格分列的稠密数值行仍是表格事实，不能
         # 借父层级变成章节；后续 TP4a 表注也必须留在父正文。
@@ -7519,6 +7607,51 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual(1, len(firmware_sections))
         self.assertIn("Firmware Version for Ports 4 and 8 build 2024", firmware_sections[0].body)
+
+        # 即使技术 profile 行复制父标题词和 TP 标识，只要后面没有形成两个
+        # 直接子标题，就不能借词形变成章节。结构树证据而不是领域词表决定恢复。
+        profile_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("technical_profile_under_parent.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "31.3.17.2 Host and Module input tolerance tests\n"
+                            "Profile ID Description\n"
+                            "31.3.17.2.7 Host (TP4a) and Module (TP1) "
+                            "input tolerance tests profile\n"
+                            "Mode PAM4 remains enabled."
+                        ),
+                        blocks=(
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 20.0, 540.0, 32.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text="31.3.17.2 Host and Module input tolerance tests",
+                                reading_order=0,
+                                source_engine="pdfplumber",
+                                font_names=("Synthetic+Heading",),
+                            ),
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 56.0, 540.0, 68.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text=(
+                                    "31.3.17.2.7 Host (TP4a) and Module (TP1) "
+                                    "input tolerance tests profile"
+                                ),
+                                reading_order=2,
+                                source_engine="pdfplumber",
+                                font_names=("Synthetic+Heading",),
+                            ),
+                        ),
+                    )
+                ],
+            )
+        )
+        self.assertEqual(1, len(profile_sections))
+        self.assertIn("input tolerance tests profile", profile_sections[0].body)
 
     def test_reader_keeps_split_technical_label_inside_unrelated_vector_frames(self) -> None:
         """普通表格框、重复描边或另一栏 Figure 不能证明 Version 是图内标签。"""
