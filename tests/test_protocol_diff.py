@@ -17,6 +17,7 @@ import tempfile
 import time
 import unittest
 from argparse import Namespace
+from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest import mock
@@ -7544,7 +7545,7 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("Version 31.3.18.2.1", rendered)
 
     def test_reader_keeps_cross_column_abbreviation_and_technical_label(self) -> None:
-        """右栏缩写释义不能与左栏 Version 拼成伪换行尾词。"""
+        """未知缩写释义无论跨栏或同栏都不能与 Version 拼成伪换行尾词。"""
 
         def page(parent: str, child: str) -> PageText:
             lines = (
@@ -7574,21 +7575,41 @@ class ProtocolDiffTests(unittest.TestCase):
         new_parent = "31.3.18.2 Host and Module input tolerance tests"
         old_child = "31.3.17.2.1 Host (TP4a) and Module (TP1) input tolerance test methods"
         new_child = old_child.replace("31.3.17.2", "31.3.18.2")
-        result = compare_extractions(
-            ExtractionResult(Path("old_cross_column.pdf"), [page(old_parent, old_child)]),
-            ExtractionResult(Path("new_cross_column.pdf"), [page(new_parent, new_child)]),
-            DiffOptions(),
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            paths = write_reports(result, temp_dir, DiffOptions())
-            reports = tuple(
-                paths[format_name].read_text(encoding="utf-8")
-                for format_name in ("html", "markdown", "text", "json", "csv")
-            )
-        for rendered in reports:
-            self.assertIn("Version", rendered)
-            self.assertIn("31.3.17.2.1", rendered)
-            self.assertIn("31.3.18.2.1", rendered)
+        for technical_left in (72.0, 350.0):
+            with self.subTest(technical_left=technical_left):
+                def adjusted_page(parent: str, child: str) -> PageText:
+                    candidate = page(parent, child)
+                    adjusted_blocks = tuple(
+                        replace(
+                            block,
+                            bbox=(
+                                technical_left,
+                                block.bbox[1],
+                                technical_left + 180.0,
+                                block.bbox[3],
+                            ),
+                        )
+                        if block.text.strip() == "Version"
+                        else block
+                        for block in candidate.blocks
+                    )
+                    return replace(candidate, blocks=adjusted_blocks)
+
+                result = compare_extractions(
+                    ExtractionResult(Path("old_cross_column.pdf"), [adjusted_page(old_parent, old_child)]),
+                    ExtractionResult(Path("new_cross_column.pdf"), [adjusted_page(new_parent, new_child)]),
+                    DiffOptions(),
+                )
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    paths = write_reports(result, temp_dir, DiffOptions())
+                    reports = tuple(
+                        paths[format_name].read_text(encoding="utf-8")
+                        for format_name in ("html", "markdown", "text", "json", "csv")
+                    )
+                for rendered in reports:
+                    self.assertIn("Version", rendered)
+                    self.assertIn("31.3.17.2.1", rendered)
+                    self.assertIn("31.3.18.2.1", rendered)
 
     def test_reader_hides_changed_reference_lists_and_plural_section_ranges(self) -> None:
         """引用列表增删与复数 Section 范围端点变化不得占用读者报告。"""

@@ -1136,10 +1136,19 @@ def _proven_wrapped_label_before_heading(
     # 但视觉起点应保持在一个小缩进范围内。
     if abs(preceding.bbox[0] - label_block.bbox[0]) > 18.0:
         return ""
-    definition_words = abbreviation_match.group("definition").split()
-    full_definition_words = [*definition_words, label]
-    initials = "".join(word[0].upper() for word in full_definition_words)
-    if initials != abbreviation_match.group("abbr"):
+    # 只接纳已明确识别的标准术语断行，不把任意首字母巧合扩展成隐藏权限。
+    # UBHPJ 的全称必然以 Jitter 收尾；PV=Protocol / Version 等未知词典项
+    # 即使首字母匹配也继续失败可见。
+    proven_expansion = (
+        abbreviation_match.group("abbr"),
+        abbreviation_match.group("definition").casefold(),
+        label.casefold(),
+    )
+    if proven_expansion != (
+        "UBHPJ",
+        "uncorrelated bounded high probability",
+        "jitter",
+    ):
         return ""
     return compact_inline(label)
 
