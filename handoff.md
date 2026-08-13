@@ -6,8 +6,8 @@
 - canonical_path: `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - persistent_project_branch: `project/pdf-protocol-diff`
 - base_main: `86e1a26e6cc7c20abf7905fbddd3935ce6e41165`
-- implementation_commit: `pending-current-review`
-- status: `citation_renumber_review_candidate`
+- implementation_commit: `88411eb9158fc8f5ef5b3d91860735197b676dcb`
+- status: `citation_renumber_review_accepted`
 - oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf /Users/mac/Documents/文件对比工具/oif2024.532.04.pdf --new-pdf /Users/mac/Documents/文件对比工具/oif2024.532.05.pdf --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532`
 - non_oif_entrypoint: `PROTOCOL_PDF_DIFF_BUILD_COMMIT=b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95 .venv/bin/python main.py --old-pdf '/Users/mac/Documents/New project/work/word_render_v1/PCIe_technical_report_word_v1_20260704.pdf' --new-pdf '/Users/mac/Documents/New project/work/word_render_v2/PCIe_technical_report_word_v2_20260704.pdf' --layout-backend native --output-dir /Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/pcie`
 - accepted_oif_report: `/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
@@ -42,8 +42,8 @@
 
 ## Acceptance Evidence
 
-- 2026-08-14 引用与编号复核边界：`specified in Table 31-2` → `specified in Section 31.3.15 and Table 31-10 and Table 31-11` 继续仅在读者层中和，HTML/MD/TXT 不再列为技术差异，JSON/CSV 保留原始审计；`Sinusoidal Interface` → `Sinusoidal Interface TP4a` 仍作为核心技术变化。物理行首、字体、层级和 outline 即使同时满足，也不能排除 Firmware/Version/Profile 等技术记录，因此稠密编号章节及其后代的纯父号顺延不再静默隐藏，而以黄色“结构顺延复核”保留双侧完整原文并从核心变化计数中分离。最新真实 OIF 532 候选报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异中性复核_20260814/protocol_diff_20260814_042151/protocol_diff_report.html`。
-- 回归证据：`PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` 共 1043 项，仅因运行中的另一测试进程暂时持有 PyMuPDF 二进制模块而出现一次瞬时 import error；同一 venv 随后独立运行该用例通过。`.venv/bin/python -m unittest tests.test_protocol_diff` 为 465/465 PASS；截图定向、Version/Firmware、跨栏/同栏伪标签、表格/公式/引用矩阵均通过。最终 exact commit 双审与交付门仍待完成。
+- 2026-08-14 引用与编号复核边界：`specified in Table 31-2` → `specified in Section 31.3.15 and Table 31-10 and Table 31-11` 继续仅在读者层中和，HTML/MD/TXT 不再列为技术差异，JSON/CSV 保留原始审计；`Sinusoidal Interface` → `Sinusoidal Interface TP4a` 仍作为核心技术变化。物理行首、字体、层级和 outline 即使同时满足，也不能排除 Firmware/Version/Profile 等技术记录，因此稠密编号章节及其后代的纯父号顺延不再静默隐藏，而以黄色“结构顺延复核”保留双侧完整原文并从核心变化计数中分离。跨卡引用消噪仅在两侧总页数已知、完整页窗、报告位置唯一且完全相同时启用；局部范围、未知总页数、重复位置、未配对章节改号和同名章节迁移均保守显示。最终真实 OIF 532 报告：`/Users/mac/Desktop/test/PDF对比工具_引用差异最终验收_20260814/532-final/protocol_diff_20260814_053735/protocol_diff_report.html`。
+- 回归证据：`.venv/bin/python -m unittest tests.test_protocol_diff` 为 `473/473 PASS`；correctness reviewer 独立全仓 `1051/1051 PASS`。截图定向、Version/Firmware、跨栏/同栏伪标签、表格/公式/引用、known/full/partial/unknown 页范围和重复章节矩阵均通过。真实 OIF 532 报告为 `24` 项核心技术变化、`3` 项正文字符复核；两条纯出处旧/新句在读者 HTML 中均为 `0` 次，`Sinusoidal Interface TP4a` 保持可见，三条父号顺延保留为结构复核。HTML/JSON SHA-256 分别为 `e82ce94843bf56013d4b3dfd2f736f40e3620211604ab6ceeffe8130eba2d387` / `5c3ed6186b0707fc0a253e836624fc501cba543a92278fff5f28f497e183149f`，provenance.build_commit 精确绑定 implementation commit。
 
 - 2026-08-13 引用差异修复：旧句仅含 `Table 31-2`、新句扩展为 `Section 31.3.15 + Table 31-10/31-11` 时，两侧都由 `specified in` 正向证明为出处集合，读者报告不再把引用类别/数量变化当技术差异；同一已配对条款中完整继承父条款号的裸子条款 `31.3.17.2.1→31.3.18.2.1` 也只在读者层中和。`Sinusoidal Interface→Sinusoidal Interface TP4a`、子层级自身 `.1→.2`、`20→21 mV` 继续严格显示；JSON/CSV 保留所有原始引用事实。
 - 前三版父前缀中和均被两名 reviewer 独立否决：第一版会把 `Protocol Version/Firmware ID/Register identifier 31...` 误当子条款；第二版仅要求与父标题共享两个词，会被普通技术句中的 `Host/Module/input/tolerance` 碰撞绕过；第三版增加“文档树中存在同号结构”仍无法证明句中 `Revision/Version` 正在引用它。当前实现把 provenance 绑定到该片段所属章节自身：只有源 PDF 的物理行确实从该后代编号开头、且后续标题主干与读者片段吻合，才允许中和；句内技术 ID 即使文档别处存在同号章节也保持五面可见，不依赖标签黑名单。
@@ -69,12 +69,14 @@
 
 ## Independent Review
 
+- exact implementation commit `88411eb9158fc8f5ef5b3d91860735197b676dcb` 已获两名只读 reviewer 的 commit-bound PASS，unresolved P1/P2=`0/0`。correctness reviewer `019fcb67-bcc9-7270-988d-113d07697892`；regression reviewer `019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`；review tasks 分别为 `accuracy-phase1-correctness-20260810` 与 `accuracy-phase1-regression-20260810`。
 - exact implementation commit `b48eb82d24fd5245498ec17ecdbf7e68f6ad9f95` 已获两名只读 reviewer 的 commit-bound PASS，unresolved P1/P2=`0/0`。
 - correctness reviewer：`019fcb67-bcc9-7270-988d-113d07697892`，review task `accuracy-phase1-correctness-20260810`。
 - regression reviewer：`019fcb67-f0d1-7fc2-acdb-c2164e8e9b59`，review task `accuracy-phase1-regression-20260810`；独立全量 `1035/1035 PASS`。
 
 ## User-Facing Artifacts
 
+- 引用差异最终 OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_引用差异最终验收_20260814/532-final/protocol_diff_20260814_053735/protocol_diff_report.html`
 - 引用差异修复 OIF 候选 HTML：`/Users/mac/Desktop/test/PDF对比工具_引用差异修复行证据验收_20260813/532/protocol_diff_20260813_231030/protocol_diff_report.html`
 - 最终验收根目录：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813`
 - OIF HTML：`/Users/mac/Desktop/test/PDF对比工具_通用性增强最终验收_20260813/532/protocol_diff_20260813_073607/protocol_diff_report.html`
