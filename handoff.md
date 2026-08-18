@@ -3,6 +3,7 @@
 ## 当前任务
 
 - task_id: `pdf-diff-accuracy-phase1-20260810`
+- status: ready
 - 目标：修复 112G `/Users/mac/Desktop/oif2021.405.14.pdf` 与 224G `/Users/mac/Desktop/oif2024.522.06.pdf` 的表格错配，尤其是 TP1a、CTLE 和中间删行后的参数行对齐。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
