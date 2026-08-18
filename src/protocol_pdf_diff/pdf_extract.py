@@ -3389,8 +3389,12 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     """Return True when a pdfplumber table object is actually a figure/noise region."""
 
     cleaned_title = normalize_line(title)  # 统一空白后判断标题类型，避免行号残留影响规则。
-    if table_lines and _table_lines_are_visual_only(table_lines):
-        return True  # 即使没有 bbox，纯坐标轴/公式碎片也不能进入正文 diff 或表格截图区。
+    if (
+        table_lines
+        and _table_lines_are_visual_only(table_lines)
+        and not _looks_like_table_caption(cleaned_title)
+    ):
+        return True  # 纯坐标轴/公式碎片默认跳过；严格 Table 表题则是更强的真实表格证据。
     if _looks_like_figure_caption(cleaned_title):
         return True  # 用户明确不需要图片/图形对比，Figure 误检必须整块跳过。
     if _looks_like_non_table_caption(cleaned_title) and not table_lines:

@@ -3211,6 +3211,31 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertFalse(_should_skip_detected_table("", real_rows))  # 缺表题但有结构化表格行时保守保留。
         self.assertFalse(_should_skip_detected_table("", single_column_real_rows))  # 单列真实表不能被关键词粗暴删除。
 
+    def test_explicit_table_caption_preserves_numeric_only_ctle_grid(self) -> None:
+        """A strict Table caption outranks the plot-axis shape heuristic."""
+
+        numeric_rows = [
+            (
+                "表格行: T1 | min=0 | max=2 | step size=0.5 dB | "
+                "min=0 | max=6 | step size=1.0 dB | 列7=TP1a, TP4"
+            )
+        ]
+
+        self.assertFalse(
+            _should_skip_detected_table(
+                "Table 29-12. CTLE Gain Range",
+                numeric_rows,
+            ),
+            "TARGET_REGRESSION: an explicit numbered Table must not be discarded as plot axes",
+        )
+        self.assertTrue(_should_skip_detected_table("", numeric_rows))
+        self.assertTrue(
+            _should_skip_detected_table(
+                "Figure 29-12. CTLE Gain Range",
+                numeric_rows,
+            )
+        )
+
     def test_table_visual_summary_matches_human_readable_symbol_change_style(self) -> None:
         """Small table summaries should show item/old/new/type like the visual reference."""
 

@@ -1480,6 +1480,488 @@ class ReportingGeneralityTests(unittest.TestCase):
             all(bool(group.old_tables) != bool(group.new_tables) for group in groups)
         )
 
+    def test_cross_clause_table_family_pairs_only_after_three_monotonic_anchors(self) -> None:
+        """Three unique exact captions may prove one Clause-family migration."""
+
+        def table(
+            page: int,
+            title: str,
+            parameter: str,
+        ) -> TableVisual:
+            return TableVisual(
+                page_number=page,
+                table_number=1,
+                title=title,
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=[
+                    f"表格行: T1 | Parameter={parameter} | Min=0 | Max=1 | Unit=V",
+                    "表格行: T1 | Parameter=Shared limit | Min=0 | Max=2 | Unit=dB",
+                ],
+                grid_summary="structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 29-2. Host Output 5-tap Reference FFE Characteristics", "FFE tap"),
+            table(3, "Table 29-3. Crosstalk Calibration Parameter Limits", "Crosstalk"),
+            table(4, "Table 29-4. Emulated Host Channel Characteristics", "Channel loss"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 30-2. Host Output 15-tap Reference FFE Characteristics", "FFE tap"),
+            table(3, "Table 30-3. Crosstalk Calibration Parameter Limits", "Crosstalk"),
+            table(4, "Table 30-4. Emulated Host Channel Characteristics", "Channel loss"),
+        ]
+
+        def extraction(name: str, clause: int, tables: list[TableVisual]) -> ExtractionResult:
+            pages = [
+                PageText(
+                    page_number=page,
+                    text=(
+                        f"{clause}.{page} Host interface requirement {page}\n"
+                        + "Each limit shall remain traceable to its table and test point. " * 8
+                    ),
+                )
+                for page in range(1, 5)
+            ]
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=pages,
+                total_pages=4,
+                selected_start_page=1,
+                selected_end_page=4,
+                table_visuals=tables,
+            )
+
+        options = DiffOptions(visual_watchdog=False)
+        result = compare_extractions(
+            extraction("old-clause.pdf", 29, old_tables),
+            extraction("new-clause.pdf", 30, new_tables),
+            options,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, options)
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        title_pairs = {
+            (tuple(change["old_titles"]), tuple(change["new_titles"]))
+            for change in payload["table_changes"]
+        }
+        self.assertEqual(
+            {
+                ((old.title,), (new.title,))
+                for old, new in zip(old_tables, new_tables, strict=True)
+            },
+            title_pairs,
+            "TARGET_REGRESSION: a proven 29→30 table family must not split into add/delete cards",
+        )
+
+    def test_two_cross_clause_captions_do_not_authorize_a_family_mapping(self) -> None:
+        """Two matching templates remain insufficient evidence for Clause migration."""
+
+        def table(page: int, title: str, parameter: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [f"表格行: T1 | Parameter={parameter} | Min=0 | Max=1 | Unit=V"],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 29-2. Module Electrical Input Limits", "Input voltage"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 30-2. Module Electrical Input Limits", "Input voltage"),
+        ]
+        old_section = Section(
+            "OLD",
+            "29 Interface",
+            "Old interface",
+            1,
+            ("29 Interface",),
+            ("29",),
+            1,
+            2,
+            "body",
+        )
+        new_section = Section(
+            "NEW",
+            "30 Interface",
+            "New interface",
+            1,
+            ("30 Interface",),
+            ("30",),
+            1,
+            2,
+            "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+
+        self.assertEqual(4, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups)
+        )
+
+    def test_crossing_cross_clause_anchors_do_not_authorize_a_family_mapping(self) -> None:
+        """Three exact descriptors still fail closed when their order crosses."""
+
+        def table(page: int, title: str, parameter: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [f"表格行: T1 | Parameter={parameter} | Min=0 | Max=1 | Unit=V"],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 29-2. Module Electrical Input Limits", "Input voltage"),
+            table(3, "Table 29-3. Crosstalk Calibration Limits", "Crosstalk"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 30-2. Crosstalk Calibration Limits", "Crosstalk"),
+            table(3, "Table 30-3. Module Electrical Input Limits", "Input voltage"),
+        ]
+        old_section = Section(
+            "OLD", "29 Interface", "Old interface", 1,
+            ("29 Interface",), ("29",), 1, 3, "body",
+        )
+        new_section = Section(
+            "NEW", "30 Interface", "New interface", 1,
+            ("30 Interface",), ("30",), 1, 3, "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+
+        self.assertEqual(6, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups)
+        )
+
+    def test_competing_cross_clause_family_rejects_an_otherwise_supported_map(self) -> None:
+        """Even a two-anchor competitor proves that one old family split."""
+
+        def table(page: int, title: str, parameter: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [f"表格行: T1 | Parameter={parameter} | Min=0 | Max=1 | Unit=V"],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 29-2. Module Electrical Input Limits", "Input voltage"),
+            table(3, "Table 29-3. Crosstalk Calibration Limits", "Crosstalk"),
+            table(4, "Table 29-4. Emulated Host Channel Limits", "Channel loss"),
+            table(5, "Table 29-5. Receiver Equalization Limits", "Equalization"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 30-2. Module Electrical Input Limits", "Input voltage"),
+            table(3, "Table 30-3. Crosstalk Calibration Limits", "Crosstalk"),
+            table(4, "Table 31-1. Emulated Host Channel Limits", "Channel loss"),
+            table(5, "Table 31-2. Receiver Equalization Limits", "Equalization"),
+        ]
+        old_section = Section(
+            "OLD", "29 Interface", "Old interface", 1,
+            ("29 Interface",), ("29",), 1, 5, "body",
+        )
+        new_sections = [
+            Section(
+                "NEW30", "30 Interface", "New interface 30", 1,
+                ("30 Interface",), ("30",), 1, 3, "body",
+            ),
+            Section(
+                "NEW31", "31 Interface", "New interface 31", 1,
+                ("31 Interface",), ("31",), 4, 5, "body",
+            ),
+        ]
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=new_sections,
+        )
+
+        self.assertEqual(10, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups)
+        )
+
+    def test_cross_clause_offset_change_keeps_the_insertion_region_unpaired(self) -> None:
+        """A new table changes the ordinal offset; the bracketed gap must stay visible."""
+
+        def table(page: int, title: str, parameter: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter={parameter} | Min=0 | Max=1 | Unit=V",
+                    "表格行: T1 | Parameter=Shared limit | Min=0 | Max=2 | Unit=dB",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 29-2. Host Output 5-tap Tuning Values", "FFE tap"),
+            table(3, "Table 29-3. Crosstalk Calibration Parameter Limits", "Crosstalk"),
+            table(4, "Table 29-4. Emulated Host Channel Characteristics", "Channel loss"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Host Electrical Output Limits", "Output voltage"),
+            table(2, "Table 30-2. New Electrical Stressor Parameters", "Stressor"),
+            table(3, "Table 30-3. Host Output 15-tap Tuning Values", "FFE tap"),
+            table(4, "Table 30-4. Crosstalk Calibration Parameter Limits", "Crosstalk"),
+            table(5, "Table 30-5. Emulated Host Channel Characteristics", "Channel loss"),
+        ]
+        old_section = Section(
+            "OLD",
+            "29 Interface",
+            "Old interface",
+            1,
+            ("29 Interface",),
+            ("29",),
+            1,
+            4,
+            "body",
+        )
+        new_section = Section(
+            "NEW",
+            "30 Interface",
+            "New interface",
+            1,
+            ("30 Interface",),
+            ("30",),
+            1,
+            5,
+            "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+        paired_titles = {
+            (group.old_tables[0].title, group.new_tables[0].title)
+            for group in groups
+            if group.old_tables and group.new_tables
+        }
+
+        self.assertEqual(
+            {
+                (old_tables[0].title, new_tables[0].title),
+                (old_tables[2].title, new_tables[3].title),
+                (old_tables[3].title, new_tables[4].title),
+            },
+            paired_titles,
+        )
+        self.assertNotIn((old_tables[1].title, new_tables[2].title), paired_titles)
+
+    def test_parameter_table_note_does_not_turn_one_deleted_row_into_positional_replacements(self) -> None:
+        """A spanning NOTES row must not disable stable parameter-key alignment."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=Differential Voltage | Min=0 | Max=500 | Unit=mV",
+            "表格行: T1 | Parameter=Low-Frequency Peak-to-Peak AC Common-Mode Voltage (VCM) LF | Min=- | Max=30 | Unit=mV",
+            "表格行: T1 | Parameter=Differential Termination Resistance Mismatch | Min=- | Max=10 | Unit=%",
+            "表格行: T1 | Parameter=Common Mode to Differential ↵ Mode Conversion (SDC22) | Min=- | Max=Equation 29-2 | Unit=dB",
+            "表格行: T1 | Parameter=Common Mode Return Loss (SCC22) | Min=- | Max=-2 | Unit=dB",
+            "表格行: T1 | Parameter=Effective Return Loss (ERL) | Min=8.5 | Max=- | Unit=dB",
+            "表格行: T1 | Parameter=Transition Time | Min=10 | Max=- | Unit=ps",
+            (
+                "表格行: T1 | Parameter=NOTES: The parameters shall be measured at TP1a "
+                "and recorded for compliance under Clause 29."
+            ),
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Differential Voltage | Min=0 | Max=525 | Unit=mV",
+            "表格行: T1 | Parameter=Peak to Peak AC Low Frequency Common Mode Voltage (VCM) LF | Min=- | Max=32 | Unit=mV",
+            "表格行: T1 | Parameter=Common Mode to Differential Mode ↵ Conversion ↵ (SDC22) | Min=- | Max=Equation 30-2 | Unit=dB",
+            "表格行: T1 | Parameter=Common Mode Return Loss (SCC22) | Min=- | Max=-3 | Unit=dB",
+            "表格行: T1 | Parameter=Effective Return Loss (ERL) | Min=9 | Max=- | Unit=dB",
+            "表格行: T1 | Parameter=Transition Time | Min=12 | Max=- | Unit=ps",
+            (
+                "表格行: T1 | Parameter=NOTES: The parameters shall be measured at TP1a "
+                "and recorded for compliance under Clause 30."
+            ),
+        ]
+
+        def extraction(name: str, rows: list[str]) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text=(
+                            "7.1 Host output requirements\n"
+                            + "Each parameter shall retain its identity across revisions. " * 8
+                        ),
+                    )
+                ],
+                total_pages=1,
+                selected_start_page=1,
+                selected_end_page=1,
+                table_visuals=[
+                    TableVisual(
+                        page_number=1,
+                        table_number=1,
+                        title="Table 7-1. Host-to-Module Electrical Specifications at TP1a",
+                        bbox=(0.0, 0.0, 100.0, 100.0),
+                        image_data_uri="",
+                        row_texts=rows,
+                        grid_summary="structured rows",
+                        content_fully_represented=True,
+                        row_alignment_reliable=True,
+                    )
+                ],
+            )
+
+        options = DiffOptions(visual_watchdog=False)
+        result = compare_extractions(
+            extraction("old-parameter-table.pdf", old_rows),
+            extraction("new-parameter-table.pdf", new_rows),
+            options,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, options)
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        row_changes = payload["table_changes"][0]["row_changes"]
+        name_changes = [
+            change for change in row_changes if change["item"] == "表格项目名称"
+        ]
+        self.assertEqual(
+            1,
+            len(name_changes),
+            "TARGET_REGRESSION: only the real VCM wording change may remain; deleted rows must not shift later identities",
+        )
+        self.assertIn("VCM", name_changes[0]["old_value"])
+        self.assertIn("VCM", name_changes[0]["new_value"])
+        deleted = [
+            change
+            for change in row_changes
+            if "Differential Termination" in change["item"]
+        ]
+        self.assertEqual(1, len(deleted))
+        self.assertEqual("", deleted[0]["new_value"])
+        self.assertEqual("旧表删除行", deleted[0]["change_type"])
+        for identity in ("SDC22", "SCC22", "ERL", "Transition Time"):
+            with self.subTest(identity=identity):
+                matches = [change for change in row_changes if identity in change["item"]]
+                self.assertEqual(1, len(matches))
+                self.assertTrue(matches[0]["old_value"])
+                self.assertTrue(matches[0]["new_value"])
+        vcm_lf = [
+            change
+            for change in row_changes
+            if "VCM" in " ".join(
+                (change["item"], change["old_value"], change["new_value"])
+            )
+        ]
+        self.assertEqual(
+            1,
+            len(vcm_lf),
+            "TARGET_REGRESSION: the unique VCM/LF engineering anchor must survive word-order reflow",
+        )
+        self.assertTrue(vcm_lf[0]["old_value"])
+        self.assertTrue(vcm_lf[0]["new_value"])
+        notes = [change for change in row_changes if change["item"] == "表格说明"]
+        self.assertEqual(1, len(notes))
+        self.assertTrue(notes[0]["old_value"])
+        self.assertTrue(notes[0]["new_value"])
+        self.assertEqual("表格说明", row_changes[-1]["item"])
+
+    def test_engineering_anchor_does_not_hide_operator_or_identifier_case_changes(self) -> None:
+        """Word-order rescue must retain operators and technical identifier case."""
+
+        def table(parameter: str, value: int) -> TableVisual:
+            return TableVisual(
+                1,
+                1,
+                "Table 7-1. Anchored Limits",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    (
+                        f"表格行: T1 | Parameter={parameter} | Min=0 | "
+                        f"Max={value} | Unit=dB"
+                    )
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        for old_parameter, new_parameter in (
+            ("Gain > Limit (ABC1)", "Gain < Limit (ABC1)"),
+            ("Gain ABC Mode (ABC1)", "Gain Abc Mode (ABC1)"),
+        ):
+            with self.subTest(old=old_parameter, new=new_parameter):
+                changes = reporting_module._table_row_changes(
+                    (table(old_parameter, 1),),
+                    (table(new_parameter, 2),),
+                )
+
+                self.assertEqual(2, len(changes))
+                self.assertTrue(all(not (change.old_value and change.new_value) for change in changes))
+                visible = "\n".join(
+                    f"{change.item}\n{change.old_value}\n{change.new_value}"
+                    for change in changes
+                )
+                self.assertIn(old_parameter, visible)
+                self.assertIn(new_parameter, visible)
+
+        direction_changes = reporting_module._table_row_changes(
+            (table("Module to Host Voltage (VCM) LF", 30),),
+            (table("Host to Module Voltage (VCM) LF", 31),),
+        )
+        self.assertEqual(1, len(direction_changes))
+        self.assertEqual("表格项目名称", direction_changes[0].item)
+        self.assertIn("Module to Host", direction_changes[0].old_value)
+        self.assertIn("Host to Module", direction_changes[0].new_value)
+
     def test_same_number_but_different_section_titles_still_require_table_content(self) -> None:
         """相同 number_path 不能抹掉章节语义变化并绕过唯一表题整组门槛。"""
 

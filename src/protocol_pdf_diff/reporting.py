@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
+from itertools import pairwise
 from pathlib import Path
 
 from .formula_visuals import normalized_formula_key
@@ -254,6 +255,16 @@ class _TableVisualGroup:
 
     old_tables: tuple[TableVisual, ...]  # 旧版同一逻辑表格的一个或多个截图区域。
     new_tables: tuple[TableVisual, ...]  # 新版同一逻辑表格的一个或多个截图区域。
+
+
+@dataclass(frozen=True)
+class _NumberedTableRun:
+    """One strict numbered logical table and its cross-version locator."""
+
+    indexes: tuple[int, ...]  # 同一表题页及已由既有几何门禁证明的续页索引。
+    family: str  # 末级序号之前的严格编号，例如 ``29`` 或 ``30-4``。
+    ordinal: int  # 严格表号的末级整数，只在同一已证明 family 映射内使用。
+    descriptor: str  # 去除严格表号后的长描述；短标题保持空串，不能充当锚点。
 
 
 @dataclass(frozen=True)
@@ -2070,6 +2081,15 @@ def _paired_table_visuals(
         old_sections=old_sections,
         new_sections=new_sections,
     )
+    _pair_supported_cross_clause_table_runs(
+        old_tables,
+        new_tables,
+        old_unused,
+        new_unused,
+        groups,
+        old_sections=old_sections,
+        new_sections=new_sections,
+    )
     unique_exact_captions = _unique_exact_table_captions(old_tables, new_tables)
     supported_renumberings = _supported_table_renumberings(old_tables, new_tables)
     scored: list[tuple[float, int, int]] = []  # 保存所有足够可信的候选配对。
@@ -2396,6 +2416,259 @@ def _pair_same_caption_table_groups(
         )  # Table 32-1 这种跨页表按整组展示，不再按页误报移动行。
 
 
+def _numbered_table_runs(
+    tables: list[TableVisual],
+    sections: list[Section] | None,
+) -> list[_NumberedTableRun]:
+    """Return strict numbered logical tables after existing continuation grouping."""
+
+    runs: list[_NumberedTableRun] = []
+    for indexes in _table_visual_indexes_by_caption_key(tables, sections).values():
+        caption_index = next(
+            (
+                index
+                for index in indexes
+                if _table_visual_number_identity(tables[index]) is not None
+            ),
+            None,
+        )
+        if caption_index is None:
+            continue
+        identity = _table_visual_number_identity(tables[caption_index])
+        assert identity is not None  # 上面的生成式已用同一严格解析器证明编号存在。
+        runs.append(
+            _NumberedTableRun(
+                indexes=tuple(indexes),
+                family=identity[0],
+                ordinal=identity[1],
+                descriptor=_table_visual_caption_descriptor_key(tables[caption_index]),
+            )
+        )
+    return sorted(runs, key=lambda run: run.indexes[0])
+
+
+def _cross_clause_descriptor_anchors(
+    old_runs: list[_NumberedTableRun],
+    new_runs: list[_NumberedTableRun],
+) -> dict[tuple[str, str], list[tuple[_NumberedTableRun, _NumberedTableRun]]]:
+    """Collect globally unique exact descriptors as potential family anchors."""
+
+    old_by_descriptor: dict[str, list[_NumberedTableRun]] = {}
+    new_by_descriptor: dict[str, list[_NumberedTableRun]] = {}
+    for run in old_runs:
+        if run.descriptor:
+            old_by_descriptor.setdefault(run.descriptor, []).append(run)
+    for run in new_runs:
+        if run.descriptor:
+            new_by_descriptor.setdefault(run.descriptor, []).append(run)
+
+    anchors: dict[
+        tuple[str, str],
+        list[tuple[_NumberedTableRun, _NumberedTableRun]],
+    ] = {}
+    for descriptor in old_by_descriptor.keys() & new_by_descriptor.keys():
+        if (
+            len(old_by_descriptor[descriptor]) != 1
+            or len(new_by_descriptor[descriptor]) != 1
+        ):
+            continue  # 重复模板标题不是文档级锚点，不能证明 Clause family 身份。
+        old_run = old_by_descriptor[descriptor][0]
+        new_run = new_by_descriptor[descriptor][0]
+        if old_run.family == new_run.family:
+            continue  # 同 family 的末级改号继续由既有双标题 shift 规则处理。
+        anchors.setdefault((old_run.family, new_run.family), []).append(
+            (old_run, new_run)
+        )
+    return anchors
+
+
+def _cross_clause_anchor_chain(
+    anchors: list[tuple[_NumberedTableRun, _NumberedTableRun]],
+) -> list[tuple[_NumberedTableRun, _NumberedTableRun]]:
+    """Return the deterministic monotonic chain of exact descriptor anchors."""
+
+    old_order = sorted(anchors, key=lambda pair: pair[0].indexes[0])
+    new_order = sorted(anchors, key=lambda pair: pair[1].indexes[0])
+    old_descriptors = [(pair[0].descriptor,) for pair in old_order]
+    new_descriptors = [(pair[1].descriptor,) for pair in new_order]
+    return [
+        (old_order[old_offset][0], new_order[new_offset][1])
+        for old_offset, new_offset in _longest_common_index_pairs(
+            old_descriptors,
+            new_descriptors,
+        )
+    ]
+
+
+def _family_map_is_one_to_one(
+    family_pair: tuple[str, str],
+    family_pairs: dict[
+        tuple[str, str],
+        list[tuple[_NumberedTableRun, _NumberedTableRun]],
+    ],
+    *,
+    old_side: bool,
+) -> bool:
+    """Reject a family that participates in any competing split/merge mapping."""
+
+    family = family_pair[0 if old_side else 1]
+    return [
+        pair
+        for pair in family_pairs
+        if pair[0 if old_side else 1] == family
+    ] == [family_pair]
+
+
+def _supported_cross_clause_table_family_maps(
+    old_runs: list[_NumberedTableRun],
+    new_runs: list[_NumberedTableRun],
+) -> dict[
+    tuple[str, str],
+    list[tuple[_NumberedTableRun, _NumberedTableRun]],
+]:
+    """Authorize only well-covered, monotonic, one-to-one Clause migrations."""
+
+    anchors_by_family = _cross_clause_descriptor_anchors(old_runs, new_runs)
+    chains: dict[
+        tuple[str, str],
+        list[tuple[_NumberedTableRun, _NumberedTableRun]],
+    ] = {}
+    for family_pair, anchors in anchors_by_family.items():
+        chain = _cross_clause_anchor_chain(anchors)
+        if len(anchors) < 3 or len(chain) != len(anchors):
+            continue
+        chains[family_pair] = chain
+    return {
+        family_pair: chain
+        for family_pair, chain in chains.items()
+        if _family_map_is_one_to_one(
+            family_pair,
+            anchors_by_family,
+            old_side=True,
+        )
+        and _family_map_is_one_to_one(
+            family_pair,
+            anchors_by_family,
+            old_side=False,
+        )
+    }
+
+
+def _cross_clause_bracketed_pair_evidence(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_run: _NumberedTableRun,
+    new_run: _NumberedTableRun,
+) -> bool:
+    """Require reliable rows plus strong caption/identity evidence between anchors."""
+
+    old_group = tuple(old_tables[index] for index in old_run.indexes)
+    new_group = tuple(new_tables[index] for index in new_run.indexes)
+    if not all(
+        table.content_fully_represented and table.row_alignment_reliable
+        for table in (*old_group, *new_group)
+    ):
+        return False
+    descriptor_similarity = difflib.SequenceMatcher(
+        None,
+        old_run.descriptor.casefold(),
+        new_run.descriptor.casefold(),
+        autojunk=False,
+    ).ratio()
+    old_identities = Counter(
+        identity
+        for row in _table_group_rows(old_group)
+        if (identity := _table_row_relaxed_primary_identity(row))
+    )
+    new_identities = Counter(
+        identity
+        for row in _table_group_rows(new_group)
+        if (identity := _table_row_relaxed_primary_identity(row))
+    )
+    shared_count = sum((old_identities & new_identities).values())
+    return bool(
+        descriptor_similarity >= _TABLE_PAIR_SIMILARITY_THRESHOLD
+        and shared_count >= 1
+    )
+
+
+def _pair_supported_cross_clause_table_runs(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    *,
+    old_sections: list[Section] | None,
+    new_sections: list[Section] | None,
+) -> None:
+    """Pair a proven cross-Clause table family without guessing insertion regions."""
+
+    old_runs = _numbered_table_runs(old_tables, old_sections)
+    new_runs = _numbered_table_runs(new_tables, new_sections)
+    family_maps = _supported_cross_clause_table_family_maps(old_runs, new_runs)
+    proposed: list[tuple[_NumberedTableRun, _NumberedTableRun]] = []
+    for (old_family, new_family), anchors in family_maps.items():
+        proposed.extend(anchors)  # 唯一 exact descriptor 是已证明 family 内的硬锚点。
+        for (old_left, new_left), (old_right, new_right) in pairwise(anchors):
+            left_offset = new_left.ordinal - old_left.ordinal
+            right_offset = new_right.ordinal - old_right.ordinal
+            if (
+                left_offset != right_offset
+                or old_left.ordinal >= old_right.ordinal
+                or new_left.ordinal >= new_right.ordinal
+            ):
+                continue  # offset 改变的夹段属于插入/删除区，不能按尾号强配。
+            for old_run in old_runs:
+                if (
+                    old_run.family != old_family
+                    or not old_left.ordinal < old_run.ordinal < old_right.ordinal
+                ):
+                    continue
+                target_ordinal = old_run.ordinal + left_offset
+                candidates = [
+                    new_run
+                    for new_run in new_runs
+                    if new_run.family == new_family
+                    and new_run.ordinal == target_ordinal
+                    and new_left.ordinal < new_run.ordinal < new_right.ordinal
+                ]
+                if len(candidates) != 1:
+                    continue
+                new_run = candidates[0]
+                if _cross_clause_bracketed_pair_evidence(
+                    old_tables,
+                    new_tables,
+                    old_run,
+                    new_run,
+                ):
+                    proposed.append((old_run, new_run))
+
+    consumed_old: set[int] = set()
+    consumed_new: set[int] = set()
+    for old_run, new_run in sorted(
+        proposed,
+        key=lambda pair: (pair[0].indexes[0], pair[1].indexes[0]),
+    ):
+        if (
+            any(index not in old_unused or index in consumed_old for index in old_run.indexes)
+            or any(index not in new_unused or index in consumed_new for index in new_run.indexes)
+        ):
+            continue
+        consumed_old.update(old_run.indexes)
+        consumed_new.update(new_run.indexes)
+        for index in old_run.indexes:
+            old_unused.remove(index)
+        for index in new_run.indexes:
+            new_unused.remove(index)
+        groups.append(
+            _TableVisualGroup(
+                tuple(old_tables[index] for index in old_run.indexes),
+                tuple(new_tables[index] for index in new_run.indexes),
+            )
+        )
+
+
 def _pair_exact_duplicate_caption_runs_by_content_lcs(
     old_tables: list[TableVisual],
     new_tables: list[TableVisual],
@@ -2692,7 +2965,7 @@ def _table_row_relaxed_primary_identity(row: str) -> str:
         "symbol",
     }:
         return ""
-    return _table_row_text_key(label, field_label="symbol") if label else ""
+    return _table_row_pairing_identity_key(label, field_label="symbol") if label else ""
 
 
 def _unique_caption_table_runs(
@@ -3559,6 +3832,20 @@ def _table_row_changes(
         old_rows,
         new_rows,
     )
+    old_narrative_rows = [
+        row for row in old_rows if _table_narrative_row_text(row)
+    ]
+    new_narrative_rows = [
+        row for row in new_rows if _table_narrative_row_text(row)
+    ]
+    old_rows = [row for row in old_rows if not _table_narrative_row_text(row)]
+    new_rows = [row for row in new_rows if not _table_narrative_row_text(row)]
+    narrative_changes = _ordered_table_row_changes(
+        old_narrative_rows,
+        new_narrative_rows,
+    )
+    # 跨列 NOTES/Note 是说明事实，不是参数记录。它们单独按物理顺序比较，
+    # 不能因为缺少 Min/Max/Unit 就让整张参数表退回位置配对并产生连锁错位。
     ambiguous_row_changes, old_rows, new_rows = (
         _resolve_duplicate_primary_table_rows(old_rows, new_rows)
     )
@@ -3575,11 +3862,18 @@ def _table_row_changes(
         return [
             *review_changes,
             *_ordered_table_row_changes(old_rows, new_rows),
+            *narrative_changes,
         ]
+    engineering_anchor_changes, old_rows, new_rows = (
+        _resolve_unique_engineering_anchor_rows(old_rows, new_rows)
+    )
     old_by_key = _table_rows_by_pairing_key(old_rows)
     new_by_key = _table_rows_by_pairing_key(new_rows)
     ordered_keys = list(dict.fromkeys([*old_by_key, *new_by_key]))
-    changes: list[TableRowChange] = list(review_changes)
+    changes: list[TableRowChange] = [
+        *review_changes,
+        *engineering_anchor_changes,
+    ]
     for key in ordered_keys:
         old_remaining, new_remaining = _remove_equal_table_rows(
             old_by_key.get(key, []),
@@ -3596,6 +3890,7 @@ def _table_row_changes(
             changes.append(_make_table_row_change(old_row, "", "旧表删除行"))
         for new_row in new_remaining[paired_count:]:
             changes.append(_make_table_row_change("", new_row, "新表新增行"))
+    changes.extend(narrative_changes)
     return changes
 
 
@@ -5514,6 +5809,96 @@ def _generic_boundary_entries_look_like_header(
     )
     return len(entries) >= 2 and hits >= 2
 
+
+def _table_row_engineering_anchor(row: str) -> str:
+    """Return a strong terminal ``(SYMBOL) QUALIFIER`` parameter anchor."""
+
+    identity = _table_row_identity_text(row)
+    normalized = identity.replace("↵", " ").replace("\\n", " ").replace("\n", " ")
+    match = re.search(
+        r"\(\s*([A-Z][A-Z0-9_]{1,})\s*\)\s*([A-Z][A-Z0-9_]{1,})?\s*$",
+        normalized,
+    )
+    if match is None:
+        return ""
+    symbol = match.group(1)
+    qualifier = match.group(2) or ""
+    if not qualifier and not any(character.isdigit() for character in symbol):
+        return ""  # 单独 (MAX)/(TYPE) 一类普通大写词不足以证明参数身份。
+    return f"{symbol}:{qualifier}"
+
+
+def _table_row_identity_token_multiset(row: str) -> tuple[str, ...]:
+    """Return semantic identity tokens without treating their order as evidence."""
+
+    identity = _table_row_identity_text(row)
+    identity = identity.replace("↵", " ").replace("\\n", " ").replace("\n", " ")
+    identity = re.sub(
+        r"(?<=[A-Za-z])[-‐‑‒–—](?=[A-Za-z])",
+        " ",
+        identity,
+    )  # PDF 可把复合词连字符抽成空格；关系运算符和独立减号不在此规则内。
+    return tuple(
+        sorted(
+            token.key
+            for token in _inline_tokens(identity, field_label="parameter")
+        )
+    )
+    # 仅取消词序；关系运算符、技术标识大小写和其他可见 token 继续参与身份保护。
+
+
+def _resolve_unique_engineering_anchor_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Pair word-order reflows only when one unique engineering anchor proves identity."""
+
+    old_anchors = [_table_row_engineering_anchor(row) for row in old_rows]
+    new_anchors = [_table_row_engineering_anchor(row) for row in new_rows]
+    old_counts = Counter(anchor for anchor in old_anchors if anchor)
+    new_counts = Counter(anchor for anchor in new_anchors if anchor)
+    new_index_by_anchor = {
+        anchor: index
+        for index, anchor in enumerate(new_anchors)
+        if anchor and new_counts[anchor] == 1
+    }
+    consumed_old: set[int] = set()
+    consumed_new: set[int] = set()
+    changes: list[TableRowChange] = []
+    for old_index, anchor in enumerate(old_anchors):
+        if (
+            not anchor
+            or old_counts[anchor] != 1
+            or new_counts[anchor] != 1
+        ):
+            continue
+        new_index = new_index_by_anchor[anchor]
+        old_row = old_rows[old_index]
+        new_row = new_rows[new_index]
+        if _table_row_pairing_key(old_row) == _table_row_pairing_key(new_row):
+            continue  # 普通参数 key 已能配对时，不改变既有比较路径。
+        if _table_row_identity_token_multiset(old_row) != (
+            _table_row_identity_token_multiset(new_row)
+        ):
+            continue  # 技术锚相同但可见词集合变化时，仍保留新增/删除，避免吞掉语义改名。
+        consumed_old.add(old_index)
+        consumed_new.add(new_index)
+        kind = _table_structured_diff_kind(old_row, new_row)
+        if kind != "无变化":
+            changes.append(
+                _make_table_row_change(
+                    old_row,
+                    new_row,
+                    kind,
+                )
+            )
+    return (
+        changes,
+        [row for index, row in enumerate(old_rows) if index not in consumed_old],
+        [row for index, row in enumerate(new_rows) if index not in consumed_new],
+    )
+
+
 def _table_rows_by_pairing_key(rows: list[str]) -> dict[str, list[str]]:
     """Group rows by stable visible identity while preserving document order."""
 
@@ -5555,7 +5940,11 @@ def _remove_equal_table_rows(
     return unmatched_old, unmatched_new
 
 
-def _make_table_row_change(old_row: str, new_row: str, kind: str) -> TableRowChange:
+def _make_table_row_change(
+    old_row: str,
+    new_row: str,
+    kind: str,
+) -> TableRowChange:
     """Convert raw structured rows into one reusable report record."""
 
     old_note = _table_narrative_row_text(old_row)
@@ -5589,10 +5978,12 @@ def _make_table_row_change(old_row: str, new_row: str, kind: str) -> TableRowCha
     )
     old_identity = _table_row_identity_text(old_row)
     new_identity = _table_row_identity_text(new_row)
+    old_identity_key = _table_row_soft_break_identity_key(old_identity)
+    new_identity_key = _table_row_soft_break_identity_key(new_identity)
     if (
         old_identity
         and new_identity
-        and _table_row_text_key(old_identity) != _table_row_text_key(new_identity)
+        and old_identity_key != new_identity_key
     ):
         return TableRowChange(
             item="表格项目名称",
@@ -6419,10 +6810,27 @@ def _table_row_pairing_primary_identity(
         return ""
     if not label:
         return ""
-    return _table_row_text_key(
-        readable_symbol_font_glyphs(label),
+    return _table_row_pairing_identity_key(
+        label,
         field_label=field_label,
     )  # 映射只用于把潜在同一行送入“需复核”分类；显示 key 和 JSON 仍保留原码位。
+
+
+def _table_row_pairing_identity_key(value: str, *, field_label: str = "") -> str:
+    """Normalize codec-proven soft line breaks only for row identity pairing."""
+
+    normalized = readable_symbol_font_glyphs(value)
+    normalized = normalized.replace("↵", " ").replace("\\n", " ").replace("\n", " ")
+    return _table_row_text_key(normalized, field_label=field_label)
+    # 完整显示/equality key 仍保留换行；这里只防止同一参数因 PDF 软换行位置变化而拆成新增/删除。
+
+
+def _table_row_soft_break_identity_key(value: str) -> str:
+    """Ignore codec soft breaks without decoding unproven private-use glyphs."""
+
+    normalized = value.replace("↵", " ").replace("\\n", " ").replace("\n", " ")
+    return _table_row_text_key(normalized)
+    # 报告项目名判断必须保留原码位；否则 U+F067 会被可读映射成 γ，丢失审计证据。
 
 
 def _table_row_primary_identity(row: str) -> str:
