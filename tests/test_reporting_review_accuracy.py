@@ -848,6 +848,9 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
                             **old_table.__dict__,
                             "title": "Table 32-9. Receiver limits",
                             "row_texts": [row],
+                            "content_fully_represented": True,
+                            "row_alignment_reliable": True,
+                            "data_rows_fully_represented": True,
                         }
                     )
                     new_table = TableVisual(
@@ -873,6 +876,9 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
                 **self._table().__dict__,
                 "title": "Table 32--9. Receiver limits",
                 "row_texts": [row],
+                "content_fully_represented": True,
+                "row_alignment_reliable": True,
+                "data_rows_fully_represented": True,
             }
         )
         valid_old = TableVisual(
@@ -895,6 +901,13 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertTrue(invalid_changes)
         self.assertTrue(
             any(change.caption_changed for change in invalid_changes)
+            or (
+                len(invalid_changes) == 2
+                and all(
+                    bool(change.old_tables) != bool(change.new_tables)
+                    for change in invalid_changes
+                )
+            )
         )  # 非法双横线可保守 fuzzy 配对或拆成增删，但绝不能被规范化成“无变化”。
 
     def test_pua_only_caption_delta_is_review_not_confirmed_change(self) -> None:
@@ -904,6 +917,9 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
             **{
                 **self._table().__dict__,
                 "title": "Table 1. \uf067 limits",
+                "content_fully_represented": True,
+                "row_alignment_reliable": True,
+                "data_rows_fully_represented": True,
             }
         )
         new_table = TableVisual(

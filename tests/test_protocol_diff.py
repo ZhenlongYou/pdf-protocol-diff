@@ -2193,14 +2193,34 @@ class ProtocolDiffTests(unittest.TestCase):
                 "x1": x0 + max(8.0, len(text) * 5.0),
                 "top": top,
                 "bottom": top + 10.0,
+                "size": 10.0,
+                "fontname": "TestFigureFont",
+            }
+
+        def painted_space(
+            x0: float,
+            x1: float,
+            *,
+            top: float = 80.0,
+            size: float = 10.9,
+            fontname: str = "TestFigureFont",
+        ) -> dict[str, object]:
+            return {
+                "text": " ",
+                "x0": x0,
+                "x1": x1,
+                "top": top,
+                "bottom": top + 10.0,
+                "size": size,
+                "fontname": fontname,
             }
 
         figure_words = [
-            word("Figure 4-2. Receiver test setup", 80.0),
-            word("Generator", 110.0),
-            word("Stressed signal", 130.0),
-            word("Reference", 150.0),
-            word("CRU", 170.0),
+            word("Figure 4-2. Receiver test setup", 80.0, 280.0),
+            word("Generator", 110.0, 300.0),
+            word("Stressed signal", 130.0, 300.0),
+            word("Reference", 150.0, 300.0),
+            word("CRU", 170.0, 300.0),
         ]
         figure_rows = ["表格行: T1 | Column 1=Reference CRU | Column 2=DFE"]
 
@@ -2210,6 +2230,411 @@ class ProtocolDiffTests(unittest.TestCase):
                 figure_rows,
                 figure_words,
             )
+        )
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                (300.0, 190.0, 390.0, 225.0),
+                figure_rows,
+                [*figure_words, word("Table 9-9. Other-column limits", 140.0, 40.0)],
+            ),
+            "an unrelated Table caption in another column cannot veto a proven Figure grid",
+        )
+        other_column_figure_words = [
+            word("Figure 4-3. Left-column setup", 80.0, 72.0),
+            word("Generator", 110.0, 72.0),
+            word("Reference", 130.0, 72.0),
+            word("CRU", 150.0, 72.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (340.0, 190.0, 500.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                other_column_figure_words,
+            ),
+            "a left-column Figure and labels cannot delete a right-column generic table",
+        )
+        wide_caption_words = [
+            word("Figure 4-4. Full-width setup", 80.0, 72.0)
+            | {"x1": 540.0},
+            word("Generator", 110.0, 72.0),
+            word("Reference", 130.0, 110.0),
+            word("Mode", 150.0, 360.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (340.0, 190.0, 500.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                wide_caption_words,
+            ),
+            "a wide caption cannot let two disconnected left-column labels complete right-column support",
+        )
+        table_bridge_words = [
+            word("Figure 4-6. Full-width setup", 80.0, 72.0)
+            | {"x1": 540.0},
+            word("Right label", 110.0, 305.0) | {"x1": 330.0},
+            word("Middle label", 130.0, 265.0) | {"x1": 295.0},
+            word("Table 9-9. Left limits", 150.0, 120.0) | {"x1": 255.0},
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (340.0, 190.0, 500.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                table_bridge_words,
+            ),
+            "an unrelated strict Table caption cannot count as a connected Figure label",
+        )
+        same_baseline_words = [
+            word("Figure 4-5. Left setup", 80.0, 40.0),
+            word("Mode", 80.0, 360.0),
+            word("Generator", 110.0, 40.0),
+            word("Reference", 130.0, 40.0),
+            word("CRU", 150.0, 40.0),
+            word("Header", 170.0, 360.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (340.0, 190.0, 500.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                same_baseline_words,
+            ),
+            "a same-baseline right-column word cannot widen a left Figure caption",
+        )
+        adjacent_figure_identifier = [
+            word("Figure", 80.0, 240.0) | {"x1": 270.0, "size": 10.9},
+            word("A-2.", 80.0, 273.0) | {"x1": 300.0, "size": 10.9},
+        ]
+        narrow_gutter_words = [
+            *adjacent_figure_identifier,
+            word("Generator", 110.0, 250.0) | {"x1": 300.0},
+            word("Reference", 130.0, 250.0) | {"x1": 300.0},
+            word("CRU", 150.0, 250.0) | {"x1": 300.0},
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (310.0, 190.0, 350.0, 225.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                narrow_gutter_words,
+            ),
+            "a narrow table cannot inherit a Figure across a non-overlapping 10pt gutter",
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (310.0, 190.0, 350.0, 225.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                [
+                    *narrow_gutter_words,
+                    word("Mode", 80.0, 306.33)
+                    | {"x1": 330.0, "size": 10.9},
+                ],
+            ),
+            "a same-baseline right field cannot widen the adjacent Figure across a gutter",
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (310.0, 190.0, 500.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                [
+                    *narrow_gutter_words,
+                    word("Mode", 80.0, 306.33)
+                    | {"x1": 330.0, "size": 10.9},
+                    word("Target", 80.0, 333.0)
+                    | {"x1": 365.0, "size": 10.9},
+                    word("Value", 80.0, 368.0)
+                    | {"x1": 395.0, "size": 10.9},
+                    word("Unit", 80.0, 398.0)
+                    | {"x1": 420.0, "size": 10.9},
+                ],
+            ),
+            "a four-field table super-header cannot become a Figure descriptor",
+        )
+        descriptor_then_header_words = [
+            *adjacent_figure_identifier,
+            word("Module", 80.0, 305.9) | {"x1": 340.0, "size": 10.9},
+            word("input", 80.0, 343.0) | {"x1": 370.0, "size": 10.9},
+            word("Mode", 80.0, 373.0) | {"x1": 400.0, "size": 10.9},
+            word("Target", 80.0, 403.0) | {"x1": 435.0, "size": 10.9},
+            word("Value", 80.0, 438.0) | {"x1": 465.0, "size": 10.9},
+            word("Unit", 80.0, 468.0) | {"x1": 490.0, "size": 10.9},
+            *narrow_gutter_words[2:],
+        ]
+        descriptor_spaces = [
+            painted_space(300.0, 305.9),
+            painted_space(340.0, 343.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (375.0, 190.0, 520.0, 240.0),
+                [
+                    "表格行: T1 | Column 1=A | Column 2=10",
+                    "表格行: T1 | Column 1=B | Column 2=20",
+                ],
+                descriptor_then_header_words,
+                page_characters=descriptor_spaces,
+            ),
+            "painted spaces may prove the real descriptor but not an unpainted table header suffix",
+        )
+        generic_rows = [
+            "表格行: T1 | Column 1=A | Column 2=10",
+            "表格行: T1 | Column 1=B | Column 2=20",
+        ]
+        mismatched_style_words = [
+            word("Figure", 80.0, 240.0)
+            | {"x1": 270.0, "size": 10.9, "fontname": "FigureFont"},
+            word("A-2.", 80.0, 273.0)
+            | {"x1": 300.0, "size": 10.9, "fontname": "FigureFont"},
+            *[
+                word(text, 80.0, left)
+                | {"x1": right, "size": 14.0, "fontname": "HeaderFont"}
+                for text, left, right in (
+                    ("Module", 306.0, 340.0),
+                    ("input", 343.0, 370.0),
+                    ("Mode", 373.0, 400.0),
+                    ("Target", 403.0, 435.0),
+                    ("Value", 438.0, 465.0),
+                    ("Unit", 468.0, 490.0),
+                )
+            ],
+            *narrow_gutter_words[2:],
+        ]
+        mismatched_style_spaces = [
+            painted_space(left, right, size=14.0, fontname="HeaderFont")
+            for left, right in (
+                (300.0, 306.0),
+                (340.0, 343.0),
+                (370.0, 373.0),
+                (400.0, 403.0),
+                (435.0, 438.0),
+                (465.0, 468.0),
+            )
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (375.0, 190.0, 520.0, 240.0),
+                generic_rows,
+                mismatched_style_words,
+                page_characters=mismatched_style_spaces,
+            ),
+            "another column's larger font and spaces cannot extend a Figure caption",
+        )
+        forbidden_joined_caption = "Figure A-2. Module input Mode Target Value Unit"
+        self.assertNotIn(
+            forbidden_joined_caption,
+            [
+                pdf_extract_module._word_cluster_text(cluster)
+                for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                    [word_item for word_item in mismatched_style_words if word_item["top"] == 80.0],
+                    bbox=(375.0, 190.0, 520.0, 240.0),
+                    page_characters=mismatched_style_spaces,
+                )
+            ],
+        )
+        same_style_words = [
+            word_item | {"fontname": "TestFigureFont", "size": 10.9}
+            for word_item in descriptor_then_header_words
+        ]
+        adjacent_baseline_spaces = [
+            painted_space(left, right, top=90.5)
+            for left, right in (
+                (300.0, 305.9),
+                (340.0, 343.0),
+                (370.0, 373.0),
+                (400.0, 403.0),
+                (435.0, 438.0),
+                (465.0, 468.0),
+            )
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (375.0, 190.0, 520.0, 240.0),
+                generic_rows,
+                same_style_words,
+                page_characters=adjacent_baseline_spaces,
+            ),
+            "spaces painted on the adjacent baseline cannot extend this Figure",
+        )
+        self.assertNotIn(
+            forbidden_joined_caption,
+            [
+                pdf_extract_module._word_cluster_text(cluster)
+                for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                    [word_item for word_item in same_style_words if word_item["top"] == 80.0],
+                    bbox=(375.0, 190.0, 520.0, 240.0),
+                    page_characters=adjacent_baseline_spaces,
+                )
+            ],
+            "adjacent-line spaces must be rejected at the geometry gate, not by a later label count",
+        )
+        rotated_spaces = [
+            painted_space(left, right)
+            | {
+                "upright": False,
+                "matrix": (0.0, 10.9, -10.9, 0.0, 0.0, 0.0),
+            }
+            for left, right in (
+                (300.0, 305.9),
+                (340.0, 343.0),
+                (370.0, 373.0),
+                (400.0, 403.0),
+                (435.0, 438.0),
+                (465.0, 468.0),
+            )
+        ]
+        self.assertNotIn(
+            forbidden_joined_caption,
+            [
+                pdf_extract_module._word_cluster_text(cluster)
+                for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                    [word_item for word_item in same_style_words if word_item["top"] == 80.0],
+                    bbox=(375.0, 190.0, 520.0, 240.0),
+                    page_characters=rotated_spaces,
+                )
+            ],
+            "rotated-axis spaces cannot prove a horizontal caption gap",
+        )
+        invalid_space_geometries = (
+            {"x0": float("nan"), "x1": float("nan")},
+            {"x0": float("inf"), "x1": float("inf")},
+            {"x0": 306.0, "x1": 300.0},
+            {"top": 90.0, "bottom": 80.0},
+        )
+        self.assertTrue(
+            pdf_extract_module._finite_positive_layout_box(300.0, 306.0, 80.0, 90.0)
+        )
+        for invalid_box in (
+            (float("nan"), 306.0, 80.0, 90.0),
+            (300.0, float("inf"), 80.0, 90.0),
+            (306.0, 300.0, 80.0, 90.0),
+            (300.0, 306.0, 90.0, 80.0),
+        ):
+            with self.subTest(invalid_layout_box=invalid_box):
+                self.assertFalse(pdf_extract_module._finite_positive_layout_box(*invalid_box))
+        valid_caption_words = [
+            word_item for word_item in same_style_words if word_item["top"] == 80.0
+        ]
+        self.assertTrue(
+            all(
+                pdf_extract_module._word_has_finite_positive_geometry(word_item)
+                for word_item in valid_caption_words
+            )
+        )
+        invalid_word_geometries = (
+            {"x0": float("nan")},
+            {"x1": float("inf")},
+            {"x0": 341.0, "x1": 340.0},
+            {"top": 90.0, "bottom": 80.0},
+            {"size": float("inf")},
+            {"size": 0.0},
+        )
+        word_without_size = dict(valid_caption_words[0])
+        word_without_size.pop("size")
+        self.assertTrue(
+            pdf_extract_module._word_has_finite_positive_geometry(word_without_size)
+        )
+        for invalid_geometry in invalid_word_geometries:
+            with self.subTest(invalid_word_geometry=invalid_geometry):
+                invalid_word = valid_caption_words[2] | invalid_geometry
+                self.assertFalse(
+                    pdf_extract_module._word_has_finite_positive_geometry(invalid_word)
+                )
+                invalid_words = [*valid_caption_words]
+                invalid_words[2] = invalid_word
+                self.assertEqual(
+                    (),
+                    pdf_extract_module._figure_safe_horizontal_word_clusters(
+                        invalid_words,
+                        bbox=(375.0, 190.0, 520.0, 240.0),
+                        page_characters=[painted_space(300.0, 305.9)],
+                    ),
+                    "one invalid word invalidates the whole visual-line Figure proof",
+                )
+        for invalid_geometry in invalid_space_geometries:
+            with self.subTest(invalid_space_geometry=invalid_geometry):
+                invalid_space = painted_space(300.0, 306.0) | invalid_geometry
+                self.assertNotIn(
+                    forbidden_joined_caption,
+                    [
+                        pdf_extract_module._word_cluster_text(cluster)
+                        for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                            [
+                                word_item
+                                for word_item in same_style_words
+                                if word_item["top"] == 80.0
+                            ],
+                            bbox=(375.0, 190.0, 520.0, 240.0),
+                            page_characters=[invalid_space],
+                        )
+                    ],
+                    "non-finite or reversed raw character boxes cannot prove a caption gap",
+                )
+        subpoint_gap_words = [
+            *adjacent_figure_identifier,
+            word("Module", 80.0, 306.0) | {"x1": 340.0, "size": 10.9},
+            word("input", 80.0, 340.5) | {"x1": 370.0, "size": 10.9},
+            word("Mode", 80.0, 370.5) | {"x1": 400.0, "size": 10.9},
+            word("Target", 80.0, 400.5) | {"x1": 435.0, "size": 10.9},
+            word("Value", 80.0, 435.5) | {"x1": 465.0, "size": 10.9},
+            word("Unit", 80.0, 465.5) | {"x1": 490.0, "size": 10.9},
+            *narrow_gutter_words[2:],
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (375.0, 190.0, 520.0, 240.0),
+                generic_rows,
+                subpoint_gap_words,
+                page_characters=[painted_space(300.0, 306.0)],
+            ),
+            "sub-point gaps still require their own painted spaces after a relaxed edge",
+        )
+        self.assertNotIn(
+            forbidden_joined_caption,
+            [
+                pdf_extract_module._word_cluster_text(cluster)
+                for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                    [word_item for word_item in subpoint_gap_words if word_item["top"] == 80.0],
+                    bbox=(375.0, 190.0, 520.0, 240.0),
+                    page_characters=[painted_space(300.0, 306.0)],
+                )
+            ],
+            "sub-point gaps must be rejected at the cluster gate when no glyph paints them",
+        )
+        offset_caption_words = [
+            word("Figure 31-5. Module output test setup", 80.0, 212.0)
+            | {"x1": 408.0},
+            word("Crosstalk", 120.0, 424.0) | {"x1": 463.0},
+            word("Generator", 140.0, 424.0) | {"x1": 468.0},
+            word("Scope", 160.0, 425.0) | {"x1": 450.0},
+        ]
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                (422.0, 190.0, 506.0, 230.0),
+                [
+                    "表格行: T1 | Column 1=Emulated Host Channel | Column 2=",
+                    "表格行: T1 | Column 1=Scope | Column 2=CTLE",
+                ],
+                offset_caption_words,
+            ),
+            "three in-lane labels may bridge the small real Figure-caption offset",
         )
         prose_after_figure = [
             *figure_words[:2],
@@ -2294,6 +2719,986 @@ class ProtocolDiffTests(unittest.TestCase):
             )
         )
 
+    def test_captioned_figure_grid_accepts_short_dotted_abbreviation_label(self) -> None:
+        """A diagram abbreviation such as ``Conn.`` is not prose after a Figure."""
+
+        def word(text: str, top: float, x0: float = 72.0) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x0 + max(8.0, len(text) * 5.0),
+                "top": top,
+                "bottom": top + 10.0,
+            }
+
+        figure_words = [
+            word("Figure 30-14. Channel Reference Model", 80.0, 87.0),
+            word("Host IC", 110.0, 170.0),
+            word("Conn.", 130.0, 180.0),
+            word("Module", 150.0, 180.0),
+            word("TP0", 170.0, 195.0),
+        ]
+
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Column 1=TP | Column 2=0"],
+                figure_words,
+            ),
+            "TARGET_REGRESSION: the Figure 30-14 TP0 box must not become an added table",
+        )
+        abbreviation_only = [
+            word("Figure 4-3. Compact labels", 80.0),
+            word("Ref.", 110.0),
+            word("Gen.", 130.0),
+            word("Conn.", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Column 1=Mode | Column 2=A"],
+                abbreviation_only,
+            ),
+            "abbreviations alone cannot prove that a real small table belongs to a Figure",
+        )
+        non_modal_sentence = [
+            word("Figure 4-4. Earlier setup", 80.0),
+            word("Generator", 110.0),
+            word("Calibration complete.", 130.0),
+            word("Parameter", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Parameter=Mode A | Value=20 mV"],
+                non_modal_sentence,
+            ),
+            "a short non-modal sentence still ends the diagram-label region",
+        )
+        unpunctuated_prose = [
+            word("Figure 4-4. Earlier setup", 80.0),
+            word("Generator", 110.0),
+            word("Calibration complete", 130.0),
+            word("Parameter", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Parameter=Mode A | Value=20 mV"],
+                unpunctuated_prose,
+            ),
+            "an explicit technical schema remains a real small table without prose punctuation",
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Parameter=Mode A | Symbol=M"],
+                unpunctuated_prose,
+            ),
+            "Parameter/Symbol is already an explicit technical schema without a numeric field",
+        )
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | 参数=模式A | 符号=M"],
+                unpunctuated_prose,
+            ),
+            "中文参数/符号字段也必须保护真实小表",
+        )
+        for technical_row in (
+            "表格行: T1 | Test Point=TP1a | Tolerance=10 %",
+            "表格行: T1 | Frequency=26.5625 GHz | Nominal=100 mV",
+        ):
+            with self.subTest(unknown_explicit_schema=technical_row):
+                self.assertFalse(
+                    _table_bbox_belongs_to_captioned_figure(
+                        (190.8, 190.0, 212.16, 215.0),
+                        [technical_row],
+                        unpunctuated_prose,
+                    ),
+                    "two explicit non-generic field names protect an unknown technical schema",
+                )
+        note_boundary = [
+            word("Figure 4-5. Earlier setup", 80.0),
+            word("Generator", 105.0),
+            word("Host", 120.0),
+            word("Module", 135.0),
+            word("Note.", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Parameter=Mode A | Value=20 mV"],
+                note_boundary,
+            ),
+            "a one-token Note marker starts prose and is not a diagram abbreviation",
+        )
+        reserved_boundary = [
+            word("Figure 4-6. Earlier setup", 80.0),
+            word("Generator", 105.0),
+            word("Host", 120.0),
+            word("Module", 135.0),
+            word("Reserved.", 150.0),
+        ]
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                (190.8, 190.0, 212.16, 215.0),
+                ["表格行: T1 | Parameter=Mode A | Value=20 mV"],
+                reserved_boundary,
+            ),
+            "an unknown one-word sentence cannot inherit diagram-abbreviation status",
+        )
+
+    def test_table_caption_appends_only_geometry_proven_centered_continuation(self) -> None:
+        """A caption line crossing the grid border keeps its immediate styled continuation."""
+
+        def line(
+            text: str,
+            *,
+            x0: float,
+            x1: float,
+            top: float,
+            size: float = 10.0,
+            fontname: str = "ABCDEF+Arial,Bold",
+        ) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x1,
+                "top": top,
+                "bottom": top + size,
+                "size": size,
+                "fontname": fontname,
+            }
+
+        title = (
+            "Table 30-6. Crosstalk parameters for module output test and host "
+            "stressed input test calibration"
+        )
+        geometry_words = [
+            line(title, x0=74.9, x1=529.0, top=394.4),
+            line("at TP1a", x0=284.2, x1=319.8, top=405.4),
+            line("Parameter Target value Unit Conditions", x0=75.0, x1=520.0, top=430.0),
+        ]
+        self.assertEqual(
+            f"{title} at TP1a",
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                title,
+                (61.8, 425.0, 542.8, 510.0),
+                geometry_words,
+            ),
+            "TARGET_REGRESSION: the TP1a continuation must remain in the visible caption",
+        )
+
+        for wrapped_title, continuation, size, anchor_top, continuation_top, table_top in (
+            (
+                "Table 29-3. Crosstalk parameters for host output test and module stressed input test",
+                "calibration at TP4",
+                11.0,
+                366.5,
+                377.5,
+                397.9,
+            ),
+            (
+                "Table 29-6. Crosstalk parameters for module output test and host stressed input test",
+                "calibration at TP1a",
+                11.0,
+                351.5,
+                362.5,
+                383.0,
+            ),
+            (
+                "Table 30-3. Crosstalk parameters for host output test and module stressed input test calibration",
+                "at TP4",
+                10.0,
+                345.4,
+                356.4,
+                376.1,
+            ),
+        ):
+            with self.subTest(wrapped_title=wrapped_title):
+                self.assertEqual(
+                    f"{wrapped_title} {continuation}",
+                    pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                        wrapped_title,
+                        (70.0, table_top, 540.0, table_top + 100.0),
+                        [
+                            line(
+                                wrapped_title,
+                                x0=75.0,
+                                x1=529.0,
+                                top=anchor_top,
+                                size=size,
+                            ),
+                            line(
+                                continuation,
+                                x0=260.0,
+                                x1=360.0,
+                                top=continuation_top,
+                                size=size,
+                            ),
+                        ],
+                    ),
+                )
+
+        il_title = "Table 30-8. Recommended gDC and gDC2 settings vs. Channel"
+        self.assertEqual(
+            f"{il_title} Insertion Loss (IL)",
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                il_title,
+                (70.2, 131.0, 390.1, 424.0),
+                [
+                    line(il_title, x0=81.1, x1=377.4, top=100.4),
+                    line("Insertion Loss (IL)", x0=186.8, x1=273.4, top=111.4),
+                ],
+            ),
+        )
+
+        old_il_title = (
+            "Table 29-8. Recommended g and g settings vs. Channel Insertion Loss (IL)"
+        )
+        subscript_words = [
+            line("Table 29-8. Recommended", x0=92.9, x1=231.0, top=100.5, size=11.0),
+            line("g", x0=233.7, x1=240.5, top=100.5, size=11.0),
+            line("and", x0=258.0, x1=274.0, top=100.5, size=11.0),
+            line("g", x0=278.8, x1=285.5, top=100.5, size=11.0),
+            line(
+                "settings vs. Channel Insertion Loss (IL)",
+                x0=309.0,
+                x1=511.4,
+                top=100.5,
+                size=11.0,
+            ),
+            line("DC", x0=240.4, x1=253.0, top=104.6, size=8.8),
+            line("DC2", x0=285.5, x1=303.1, top=104.6, size=8.8),
+        ]
+        self.assertEqual(
+            "Table 29-8. Recommended gDC and gDC2 settings vs. Channel Insertion Loss (IL)",
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                old_il_title,
+                (82.9, 121.0, 521.4, 426.9),
+                subscript_words,
+            ),
+        )
+        for unsafe_suffixes in (
+            [line("DC", x0=330.0, x1=342.6, top=104.6, size=8.8)],
+            [line("DC", x0=240.4, x1=253.0, top=100.5, size=11.0)],
+        ):
+            with self.subTest(unsafe_suffixes=unsafe_suffixes):
+                self.assertEqual(
+                    old_il_title,
+                    pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                        old_il_title,
+                        (82.9, 121.0, 521.4, 426.9),
+                        [*subscript_words[:5], *unsafe_suffixes],
+                    ),
+                )
+
+        ambiguous_title = "Table 29-9. Recommended g g settings"
+        ambiguous_words = [
+            line("Table 29-9. Recommended", x0=92.9, x1=231.0, top=100.5, size=11.0),
+            line("g", x0=233.7, x1=240.5, top=100.5, size=11.0),
+            line("g", x0=238.0, x1=242.0, top=100.5, size=11.0),
+            line("settings", x0=260.0, x1=310.0, top=100.5, size=11.0),
+            line("DC", x0=241.0, x1=253.0, top=104.6, size=8.8),
+        ]
+        self.assertEqual(
+            ambiguous_title,
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                ambiguous_title,
+                (82.9, 121.0, 521.4, 426.9),
+                ambiguous_words,
+            ),
+            "one suffix shared by two bases is ambiguous and must remain untouched",
+        )
+
+        for continuation in (
+            line("Calibration complete.", x0=250.0, x1=355.0, top=405.4),
+            line(
+                "at TP1a",
+                x0=284.2,
+                x1=319.8,
+                top=405.4,
+                fontname="ABCDEF+Arial",
+            ),
+            line("at TP1a", x0=80.0, x1=115.6, top=405.4),
+            line("at TP1a", x0=284.2, x1=319.8, top=430.0),
+        ):
+            with self.subTest(continuation=continuation):
+                self.assertEqual(
+                    title,
+                    pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                        title,
+                        (61.8, 425.0, 542.8, 510.0),
+                        [geometry_words[0], continuation],
+                    ),
+                )
+
+        short_title = "Table 7-1. Electrical Limits"
+        self.assertEqual(
+            short_title,
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                short_title,
+                (70.0, 100.0, 540.0, 220.0),
+                [
+                    line(short_title, x0=190.0, x1=420.0, top=80.0),
+                    line(
+                        "Receiver Operating Mode",
+                        x0=215.0,
+                        x1=395.0,
+                        top=90.5,
+                    ),
+                ],
+            ),
+            "a short caption must not absorb a same-style table super-header",
+        )
+        short_wrapped_title = "Table 7-1. Receiver calibration"
+        self.assertEqual(
+            f"{short_wrapped_title} at TP1a",
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                short_wrapped_title,
+                (70.0, 100.0, 540.0, 220.0),
+                [
+                    line(short_wrapped_title, x0=180.0, x1=430.0, top=80.0),
+                    line("at TP1a", x0=285.0, x1=325.0, top=90.5),
+                ],
+            ),
+        )
+        long_title = (
+            "Table 7-2. Electrical receiver limits for every supported module "
+            "operating condition"
+        )
+        self.assertEqual(
+            long_title,
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                long_title,
+                (70.0, 100.0, 540.0, 220.0),
+                [
+                    line(long_title, x0=75.0, x1=529.0, top=80.0),
+                    line(
+                        "Receiver Operating Mode",
+                        x0=215.0,
+                        x1=395.0,
+                        top=90.5,
+                    ),
+                ],
+            ),
+            "caption length alone cannot distinguish a same-style super-header",
+        )
+        for super_header in (
+            "receiver operating mode",
+            "parameter target value unit conditions",
+            "Receiver Operating Mode (ROM)",
+        ):
+            with self.subTest(super_header=super_header):
+                self.assertEqual(
+                    long_title,
+                    pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                        long_title,
+                        (70.0, 100.0, 540.0, 220.0),
+                        [
+                            line(long_title, x0=75.0, x1=529.0, top=80.0),
+                            line(super_header, x0=180.0, x1=430.0, top=90.5),
+                        ],
+                    ),
+                )
+        connector_title = "Table 7-3. Electrical requirements for"
+        for super_header in (
+            "Receiver Operating Mode",
+            "Parameter Target Value Unit Conditions",
+            "Host",
+            "Module",
+            "Host Output",
+            "Module Input",
+            "Configuration",
+            "configuration",
+            "Applications",
+            "Test Point",
+        ):
+            with self.subTest(connector_super_header=super_header):
+                self.assertEqual(
+                    connector_title,
+                    pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                        connector_title,
+                        (70.0, 100.0, 540.0, 220.0),
+                        [
+                            line(connector_title, x0=145.0, x1=465.0, top=80.0),
+                            line(super_header, x0=215.0, x1=395.0, top=90.5),
+                        ],
+                    ),
+                    "an OIF-style super-header remains ambiguous after a connector",
+                )
+        self.assertEqual(
+            f"{connector_title} supported receiver paths",
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                connector_title,
+                (70.0, 100.0, 540.0, 220.0),
+                [
+                    line(connector_title, x0=145.0, x1=465.0, top=80.0),
+                    line(
+                        "supported receiver paths",
+                        x0=215.0,
+                        x1=395.0,
+                        top=90.5,
+                    ),
+                ],
+            ),
+            "a lowercase grammatical continuation remains supported",
+        )
+        ambiguous_connector_title = (
+            "Table 7-4. Long Supported Receiver Operating Limits for"
+        )
+        self.assertEqual(
+            ambiguous_connector_title,
+            pdf_extract_module._append_geometry_proven_table_caption_continuation(
+                ambiguous_connector_title,
+                (70.0, 100.0, 540.0, 220.0),
+                [
+                    line(
+                        ambiguous_connector_title,
+                        x0=75.0,
+                        x1=529.0,
+                        top=80.0,
+                    ),
+                    line("Conditions", x0=270.0, x1=340.0, top=90.5),
+                ],
+            ),
+            "a single schema header remains ambiguous even after a connector",
+        )
+
+    def test_table_title_scan_prefers_the_nearest_strict_figure_or_table_caption(self) -> None:
+        """A farther Table caption cannot override a nearer Figure caption."""
+
+        class FakeCrop:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def extract_text(self, **_kwargs: object) -> str:
+                return self.text
+
+        class FakePage:
+            width = 612.0
+            height = 792.0
+            bbox = (0.0, 0.0, 612.0, 792.0)
+
+            @staticmethod
+            def crop(crop_bbox: tuple[float, float, float, float]) -> FakeCrop:
+                if crop_bbox[0] == 0.0 and crop_bbox[2] == 612.0:
+                    return FakeCrop(
+                        "Table 1-1. Earlier limits\n"
+                        "Figure 1-2. Nearer setup\nOther-column value"
+                    )
+                return FakeCrop("Table 1-1. Earlier limits")
+
+        self.assertEqual(
+            "Table 1-1. Earlier limits",
+            pdf_extract_module._table_title_above_bbox(
+                FakePage(),
+                (100.0, 100.0, 500.0, 300.0),
+            ),
+            "without geometry, a full-only Figure cannot delete a local technical table",
+        )
+
+        class TailAlignedPage(FakePage):
+            @staticmethod
+            def crop(crop_bbox: tuple[float, float, float, float]) -> FakeCrop:
+                if crop_bbox[0] == 0.0 and crop_bbox[2] == 612.0:
+                    return FakeCrop(
+                        "Table 1-1. Earlier limits\nFigure 1-2. Nearer setup"
+                    )
+                return FakeCrop("Table 1-1. Earlier limits\nNearer setup")
+
+        self.assertEqual(
+            "Table 1-1. Earlier limits",
+            pdf_extract_module._table_title_above_bbox(
+                TailAlignedPage(),
+                (100.0, 100.0, 500.0, 300.0),
+            ),
+            "without geometry, a plain tail is indistinguishable from a schema header",
+        )
+
+        class TwoColumnPage:
+            width = 612.0
+            height = 792.0
+            bbox = (0.0, 0.0, 612.0, 792.0)
+
+            def __init__(
+                self,
+                local_text: str,
+                full_text: str,
+                *,
+                chars: tuple[dict[str, object], ...] = (),
+            ) -> None:
+                self.local_text = local_text
+                self.full_text = full_text
+                self.chars = chars
+
+            def crop(self, crop_bbox: tuple[float, float, float, float]) -> FakeCrop:
+                if crop_bbox[0] == 0.0 and crop_bbox[2] == 612.0:
+                    return FakeCrop(self.full_text)
+                return FakeCrop(self.local_text)
+
+        def caption_word(text: str, x0: float, top: float) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x0 + max(20.0, len(text) * 4.0),
+                "top": top,
+                "bottom": top + 8.0,
+                "size": 10.0,
+                "fontname": "TestFigureFont",
+            }
+
+        def painted_space(
+            x0: float,
+            x1: float,
+            *,
+            top: float = 75.0,
+            size: float = 10.9,
+            fontname: str = "TestFigureFont",
+        ) -> dict[str, object]:
+            return {
+                "text": " ",
+                "x0": x0,
+                "x1": x1,
+                "top": top,
+                "bottom": top + 8.0,
+                "size": size,
+                "fontname": fontname,
+            }
+
+        local_table = "Table 1-1. Local limits"
+        for local_text, full_text in (
+            (
+                "Table 1-1. Receiver limits",
+                "Table 1-1. Receiver limits\nFigure 9-9. Receiver limits",
+            ),
+            (
+                f"{local_table}\nReceiver Operating Mode",
+                f"{local_table}\nFigure 9-9. Receiver Operating Mode",
+            ),
+        ):
+            with self.subTest(no_geometry_full_only_figure=full_text):
+                self.assertTrue(
+                    pdf_extract_module._table_title_above_bbox(
+                        TwoColumnPage(local_text, full_text),
+                        (100.0, 100.0, 300.0, 300.0),
+                    ).startswith("Table "),
+                    "same-tail/schema text cannot grant a full-only Figure deletion authority",
+                )
+        other_figure = "Figure 9-9. Other-column setup"
+        self.assertEqual(
+            local_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{local_table}\n{other_figure}",
+                    f"{local_table}\n{other_figure}",
+                ),
+                (100.0, 100.0, 300.0, 300.0),
+            ),
+            "without geometry, even a local exact Figure cannot outrank a local Table",
+        )
+        self.assertEqual(
+            local_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{local_table}\n{other_figure}",
+                    f"{local_table}\n{other_figure}",
+                ),
+                (100.0, 100.0, 300.0, 300.0),
+                geometry_words=[
+                    caption_word(local_table, 100.0, 55.0),
+                    caption_word(other_figure, 340.0, 75.0),
+                ],
+            ),
+            "an adjacent-column caption inside the old halo cannot win without local ownership",
+        )
+        nearer_figure = "Figure 1-2. Nearer setup"
+        other_table = "Table 9-9. Other-column table"
+        self.assertEqual(
+            nearer_figure,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{local_table}\nNearer setup",
+                    f"{local_table}\n{nearer_figure}\n{other_table}",
+                ),
+                (100.0, 100.0, 300.0, 300.0),
+                geometry_words=[
+                    caption_word(local_table, 100.0, 45.0),
+                    caption_word(nearer_figure, 100.0, 65.0),
+                    caption_word(other_table, 470.0, 80.0),
+                ],
+            ),
+            "all strict candidates must reach the geometry ranking before another-column filtering",
+        )
+        self.assertEqual(
+            nearer_figure,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{local_table}\n{nearer_figure}",
+                    f"{local_table}\n{nearer_figure}\nOther heading",
+                ),
+                (100.0, 100.0, 300.0, 300.0),
+                geometry_words=[
+                    caption_word(local_table, 100.0, 50.0),
+                    caption_word("Other heading", 470.0, 50.0)
+                    | {"bottom": 75.0},
+                    caption_word(nearer_figure, 100.0, 65.0),
+                ],
+            ),
+            "another-column font height cannot replace the matched caption span bottom",
+        )
+        same_baseline_figure = "Figure 9-9. Left setup"
+        self.assertEqual(
+            local_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    local_table,
+                    f"{local_table}\n{same_baseline_figure} Mode",
+                ),
+                (340.0, 100.0, 500.0, 300.0),
+                geometry_words=[
+                    caption_word(local_table, 340.0, 50.0),
+                    caption_word(same_baseline_figure, 40.0, 75.0),
+                    caption_word("Mode", 360.0, 75.0),
+                ],
+            ),
+            "a same-baseline word in another column cannot widen a Figure caption span",
+        )
+        narrow_table = "Table 2-1. Narrow limits"
+        adjacent_figure = "Figure A-2. CRU"
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{adjacent_figure}",
+                    f"{narrow_table}\n{adjacent_figure}",
+                ),
+                (310.0, 190.0, 350.0, 225.0),
+                geometry_words=[
+                    caption_word(narrow_table, 310.0, 115.0) | {"x1": 350.0},
+                    caption_word(adjacent_figure, 240.0, 145.0) | {"x1": 300.0},
+                ],
+            ),
+            "a 10pt gutter is not horizontal ownership without physical overlap",
+        )
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{adjacent_figure} Mode",
+                    f"{narrow_table}\n{adjacent_figure} Mode",
+                ),
+                (310.0, 190.0, 350.0, 225.0),
+                geometry_words=[
+                    caption_word(narrow_table, 310.0, 115.0) | {"x1": 350.0},
+                    caption_word(adjacent_figure, 240.0, 145.0)
+                    | {"x1": 300.0, "size": 10.9},
+                    caption_word("Mode", 306.33, 145.0)
+                    | {"x1": 330.0, "size": 10.9},
+                ],
+            ),
+            "a right-field word cannot grant an adjacent Figure deletion authority",
+        )
+        schema_figure = f"{adjacent_figure} Mode Target Value Unit"
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{schema_figure}",
+                    f"{narrow_table}\n{schema_figure}",
+                ),
+                (310.0, 190.0, 500.0, 225.0),
+                geometry_words=[
+                    caption_word(narrow_table, 310.0, 115.0) | {"x1": 500.0},
+                    caption_word(adjacent_figure, 240.0, 145.0)
+                    | {"x1": 300.0, "size": 10.9},
+                    caption_word("Mode", 306.33, 145.0)
+                    | {"x1": 330.0, "size": 10.9},
+                    caption_word("Target", 333.0, 145.0)
+                    | {"x1": 365.0, "size": 10.9},
+                    caption_word("Value", 368.0, 145.0)
+                    | {"x1": 395.0, "size": 10.9},
+                    caption_word("Unit", 398.0, 145.0)
+                    | {"x1": 420.0, "size": 10.9},
+                ],
+            ),
+            "schema fields cannot supply the relaxed Figure descriptor edge",
+        )
+        real_gap_figure = "Figure 31-6. Module input test setup"
+        real_gap_spaces = (
+            painted_space(276.0, 279.05),
+            painted_space(279.15, 282.33),
+            painted_space(320.65, 323.81),
+            painted_space(348.0, 351.16),
+            painted_space(370.0, 373.13),
+        )
+        real_gap_words = [
+            caption_word("Figure", 214.44, 75.0)
+            | {"x1": 247.98, "size": 10.9},
+            caption_word("31-6.", 251.01, 75.0)
+            | {"x1": 276.00, "size": 10.9},
+            caption_word("Module", 282.33, 75.0)
+            | {"x1": 320.65, "size": 10.9},
+            caption_word("input", 323.81, 75.0)
+            | {"x1": 348.0, "size": 10.9},
+            caption_word("test", 351.16, 75.0)
+            | {"x1": 370.0, "size": 10.9},
+            caption_word("setup", 373.13, 75.0)
+            | {"x1": 405.38, "size": 10.9},
+        ]
+        shifted_duplicate_spaces = tuple(
+            space
+            | {
+                key: float(space[key]) + 0.0008
+                for key in ("x0", "x1", "top", "bottom")
+            }
+            for space in real_gap_spaces
+        )
+        duplicated_gap_spaces = real_gap_spaces + shifted_duplicate_spaces
+        self.assertEqual(
+            real_gap_figure,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    real_gap_figure,
+                    real_gap_figure,
+                    chars=duplicated_gap_spaces,
+                ),
+                (351.02, 102.49, 401.06, 167.57),
+                geometry_words=real_gap_words,
+            ),
+            "duplicate transparent text layers cannot split a real painted-space caption",
+        )
+        duplicated_clusters = pdf_extract_module._figure_safe_horizontal_word_clusters(
+            real_gap_words,
+            bbox=(351.02, 102.49, 401.06, 167.57),
+            page_characters=duplicated_gap_spaces,
+        )
+        self.assertIn(
+            real_gap_figure,
+            [pdf_extract_module._word_cluster_text(cluster) for cluster in duplicated_clusters],
+            "duplicate physical glyph observations must be deduplicated before the space-count limit",
+        )
+        four_distinct_spaces = tuple(
+            painted_space(left, right)
+            for left, right in (
+                (276.0, 277.55),
+                (277.55, 279.1),
+                (279.1, 280.7),
+                (280.7, 282.33),
+            )
+        ) + real_gap_spaces[2:]
+        self.assertNotIn(
+            real_gap_figure,
+            [
+                pdf_extract_module._word_cluster_text(cluster)
+                for cluster in pdf_extract_module._figure_safe_horizontal_word_clusters(
+                    real_gap_words,
+                    bbox=(351.02, 102.49, 401.06, 167.57),
+                    page_characters=four_distinct_spaces,
+                )
+            ],
+            "four distinct compressed spaces remain ambiguous even though exact duplicate layers do not",
+        )
+        descriptor_then_header = "Figure A-2. Module input Mode Target Value Unit"
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{descriptor_then_header}",
+                    f"{narrow_table}\n{descriptor_then_header}",
+                    chars=(
+                        painted_space(300.0, 305.9, top=145.0),
+                        painted_space(340.0, 343.0, top=145.0),
+                    ),
+                ),
+                (375.0, 190.0, 520.0, 240.0),
+                geometry_words=[
+                    caption_word(narrow_table, 375.0, 115.0) | {"x1": 520.0},
+                    caption_word("Figure", 240.0, 145.0)
+                    | {"x1": 270.0, "size": 10.9},
+                    caption_word("A-2.", 273.0, 145.0)
+                    | {"x1": 300.0, "size": 10.9},
+                    caption_word("Module", 305.9, 145.0)
+                    | {"x1": 340.0, "size": 10.9},
+                    caption_word("input", 343.0, 145.0)
+                    | {"x1": 370.0, "size": 10.9},
+                    caption_word("Mode", 373.0, 145.0)
+                    | {"x1": 400.0, "size": 10.9},
+                    caption_word("Target", 403.0, 145.0)
+                    | {"x1": 435.0, "size": 10.9},
+                    caption_word("Value", 438.0, 145.0)
+                    | {"x1": 465.0, "size": 10.9},
+                    caption_word("Unit", 468.0, 145.0)
+                    | {"x1": 490.0, "size": 10.9},
+                ],
+            ),
+            "a proven two-word Figure descriptor cannot borrow an unpainted table-header suffix",
+        )
+        styled_figure = "Figure A-2. Module input Mode Target Value Unit"
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{styled_figure}",
+                    f"{narrow_table}\n{styled_figure}",
+                    chars=tuple(
+                        painted_space(
+                            left,
+                            right,
+                            top=145.0,
+                            size=14.0,
+                            fontname="HeaderFont",
+                        )
+                        for left, right in (
+                            (300.0, 306.0),
+                            (340.0, 343.0),
+                            (370.0, 373.0),
+                            (400.0, 403.0),
+                            (435.0, 438.0),
+                            (465.0, 468.0),
+                        )
+                    ),
+                ),
+                (375.0, 190.0, 520.0, 240.0),
+                geometry_words=[
+                    caption_word(narrow_table, 375.0, 115.0) | {"x1": 520.0},
+                    caption_word("Figure", 240.0, 145.0)
+                    | {"x1": 270.0, "size": 10.9, "fontname": "FigureFont"},
+                    caption_word("A-2.", 273.0, 145.0)
+                    | {"x1": 300.0, "size": 10.9, "fontname": "FigureFont"},
+                    *[
+                        caption_word(text, left, 145.0)
+                        | {"x1": right, "size": 14.0, "fontname": "HeaderFont"}
+                        for text, left, right in (
+                            ("Module", 306.0, 340.0),
+                            ("input", 343.0, 370.0),
+                            ("Mode", 373.0, 400.0),
+                            ("Target", 403.0, 435.0),
+                            ("Value", 438.0, 465.0),
+                            ("Unit", 468.0, 490.0),
+                        )
+                    ],
+                ],
+            ),
+            "painted spaces from a larger neighbouring font cannot grant Figure ownership",
+        )
+        subpoint_figure = "Figure A-2. Module input Mode Target Value Unit"
+        self.assertEqual(
+            narrow_table,
+            pdf_extract_module._table_title_above_bbox(
+                TwoColumnPage(
+                    f"{narrow_table}\n{subpoint_figure}",
+                    f"{narrow_table}\n{subpoint_figure}",
+                    chars=(painted_space(300.0, 306.0, top=145.0),),
+                ),
+                (375.0, 190.0, 520.0, 240.0),
+                geometry_words=[
+                    caption_word(narrow_table, 375.0, 115.0) | {"x1": 520.0},
+                    caption_word("Figure", 240.0, 145.0)
+                    | {"x1": 270.0, "size": 10.9},
+                    caption_word("A-2.", 273.0, 145.0)
+                    | {"x1": 300.0, "size": 10.9},
+                    caption_word("Module", 306.0, 145.0)
+                    | {"x1": 340.0, "size": 10.9},
+                    caption_word("input", 340.5, 145.0)
+                    | {"x1": 370.0, "size": 10.9},
+                    caption_word("Mode", 370.5, 145.0)
+                    | {"x1": 400.0, "size": 10.9},
+                    caption_word("Target", 400.5, 145.0)
+                    | {"x1": 435.0, "size": 10.9},
+                    caption_word("Value", 435.5, 145.0)
+                    | {"x1": 465.0, "size": 10.9},
+                    caption_word("Unit", 465.5, 145.0)
+                    | {"x1": 490.0, "size": 10.9},
+                ],
+            ),
+            "every post-relaxation word edge needs its own painted-space glyph, even below one point",
+        )
+
+    def test_table_title_joins_only_tight_mixed_size_caption_clusters(self) -> None:
+        """A mixed-size caption is one title; a distant same-row word is not."""
+
+        title = "Table 32-4. Transmitter Output Jitter Specification"
+
+        class FakeCrop:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+            def extract_text(self, **_kwargs: object) -> str:
+                return self.text
+
+        class FakePage:
+            width = 612.0
+            height = 792.0
+            bbox = (0.0, 0.0, 612.0, 792.0)
+
+            def __init__(self, caption: str) -> None:
+                self.caption = caption
+
+            def crop(self, _bbox: tuple[float, float, float, float]) -> FakeCrop:
+                return FakeCrop(f"39 {self.caption}\n40")
+
+        def word(
+            text: str,
+            x0: float,
+            x1: float,
+            top: float,
+            bottom: float,
+            size: float,
+            fontname: str = "FUITUJ+Arial,Bold",
+        ) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x1,
+                "top": top,
+                "bottom": bottom,
+                "size": size,
+                "fontname": fontname,
+            }
+
+        geometry_words = [
+            word("39", 46.6471, 60.0391, 571.7316, 583.7316, 12.0, "ASTKCT+Arial"),
+            word("Transmitter", 228.7191, 288.4370, 572.7839, 583.7839, 11.0),
+            word("Output", 291.5973, 327.6630, 572.7839, 583.7839, 11.0),
+            word("Jitter", 330.7188, 357.5577, 572.7839, 583.7839, 11.0),
+            word("Specification", 360.4782, 428.8795, 572.7839, 583.7839, 11.0),
+            word("Table", 175.0187, 200.4977, 573.4079, 583.4079, 10.0),
+            word("32-4.", 203.0977, 226.0367, 573.4079, 583.4079, 10.0),
+            word("Mode", 520.0, 548.0, 572.7839, 583.7839, 11.0),
+        ]
+        for candidate, expected in (
+            (title, title),
+            (f"{title} Mode", f"{title} Mode"),
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(
+                    expected,
+                    pdf_extract_module._table_title_above_bbox(
+                        FakePage(candidate),
+                        (71.9971, 587.0161, 531.09835, 690.9319),
+                        geometry_words=geometry_words,
+                    ),
+                )
+        ambiguous_title = "Table 1-1. Alpha limits"
+        ambiguous_geometry = [
+            word("39", 50.0, 60.0, 96.7, 108.7, 12.0, "ASTKCT+Arial"),
+            word("limits", 178.0, 210.0, 98.0, 109.0, 11.0),
+            word("Alpha", 153.0, 175.0, 98.4, 109.4, 11.0),
+            word("Table 1-1.", 100.0, 150.0, 100.0, 110.0, 10.0),
+            word("limits", 178.0, 210.0, 100.0, 110.0, 11.0),
+        ]
+        self.assertEqual(
+            ambiguous_title,
+            pdf_extract_module._table_title_above_bbox(
+                FakePage(ambiguous_title),
+                (100.0, 130.0, 300.0, 220.0),
+                geometry_words=ambiguous_geometry,
+            ),
+            "a chain that becomes ambiguous after one extension must keep the raw title",
+        )
+
     def test_annex_letter_captions_distinguish_figure_grids_from_real_tables(self) -> None:
         """Annex A-2/A-1 captions use the same geometry safeguards as numeric captions."""
 
@@ -2307,11 +3712,11 @@ class ProtocolDiffTests(unittest.TestCase):
             }
 
         figure_words = [
-            word("Figure A-2. Receiver test setup", 80.0),
-            word("Generator", 110.0),
-            word("Stressed signal", 130.0),
-            word("Reference", 150.0),
-            word("CRU", 170.0),
+            word("Figure A-2. Receiver test setup", 80.0, 280.0),
+            word("Generator", 110.0, 300.0),
+            word("Stressed signal", 130.0, 300.0),
+            word("Reference", 150.0, 300.0),
+            word("CRU", 170.0, 300.0),
         ]
         bbox = (300.0, 190.0, 390.0, 225.0)
 
@@ -2341,10 +3746,10 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         figure_with_table_reference = [
             figure_words[0],
-            word("See Table A-1", 105.0),
-            word("Generator", 125.0),
-            word("MCB", 145.0),
-            word("HCB", 165.0),
+            word("See Table A-1", 105.0, 300.0),
+            word("Generator", 125.0, 300.0),
+            word("MCB", 145.0, 300.0),
+            word("HCB", 165.0, 300.0),
         ]
         self.assertTrue(
             _table_bbox_belongs_to_captioned_figure(
@@ -3203,6 +4608,13 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertTrue(
             _should_skip_detected_table("Figure 32-2.Channel Insertion Loss Limit for 112 Gsym/s", figure_rows)
         )  # 图题候选必须整块跳过，不能进入正文或截图。
+        self.assertFalse(
+            _should_skip_detected_table(
+                "Figure 32-2. Receiver setup",
+                ["表格行: T1 | Parameter=Amplitude | Value=600 mV"],
+            ),
+            "a cross-column Figure title match cannot override an explicit technical schema",
+        )
         self.assertTrue(_should_skip_detected_table("", figure_rows))  # 无 bbox/无图题时，图轴表格行也必须跳过。
         self.assertTrue(_should_skip_detected_table("X", []))  # 坐标轴单字母空候选必须跳过。
         self.assertTrue(_should_skip_detected_table("", note_box_rows))  # 无表题单列 Note 框不应进入表格对比。
@@ -3228,13 +4640,15 @@ class ProtocolDiffTests(unittest.TestCase):
             ),
             "TARGET_REGRESSION: an explicit numbered Table must not be discarded as plot axes",
         )
-        self.assertTrue(_should_skip_detected_table("", numeric_rows))
-        self.assertTrue(
+        self.assertFalse(
+            _should_skip_detected_table("", numeric_rows)
+        )  # 标题缺失时也保留多字段技术 schema；误删真表比多一张待复核卡更危险。
+        self.assertFalse(
             _should_skip_detected_table(
                 "Figure 29-12. CTLE Gain Range",
                 numeric_rows,
             )
-        )
+        )  # 显式 Min/Max/step 技术字段优先保留，防止误定位的 Figure 题名静默删表。
 
     def test_table_visual_summary_matches_human_readable_symbol_change_style(self) -> None:
         """Small table summaries should show item/old/new/type like the visual reference."""
@@ -3442,6 +4856,9 @@ class ProtocolDiffTests(unittest.TestCase):
                 "表格行: T1 | Parameter=Reference resistance | Condition=See Note 1 | Value=50 | Units=Ω"
             ],
             grid_summary="",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         new_table = TableVisual(
             page_number=2,
@@ -3453,6 +4870,9 @@ class ProtocolDiffTests(unittest.TestCase):
                 "表格行: T1 | Parameter=Reference resistance | Condition=See Note 2 | Value=46.25 | Units=Ω"
             ],
             grid_summary="",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         result = compare_extractions(
             ExtractionResult(
@@ -4286,6 +5706,9 @@ class ProtocolDiffTests(unittest.TestCase):
             image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
             row_texts=["表格行: T1 | Parameter=Clock relation | Value=fb*n"],
             grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         new_math = TableVisual(
             page_number=3,
@@ -4295,6 +5718,9 @@ class ProtocolDiffTests(unittest.TestCase):
             image_data_uri="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w==",
             row_texts=["表格行: T1 | Parameter=Clock relation | Value=fb×n"],
             grid_summary="OpenCV 网格检测: 横线 2 条，竖线 2 条",
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         result = compare_extractions(
             ExtractionResult(
@@ -4592,8 +6018,9 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("OIF 2024.058.13", table_csv)  # 修订历史只由表格事实系统承载一次。
         self.assertIn("Updated based on comment resolution spreadsheet oif2026.245.01.", table_csv)
         technical_table_count = sum(
-            change["role"] == "technical" for change in payload["table_changes"]
-        )  # 读者 HTML 只导航技术表，出版/修订表继续留在 JSON 与 table CSV 审计面。
+            change["role"] == "technical" and change["reader_card_id"] is not None
+            for change in payload["table_changes"]
+        )  # 读者 HTML 只导航可见技术卡；纯表号顺延和出版/修订表仍留在 JSON/CSV 审计面。
         self.assertEqual(
             technical_table_count,
             html.count('href="#table-change-'),
@@ -6330,6 +7757,297 @@ class ProtocolDiffTests(unittest.TestCase):
                 None,
             ),
         )  # 表头保留；对齐的多记录行可逐行替换；计数冲突行继续保留原始比较文本。
+
+    def test_data_row_coverage_compares_raw_cells_with_independent_geometry(self) -> None:
+        """Raw-to-structured self-consistency cannot prove a detector saw every cell."""
+
+        def word(text: str, x0: float) -> dict[str, object]:
+            return {
+                "text": text,
+                "x0": x0,
+                "x1": x0 + max(4.0, len(text) * 5.0),
+                "top": 20.0,
+                "bottom": 30.0,
+                "size": 10.0,
+            }
+
+        geometry = [
+            [[word("min", 10.0)], [word("max", 60.0)]],
+            [[word("0", 10.0)], [word("10", 60.0)]],
+        ]
+        positive = pdf_extract_module._table_lines_from_rows_with_data_evidence(
+            [["min", "max"], ["0", "10"]],
+            table_number=1,
+            cell_word_rows=geometry,
+        )
+        omitted_cell = pdf_extract_module._table_lines_from_rows_with_data_evidence(
+            [["min", "max"], ["0", ""]],
+            table_number=1,
+            cell_word_rows=geometry,
+        )
+        transposed_geometry = [
+            geometry[0],
+            [[word("0", 10.0)], [word("01", 60.0)]],
+        ]
+        transposed_cell = pdf_extract_module._table_lines_from_rows_with_data_evidence(
+            [["min", "max"], ["0", "10"]],
+            table_number=1,
+            cell_word_rows=transposed_geometry,
+        )
+        missing_geometry = pdf_extract_module._table_lines_from_rows_with_data_evidence(
+            [["min", "max"], ["0", "10"]],
+            table_number=1,
+            cell_word_rows=None,
+        )
+
+        self.assertTrue(positive[3])
+        self.assertFalse(omitted_cell[3])
+        self.assertFalse(transposed_cell[3])
+        self.assertFalse(missing_geometry[3])
+
+        class FakeRow:
+            def __init__(self, cells: list[tuple[float, float, float, float] | None]) -> None:
+                self.cells = cells
+
+        class FakeTable:
+            bbox = (0.0, 0.0, 100.0, 45.0)
+            rows = [
+                FakeRow([(0.0, 0.0, 50.0, 15.0), (50.0, 0.0, 100.0, 15.0)]),
+                FakeRow([(0.0, 15.0, 50.0, 30.0), None]),
+            ]
+
+        missing_cell_geometry = [
+            word("min", 10.0) | {"top": 2.0, "bottom": 12.0},
+            word("max", 60.0) | {"top": 2.0, "bottom": 12.0},
+            word("0", 10.0) | {"top": 17.0, "bottom": 27.0},
+            word("10", 60.0) | {"top": 17.0, "bottom": 27.0},
+        ]
+        incomplete_words = pdf_extract_module._table_cell_word_rows(
+            FakeTable(),
+            [["min", "max"], ["0", ""]],
+            missing_cell_geometry,
+        )
+        self.assertIsNotNone(incomplete_words)
+        self.assertFalse(
+            pdf_extract_module._table_data_cell_geometry_is_complete(
+                FakeTable(),
+                [["min", "max"], ["0", ""]],
+                missing_cell_geometry,
+                incomplete_words,
+            )
+        )
+        outside_median_band_geometry = [
+            *missing_cell_geometry[:3],
+            word("10", 60.0) | {"top": 32.0, "bottom": 42.0},
+        ]
+        outside_band_words = pdf_extract_module._table_cell_word_rows(
+            FakeTable(),
+            [["min", "max"], ["0", ""]],
+            outside_median_band_geometry,
+        )
+        self.assertFalse(
+            pdf_extract_module._table_data_cell_geometry_is_complete(
+                FakeTable(),
+                [["min", "max"], ["0", ""]],
+                outside_median_band_geometry,
+                outside_band_words,
+            ),
+            "an omitted cell word anywhere inside the table bbox must veto coverage",
+        )
+
+        class HeaderRowspanTable:
+            bbox = (0.0, 0.0, 100.0, 30.0)
+            rows = [
+                FakeRow([(0.0, 0.0, 50.0, 15.0), (50.0, 0.0, 100.0, 30.0)]),
+                FakeRow([(0.0, 15.0, 50.0, 30.0), None]),
+            ]
+
+        rowspan_geometry = missing_cell_geometry
+        rowspan_words = pdf_extract_module._table_cell_word_rows(
+            HeaderRowspanTable(),
+            [["min", "max"], ["0", ""]],
+            rowspan_geometry,
+        )
+        self.assertFalse(
+            pdf_extract_module._table_data_cell_geometry_is_complete(
+                HeaderRowspanTable(),
+                [["min", "max"], ["0", ""]],
+                rowspan_geometry,
+                rowspan_words,
+            ),
+            "a header rowspan cannot absorb an omitted data-cell word",
+        )
+
+        class SpanningTable:
+            bbox = (0.0, 0.0, 100.0, 30.0)
+            rows = [
+                FakeRow([(0.0, 0.0, 50.0, 15.0), (50.0, 0.0, 100.0, 15.0)]),
+                FakeRow([(0.0, 15.0, 100.0, 30.0), None]),
+            ]
+
+        spanning_geometry = [
+            *missing_cell_geometry[:2],
+            word("NOTES:", 10.0) | {"top": 17.0, "bottom": 27.0},
+        ]
+        spanning_words = pdf_extract_module._table_cell_word_rows(
+            SpanningTable(),
+            [["min", "max"], ["NOTES:", None]],
+            spanning_geometry,
+        )
+        self.assertIsNotNone(spanning_words)
+        self.assertTrue(
+            pdf_extract_module._table_data_cell_geometry_is_complete(
+                SpanningTable(),
+                [["min", "max"], ["NOTES:", None]],
+                spanning_geometry,
+                spanning_words,
+            ),
+            "a spanning NOTE bbox with raw=None placeholders is a valid merged row",
+        )
+
+        class RepeatedPhysicalRowTable:
+            bbox = (0.0, 0.0, 100.0, 30.0)
+            rows = [
+                FakeRow([(0.0, 0.0, 50.0, 15.0), (50.0, 0.0, 100.0, 15.0)]),
+                FakeRow([(0.0, 15.0, 50.0, 30.0), (50.0, 15.0, 100.0, 30.0)]),
+                FakeRow([(0.0, 15.0, 50.0, 30.0), (50.0, 15.0, 100.0, 30.0)]),
+            ]
+
+        repeated_geometry = [
+            *missing_cell_geometry[:2],
+            word("Mode", 10.0) | {"top": 17.0, "bottom": 27.0},
+            word("20", 60.0) | {"top": 17.0, "bottom": 27.0},
+        ]
+        repeated_rows = [["min", "max"], ["Mode", "20"], ["Mode", "20"]]
+        repeated_words = pdf_extract_module._table_cell_word_rows(
+            RepeatedPhysicalRowTable(),
+            repeated_rows,
+            repeated_geometry,
+        )
+        repeated_geometry_complete = (
+            pdf_extract_module._table_data_cell_geometry_is_complete(
+                RepeatedPhysicalRowTable(),
+                repeated_rows,
+                repeated_geometry,
+                repeated_words,
+            )
+        )
+        self.assertFalse(
+            repeated_geometry_complete,
+            "one physical word set cannot prove two overlapping logical rows",
+        )
+        self.assertEqual(
+            (),
+            pdf_extract_module._fully_represented_table_row_bboxes(
+                object(),
+                RepeatedPhysicalRowTable(),
+                repeated_rows,
+                repeated_words,
+                data_cell_geometry_complete=repeated_geometry_complete,
+            ),
+            "row-level replacement must not bypass failed one-owner geometry",
+        )
+
+        class FakeCrop:
+            @staticmethod
+            def extract_text(**_kwargs: object) -> str:
+                return "10"
+
+        class FakePage:
+            chars: list[dict[str, object]] = []
+
+            @staticmethod
+            def crop(_bbox: tuple[float, ...]) -> FakeCrop:
+                return FakeCrop()
+
+        self.assertTrue(
+            pdf_extract_module._table_bbox_content_is_fully_represented(
+                FakePage(),
+                (0.0, 0.0, 100.0, 30.0),
+                [["01"]],
+            )
+        )
+        self.assertFalse(
+            pdf_extract_module._table_bbox_is_fully_represented(
+                FakePage(),
+                (0.0, 0.0, 100.0, 30.0),
+                [["01"]],
+                row_content_fully_represented=True,
+                row_alignment_reliable=True,
+                data_rows_fully_represented=False,
+            ),
+            "character coverage alone cannot override failed ordered cell geometry",
+        )
+        self.assertFalse(
+            pdf_extract_module._table_row_bbox_matches_raw_cells(
+                FakePage(),
+                (0.0, 15.0, 100.0, 30.0),
+                ["01"],
+            )
+        )
+
+    def test_json_serializes_independent_table_data_row_coverage(self) -> None:
+        """The audit JSON must expose data-row evidence instead of aliasing older flags."""
+
+        old_table = TableVisual(
+            page_number=23,
+            table_number=1,
+            title="Table 29-12. CTLE parameters",
+            bbox=(0.0, 0.0, 100.0, 40.0),
+            image_data_uri="",
+            row_texts=["表格行: T1 | Min=0 | Max=6"],
+            grid_summary="grid",
+            content_fully_represented=False,
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
+        )
+        new_table = TableVisual(
+            page_number=24,
+            table_number=1,
+            title="Table 30-12. Stressor parameters",
+            bbox=(0.0, 0.0, 100.0, 40.0),
+            image_data_uri="",
+            row_texts=["表格行: T1 | Parameter=Host Loss | Value=22"],
+            grid_summary="grid",
+            content_fully_represented=True,
+            row_alignment_reliable=False,
+            data_rows_fully_represented=True,
+        )
+        result = DiffResult(
+            old_pdf=Path("old.pdf"),
+            new_pdf=Path("new.pdf"),
+            old_sections=[],
+            new_sections=[],
+            changes=[],
+            warnings=[],
+            old_table_visuals=[old_table],
+            new_table_visuals=[new_table],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        old_payload = payload["old_table_visuals"][0]
+        new_payload = payload["new_table_visuals"][0]
+        self.assertIs(old_payload["data_rows_fully_represented"], True)
+        self.assertIs(new_payload["data_rows_fully_represented"], True)
+        self.assertEqual(
+            (False, True, True),
+            (
+                old_payload["content_fully_represented"],
+                old_payload["row_alignment_reliable"],
+                old_payload["data_rows_fully_represented"],
+            ),
+        )
+        self.assertEqual(
+            (True, False, True),
+            (
+                new_payload["content_fully_represented"],
+                new_payload["row_alignment_reliable"],
+                new_payload["data_rows_fully_represented"],
+            ),
+        )
 
     def test_table_row_replacement_counts_the_exact_center_filtered_glyphs(self) -> None:
         """Cell words cannot authorize deletion of extra text inside the row box."""

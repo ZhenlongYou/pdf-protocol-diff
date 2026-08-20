@@ -30,6 +30,7 @@ _KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
         "\uf03d": "=",
         "\uf03c": "<",
         "\uf03e": ">",
+        "\uf057": "Ω",
         "\uf061": "α",
         "\uf067": "γ",
         "\uf073": "σ",
@@ -37,7 +38,7 @@ _KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
         "\uf0a3": "≤",
         "\uf0a4": "⁄",
     }
-)  # OIF PDFs use legacy Adobe Symbol code positions for basic formula punctuation/operators, alpha/gamma/sigma/tau, <=, and fraction slash.
+)  # OIF PDFs use legacy Adobe Symbol code positions for formula punctuation/operators, omega, alpha/gamma/sigma/tau, <=, and fraction slash.
 _KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES = {
     "A": frozenset({"fe", "ne", "v"}),
     "C": frozenset({"p"}),

@@ -2105,6 +2105,16 @@ def _paired_table_visuals(
                 _table_descriptive_renumbering_key(old_table, new_table)
                 in supported_renumberings
             )
+            old_number_identity = _table_visual_number_identity(old_table)
+            new_number_identity = _table_visual_number_identity(new_table)
+            if (
+                old_number_identity is not None
+                and new_number_identity is not None
+                and old_number_identity[0] != new_number_identity[0]
+            ):
+                # 跨 family 严格编号表只能由前面的多锚点 Clause 映射消费；
+                # 章节抽取为空时也不能回落到全局 fuzzy 猜配。
+                continue
             old_caption = _table_visual_caption_key(old_table)
             new_caption = _table_visual_caption_key(new_table)
             exact_caption_identity = (
@@ -2142,10 +2152,82 @@ def _paired_table_visuals(
                 new_index,
             ):
                 continue  # 同页多章节没有 y 坐标归属证据：无编号表只能按页内 ordinal 配对。
+            exact_visible_rows = (
+                bool(old_table.row_texts)
+                and tuple(compact_inline(row) for row in old_table.row_texts)
+                == tuple(compact_inline(row) for row in new_table.row_texts)
+            )
+            old_descriptor = _table_visual_caption_descriptor_key(old_table)
+            new_descriptor = _table_visual_caption_descriptor_key(new_table)
+            old_exact_caption_tail = _table_visual_exact_caption_tail_key(old_table)
+            new_exact_caption_tail = _table_visual_exact_caption_tail_key(new_table)
+            old_raw_title = compact_inline(old_table.title)
+            new_raw_title = compact_inline(new_table.title)
+            raw_case_only_numbered_change = bool(
+                old_raw_title
+                and old_raw_title != new_raw_title
+                and old_raw_title.casefold() == new_raw_title.casefold()
+                and re.match(r"(?i)^(?:table\s+\d+|表\s*\d+)", old_raw_title)
+                and re.match(r"(?i)^(?:table\s+\d+|表\s*\d+)", new_raw_title)
+            )
+            exact_rows_caption_supported = bool(
+                exact_visible_rows
+                and (
+                    (old_descriptor and old_descriptor == new_descriptor)
+                    or (
+                        old_exact_caption_tail
+                        and old_exact_caption_tail == new_exact_caption_tail
+                    )
+                    or raw_case_only_numbered_change
+                )
+            )
+            single_row_exact_title_supported = (
+                _single_row_exact_raw_title_pair_supported(old_table, new_table)
+            )
+            if (
+                not supported_descriptive_renumbering
+                and not exact_rows_caption_supported
+                and not all(
+                    table.content_fully_represented
+                    and table.row_alignment_reliable
+                    and table.data_rows_fully_represented
+                    for table in (old_table, new_table)
+                )
+            ):
+                # 无题 fragment 即使逐字相同也不能绕过质量门。例外只给描述表题一致且
+                # 可见行逐字相同的 caption-only 变化，或已证明的同-family 改号。
+                continue
+            if (
+                (not old_caption or not new_caption)
+                and not exact_rows_caption_supported
+                and not single_row_exact_title_supported
+            ):
+                old_identities = Counter(
+                    identity
+                    for row in old_table.row_texts
+                    if (identity := _table_row_relaxed_primary_identity(row))
+                )
+                new_identities = Counter(
+                    identity
+                    for row in new_table.row_texts
+                    if (identity := _table_row_relaxed_primary_identity(row))
+                )
+                if sum((old_identities & new_identities).values()) < 2:
+                    continue  # 无题或非严格表题只共享一个通用参数名，不能证明整表身份。
             score = _table_visual_similarity(old_table, new_table)
             if score >= _TABLE_PAIR_SIMILARITY_THRESHOLD:
                 scored.append((score, old_index, new_index))
-    for _score, old_index, new_index in sorted(scored, reverse=True):
+    mutually_best = _mutual_unique_non_crossing_table_pairs(
+        scored,
+        old_tables,
+        new_tables,
+        old_sections=old_sections,
+        new_sections=new_sections,
+    )
+    for _score, old_index, new_index in sorted(
+        mutually_best,
+        key=lambda candidate: (candidate[1], candidate[2]),
+    ):
         if old_index not in old_unused or new_index not in new_unused:
             continue
         old_unused.remove(old_index)
@@ -2156,6 +2238,70 @@ def _paired_table_visuals(
     for new_index in sorted(new_unused):
         groups.append(_TableVisualGroup((), (new_tables[new_index],)))
     return groups
+
+
+def _mutual_unique_non_crossing_table_pairs(
+    scored: list[tuple[float, int, int]],
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    *,
+    old_sections: list[Section] | None,
+    new_sections: list[Section] | None,
+) -> list[tuple[float, int, int]]:
+    """Keep only strict mutual-best fuzzy pairs that preserve local order."""
+
+    by_old: dict[int, list[tuple[float, int, int]]] = {}
+    by_new: dict[int, list[tuple[float, int, int]]] = {}
+    for candidate in scored:
+        by_old.setdefault(candidate[1], []).append(candidate)
+        by_new.setdefault(candidate[2], []).append(candidate)
+
+    def unique_best(
+        candidates: list[tuple[float, int, int]],
+    ) -> tuple[float, int, int] | None:
+        best_score = max(score for score, _old, _new in candidates)
+        best = [candidate for candidate in candidates if candidate[0] == best_score]
+        return best[0] if len(best) == 1 else None
+
+    old_best = {
+        old_index: best
+        for old_index, candidates in by_old.items()
+        if (best := unique_best(candidates)) is not None
+    }
+    new_best = {
+        new_index: best
+        for new_index, candidates in by_new.items()
+        if (best := unique_best(candidates)) is not None
+    }
+    mutual = [
+        candidate
+        for candidate in scored
+        if old_best.get(candidate[1]) == candidate
+        and new_best.get(candidate[2]) == candidate
+    ]
+    crossing_indexes: set[int] = set()
+    for left_index, left in enumerate(mutual):
+        _left_score, left_old, left_new = left
+        left_context = (
+            _table_visual_section_context(old_tables[left_old], old_sections or []),
+            _table_visual_section_context(new_tables[left_new], new_sections or []),
+        )
+        for right_index in range(left_index + 1, len(mutual)):
+            _right_score, right_old, right_new = mutual[right_index]
+            right_context = (
+                _table_visual_section_context(old_tables[right_old], old_sections or []),
+                _table_visual_section_context(new_tables[right_new], new_sections or []),
+            )
+            if (
+                left_context == right_context
+                and (left_old - right_old) * (left_new - right_new) < 0
+            ):
+                crossing_indexes.update((left_index, right_index))
+    return [
+        candidate
+        for index, candidate in enumerate(mutual)
+        if index not in crossing_indexes
+    ]
 
 
 def _same_page_table_ordinals_differ(
@@ -2569,12 +2715,7 @@ def _cross_clause_bracketed_pair_evidence(
         for table in (*old_group, *new_group)
     ):
         return False
-    descriptor_similarity = difflib.SequenceMatcher(
-        None,
-        old_run.descriptor.casefold(),
-        new_run.descriptor.casefold(),
-        autojunk=False,
-    ).ratio()
+    descriptor_similarity = _cross_clause_descriptor_similarity(old_run, new_run)
     old_identities = Counter(
         identity
         for row in _table_group_rows(old_group)
@@ -2589,6 +2730,74 @@ def _cross_clause_bracketed_pair_evidence(
     return bool(
         descriptor_similarity >= _TABLE_PAIR_SIMILARITY_THRESHOLD
         and shared_count >= 1
+    )
+
+
+def _cross_clause_descriptor_similarity(
+    old_run: _NumberedTableRun,
+    new_run: _NumberedTableRun,
+) -> float:
+    """Return the visible descriptor score used inside one proven bracket."""
+
+    if not old_run.descriptor or not new_run.descriptor:
+        return 0.0  # 两个空 descriptor 不是“完全相同”；短标题留作单侧证据。
+    return difflib.SequenceMatcher(
+        None,
+        old_run.descriptor.casefold(),
+        new_run.descriptor.casefold(),
+        autojunk=False,
+    ).ratio()
+
+
+def _cross_clause_candidate_is_mutual_unique_best(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_run: _NumberedTableRun,
+    new_run: _NumberedTableRun,
+    old_candidates: list[_NumberedTableRun],
+    new_candidates: list[_NumberedTableRun],
+) -> bool:
+    """Reject an ordinal pair when either side has an equal or stronger rival."""
+
+    def supported_scores_for_old(
+        candidate_old: _NumberedTableRun,
+    ) -> list[tuple[float, _NumberedTableRun]]:
+        return [
+            (_cross_clause_descriptor_similarity(candidate_old, candidate_new), candidate_new)
+            for candidate_new in new_candidates
+            if _cross_clause_bracketed_pair_evidence(
+                old_tables,
+                new_tables,
+                candidate_old,
+                candidate_new,
+            )
+        ]
+
+    def supported_scores_for_new(
+        candidate_new: _NumberedTableRun,
+    ) -> list[tuple[float, _NumberedTableRun]]:
+        return [
+            (_cross_clause_descriptor_similarity(candidate_old, candidate_new), candidate_old)
+            for candidate_old in old_candidates
+            if _cross_clause_bracketed_pair_evidence(
+                old_tables,
+                new_tables,
+                candidate_old,
+                candidate_new,
+            )
+        ]
+
+    old_side = supported_scores_for_old(old_run)
+    new_side = supported_scores_for_new(new_run)
+    if not old_side or not new_side:
+        return False
+    old_best = max(score for score, _candidate in old_side)
+    new_best = max(score for score, _candidate in new_side)
+    return (
+        sum(score == old_best for score, _candidate in old_side) == 1
+        and sum(score == new_best for score, _candidate in new_side) == 1
+        and next(candidate for score, candidate in old_side if score == old_best) == new_run
+        and next(candidate for score, candidate in new_side if score == new_best) == old_run
     )
 
 
@@ -2619,19 +2828,24 @@ def _pair_supported_cross_clause_table_runs(
                 or new_left.ordinal >= new_right.ordinal
             ):
                 continue  # offset 改变的夹段属于插入/删除区，不能按尾号强配。
-            for old_run in old_runs:
-                if (
-                    old_run.family != old_family
-                    or not old_left.ordinal < old_run.ordinal < old_right.ordinal
-                ):
-                    continue
+            old_candidates = [
+                old_run
+                for old_run in old_runs
+                if old_run.family == old_family
+                and old_left.ordinal < old_run.ordinal < old_right.ordinal
+            ]
+            new_candidates = [
+                new_run
+                for new_run in new_runs
+                if new_run.family == new_family
+                and new_left.ordinal < new_run.ordinal < new_right.ordinal
+            ]
+            for old_run in old_candidates:
                 target_ordinal = old_run.ordinal + left_offset
                 candidates = [
                     new_run
-                    for new_run in new_runs
-                    if new_run.family == new_family
-                    and new_run.ordinal == target_ordinal
-                    and new_left.ordinal < new_run.ordinal < new_right.ordinal
+                    for new_run in new_candidates
+                    if new_run.ordinal == target_ordinal
                 ]
                 if len(candidates) != 1:
                     continue
@@ -2641,6 +2855,13 @@ def _pair_supported_cross_clause_table_runs(
                     new_tables,
                     old_run,
                     new_run,
+                ) and _cross_clause_candidate_is_mutual_unique_best(
+                    old_tables,
+                    new_tables,
+                    old_run,
+                    new_run,
+                    old_candidates,
+                    new_candidates,
                 ):
                     proposed.append((old_run, new_run))
 
@@ -2753,6 +2974,106 @@ def _pair_exact_duplicate_caption_runs_by_content_lcs(
                 )
             )
 
+        old_remaining = [
+            run for run in old_available if all(index in old_unused for index in run)
+        ]
+        new_remaining = [
+            run for run in new_available if all(index in new_unused for index in run)
+        ]
+        for old_offset, new_offset in _unique_shared_revision_run_pairs(
+            old_tables,
+            new_tables,
+            old_remaining,
+            new_remaining,
+        ):
+            old_run = old_remaining[old_offset]
+            new_run = new_remaining[new_offset]
+            for index in old_run:
+                old_unused.remove(index)
+            for index in new_run:
+                new_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    tuple(old_tables[index] for index in old_run),
+                    tuple(new_tables[index] for index in new_run),
+                )
+            )
+
+        old_remaining = [
+            run for run in old_available if all(index in old_unused for index in run)
+        ]
+        new_remaining = [
+            run for run in new_available if all(index in new_unused for index in run)
+        ]
+        old_identity_keys = [
+            _table_run_primary_identity_signature(old_tables, run)
+            for run in old_remaining
+        ]
+        new_identity_keys = [
+            _table_run_primary_identity_signature(new_tables, run)
+            for run in new_remaining
+        ]
+        old_identity_counts = Counter(key for key in old_identity_keys if key)
+        new_identity_counts = Counter(key for key in new_identity_keys if key)
+        old_unique_identity_keys = [
+            key
+            if key
+            and old_identity_counts[key] == 1
+            and new_identity_counts[key] == 1
+            else ()
+            for key in old_identity_keys
+        ]
+        new_unique_identity_keys = [
+            key
+            if key
+            and old_identity_counts[key] == 1
+            and new_identity_counts[key] == 1
+            else ()
+            for key in new_identity_keys
+        ]
+        for old_offset, new_offset in _longest_common_index_pairs(
+            old_unique_identity_keys,
+            new_unique_identity_keys,
+        ):
+            old_run = old_remaining[old_offset]
+            new_run = new_remaining[new_offset]
+            for index in old_run:
+                old_unused.remove(index)
+            for index in new_run:
+                new_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    tuple(old_tables[index] for index in old_run),
+                    tuple(new_tables[index] for index in new_run),
+                )
+            )
+
+        # A duplicate caption that remains ambiguous must not fall through to
+        # the raw ``run:N`` or fuzzy matchers.  Single-sided cards are safer
+        # than shifting every later occurrence after one insertion.
+        for old_run in old_available:
+            if not all(index in old_unused for index in old_run):
+                continue
+            for index in old_run:
+                old_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    tuple(old_tables[index] for index in old_run),
+                    (),
+                )
+            )
+        for new_run in new_available:
+            if not all(index in new_unused for index in new_run):
+                continue
+            for index in new_run:
+                new_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    (),
+                    tuple(new_tables[index] for index in new_run),
+                )
+            )
+
 
 def _table_runs_by_caption_and_context(
     tables: list[TableVisual],
@@ -2781,6 +3102,32 @@ def _exact_table_run_content_key(
     )
 
 
+def _table_run_primary_identity_signature(
+    tables: list[TableVisual],
+    indexes: list[int],
+) -> tuple[str, ...]:
+    """Return all explicit row identities for one reliable duplicate-caption run."""
+
+    run_tables = tuple(tables[index] for index in indexes)
+    if not run_tables or not all(
+        table.content_fully_represented and table.row_alignment_reliable
+        for table in run_tables
+    ):
+        return ()
+    identities: list[str] = []
+    for row in _table_group_rows(run_tables):
+        if _table_narrative_row_text(row):
+            continue
+        identity = _table_row_pairing_primary_identity(
+            row,
+            allow_generic_column=False,
+        )
+        if not identity:
+            return ()
+        identities.append(identity)
+    return tuple(sorted(identities)) if identities else ()
+
+
 def _revision_table_run_identity(
     tables: list[TableVisual],
     indexes: list[int],
@@ -2793,6 +3140,53 @@ def _revision_table_run_identity(
     rows = _table_group_rows(run_tables)
     by_revision = _unique_revision_rows(rows)
     return tuple(by_revision) if by_revision else ()
+
+
+def _unique_shared_revision_run_pairs(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_runs: list[list[int]],
+    new_runs: list[list[int]],
+) -> list[tuple[int, int]]:
+    """Pair revision runs only through a globally unique shared Revision value."""
+
+    old_identities = [
+        _revision_table_run_identity(old_tables, run) for run in old_runs
+    ]
+    new_identities = [
+        _revision_table_run_identity(new_tables, run) for run in new_runs
+    ]
+    old_counts = Counter(
+        revision for identities in old_identities for revision in identities
+    )
+    new_counts = Counter(
+        revision for identities in new_identities for revision in identities
+    )
+    candidates = [
+        (old_offset, new_offset)
+        for old_offset, old_identity in enumerate(old_identities)
+        for new_offset, new_identity in enumerate(new_identities)
+        if any(
+            old_counts[revision] == new_counts[revision] == 1
+            for revision in set(old_identity) & set(new_identity)
+        )
+    ]
+    old_degrees = Counter(old_offset for old_offset, _new_offset in candidates)
+    new_degrees = Counter(new_offset for _old_offset, new_offset in candidates)
+    unique = [
+        pair
+        for pair in candidates
+        if old_degrees[pair[0]] == new_degrees[pair[1]] == 1
+    ]
+    crossing: set[int] = set()
+    for left_index, left in enumerate(unique):
+        for right_index in range(left_index + 1, len(unique)):
+            right = unique[right_index]
+            if (left[0] - right[0]) * (left[1] - right[1]) < 0:
+                crossing.update((left_index, right_index))
+    return [
+        pair for index, pair in enumerate(unique) if index not in crossing
+    ]
 
 
 def _longest_common_index_pairs(
@@ -3521,6 +3915,20 @@ def _table_visual_caption_descriptor_key(table: TableVisual) -> str:
     return descriptor
 
 
+def _table_visual_exact_caption_tail_key(table: TableVisual) -> str:
+    """Return the exact non-empty caption tail without imposing anchor length."""
+
+    caption = _table_visual_caption_key(table)
+    if not caption:
+        return ""
+    return re.sub(
+        r"^(?:table\s+\d+(?:-\d+)?|表\s*\d+)\s*[.：:\-–—]*\s*",
+        "",
+        caption,
+        flags=re.I,
+    ).strip()
+
+
 def _unique_exact_table_captions(
     old_tables: list[TableVisual],
     new_tables: list[TableVisual],
@@ -3618,11 +4026,60 @@ def _supported_table_renumberings(
 def _table_visual_similarity(old_table: TableVisual, new_table: TableVisual) -> float:
     """Score whether two screenshot table regions likely represent the same table."""
 
-    old_key = _table_visual_identity(old_table)  # 标题和前几行共同构成旧表身份。
-    new_key = _table_visual_identity(new_table)  # 新表同样使用标题和行文本。
-    if not old_key or not new_key:
+    old_rows = Counter(
+        _table_row_pairing_key(row)
+        for row in old_table.row_texts
+        if compact_inline(row)
+    )
+    new_rows = Counter(
+        _table_row_pairing_key(row)
+        for row in new_table.row_texts
+        if compact_inline(row)
+    )
+    shared_count = sum((old_rows & new_rows).values())
+    total_count = sum(old_rows.values()) + sum(new_rows.values())
+    if not total_count:
         return 0.0
-    return difflib.SequenceMatcher(None, old_key, new_key, autojunk=False).ratio()
+    row_similarity = 2.0 * shared_count / total_count
+    old_title = compact_inline(old_table.title).casefold()
+    new_title = compact_inline(new_table.title).casefold()
+    if not old_title or not new_title:
+        return row_similarity  # 无题表完全依赖所有行身份；不得截断到前六行。
+    caption_similarity = difflib.SequenceMatcher(
+        None,
+        old_title,
+        new_title,
+        autojunk=False,
+    ).ratio()
+    return min(caption_similarity, row_similarity)
+
+
+def _single_row_exact_raw_title_pair_supported(
+    old_table: TableVisual,
+    new_table: TableVisual,
+) -> bool:
+    """Allow one exact generic title only when its singleton schema stays compatible."""
+
+    old_title = compact_inline(old_table.title)
+    new_title = compact_inline(new_table.title)
+    if (
+        not old_title
+        or old_title.casefold() != new_title.casefold()
+        or len(old_table.row_texts) != 1
+        or len(new_table.row_texts) != 1
+    ):
+        return False
+    old_fields = _table_row_fields(old_table.row_texts[0])
+    new_fields = _table_row_fields(new_table.row_texts[0])
+    if set(old_fields) != set(new_fields):
+        return False
+    old_identity = _table_row_relaxed_primary_identity(old_table.row_texts[0])
+    new_identity = _table_row_relaxed_primary_identity(new_table.row_texts[0])
+    if not old_identity or old_identity != new_identity:
+        return False
+    old_unit = _first_table_field(old_fields, ("unit", "units"))
+    new_unit = _first_table_field(new_fields, ("unit", "units"))
+    return compact_inline(old_unit).casefold() == compact_inline(new_unit).casefold()
 
 
 def _table_visual_identity(table: TableVisual) -> str:
@@ -3634,7 +4091,7 @@ def _table_visual_identity(table: TableVisual) -> str:
         for row in table.row_texts
         if compact_inline(row)
     )
-    rows = " ".join(row_identities[:6])  # 排序后的行身份不受字段顺序、数据行顺序或数值变化影响。
+    rows = " ".join(row_identities)  # 全部行身份都必须参与；第七行以后也可能是唯一判别证据。
     return compact_inline(f"{title} {rows}").casefold()
 
 
@@ -3832,6 +4289,7 @@ def _table_row_changes(
         old_rows,
         new_rows,
     )
+    old_rows, new_rows = _remove_cross_schema_header_rows(old_rows, new_rows)
     old_narrative_rows = [
         row for row in old_rows if _table_narrative_row_text(row)
     ]
@@ -3840,12 +4298,40 @@ def _table_row_changes(
     ]
     old_rows = [row for row in old_rows if not _table_narrative_row_text(row)]
     new_rows = [row for row in new_rows if not _table_narrative_row_text(row)]
-    narrative_changes = _ordered_table_row_changes(
+    narrative_changes = _ordered_narrative_table_row_changes(
         old_narrative_rows,
         new_narrative_rows,
     )
+    order_change = _unique_order_sensitive_table_row_change(
+        old_tables,
+        new_tables,
+        old_rows,
+        new_rows,
+    )
+    if order_change is not None:
+        review_changes.append(order_change)
     # 跨列 NOTES/Note 是说明事实，不是参数记录。它们单独按物理顺序比较，
     # 不能因为缺少 Min/Max/Unit 就让整张参数表退回位置配对并产生连锁错位。
+    numeric_qualifier_changes, old_rows, new_rows = (
+        _resolve_unique_numeric_qualifier_rows(old_rows, new_rows)
+    )
+    review_changes.extend(numeric_qualifier_changes)
+    schema_only_changes, old_rows, new_rows = (
+        _resolve_unique_identityless_schema_rows(
+            old_tables,
+            new_tables,
+            old_rows,
+            new_rows,
+        )
+    )
+    review_changes.extend(schema_only_changes)
+    unproven_schema_changes, old_rows, new_rows = (
+        _partition_unproven_identityless_schema_rows(old_rows, new_rows)
+    )
+    review_changes.extend(unproven_schema_changes)
+    # A repeated Min/Max grid that failed the strict singleton proof must not
+    # fall through to the generic first-cell/position matcher.  Exact rows may
+    # still cancel; every changed remainder stays explicitly single-sided.
     ambiguous_row_changes, old_rows, new_rows = (
         _resolve_duplicate_primary_table_rows(old_rows, new_rows)
     )
@@ -3853,7 +4339,7 @@ def _table_row_changes(
     # Apply the same identityless/repeated-row contract before choosing either
     # ordered or parameter-key comparison.  Schema drift must not bypass the
     # conservative resolver merely because the table otherwise looks unordered.
-    if not _table_group_has_order_independent_parameter_identity(
+    if order_change is None and not _table_group_has_order_independent_parameter_identity(
         old_tables,
         new_tables,
         old_rows,
@@ -5218,6 +5704,93 @@ def _ordered_table_row_changes(
     return changes
 
 
+def _unique_order_sensitive_table_row_change(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+    old_rows: list[str],
+    new_rows: list[str],
+) -> TableRowChange | None:
+    """Expose a proven permutation before identity-based value resolvers run."""
+
+    observed_text = " ".join(
+        [
+            *(table.title for table in (*old_tables, *new_tables)),
+            *old_rows,
+            *new_rows,
+        ]
+    )
+    if not re.search(
+        r"(?i)\b(?:first[- ]match|top\s+to\s+bottom|policy|priority|precedence|rules?|sequence|ordered|ordering|rank|step)\b",
+        observed_text,
+    ):
+        return None
+
+    def record_identity(row: str) -> str:
+        return _table_row_numeric_qualifier_skeleton(row) or (
+            _table_row_pairing_primary_identity(
+                row,
+                allow_generic_column=False,
+            )
+        )
+
+    old_identities = [record_identity(row) for row in old_rows]
+    new_identities = [record_identity(row) for row in new_rows]
+    if (
+        len(old_identities) < 2
+        or not all(old_identities)
+        or not all(new_identities)
+        or len(old_identities) != len(set(old_identities))
+        or len(new_identities) != len(set(new_identities))
+        or Counter(old_identities) != Counter(new_identities)
+        or old_identities == new_identities
+    ):
+        return None
+    return TableRowChange(
+        item="表格行顺序",
+        old_value=" → ".join(_first_nonempty_table_cell(row) for row in old_rows),
+        new_value=" → ".join(_first_nonempty_table_cell(row) for row in new_rows),
+        change_type="顺序变化",
+    )
+
+
+def _ordered_narrative_table_row_changes(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> list[TableRowChange]:
+    """Compare already-proven NOTE rows in their physical order.
+
+    Narrative rows deliberately have no parameter identity.  Sending them
+    through the generic-row identity guard would turn every edited NOTE into a
+    delete plus add, even when there is exactly one note on each side.
+    """
+
+    if len(old_rows) == 1 and len(new_rows) == 1:
+        kind = _table_structured_diff_kind(old_rows[0], new_rows[0])
+        if kind != "无变化":
+            return [_make_table_row_change(old_rows[0], new_rows[0], kind)]
+        return []
+
+    matcher = difflib.SequenceMatcher(
+        None,
+        [_table_row_display_key(row) for row in old_rows],
+        [_table_row_display_key(row) for row in new_rows],
+        autojunk=False,
+    )
+    changes: list[TableRowChange] = []
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changes.extend(
+            _make_table_row_change(row, "", "旧表删除行")
+            for row in old_rows[old_start:old_end]
+        )
+        changes.extend(
+            _make_table_row_change("", row, "新表新增行")
+            for row in new_rows[new_start:new_end]
+        )
+    return changes
+
+
 def _resolve_duplicate_primary_table_rows(
     old_rows: list[str],
     new_rows: list[str],
@@ -5847,6 +6420,225 @@ def _table_row_identity_token_multiset(row: str) -> tuple[str, ...]:
     # 仅取消词序；关系运算符、技术标识大小写和其他可见 token 继续参与身份保护。
 
 
+def _table_row_numeric_qualifier_skeleton(row: str) -> str:
+    """Return a strict identity skeleton for a changed numeric range qualifier.
+
+    This is intentionally narrower than general fuzzy row matching.  It only
+    accepts a parenthesized descriptor containing at least two signed or
+    unsigned numeric literals and an engineering unit.  Replacing the literal
+    magnitudes then preserves the visible words, signs, punctuation, and units,
+    so ``-160/+160 mV`` can follow ``-180/+180 mV`` without making ``Tap 1``
+    interchangeable with ``Tap 2``.
+    """
+
+    identity = _first_nonempty_table_cell(row)
+    identity = identity.replace("↵", " ").replace("\\n", " ").replace("\n", " ")
+    match = re.search(r"\(([^()]*)\)", identity)
+    if match is None:
+        return ""
+    qualifier = match.group(1)
+    if not re.search(r"(?i)\bbetween\b", qualifier) or not re.search(
+        r"(?i)\band\b",
+        qualifier,
+    ):
+        return ""
+    numbers = re.findall(r"(?<![A-Za-z0-9_])[+-]?\d+(?:\.\d+)?", qualifier)
+    if len(numbers) < 2:
+        return ""
+    if not re.search(
+        r"(?i)\b(?:a|db|ghz|hz|khz|mhz|mv|ma|ns|ohm|ps|ui|v|w)\b",
+        qualifier,
+    ):
+        return ""
+    qualifier_skeleton = re.sub(
+        r"(?<![A-Za-z0-9_])([+-]?)\d+(?:\.\d+)?",
+        r"\1#",
+        qualifier,
+    )
+    skeleton = "".join(
+        (identity[: match.start(1)], qualifier_skeleton, identity[match.end(1) :])
+    )  # 只屏蔽括号内范围幅值；Tap 编号、后缀和所有运算符仍逐字参与身份。
+    return _case_aware_display_text_key(skeleton)
+
+
+def _resolve_unique_numeric_qualifier_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Pair unique parameter rows whose embedded engineering range changed."""
+
+    old_skeletons = [_table_row_numeric_qualifier_skeleton(row) for row in old_rows]
+    new_skeletons = [_table_row_numeric_qualifier_skeleton(row) for row in new_rows]
+    old_counts = Counter(skeleton for skeleton in old_skeletons if skeleton)
+    new_counts = Counter(skeleton for skeleton in new_skeletons if skeleton)
+    new_index_by_skeleton = {
+        skeleton: index
+        for index, skeleton in enumerate(new_skeletons)
+        if skeleton and new_counts[skeleton] == 1
+    }
+    consumed_old: set[int] = set()
+    consumed_new: set[int] = set()
+    changes: list[TableRowChange] = []
+    for old_index, skeleton in enumerate(old_skeletons):
+        if (
+            not skeleton
+            or old_counts[skeleton] != 1
+            or new_counts[skeleton] != 1
+        ):
+            continue
+        new_index = new_index_by_skeleton[skeleton]
+        old_row = old_rows[old_index]
+        new_row = new_rows[new_index]
+        if _table_row_pairing_key(old_row) == _table_row_pairing_key(new_row):
+            continue
+        consumed_old.add(old_index)
+        consumed_new.add(new_index)
+        kind = _table_structured_diff_kind(old_row, new_row)
+        if kind != "无变化":
+            changes.append(_make_table_row_change(old_row, new_row, kind))
+    return (
+        changes,
+        [row for index, row in enumerate(old_rows) if index not in consumed_old],
+        [row for index, row in enumerate(new_rows) if index not in consumed_new],
+    )
+
+
+def _identityless_table_row_schema(row: str) -> tuple[str, ...]:
+    """Return a strong repeated-field schema for a row without a record name."""
+
+    if _table_row_pairing_primary_identity(row):
+        return ()
+    entries = _table_row_field_entries(row)
+    if len(entries) < 5 or any(
+        re.fullmatch(r"column\s+\d+", entry[2], flags=re.I)
+        for entry in entries
+    ):
+        return ()
+    labels = tuple(entry[2] for entry in entries)
+    counts = Counter(labels)
+    if counts["min"] < 2 or counts["max"] < 2:
+        return ()  # 当前安全路径只覆盖 CTLE 一类成对 Min/Max 网格，不泛化到普通无身份行。
+    return labels
+
+
+def _identityless_schema_rows_share_stable_facts(old_row: str, new_row: str) -> bool:
+    """Require several same-position facts before pairing a singleton grid row."""
+
+    old_entries = _table_row_field_entries(old_row)
+    new_entries = _table_row_field_entries(new_row)
+    if len(old_entries) != len(new_entries):
+        return False
+    equal_count = 0
+    changed_count = 0
+    for old_entry, new_entry in zip(old_entries, new_entries, strict=True):
+        if old_entry[2] != new_entry[2]:
+            return False
+        old_key = _cross_schema_table_value_key(old_entry[3], old_entry[2])
+        new_key = _cross_schema_table_value_key(new_entry[3], new_entry[2])
+        if old_key == new_key and old_key:
+            equal_count += 1
+        elif old_key or new_key:
+            changed_count += 1
+    return equal_count >= 2 and changed_count == 1
+
+
+def _resolve_unique_identityless_schema_rows(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Pair one uniquely shaped numeric grid record without inventing an identity."""
+
+    old_descriptors = {
+        descriptor
+        for table in old_tables
+        if (descriptor := _table_visual_caption_descriptor_key(table))
+    }
+    new_descriptors = {
+        descriptor
+        for table in new_tables
+        if (descriptor := _table_visual_caption_descriptor_key(table))
+    }
+    if (
+        not old_tables
+        or not new_tables
+        or not all(table.row_alignment_reliable for table in old_tables)
+        or not all(table.row_alignment_reliable for table in new_tables)
+        or not all(table.data_rows_fully_represented for table in old_tables)
+        or not all(table.data_rows_fully_represented for table in new_tables)
+        or len(old_descriptors) != 1
+        or old_descriptors != new_descriptors
+    ):
+        return [], old_rows, new_rows
+        # 无字段身份的数值网格只有在可靠行对齐且描述性表题一致时才能被解释为同一记录。
+
+    old_schemas = [_identityless_table_row_schema(row) for row in old_rows]
+    new_schemas = [_identityless_table_row_schema(row) for row in new_rows]
+    old_counts = Counter(schema for schema in old_schemas if schema)
+    new_counts = Counter(schema for schema in new_schemas if schema)
+    new_index_by_schema = {
+        schema: index
+        for index, schema in enumerate(new_schemas)
+        if schema and new_counts[schema] == 1
+    }
+    consumed_old: set[int] = set()
+    consumed_new: set[int] = set()
+    changes: list[TableRowChange] = []
+    for old_index, schema in enumerate(old_schemas):
+        if not schema or old_counts[schema] != 1 or new_counts[schema] != 1:
+            continue
+        new_index = new_index_by_schema[schema]
+        old_row = old_rows[old_index]
+        new_row = new_rows[new_index]
+        if not _identityless_schema_rows_share_stable_facts(old_row, new_row):
+            continue
+        consumed_old.add(old_index)
+        consumed_new.add(new_index)
+        kind = _table_structured_diff_kind(old_row, new_row)
+        if kind != "无变化":
+            changes.append(
+                replace(
+                    _make_table_row_change(old_row, new_row, kind),
+                    item="Min/Max 参数范围",
+                )
+            )
+    return (
+        changes,
+        [row for index, row in enumerate(old_rows) if index not in consumed_old],
+        [row for index, row in enumerate(new_rows) if index not in consumed_new],
+    )
+
+
+def _partition_unproven_identityless_schema_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[TableRowChange], list[str], list[str]]:
+    """Keep changed identityless grid rows single-sided after strict proof fails."""
+
+    old_schema_rows = [row for row in old_rows if _identityless_table_row_schema(row)]
+    new_schema_rows = [row for row in new_rows if _identityless_table_row_schema(row)]
+    old_remaining_schema, new_remaining_schema = _remove_equal_table_rows(
+        old_schema_rows,
+        new_schema_rows,
+    )
+    changes = [
+        *(
+            _make_table_row_change(row, "", "旧表删除行")
+            for row in old_remaining_schema
+        ),
+        *(
+            _make_table_row_change("", row, "新表新增行")
+            for row in new_remaining_schema
+        ),
+    ]
+    return (
+        changes,
+        [row for row in old_rows if not _identityless_table_row_schema(row)],
+        [row for row in new_rows if not _identityless_table_row_schema(row)],
+    )
+
+
 def _resolve_unique_engineering_anchor_rows(
     old_rows: list[str],
     new_rows: list[str],
@@ -5949,11 +6741,13 @@ def _make_table_row_change(
 
     old_note = _table_narrative_row_text(old_row)
     new_note = _table_narrative_row_text(new_row)
-    if old_note and new_note:
+    if (old_note and (new_note or not new_row)) or (
+        new_note and (old_note or not old_row)
+    ):
         return TableRowChange(
             item="表格说明",
-            old_value=old_note,
-            new_value=new_note,
+            old_value=old_note or "",
+            new_value=new_note or "",
             change_type=kind,
         )
     hidden_empty_fields = _reader_hidden_empty_table_fields(old_row, new_row)
@@ -6097,6 +6891,11 @@ def _table_narrative_row_text(row: str) -> str:
     if len(populated) != 1:
         return ""
     _column, _display_label, normalized_label, value = populated[0]
+    compact = compact_inline(value)
+    explicit_note = bool(re.match(r"(?i)^notes?\s*[:：]", compact))
+    if explicit_note:
+        return compact_inline(value.replace("↵", " "))
+        # 跨列 Note 常被 pdfplumber 临时挂到 min/Column 1；显式前缀和唯一非空单元格共同证明其说明身份。
     if normalized_label not in {
         "parameter",
         "characteristic",
@@ -6107,7 +6906,6 @@ def _table_narrative_row_text(row: str) -> str:
         "note",
     }:
         return ""
-    compact = compact_inline(value)
     if len(compact) < 40 or not _READER_PROSE_VERB_RE.search(compact):
         return ""
     return compact_inline(value.replace("↵", " "))
@@ -6862,6 +7660,85 @@ def _table_row_primary_identity(row: str) -> str:
     if identity_field_label:
         return _table_row_text_key(label, field_label=identity_field_label)
     return _table_row_display_key(label)
+
+
+def _table_schema_label_key(value: str) -> str:
+    """Normalize a visible header cell only enough to compare field labels."""
+
+    tokens = re.findall(r"[a-z]+|\d+", compact_inline(value).casefold())
+    if tokens and tokens[-1].isdigit() and any(token.isalpha() for token in tokens):
+        tokens.pop()  # ``Parameter 1`` commonly carries a source footnote marker.
+    aliases = {
+        "characteristics": "characteristic",
+        "conditions": "condition",
+        "parameters": "parameter",
+        "units": "unit",
+        "values": "value",
+    }
+    return " ".join(aliases.get(token, token) for token in tokens)
+
+
+def _generic_header_matches_explicit_rows(
+    header_row: str,
+    explicit_rows: list[str],
+) -> bool:
+    """Prove that a neutral ``Column N`` row is the other side's schema header."""
+
+    header_entries = _table_row_field_entries(header_row)
+    if not (
+        header_entries
+        and _generic_boundary_entries_look_like_header(header_entries)
+        and all(
+            re.fullmatch(r"column\s+\d+", entry[2], flags=re.I)
+            for entry in header_entries
+        )
+    ):
+        return False
+    for row in explicit_rows:
+        entries = _table_row_field_entries(row)
+        if not entries or len(entries) != len(header_entries):
+            continue
+        if all(
+            not re.fullmatch(r"column\s+\d+", entry[2], flags=re.I)
+            for entry in entries
+        ) and all(
+            _table_schema_label_key(header[3]) == _table_schema_label_key(explicit[2])
+            for header, explicit in zip(header_entries, entries, strict=True)
+        ):
+            return True
+    return False
+
+
+def _remove_cross_schema_header_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[str], list[str]]:
+    """Remove an extractor-only generic header when explicit labels prove it."""
+
+    if not _table_groups_mix_generic_and_explicit_schema(old_rows, new_rows):
+        return old_rows, new_rows
+    old_headers = {
+        index
+        for index, row in enumerate(old_rows)
+        if _generic_header_matches_explicit_rows(row, new_rows)
+    }
+    new_headers = {
+        index
+        for index, row in enumerate(new_rows)
+        if _generic_header_matches_explicit_rows(row, old_rows)
+    }
+    if bool(old_headers) == bool(new_headers):
+        return old_rows, new_rows
+    if old_headers:
+        if len(old_headers) != 1 or next(iter(old_headers)) not in {0, len(old_rows) - 1}:
+            return old_rows, new_rows
+    if new_headers:
+        if len(new_headers) != 1 or next(iter(new_headers)) not in {0, len(new_rows) - 1}:
+            return old_rows, new_rows
+    return (
+        [row for index, row in enumerate(old_rows) if index not in old_headers],
+        [row for index, row in enumerate(new_rows) if index not in new_headers],
+    )
 
 
 def _table_groups_mix_generic_and_explicit_schema(
@@ -11727,6 +12604,7 @@ def _table_visual_to_dict(table: TableVisual) -> dict[str, object]:
         "is_continuation": table.is_continuation,
         "content_fully_represented": table.content_fully_represented,
         "row_alignment_reliable": table.row_alignment_reliable,
+        "data_rows_fully_represented": table.data_rows_fully_represented,
     }
 
 

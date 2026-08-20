@@ -18,6 +18,7 @@ import tempfile  # 大 PDF 快照超过内存阈值时自动落到临时文件�
 from collections import (
     Counter,  # 比较表格 bbox、原始单元格与结构化行的字符覆盖，只有全覆盖才替换比较面。
 )
+from collections.abc import Iterable
 from pathlib import Path
 from statistics import median
 
@@ -1430,10 +1431,27 @@ def _looks_like_figure_caption(value: str) -> bool:
     return False
 
 
+def _figure_caption_is_identifier_only(value: str) -> bool:
+    """Return True only for the ``Figure N.`` prefix before its descriptor."""
+
+    candidate = _strip_caption_line_noise(value)
+    return bool(
+        re.fullmatch(
+            rf"(?i:figure|fig\.)\s+{_CAPTION_IDENTIFIER_PATTERN}\s*[.:-–—]?",
+            candidate,
+        )
+        or re.fullmatch(
+            rf"图\s*{_CAPTION_IDENTIFIER_PATTERN}\s*[.:-–—]?",
+            candidate,
+        )
+    )
+
+
 def _figure_caption_tail_starts_prose(tail: str) -> bool:
     """Return True when text after ``Figure N`` is normal sentence prose."""
 
     cleaned_tail = tail.lstrip(" .:-–—").strip()  # 去掉图题常用分隔符后看第一个词。
+    # 无连接语法的独立 super-header 默认拒绝；仅保留真实语料证明过的测量题名形态。
     return bool(
         re.match(
             r"(?i)^(?:shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|lists?|is|are|shall|should|must|may|can)\b",
@@ -2135,6 +2153,451 @@ def _word_line_records(
     ]
 
 
+def _word_span_horizontal_bounds(
+    words: Iterable[dict[str, object]],
+) -> tuple[float, float] | None:
+    """Return a physical word span, failing closed on incomplete coordinates."""
+
+    materialized = tuple(words)
+    if not materialized:
+        return None
+    try:
+        left = min(float(word["x0"]) for word in materialized)
+        right = max(float(word["x1"]) for word in materialized)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (left, right) if math.isfinite(left) and math.isfinite(right) and right > left else None
+
+
+def _finite_positive_layout_box(
+    left: float,
+    right: float,
+    top: float,
+    bottom: float,
+) -> bool:
+    """Accept only a finite, positive-area layout box as geometric evidence."""
+
+    return (
+        all(math.isfinite(value) for value in (left, right, top, bottom))
+        and right > left
+        and bottom > top
+    )
+
+
+def _word_has_finite_positive_geometry(word: dict[str, object]) -> bool:
+    """Prove that one coordinate word can participate in a caption cluster.
+
+    Older layout adapters and focused fixtures may not expose font size.  That
+    absence can still support ordinary x/y clustering, but an explicitly
+    supplied size must be finite and positive; the relaxed Figure-gap path has
+    its own stronger same-style requirement.
+    """
+
+    try:
+        left = float(word["x0"])
+        right = float(word["x1"])
+        top = float(word["top"])
+        bottom = float(word["bottom"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    raw_size = word.get("size")
+    if raw_size in (None, ""):
+        size_is_valid = True
+    else:
+        try:
+            size = float(raw_size)
+        except (TypeError, ValueError):
+            return False
+        size_is_valid = math.isfinite(size) and size > 0
+    return _finite_positive_layout_box(left, right, top, bottom) and size_is_valid
+
+
+def _horizontal_word_clusters(
+    words: Iterable[dict[str, object]],
+) -> tuple[tuple[dict[str, object], ...], ...]:
+    """Split one visual baseline at real column/gutter gaps."""
+
+    try:
+        ordered = sorted(words, key=lambda word: float(word["x0"]))
+    except (KeyError, TypeError, ValueError):
+        return ()
+    clusters: list[list[dict[str, object]]] = []
+    for word in ordered:
+        if not clusters:
+            clusters.append([word])
+            continue
+        previous = clusters[-1][-1]
+        try:
+            gap = float(word["x0"]) - float(previous["x1"])
+            sizes = [
+                float(candidate.get("size", 0.0) or 0.0)
+                for candidate in (previous, word)
+            ]
+        except (KeyError, TypeError, ValueError):
+            return ()
+        gap_limit = max(12.0, max(sizes, default=0.0) * 1.5)
+        if gap > gap_limit:
+            clusters.append([word])
+        else:
+            clusters[-1].append(word)
+    return tuple(tuple(cluster) for cluster in clusters)
+
+
+def _figure_safe_horizontal_word_clusters(
+    words: Iterable[dict[str, object]],
+    *,
+    bbox: tuple[float, float, float, float],
+    page_characters: Iterable[dict[str, object]] = (),
+) -> tuple[tuple[dict[str, object], ...], ...]:
+    """Keep a nearby field word from widening a strict Figure caption span."""
+
+    materialized_words = tuple(words)
+    if not materialized_words or any(
+        not _word_has_finite_positive_geometry(word) for word in materialized_words
+    ):
+        return ()  # 坏坐标不能只污染某一条 gap；整条 visual line 的 Figure 几何证据统一作废。
+    materialized_characters = tuple(page_characters)
+
+    def descriptor_lead_stays_outside_table_lane(
+        ordered_words: list[dict[str, object]],
+        start_index: int,
+    ) -> bool:
+        """Prove the first two descriptor words remain outside the table lane."""
+
+        if start_index + 1 >= len(ordered_words):
+            return False
+        first_word = ordered_words[start_index]
+        second_word = ordered_words[start_index + 1]
+        try:
+            next_gap = float(second_word["x0"]) - float(first_word["x1"])
+            first_size = float(first_word.get("size", 0.0) or 0.0)
+            first_left = float(first_word["x0"])
+            first_right = float(first_word["x1"])
+            second_left = float(second_word["x0"])
+            second_right = float(second_word["x1"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if (
+            not all(
+                math.isfinite(value)
+                for value in (
+                    next_gap,
+                    first_size,
+                    first_left,
+                    first_right,
+                    second_left,
+                    second_right,
+                )
+            )
+            or first_right <= first_left
+            or second_right <= second_left
+            or next_gap > max(4.0, first_size * 0.5)
+        ):
+            return False
+        return (
+            max(first_right, second_right) <= bbox[0]
+            or min(first_left, second_left) >= bbox[2]
+        )
+
+    def gap_is_painted_as_spaces(
+        previous_word: dict[str, object],
+        next_word: dict[str, object],
+    ) -> bool:
+        """Require real same-band space glyphs across a relaxed caption gap."""
+
+        try:
+            gap_left = float(previous_word["x1"])
+            gap_right = float(next_word["x0"])
+            previous_top = float(previous_word["top"])
+            previous_bottom = float(previous_word["bottom"])
+            next_top = float(next_word["top"])
+            next_bottom = float(next_word["bottom"])
+            previous_size = float(previous_word.get("size", 0.0) or 0.0)
+            next_size = float(next_word.get("size", 0.0) or 0.0)
+        except (KeyError, TypeError, ValueError):
+            return False
+        previous_font = normalize_line(str(previous_word.get("fontname", "")))
+        next_font = normalize_line(str(next_word.get("fontname", "")))
+        previous_height = previous_bottom - previous_top
+        next_height = next_bottom - next_top
+        overlap = min(previous_bottom, next_bottom) - max(previous_top, next_top)
+        if (
+            not previous_font
+            or previous_font != next_font
+            or previous_size <= 0
+            or next_size <= 0
+            or abs(previous_size - next_size)
+            > max(0.25, min(previous_size, next_size) * 0.03)
+            or previous_height <= 0
+            or next_height <= 0
+            or overlap < min(previous_height, next_height) * 0.8
+            or abs(previous_top - next_top) > 1.0
+            or abs(previous_bottom - next_bottom) > 1.0
+            or _is_rotated_text_object(previous_word)
+            or _is_rotated_text_object(next_word)
+        ):
+            return False
+        reference_size = (previous_size + next_size) / 2
+        if gap_right <= gap_left:
+            return False
+        intervals: list[tuple[float, float]] = []
+        seen_space_glyph_boxes: list[tuple[float, float, float, float]] = []
+        band_top = min(previous_top, next_top) - 1.0
+        band_bottom = max(previous_bottom, next_bottom) + 1.0
+        for character in materialized_characters:
+            if not str(character.get("text", "")).isspace():
+                continue
+            if _is_rotated_text_object(character):
+                continue  # 纵轴/旋转文本层的空格不能证明水平方向 Figure 题名间距。
+            try:
+                char_left = float(character["x0"])
+                char_right = float(character["x1"])
+                char_top = float(character["top"])
+                char_bottom = float(character["bottom"])
+                char_size = float(character.get("size", 0.0) or 0.0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                not _finite_positive_layout_box(
+                    char_left,
+                    char_right,
+                    char_top,
+                    char_bottom,
+                )
+                or not math.isfinite(char_size)
+            ):
+                continue
+            char_font = normalize_line(str(character.get("fontname", "")))
+            if not char_font or char_font != previous_font:
+                continue
+            if (
+                char_size <= 0
+                or abs(char_size - reference_size)
+                > max(0.25, reference_size * 0.03)
+                or abs(char_top - previous_top) > 1.0
+                or abs(char_bottom - previous_bottom) > 1.0
+                or abs(char_top - next_top) > 1.0
+                or abs(char_bottom - next_bottom) > 1.0
+            ):
+                continue
+            if (
+                char_right <= gap_left - 0.5
+                or char_left >= gap_right + 0.5
+                or char_bottom < band_top
+                or char_top > band_bottom
+            ):
+                continue
+            glyph_box = (char_left, char_right, char_top, char_bottom)
+            if any(
+                all(abs(observed - current) <= 0.01 for observed, current in zip(existing, glyph_box))
+                for existing in seen_space_glyph_boxes
+            ):
+                continue  # 重复 XObject/透明文字层不增加、也不否决同一物理空格证据。
+            seen_space_glyph_boxes.append(glyph_box)
+            intervals.append((max(gap_left, char_left), min(gap_right, char_right)))
+        if not intervals or len(intervals) > 3:
+            return False
+        cursor = gap_left
+        for interval_left, interval_right in sorted(intervals):
+            if interval_right <= cursor:
+                continue
+            if interval_left > cursor + 0.75:
+                return False
+            cursor = max(cursor, interval_right)
+        return cursor >= gap_right - 0.75
+
+    resolved: list[tuple[dict[str, object], ...]] = []
+    for cluster in _horizontal_word_clusters(materialized_words):
+        cleaned = _strip_caption_line_noise(_word_cluster_text(cluster))
+        if not _looks_like_figure_caption(cleaned):
+            resolved.append(cluster)
+            continue
+        tight_clusters: list[list[dict[str, object]]] = []
+        relaxed_cluster_ids: set[int] = set()
+        ordered_words = sorted(cluster, key=lambda item: float(item["x0"]))
+        for word_index, word in enumerate(ordered_words):
+            if not tight_clusters:
+                tight_clusters.append([word])
+                continue
+            previous = tight_clusters[-1][-1]
+            try:
+                gap = float(word["x0"]) - float(previous["x1"])
+                previous_size = float(previous.get("size", 0.0) or 0.0)
+            except (KeyError, TypeError, ValueError):
+                return ()
+            gap_limit = max(4.0, previous_size * 0.5)
+            relaxed_edge = (
+                gap > gap_limit
+                and _figure_caption_is_identifier_only(
+                    _word_cluster_text(tight_clusters[-1])
+                )
+                and descriptor_lead_stays_outside_table_lane(
+                    ordered_words,
+                    word_index,
+                )
+                and gap_is_painted_as_spaces(previous, word)
+            )
+            if relaxed_edge:
+                gap_limit = max(gap_limit, previous_size * 0.60)
+            if id(tight_clusters[-1]) in relaxed_cluster_ids and not gap_is_painted_as_spaces(
+                previous,
+                word,
+            ):
+                tight_clusters.append([word])
+                continue  # 一旦使用宽间距特例，后续每条边都必须各自有同风格空格；亚点间距也不能绕过。
+            if gap > gap_limit:
+                tight_clusters.append([word])
+            else:
+                tight_clusters[-1].append(word)
+                if relaxed_edge:
+                    relaxed_cluster_ids.add(id(tight_clusters[-1]))
+        resolved.extend(tuple(part) for part in tight_clusters)
+    return tuple(resolved)
+
+
+def _word_cluster_text(words: Iterable[dict[str, object]]) -> str:
+    """Reconstruct one horizontal cluster without borrowing another column."""
+
+    try:
+        ordered = sorted(words, key=lambda word: float(word["x0"]))
+    except (KeyError, TypeError, ValueError):
+        return ""
+    return normalize_line(" ".join(str(word.get("text", "")) for word in ordered))
+
+
+def _geometry_caption_cluster_for_candidate(
+    base_cluster: tuple[dict[str, object], ...],
+    cluster_records: tuple[
+        tuple[
+            float,
+            float,
+            tuple[float, float],
+            tuple[dict[str, object], ...],
+        ],
+        ...,
+    ],
+    candidate: str,
+) -> tuple[dict[str, object], ...] | None:
+    """Join only adjacent same-band clusters that exactly rebuild a caption.
+
+    A mixed-size bold caption can be split into two coordinate baselines even
+    though the painted glyph boxes overlap (for example ``Table 32-4.`` at
+    10 pt followed by its 11 pt descriptor). Returning the strict-number
+    prefix alone silently truncates table identity. Extension is therefore
+    allowed only to the right, across a small physical gap, with substantial
+    vertical overlap, and only while the exact extracted caption is rebuilt.
+    """
+
+    target = normalize_line(candidate).casefold()
+    materialized = tuple(base_cluster)
+    current_text = normalize_line(_word_cluster_text(materialized)).casefold()
+    if not target or not current_text:
+        return None
+    if current_text == target:
+        return materialized
+    if current_text.startswith(f"{target} "):
+        return None  # 几何簇比观测题名更长时歧义可见，禁止把同栏表头静默并入表题。
+    if not target.startswith(f"{current_text} "):
+        return None
+
+    used_ids = {id(word) for word in materialized}
+    while target.startswith(f"{current_text} "):
+        span = _word_span_horizontal_bounds(materialized)
+        if span is None:
+            return None
+        try:
+            current_top = min(float(word["top"]) for word in materialized)
+            current_bottom = max(float(word["bottom"]) for word in materialized)
+            current_sizes = sorted(
+                float(word.get("size", 0.0) or 0.0) for word in materialized
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        current_size = current_sizes[len(current_sizes) // 2]
+        current_fonts = {
+            str(word.get("fontname", "")) for word in materialized
+        }
+        if len(current_fonts) != 1:
+            return None
+        eligible: list[tuple[float, tuple[dict[str, object], ...], str]] = []
+        for other_top, other_bottom, other_span, other_cluster in cluster_records:
+            if any(id(word) in used_ids for word in other_cluster):
+                continue
+            gap = other_span[0] - span[1]
+            if gap < -0.5:
+                continue
+            try:
+                other_sizes = sorted(
+                    float(word.get("size", 0.0) or 0.0) for word in other_cluster
+                )
+            except (TypeError, ValueError):
+                continue
+            other_size = other_sizes[len(other_sizes) // 2]
+            other_fonts = {
+                str(word.get("fontname", "")) for word in other_cluster
+            }
+            if (
+                len(other_fonts) != 1
+                or current_fonts != other_fonts
+                or abs(current_size - other_size) > 1.1
+                or gap > max(4.0, max(current_size, other_size) * 0.5)
+            ):
+                continue
+            vertical_overlap = min(current_bottom, other_bottom) - max(
+                current_top,
+                other_top,
+            )
+            minimum_height = min(
+                current_bottom - current_top,
+                other_bottom - other_top,
+            )
+            current_center = (current_top + current_bottom) / 2
+            other_center = (other_top + other_bottom) / 2
+            if (
+                minimum_height <= 0
+                or vertical_overlap < minimum_height * 0.80
+                or abs(current_center - other_center) > 1.5
+                or abs(current_bottom - other_bottom) > 1.5
+            ):
+                continue
+            other_text = normalize_line(_word_cluster_text(other_cluster)).casefold()
+            joined_text = normalize_line(f"{current_text} {other_text}")
+            if target == joined_text or target.startswith(f"{joined_text} "):
+                eligible.append((gap, other_cluster, joined_text))
+        if len(eligible) != 1:
+            break  # 多个同样可拼的邻接簇无法证明唯一题名，保守停在已证最长前缀。
+        _gap, extension, joined_text = eligible[0]
+        materialized = (*materialized, *extension)
+        used_ids.update(id(word) for word in extension)
+        current_text = joined_text
+        if current_text == target:
+            return materialized
+    return None  # 只接受完整覆盖；半截或歧义链必须回退到原始题名，禁止静默截断。
+
+
+def _horizontal_span_belongs_to_bbox(
+    span: tuple[float, float] | None,
+    bbox: tuple[float, float, float, float],
+) -> bool:
+    """Prove a caption/diagram label belongs to the table's horizontal lane."""
+
+    if span is None:
+        return False
+    span_left, span_right = span
+    table_left, _table_top, table_right, _table_bottom = bbox
+    if span_right <= span_left or table_right <= table_left:
+        return False
+    actual_overlap = min(span_right, table_right) - max(span_left, table_left)
+    overlap_threshold = min(
+        24.0,
+        max(
+            6.0,
+            min(span_right - span_left, table_right - table_left) * 0.10,
+        ),
+    )
+    return actual_overlap >= overlap_threshold
+
+
 def _tight_word_bbox(
     word: dict[str, object],
     *,
@@ -2805,6 +3268,12 @@ def _extract_table_lines_and_visuals(
         cell_word_rows = _table_cell_word_rows(table, rows, geometry_words)
         source_rows = rows
         source_cell_word_rows = cell_word_rows
+        source_data_geometry_complete = _table_data_cell_geometry_is_complete(
+            table,
+            rows,
+            geometry_words,
+            cell_word_rows,
+        )
         rows, cell_word_rows = _split_geometry_proven_merged_table_column(
             rows,
             cell_word_rows,
@@ -2813,17 +3282,26 @@ def _extract_table_lines_and_visuals(
             table_lines,
             row_content_lossless,
             row_alignment_reliable,
-        ) = _table_lines_from_rows_with_evidence(
+            data_rows_fully_represented,
+        ) = _table_lines_from_rows_with_data_evidence(
             rows,
             table_number,
             cell_word_rows=cell_word_rows,
         )  # 有字号和坐标时先恢复视觉上下标；证据缺失则沿用纯文字保守路径。
-        title = _table_title_above_bbox(page, bbox) if bbox else ""  # 表题用于过滤图形误检和生成截图标题。
+        data_rows_fully_represented = (
+            data_rows_fully_represented and source_data_geometry_complete
+        )  # 可用几何仍参与下标重建；只有独立证明覆盖全部数据格时才授权隐藏或严格配对。
+        title = (
+            _table_title_above_bbox(page, bbox, geometry_words=geometry_words)
+            if bbox
+            else ""
+        )  # 表题用于过滤图形误检和生成截图标题；复用页面唯一一次坐标观测恢复跨行题名。
         if _should_skip_detected_table(title, table_lines) or _table_bbox_belongs_to_captioned_figure(
             bbox,
             table_lines,
             geometry_words,
             title=title,
+            page_characters=getattr(page, "chars", ()) or (),
         ):
             continue  # Figure/plot 或空伪表格不进入正文 diff，也不进入表格截图区。
         lines.extend(table_lines)  # 表格行保留在抽取文本中，后续有截图表格区时正文 diff 会自动去重隐藏。
@@ -2839,6 +3317,7 @@ def _extract_table_lines_and_visuals(
             bbox_content_fully_represented
             and row_content_lossless
             and row_alignment_reliable
+            and data_rows_fully_represented
         )
         if bbox_fully_represented:
             assert bbox is not None  # bool 门禁已证明 bbox 存在，仅帮助类型检查器收窄。
@@ -2850,6 +3329,7 @@ def _extract_table_lines_and_visuals(
                     table,
                     source_rows,
                     source_cell_word_rows,
+                    data_cell_geometry_complete=source_data_geometry_complete,
                 )
             )  # 整表含歧义行时，仍可逐行替换已完整结构化的记录，避免正确行重复进入正文卡片。
         if row_content_lossless and not row_alignment_reliable:
@@ -2866,9 +3346,12 @@ def _extract_table_lines_and_visuals(
             table_number,
             title=title,
             content_fully_represented=(
-                bbox_content_fully_represented and row_content_lossless
+                bbox_content_fully_represented
+                and row_content_lossless
+                and data_rows_fully_represented
             ),
             row_alignment_reliable=row_alignment_reliable,
+            data_rows_fully_represented=data_rows_fully_represented,
         )  # 只为通过过滤的表格生成截图证据。
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
@@ -3103,19 +3586,96 @@ def _table_cell_word_rows(
         cells = list(getattr(table_rows[row_index], "cells", ()) or ())
         if len(cells) != len(row):
             return None
-        word_rows.append(
+        word_row = [
             [
-                [
-                    word
-                    for word in geometry_words
-                    if cell_bbox
-                    and _word_effective_size(word) < _WATERMARK_MIN_FONT_SIZE
-                    and _layout_word_center_inside_box(word, tuple(cell_bbox))
-                ]
-                for cell_bbox in cells
+                word
+                for word in geometry_words
+                if cell_bbox
+                and _word_effective_size(word) < _WATERMARK_MIN_FONT_SIZE
+                and _layout_word_center_inside_box(word, tuple(cell_bbox))
             ]
-        )
+            for cell_bbox in cells
+        ]
+        word_rows.append(word_row)
     return word_rows
+
+
+def _table_data_cell_geometry_is_complete(
+    table: object,
+    rows: list[list[object]],
+    geometry_words: list[dict[str, object]],
+    cell_word_rows: list[list[list[dict[str, object]]]] | None,
+) -> bool:
+    """Prove every visible table word has one lossless physical-cell owner."""
+
+    table_rows = list(getattr(table, "rows", ()) or ())
+    if (
+        cell_word_rows is None
+        or len(table_rows) != len(rows)
+        or len(cell_word_rows) != len(rows)
+    ):
+        return False
+    try:
+        observed_table_cells = [
+            tuple(float(value) for value in cell_bbox)
+            for table_row in table_rows
+            for cell_bbox in (getattr(table_row, "cells", ()) or ())
+            if cell_bbox
+        ]
+    except (TypeError, ValueError):
+        return False
+    if any(
+        len(cell) != 4 or cell[2] <= cell[0] or cell[3] <= cell[1]
+        for cell in observed_table_cells
+    ):
+        return False
+    table_bbox = _table_bbox(table)
+    if table_bbox is None and observed_table_cells:
+        table_bbox = (
+            min(cell[0] for cell in observed_table_cells),
+            min(cell[1] for cell in observed_table_cells),
+            max(cell[2] for cell in observed_table_cells),
+            max(cell[3] for cell in observed_table_cells),
+        )
+    if (
+        table_bbox is None
+        or table_bbox[2] <= table_bbox[0]
+        or table_bbox[3] <= table_bbox[1]
+    ):
+        return False
+    assignment_counts = Counter(
+        id(word)
+        for word_row in cell_word_rows
+        for cell_words in word_row
+        for word in cell_words
+    )
+    if any(
+        assignment_counts[id(word)] != 1
+        for word in geometry_words
+        if _word_effective_size(word) < _WATERMARK_MIN_FONT_SIZE
+        and _layout_word_center_inside_box(word, table_bbox)
+    ):
+        return False  # 整表 bbox 内的每个可见词必须被恰好一个实体 cell 吸收；行带外漏字或重叠归属都 fail closed。
+    for row_index, row in enumerate(rows):
+        table_row = table_rows[row_index]
+        cells = list(getattr(table_row, "cells", ()) or ())
+        if len(cells) != len(row) or len(cell_word_rows[row_index]) != len(row):
+            return False
+        if any(
+            cell_bbox is None
+            and row[column_index] is not None
+            and normalize_line(str(row[column_index]))
+            for column_index, cell_bbox in enumerate(cells)
+        ):
+            return False  # 非空值没有自己的 bbox，不得由同源 raw 文本自证完整。
+        if not any(cell_bbox for cell_bbox in cells):
+            return False
+        if not _source_cells_match_observed_geometry(
+            [_table_cell_lines(cell) for cell in row],
+            cell_word_rows[row_index],
+        ):
+            return False  # header/rowspan 也必须与它吸收的词精确一致，禁止用跨行 header bbox 吞掉数据格。
+    return True
 
 
 def _layout_word_center_inside_box(
@@ -3142,10 +3702,16 @@ def _table_bbox_is_fully_represented(
     *,
     row_content_fully_represented: bool,
     row_alignment_reliable: bool,
+    data_rows_fully_represented: bool = False,
 ) -> bool:
     """Prove that a table bbox can be replaced by its structured rows."""
 
-    if not rows or not row_content_fully_represented or not row_alignment_reliable:
+    if (
+        not rows
+        or not row_content_fully_represented
+        or not row_alignment_reliable
+        or not data_rows_fully_represented
+    ):
         return False
     return _table_bbox_content_is_fully_represented(page, bbox, rows)
 
@@ -3179,9 +3745,13 @@ def _fully_represented_table_row_bboxes(
     table: object,
     rows: list[list[object]],
     cell_word_rows: list[list[list[dict[str, object]]]] | None,
+    *,
+    data_cell_geometry_complete: bool,
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Return only physical data-row boxes proven safe for structured replacement."""
 
+    if not data_cell_geometry_complete:
+        return ()  # 缺格、重叠格或跨行争抢词时，禁止逐行路径绕过物理归属门禁。
     row_flags = _table_row_replacement_flags(rows, cell_word_rows)
     table_rows = list(getattr(table, "rows", ()) or ())
     if len(row_flags) != len(rows) or len(table_rows) != len(rows):
@@ -3207,6 +3777,8 @@ def _fully_represented_table_row_bboxes(
             cell_word_row=cell_word_row,
         ):
             continue
+        if bbox in proven:
+            return ()  # 两个逻辑行不得各自用同一个物理 bbox 自证完整。
         proven.append(bbox)
     return tuple(proven)
 
@@ -3273,22 +3845,24 @@ def _table_row_bbox_matches_raw_cells(
     """Prove that the exact glyphs removed by a row box equal its raw cells."""
 
     raw_text = "\n".join(str(cell) for cell in row if cell is not None)
-    raw_characters = _non_whitespace_character_counts(raw_text)
-    observed_characters: Counter[str] = Counter()
+    raw_characters = _character_signature(raw_text)
+    raw_character_counts = _non_whitespace_character_counts(raw_text)
+    observed_characters = ""
     if cell_word_row is not None:
-        observed_text = "".join(
-            str(word.get("text", ""))
+        observed_text = "\n".join(
+            _table_cell_text_from_visual_words(
+                _valid_table_cell_words(cell_words)
+            )
             for cell_words in cell_word_row
-            for word in cell_words
         )
-        observed_characters = _non_whitespace_character_counts(observed_text)
+        observed_characters = _character_signature(observed_text)
         if observed_characters and observed_characters != raw_characters:
             return False
     try:
         page_characters = list(getattr(page, "chars", ()) or ())
     except Exception:
         page_characters = []
-    removed_characters = _non_whitespace_character_counts(
+    removed_characters = _character_signature(
         "".join(
             str(character.get("text", ""))
             for character in page_characters
@@ -3296,12 +3870,22 @@ def _table_row_bbox_matches_raw_cells(
         )
     )
     if removed_characters:
+        if observed_characters:
+            return (
+                _non_whitespace_character_counts(removed_characters)
+                == raw_character_counts
+            )  # 单元格词序已独立与 raw 一致；页面 chars 可按绘制次序跨列/下标重排，此处只再证明字符全覆盖。
         return removed_characters == raw_characters
     try:
         bbox_text = page.crop(bbox).extract_text(x_tolerance=1, y_tolerance=3) or ""
     except Exception:
         return False
-    bbox_characters = _non_whitespace_character_counts(bbox_text)
+    bbox_characters = _character_signature(bbox_text)
+    if observed_characters:
+        return bool(bbox_characters) and (
+            _non_whitespace_character_counts(bbox_characters)
+            == raw_character_counts
+        )
     return (
         bool(bbox_characters)
         and bbox_characters == raw_characters
@@ -3393,10 +3977,12 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
         table_lines
         and _table_lines_are_visual_only(table_lines)
         and not _looks_like_table_caption(cleaned_title)
+        and not _table_rows_have_explicit_technical_schema(table_lines)
     ):
         return True  # 纯坐标轴/公式碎片默认跳过；严格 Table 表题则是更强的真实表格证据。
     if _looks_like_figure_caption(cleaned_title):
-        return True  # 用户明确不需要图片/图形对比，Figure 误检必须整块跳过。
+        return not _table_rows_have_explicit_technical_schema(table_lines)
+        # 显式技术字段是独立真表证据；题名定位一旦跨栏误命中 Figure，必须保守保留供复核。
     if _looks_like_non_table_caption(cleaned_title) and not table_lines:
         return True  # 页眉、单字母坐标轴等空候选没有表格证据，直接丢弃。
     if _table_lines_are_single_column_note_box(table_lines, title=cleaned_title) and not _looks_like_table_caption(cleaned_title):
@@ -3412,6 +3998,7 @@ def _table_bbox_belongs_to_captioned_figure(
     geometry_words: list[dict[str, object]],
     *,
     title: str = "",
+    page_characters: Iterable[dict[str, object]] = (),
 ) -> bool:
     """Reject a tiny grid embedded in a coordinate-proven figure region.
 
@@ -3429,50 +4016,165 @@ def _table_bbox_belongs_to_captioned_figure(
         or _looks_like_table_caption(title)
         or _looks_like_table_context_caption(title)
         or _table_rows_begin_with_explicit_caption(table_lines)
+        or _table_rows_have_explicit_technical_schema(table_lines)
     ):
         return False
     word_lines = _word_line_records(geometry_words)
+    cluster_records: list[
+        tuple[float, float, str, tuple[dict[str, object], ...]]
+    ] = []
+    for _line_top, _line_bottom, _line_text, line_words in word_lines:
+        for cluster in _figure_safe_horizontal_word_clusters(
+            line_words,
+            bbox=bbox,
+            page_characters=page_characters,
+        ):
+            try:
+                cluster_top = min(float(word["top"]) for word in cluster)
+                cluster_bottom = max(float(word["bottom"]) for word in cluster)
+            except (KeyError, TypeError, ValueError):
+                continue
+            cluster_records.append(
+                (cluster_top, cluster_bottom, _word_cluster_text(cluster), cluster)
+            )
     captions = [
         line
-        for line in word_lines
+        for line in cluster_records
         if line[1] <= bbox[1] + 1.0
         and bbox[1] - line[1] <= 260.0
         and _looks_like_figure_caption(line[2])
     ]
     if not captions:
         return False
-    caption = max(captions, key=lambda line: line[1])
-    if any(
-        line[1] > caption[1]
-        and line[1] <= bbox[1] + 1.0
-        and (
-            _looks_like_table_caption(line[2])
-            or _looks_like_table_context_caption(line[2])
-        )
-        for line in word_lines
-    ):
-        return False  # Figure 后出现更近的明确表题时，真实小表优先于远处图题，失败可见。
-    intervening = [
-        normalize_line(line[2])
-        for line in word_lines
-        if line[0] >= caption[1] - 1.0
-        and line[1] <= bbox[1] + 1.0
-        and not _looks_like_figure_caption(line[2])
-        and not re.fullmatch(r"\d{1,3}", normalize_line(line[2]))
-    ]
-    if len(intervening) < 3:
+    for caption in sorted(captions, key=lambda line: line[1], reverse=True):
+        caption_span = _word_span_horizontal_bounds(caption[3])
+        if caption_span is None:
+            continue
+        if any(
+            line[1] > caption[1]
+            and line[1] <= bbox[1] + 1.0
+            and (
+                _looks_like_table_caption(line[2])
+                or _looks_like_table_context_caption(line[2])
+            )
+            and _horizontal_span_belongs_to_bbox(
+                _word_span_horizontal_bounds(line[3]),
+                bbox,
+            )
+            for line in cluster_records
+        ):
+            continue  # Figure 后出现更近的同栏表题时，真实小表优先，失败可见。
+        corridor_left = min(caption_span[0], bbox[0])
+        corridor_right = max(caption_span[1], bbox[2])
+        corridor_records = [
+            (*line, line_span)
+            for line in cluster_records
+            if line[0] >= caption[1] - 1.0
+            and line[1] <= bbox[1] + 1.0
+            and not _looks_like_figure_caption(line[2])
+            and not _looks_like_table_caption(line[2])
+            and not _looks_like_table_context_caption(line[2])
+            and not re.fullmatch(r"\d{1,3}", normalize_line(line[2]))
+            and (
+                (line_span := _word_span_horizontal_bounds(line[3])) is not None
+                and min(line_span[1], corridor_right)
+                - max(line_span[0], corridor_left)
+                >= 6.0
+            )
+        ]
+        connected_records: list[
+            tuple[
+                float,
+                float,
+                str,
+                tuple[dict[str, object], ...],
+                tuple[float, float],
+            ]
+        ] = []
+        connected_intervals = [(bbox[0], bbox[2])]
+        remaining = list(corridor_records)
+        while remaining:
+            newly_connected = [
+                record
+                for record in remaining
+                if any(
+                    max(
+                        interval_left - record[4][1],
+                        record[4][0] - interval_right,
+                        0.0,
+                    )
+                    <= 36.0
+                    for interval_left, interval_right in connected_intervals
+                )
+            ]
+            if not newly_connected:
+                break
+            for record in newly_connected:
+                connected_records.append(record)
+                connected_intervals.append(record[4])
+                remaining.remove(record)
+        support_records = [
+            record
+            for record in connected_records
+            if not _looks_like_compact_figure_abbreviation(
+                normalize_line(record[2])
+            )
+        ]
+        if len(support_records) < 3:
+            continue
+        lane_support_records = [
+            record
+            for record in support_records
+            if _horizontal_span_belongs_to_bbox(record[4], bbox)
+        ]
+        caption_owns_lane = _horizontal_span_belongs_to_bbox(caption_span, bbox)
+        if not caption_owns_lane and len(lane_support_records) < 2:
+            continue  # 邻栏标签可接近窄表，但至少两条必须实际进入当前图框水平 lane。
+        if not any(
+            max(
+                caption_span[0] - record[4][1],
+                record[4][0] - caption_span[1],
+                0.0,
+            )
+            <= 36.0
+            for record in support_records
+        ):
+            continue  # 图题本身不能跨栏搭桥；须由已证明的标签分量接到图题。
+        intervening = [normalize_line(line[2]) for line in connected_records]
+        if any(
+            len(value) > 80
+            or value.endswith(("!", "?", "。", "！", "？"))
+            or (
+                value.endswith(".")
+                and not _looks_like_compact_figure_abbreviation(value)
+            )
+            or re.search(
+                r"(?i)\b(?:shall|must|should|required|prohibited|specified|applies|means)\b",
+                value,
+            )
+            for value in intervening
+        ):
+            continue  # 已进入规范正文时，更远的 Figure 不得删除后续小表。
+        return True
+    return False
+
+
+def _looks_like_compact_figure_abbreviation(value: str) -> bool:
+    """Return whether a source-proven dotted token is a diagram abbreviation.
+
+    A generic ``Word.`` shape is indistinguishable from a short prose sentence
+    (for example ``Reserved.``), so the safe default is to treat it as prose.
+    The allow-list contains only abbreviations observed as labels in supported
+    source diagrams; an allowed token still does not count toward the three
+    independent labels required to suppress a detected grid.
+    """
+
+    candidate = normalize_line(value)
+    match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_/-]{0,12})\.", candidate)
+    if match is None:
         return False
-    if any(
-        len(value) > 80
-        or value.endswith((".", "!", "?", "。", "！", "？"))
-        or re.search(
-            r"(?i)\b(?:shall|must|should|required|prohibited|specified|applies|means)\b",
-            value,
-        )
-        for value in intervening
-    ):
-        return False  # 图题后若已进入正常句子/规范正文，不能让更远的图题删除后续小表。
-    return True
+    return match.group(1).casefold() in {"conn"}
+    # ``Conn.`` 已由 Figure 30-14 的真实几何证明；未知 Word. 一律按正文边界处理。
 
 
 def _table_rows_begin_with_explicit_caption(table_lines: list[str]) -> bool:
@@ -3505,6 +4207,24 @@ def _table_rows_begin_with_explicit_caption(table_lines: list[str]) -> bool:
             )
         )  # 只有首个非空物理行能承担 bbox 内表题；后续 ``Table N`` 只是单元格内容或引用。
     return False
+
+
+def _table_rows_have_explicit_technical_schema(table_lines: list[str]) -> bool:
+    """Keep a small grid whose structured fields independently prove a table."""
+
+    labels = {
+        compact_inline(match.group(1)).casefold()
+        for line in table_lines
+        for match in re.finditer(r"(?:^|\|)\s*([^=|]+?)\s*=", line)
+    }
+    labels = {
+        label
+        for label in labels
+        if label and not re.fullmatch(r"(?:column|列)\s*\d+", label, flags=re.I)
+    }
+    # Figure 内误检框通常只有 Column N。两个独立的显式字段名已是小表的
+    # 结构证据；不得用 Parameter/Value 有限词表删掉 Frequency/Nominal 等未预见 schema。
+    return len(labels) >= 2
 
 
 def _table_lines_are_single_column_note_box(table_lines: list[str], *, title: str = "") -> bool:
@@ -3588,6 +4308,7 @@ def _build_table_visual(
     title: str = "",
     content_fully_represented: bool = False,
     row_alignment_reliable: bool = False,
+    data_rows_fully_represented: bool = False,
 ) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
@@ -3618,6 +4339,7 @@ def _build_table_visual(
             page_bbox=_table_page_bbox(page),
             content_fully_represented=content_fully_represented,
             row_alignment_reliable=row_alignment_reliable,
+            data_rows_fully_represented=data_rows_fully_represented,
         ),
         "",
     )
@@ -3742,18 +4464,30 @@ def _ocr_table_image(image: object) -> tuple[str, str]:
     return normalized[:1600], "OCR 已执行。"
 
 
-def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float]) -> str:
+def _table_title_above_bbox(
+    page: object,
+    bbox: tuple[float, float, float, float],
+    *,
+    geometry_words: list[dict[str, object]] | None = None,
+) -> str:
     """Extract a likely table caption immediately above a table bbox."""
+
+    try:
+        page_characters = tuple(getattr(page, "chars", ()) or ())
+    except Exception:
+        page_characters = ()
 
     page_bbox = tuple(float(value) for value in (getattr(page, "bbox", None) or (0.0, 0.0, page.width, page.height)))  # 当前页面/裁剪页边界。
     page_left, _page_top, page_right, _page_bottom = page_bbox  # 只需要水平边界扩大表题搜索范围。
     left = max(page_left, bbox[0] - 90.0)  # 表题有时比表格本体更宽，左侧多取一点。
     right = min(page_right, bbox[2] + 90.0) if page_right else bbox[2] + 90.0  # 右侧同样外扩，避免漏掉跨列表题。
     top = max(0.0, bbox[1] - 90.0)  # 表题通常在表格上方；90pt 能覆盖多行题名和 line-number 残留。
-    candidate_windows: list[list[str]] = []
-    for window_left, window_right in (
-        (left, right),
-        (page_left, page_right),
+    candidate_windows: list[tuple[int, list[str]]] = []
+    for window_index, (window_left, window_right) in enumerate(
+        (
+            (left, right),
+            (page_left, page_right),
+        )
     ):
         if candidate_windows and window_left == left and window_right == right:
             continue  # 局部窗口已经覆盖整页宽度时不重复抽取。
@@ -3768,26 +4502,414 @@ def _table_title_above_bbox(page: object, bbox: tuple[float, float, float, float
             if (line := normalize_line(raw_line))
         ]  # 表题候选先去掉页边行号和尾部孤立行号。
         candidate_windows.append(
-            [
-                candidate
-                for candidate in candidates
-                if candidate and not _looks_like_non_table_caption(candidate)
-            ]
+            (
+                window_index,
+                [
+                    candidate
+                    for candidate in candidates
+                    if candidate and not _looks_like_non_table_caption(candidate)
+                ],
+            )
         )
 
-    # 每个窗口先按距 bbox 的近远顺序找明确 Table/Figure 题名。局部窗口中的
-    # Figure 不能被整页窗口里更远的上一张 Table 题名覆盖；图中窄线框若在
-    # 局部窗口漏掉 ``Figure`` 前缀，第二个整页窗口仍能补回完整题名。
-    for candidates in candidate_windows:
-        for predicate in (_looks_like_table_caption, _looks_like_figure_caption):
-            for candidate in reversed(candidates):
-                if predicate(candidate):
-                    return candidate
-    for candidates in candidate_windows:
+    # 局部与整页窗口会丢失不同的水平文字，不得把各自的数组行号伪装成
+    # 几何距离。先汇总所有严格题名，然后优先用页面词坐标选同一水平归属且垂直最近者；
+    # 无坐标/坐标不命中时，Figure 没有删除权，只保留 local 窗口中最近的严格 Table。
+    strict_candidates: list[tuple[int, int, str]] = []
+    for window_index, candidates in candidate_windows:
+        for source_index, candidate in enumerate(candidates):
+            if _looks_like_table_caption(candidate) or _looks_like_figure_caption(candidate):
+                strict_candidates.append((window_index, source_index, candidate))
+    if strict_candidates:
+        geometry_lines = _word_line_records(geometry_words or [])
+        geometry_clusters: list[
+            tuple[
+                float,
+                float,
+                tuple[float, float],
+                tuple[dict[str, object], ...],
+            ]
+        ] = []
+        for _line_top, _line_bottom, _line_text, line_words in geometry_lines:
+            for cluster in _figure_safe_horizontal_word_clusters(
+                line_words,
+                bbox=bbox,
+                page_characters=page_characters,
+            ):
+                span = _word_span_horizontal_bounds(cluster)
+                if span is None:
+                    continue
+                try:
+                    cluster_top = min(float(word["top"]) for word in cluster)
+                    cluster_bottom = max(float(word["bottom"]) for word in cluster)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                geometry_clusters.append(
+                    (cluster_top, cluster_bottom, span, cluster)
+                )
+        geometry_cluster_records = tuple(geometry_clusters)
+
+        def geometry_caption_match(candidate: str) -> tuple[float, str] | None:
+            needle = normalize_line(_strip_caption_line_noise(candidate)).casefold()
+            candidate_is_table = _looks_like_table_caption(candidate)
+            candidate_is_figure = _looks_like_figure_caption(candidate)
+            matches: list[tuple[float, str]] = []
+            for _cluster_top, _cluster_bottom, _span, base_cluster in geometry_cluster_records:
+                base_text = _strip_caption_line_noise(
+                    _word_cluster_text(base_cluster)
+                )
+                if not needle:
+                    continue
+                if candidate_is_table:
+                    if not _looks_like_table_caption(base_text):
+                        continue
+                    cluster = _geometry_caption_cluster_for_candidate(
+                        base_cluster,
+                        geometry_cluster_records,
+                        _strip_caption_line_noise(candidate),
+                    )
+                    if cluster is None:
+                        continue
+                else:
+                    if not candidate_is_figure or not _looks_like_figure_caption(base_text):
+                        continue
+                    cluster = base_cluster  # Figure 不跨坐标簇扩展，避免借用另一栏图内标签。
+                    cluster_key = normalize_line(base_text).casefold()
+                    if not (
+                        needle == cluster_key
+                        or cluster_key.startswith(f"{needle} ")
+                    ):
+                        continue
+                resolved = _strip_caption_line_noise(_word_cluster_text(cluster))
+                span = _word_span_horizontal_bounds(cluster)
+                if not _horizontal_span_belongs_to_bbox(span, bbox):
+                    continue
+                try:
+                    span_top = min(float(word["top"]) for word in cluster)
+                    span_bottom = max(float(word["bottom"]) for word in cluster)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if span_top < top - 1.0 or span_bottom > bbox[1] + 1.0:
+                    continue
+                matches.append((span_bottom, resolved))
+            if not matches:
+                return None
+            return max(matches, key=lambda item: item[0])
+
+        geometry_ranked: list[tuple[float, int, str]] = []
+        for window_index, _source_index, candidate in strict_candidates:
+            match = geometry_caption_match(candidate)
+            if match is not None:
+                bottom, resolved = match
+                geometry_ranked.append((bottom, -window_index, resolved))
+        if geometry_ranked:
+            _bottom, _window_priority, candidate = max(geometry_ranked)
+        else:
+            local_tables = [
+                (source_index, candidate)
+                for window_index, source_index, candidate in strict_candidates
+                if window_index == 0 and _looks_like_table_caption(candidate)
+            ]
+            if not local_tables:
+                return ""  # local Figure 也可能来自跨 gutter 的邻栏；无坐标时宁可保留复核候选。
+            _source_index, candidate = max(local_tables)
+        if _looks_like_table_caption(candidate):
+            return _append_geometry_proven_table_caption_continuation(
+                candidate,
+                bbox,
+                geometry_words or [],
+            )
+        return candidate
+    for _window_index, candidates in candidate_windows:
         for candidate in reversed(candidates):
             if _looks_like_table_context_caption(candidate):
                 return candidate
     return ""
+
+
+def _append_geometry_proven_table_caption_continuation(
+    title: str,
+    bbox: tuple[float, float, float, float],
+    geometry_words: list[dict[str, object]],
+) -> str:
+    """Append only immediate, style-identical lines centered under a Table caption.
+
+    In the OIF layouts the last caption line can cross pdfplumber's detected
+    grid boundary.  Text-window extraction therefore sees the line but returns
+    only the first strict ``Table N`` candidate.  The continuation is accepted
+    only when source coordinates prove the same font, size, horizontal caption
+    band, and a continuous baseline stack before the real table begins.
+    """
+
+    if not title or not geometry_words or not _looks_like_table_caption(title):
+        return title
+
+    records: list[
+        tuple[
+            float,
+            float,
+            str,
+            tuple[dict[str, object], ...],
+        ]
+    ] = []
+    styled_lines: list[
+        tuple[str, float, float, list[dict[str, object]]]
+    ] = []
+    for word in sorted(
+        geometry_words,
+        key=lambda item: (
+            str(item.get("fontname", "")),
+            float(item.get("size", 0) or 0),
+            float(item["top"]),
+            float(item["x0"]),
+        ),
+    ):
+        try:
+            font = str(word.get("fontname", ""))
+            size = float(word.get("size", 0) or 0)
+            top = float(word["top"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        matching_line = next(
+            (
+                line
+                for line in reversed(styled_lines)
+                if line[0] == font
+                and abs(line[1] - size) <= 0.25
+                and abs(line[2] - top) <= 1.5
+            ),
+            None,
+        )
+        if matching_line is None:
+            styled_lines.append((font, size, top, [word]))
+        else:
+            matching_line[3].append(word)
+    for _font, _size, top, mutable_line_words in sorted(
+        styled_lines,
+        key=lambda line: (line[2], min(float(word["x0"]) for word in line[3])),
+    ):
+        line_words = tuple(mutable_line_words)
+        bottom = max(float(word["bottom"]) for word in line_words)
+        display = normalize_line(
+            " ".join(
+                str(word.get("text", ""))
+                for word in sorted(line_words, key=lambda item: float(item["x0"]))
+            )
+        )
+        if display:
+            records.append((top, bottom, display, line_words))
+
+    title_key = _strip_caption_line_noise(title).casefold()
+    anchors = [
+        record
+        for record in records
+        if _strip_caption_line_noise(record[2]).casefold() == title_key
+        and _looks_like_table_caption(record[2])
+    ]
+    if len(anchors) != 1:
+        return title
+    anchor = anchors[0]
+
+    def uniform_style(
+        line_words: tuple[dict[str, object], ...],
+    ) -> tuple[str, float] | None:
+        try:
+            fonts = {str(word.get("fontname", "")) for word in line_words}
+            sizes = [float(word.get("size", 0) or 0) for word in line_words]
+        except (TypeError, ValueError):
+            return None
+        if (
+            len(fonts) != 1
+            or "" in fonts
+            or not sizes
+            or min(sizes) <= 0
+            or max(sizes) - min(sizes) > 0.25
+        ):
+            return None
+        return next(iter(fonts)), sum(sizes) / len(sizes)
+
+    anchor_style = uniform_style(anchor[3])
+    if anchor_style is None:
+        return title
+    anchor_font, anchor_size = anchor_style
+    if anchor[1] > bbox[1] + 1.5 or bbox[1] - anchor[1] > anchor_size * 2.5:
+        return title
+    anchor_left = min(float(word["x0"]) for word in anchor[3])
+    anchor_right = max(float(word["x1"]) for word in anchor[3])
+    anchor_center = (anchor_left + anchor_right) / 2.0
+    table_center = (bbox[0] + bbox[2]) / 2.0
+    if abs(anchor_center - table_center) > max(anchor_size, (bbox[2] - bbox[0]) * 0.05):
+        return title
+
+    anchor_word_ids = {id(word) for word in anchor[3]}
+    suffix_words: list[dict[str, object]] = []
+    for word in geometry_words:
+        if id(word) in anchor_word_ids:
+            continue
+        try:
+            word_top = float(word.get("top", bbox[1]) or bbox[1])
+        except (TypeError, ValueError):
+            continue
+        if word_top < bbox[1] and str(word.get("fontname", "")) == anchor_font:
+            suffix_words.append(word)
+    subscript_edges = [
+        (base_index, suffix_index)
+        for base_index, base_word in enumerate(anchor[3])
+        for suffix_index, suffix_word in enumerate(suffix_words)
+        if _words_form_visual_subscript(
+            base_word,
+            suffix_word,
+            require_lowered_bottom=True,
+        )
+    ]
+    endpoint_degrees = Counter(
+        endpoint
+        for base_index, suffix_index in subscript_edges
+        for endpoint in (("base", base_index), ("suffix", suffix_index))
+    )
+    if subscript_edges and all(
+        endpoint_degrees[("base", base_index)] == 1
+        and endpoint_degrees[("suffix", suffix_index)] == 1
+        for base_index, suffix_index in subscript_edges
+    ):
+        suffix_for_base = {
+            base_index: suffix_words[suffix_index]
+            for base_index, suffix_index in subscript_edges
+        }
+        rebuilt_parts = [
+            f'{word.get("text", "")}{suffix_for_base[index].get("text", "")}'
+            if index in suffix_for_base
+            else str(word.get("text", ""))
+            for index, word in sorted(
+                enumerate(anchor[3]),
+                key=lambda item: float(item[1]["x0"]),
+            )
+        ]
+        rebuilt_title = normalize_line(" ".join(rebuilt_parts))
+        observed_subscript_text = "".join(
+            str(suffix_words[suffix_index].get("text", ""))
+            for _base_index, suffix_index in subscript_edges
+        )
+        if (
+            _non_whitespace_character_counts(rebuilt_title)
+            == _non_whitespace_character_counts(title + observed_subscript_text)
+            and _looks_like_table_caption(rebuilt_title)
+        ):
+            title = rebuilt_title
+    result = title
+    previous = anchor
+    used: set[int] = set()
+    while True:
+        eligible: list[tuple[int, tuple[float, float, str, tuple[dict[str, object], ...]]]] = []
+        for index, record in enumerate(records):
+            if index in used or record[0] <= previous[0]:
+                continue
+            vertical_gap = record[0] - previous[1]
+            if vertical_gap < -0.5 or vertical_gap > 1.5:
+                continue
+            if record[1] > bbox[1] + 1.5:
+                continue
+            style = uniform_style(record[3])
+            if style is None or style[0] != anchor_font or abs(style[1] - anchor_size) > 0.25:
+                continue
+            left = min(float(word["x0"]) for word in record[3])
+            right = max(float(word["x1"]) for word in record[3])
+            center = (left + right) / 2.0
+            if left < anchor_left - anchor_size or right > anchor_right + anchor_size:
+                continue
+            if abs(center - anchor_center) > max(anchor_size, (anchor_right - anchor_left) * 0.05):
+                continue
+            continuation = record[2]
+            if (
+                len(continuation) > 100
+                or len(continuation.split()) > 12
+                or re.search(r"[.!?。！？]\s*$", continuation)
+                or re.match(r"(?i)^notes?\b", continuation)
+                or _SECTION_ANCHOR_NORMATIVE_PROSE_RE.search(continuation)
+                or _looks_like_table_caption(continuation)
+                or _looks_like_figure_caption(continuation)
+                or _looks_like_table_context_caption(continuation)
+                or not _caption_line_has_continuation_grammar(
+                    result,
+                    continuation,
+                )
+            ):
+                continue
+            eligible.append((index, record))
+        if len(eligible) != 1:
+            break
+        index, continuation_record = eligible[0]
+        used.add(index)
+        result = normalize_line(f"{result} {continuation_record[2]}")
+        previous = continuation_record
+    return result
+
+
+def _caption_line_has_continuation_grammar(
+    current_title: str,
+    continuation: str,
+) -> bool:
+    """Require lexical evidence that a same-style line completes a caption."""
+
+    current = normalize_line(current_title)
+    candidate = normalize_line(continuation)
+    if not current or not candidate:
+        return False
+    connector_ended = bool(
+        re.search(
+            r"(?i)\b(?:and|at|between|by|for|from|in|of|on|or|to|versus|vs\.?|with|without)\s*$",
+            current,
+        )
+    )
+    header_terms = set(re.findall(r"[a-z]+", candidate.casefold())) & {
+        "characteristic",
+        "condition",
+        "conditions",
+        "description",
+        "electrical",
+        "host",
+        "input",
+        "limit",
+        "limits",
+        "maximum",
+        "minimum",
+        "mode",
+        "module",
+        "operating",
+        "output",
+        "parameter",
+        "receiver",
+        "symbol",
+        "target",
+        "transmitter",
+        "typical",
+        "unit",
+        "units",
+        "value",
+    }
+    candidate_words = re.findall(r"[a-z]+", candidate.casefold())
+    if len(header_terms) >= 2:
+        return False
+    if (
+        connector_ended
+        and len(candidate_words) == 1
+        and candidate_words[0] in header_terms
+    ):
+        return False  # 单个字段表头仍有歧义；即使前行以连接词结尾，也不据此污染表题身份。
+    if re.match(r"(?i)^(?:calibration\s+)?at\s+\S+", candidate):
+        return True
+    loss_continuation = bool(
+        re.fullmatch(
+            r"(?i)(?:insertion|return)\s+loss\s+\([A-Z][A-Z0-9_/-]{1,8}\)",
+            candidate,
+        )
+        and re.search(r"(?i)\bchannel\s*$", current)
+    )
+    if loss_continuation:
+        return True
+    if connector_ended:
+        return candidate[:1].islower() and len(candidate_words) >= 2  # 未知单字段或 Title Case lane 默认视为超级表头。
+    return False
 
 
 def _strip_caption_line_noise(value: str) -> str:
@@ -3910,14 +5032,38 @@ def _table_lines_from_rows_with_evidence(
 ) -> tuple[list[str], bool, bool]:
     """Return rows plus independent content-loss and row-alignment evidence."""
 
+    lines, content_lossless, alignment_reliable, _data_rows_lossless = (
+        _table_lines_from_rows_with_data_evidence(
+            rows,
+            table_number,
+            cell_word_rows=cell_word_rows,
+        )
+    )
+    return lines, content_lossless, alignment_reliable
+
+
+def _table_lines_from_rows_with_data_evidence(
+    rows: list[list[object]],
+    table_number: int,
+    *,
+    cell_word_rows: list[list[list[dict[str, object]]]] | None = None,
+) -> tuple[list[str], bool, bool, bool]:
+    """Also expose whether every emitted data-row character stayed in its column."""
+
+    observed_source_rows = [
+        [_table_cell_lines(cell) for cell in row]
+        for row in rows
+    ]  # 保留 pdfplumber 的原始视觉顺序；下标重建会改变语义顺序，不能反过来否定几何完整性。
     rows = _rejoin_table_cell_subscripts(rows, cell_word_rows)
     raw_rows: list[list[list[str]]] = []
+    raw_observed_source_rows: list[list[list[str]]] = []
     raw_word_rows: list[list[list[dict[str, object]]] | None] = []
     for row_index, row in enumerate(rows):
         raw_row = [_table_cell_lines(cell) for cell in row]
         if not any(any(cell_lines) for cell_lines in raw_row):
             continue
         raw_rows.append(raw_row)
+        raw_observed_source_rows.append(observed_source_rows[row_index])
         raw_word_rows.append(
             cell_word_rows[row_index]
             if cell_word_rows is not None and row_index < len(cell_word_rows)
@@ -3925,28 +5071,45 @@ def _table_lines_from_rows_with_evidence(
         )
     # 文字行与单元格几何必须同索引过滤；后面只允许几何证明过的多字符纯字母 Symbol 参与拆行。
     if not raw_rows:  # 空表格没有可比较内容。
-        return [], False, False
+        return [], False, False, False
 
     header_index = _find_table_header_row(raw_rows)  # 在表格前几行扫描表头，处理标题行/空白行插在表头前的情况。
     if header_index is None:
         header = _default_header_for_table(raw_rows)  # 续页缺失表头时，用常见协议表宽恢复列含义。
         data_rows = raw_rows  # 没有真实表头时，所有行都作为数据行输出。
+        observed_data_rows = raw_observed_source_rows
         data_word_rows = raw_word_rows
     else:
         header = _clean_table_header(raw_rows[header_index])  # 清洗扫描到的表头，用于 Header=Value 片段。
         data_rows = raw_rows[header_index + 1 :]  # 有真实表头时跳过表头本身，只输出数据行。
+        observed_data_rows = raw_observed_source_rows[header_index + 1 :]
         data_word_rows = raw_word_rows[header_index + 1 :]
     content_lossless = header_index in {None, 0}  # 表头前的非空标题/注释行会被跳过，不能授权删除 bbox 原文。
+    data_rows_lossless = True
     alignment_reliable = True
     lines: list[str] = []  # 输出给比较器的结构化表格行。
-    for row, cell_word_row in zip(data_rows, data_word_rows, strict=True):
+    for row, observed_source_row, cell_word_row in zip(
+        data_rows,
+        observed_data_rows,
+        data_word_rows,
+        strict=True,
+    ):
         expanded_rows, expansion_alignment_reliable = _expand_table_row_with_evidence(
             row,
             header,
             cell_word_row=cell_word_row,
         )
         row_content_lossless = _expanded_rows_preserve_source_cells(row, expanded_rows)
+        row_geometry_lossless = _source_cells_match_observed_geometry(
+            observed_source_row,
+            cell_word_row,
+        )
         content_lossless = content_lossless and row_content_lossless
+        data_rows_lossless = (
+            data_rows_lossless
+            and row_content_lossless
+            and row_geometry_lossless
+        )
         alignment_reliable = (
             alignment_reliable
             and row_content_lossless
@@ -3962,7 +5125,42 @@ def _table_lines_from_rows_with_evidence(
             if line:
                 lines.append(line)
     has_lines = bool(lines)
-    return lines, content_lossless and has_lines, alignment_reliable and has_lines
+    return (
+        lines,
+        content_lossless and has_lines,
+        alignment_reliable and has_lines,
+        data_rows_lossless and has_lines,
+    )
+
+
+def _source_cells_match_observed_geometry(
+    source_row: list[list[str]],
+    cell_word_row: list[list[dict[str, object]]] | None,
+) -> bool:
+    """Prove that raw extraction neither omitted nor invented a data-cell token.
+
+    Comparing structured output back to the same raw strings is circular: a
+    detector can omit an entire cell and still preserve every character it did
+    return.  This independent check compares every raw cell with the words
+    observed inside that cell's bbox.  Missing geometry fails closed.
+    """
+
+    if cell_word_row is None or len(cell_word_row) != len(source_row):
+        return False
+    for source_lines, observed_words in zip(
+        source_row,
+        cell_word_row,
+        strict=True,
+    ):
+        source_characters = _character_signature("\n".join(source_lines))
+        observed_characters = _character_signature(
+            _table_cell_text_from_visual_words(
+                _valid_table_cell_words(observed_words)
+            )
+        )
+        if source_characters != observed_characters:
+            return False
+    return True
 
 
 def _expanded_rows_preserve_source_cells(

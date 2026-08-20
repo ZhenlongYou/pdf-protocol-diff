@@ -1872,7 +1872,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                     page_number=1,
                     text=(
                         "1 Scope\nNote: ADD and \uf073 calculated from RJ measurements "
-                        "use the range f\uf0a42 in Table XXX."
+                        "use the range f\uf0a42 with a 50\uf057 load in Table XXX."
                     ),
                 )
             ],
@@ -1884,7 +1884,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                     page_number=1,
                     text=(
                         "1 Scope\nNote: ADD and \uf073 calculated from RJ measurements "
-                        "use the range f\uf0a42 in Table 31-14."
+                        "use the range f\uf0a42 with a 50\uf057 load in Table 31-14."
                     ),
                 )
             ],
@@ -1902,11 +1902,14 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         for reader_output in reader_outputs:
             self.assertIn("σ", reader_output)
             self.assertIn("f⁄2", reader_output)
+            self.assertIn("50Ω", reader_output)
             self.assertNotIn("\uf073", reader_output)
             self.assertNotIn("\uf0a4", reader_output)
+            self.assertNotIn("\uf057", reader_output)
         audit_text = json.dumps(audit, ensure_ascii=False)
         self.assertIn("\uf073", audit_text)
         self.assertIn("\uf0a4", audit_text)
+        self.assertIn("\uf057", audit_text)
 
     def test_table_row_pua_is_raw_in_json_csv_and_readable_in_reader_formats(self) -> None:
         """Table facts keep source glyphs while HTML/Markdown/TXT decode the whitelist."""
@@ -3346,8 +3349,13 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             mock.patch.object(pdf_extract_module, "_table_cell_word_rows", return_value=None),
             mock.patch.object(
                 pdf_extract_module,
-                "_table_lines_from_rows_with_evidence",
-                return_value=(["表格行: T1 | Parameter=Limit | Value=10"], False, False),
+                "_table_lines_from_rows_with_data_evidence",
+                return_value=(
+                    ["表格行: T1 | Parameter=Limit | Value=10"],
+                    False,
+                    False,
+                    False,
+                ),
             ),
             mock.patch.object(
                 pdf_extract_module,
@@ -5194,6 +5202,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             page_bbox=(0.0, 0.0, 120.0, 800.0),
             content_fully_represented=True,
             row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         shared = "The receiver shall preserve every calibration requirement. " * 8
         old_extraction = ExtractionResult(
@@ -5248,6 +5257,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             page_bbox=(0.0, 0.0, 120.0, 800.0),
             content_fully_represented=True,
             row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         shared = "The receiver shall preserve every calibration requirement. " * 8
 
@@ -5317,6 +5327,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             page_bbox=(0.0, 0.0, 120.0, 800.0),
             content_fully_represented=True,
             row_alignment_reliable=True,
+            data_rows_fully_represented=True,
         )
         shared = "The receiver shall preserve every calibration requirement. " * 8
 

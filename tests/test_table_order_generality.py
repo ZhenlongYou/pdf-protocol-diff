@@ -44,7 +44,9 @@ class TableOrderGeneralityTests(unittest.TestCase):
                         image_data_uri="",
                         row_texts=rows,
                         grid_summary="structured rows",
+                        content_fully_represented=True,
                         row_alignment_reliable=True,
+                        data_rows_fully_represented=True,
                     )
                 ],
             )

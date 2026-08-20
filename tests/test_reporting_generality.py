@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from protocol_pdf_diff import (
@@ -37,6 +38,8 @@ class ReportingGeneralityTests(unittest.TestCase):
         *,
         title: str = "Table 1 Generic expression",
         new_title: str | None = None,
+        row_alignment_reliable: bool = False,
+        data_rows_fully_represented: bool = False,
     ) -> list[dict[str, object]]:
         body = "Each reported value shall remain traceable to its condition and unit. " * 9
 
@@ -56,6 +59,8 @@ class ReportingGeneralityTests(unittest.TestCase):
                         image_data_uri="",
                         row_texts=rows,
                         grid_summary="structured rows",
+                        row_alignment_reliable=row_alignment_reliable,
+                        data_rows_fully_represented=data_rows_fully_represented,
                     )
                 ],
             )
@@ -1437,6 +1442,327 @@ class ReportingGeneralityTests(unittest.TestCase):
             2,
         )
 
+    def test_repeated_exact_caption_insertion_uses_unique_row_identity(self) -> None:
+        """An inserted repeated-caption run must not shift every later occurrence."""
+
+        def table(page: int, parameter: str, value: int) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                "Table 7-1. Repeated Operating Limits",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter={parameter} | Min=0 | Max={value} | Unit=V"
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+                data_rows_fully_represented=True,
+            )
+
+        old_tables = [table(1, "AlphaVoltage", 1), table(3, "BetaVoltage", 2)]
+        new_tables = [
+            table(1, "InsertedCurrent", 9),
+            table(3, "AlphaVoltage", 10),
+            table(5, "BetaVoltage", 20),
+        ]
+        section = Section(
+            "S", "7 Operating limits", "Operating limits", 1,
+            ("7 Operating limits",), ("7",), 1, 5, "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[section],
+            new_sections=[section],
+        )
+
+        def parameter(group_tables: tuple[TableVisual, ...]) -> str:
+            if not group_tables:
+                return ""
+            return reporting_module._table_row_fields(
+                group_tables[0].row_texts[0]
+            ).get("parameter", "")
+
+        pairs = {
+            (parameter(group.old_tables), parameter(group.new_tables))
+            for group in groups
+        }
+        self.assertEqual(
+            {
+                ("AlphaVoltage", "AlphaVoltage"),
+                ("BetaVoltage", "BetaVoltage"),
+                ("", "InsertedCurrent"),
+            },
+            pairs,
+            "TARGET_REGRESSION: repeated captions require content identity, never run ordinal",
+        )
+        self.assertEqual(3, len(groups))
+
+    def test_repeated_exact_caption_equal_identity_tie_stays_single_sided(self) -> None:
+        """A repeated signature cannot be broken by physical ordinal or changed values."""
+
+        def table(page: int, value: int) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                "Table 7-1. Repeated Operating Limits",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter=SharedVoltage | Min=0 | Max={value} | Unit=V"
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        section = Section(
+            "S", "7 Operating limits", "Operating limits", 1,
+            ("7 Operating limits",), ("7",), 1, 5, "body",
+        )
+        groups = reporting_module._paired_table_visuals(
+            [table(1, 1), table(3, 2)],
+            [table(1, 9), table(3, 10), table(5, 20)],
+            old_sections=[section],
+            new_sections=[section],
+        )
+
+        self.assertEqual(5, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups),
+            "equal repeated signatures must remain auditable add/delete groups",
+        )
+
+    def test_unnumbered_fuzzy_pairing_uses_seventh_identity_across_insertion(self) -> None:
+        """Every row identity must participate when an untitled table is inserted."""
+
+        def table(page: int, unique_identity: str, value: int) -> TableVisual:
+            common_rows = [
+                f"表格行: T1 | Parameter={letter}Common | Min=0 | Max={value} | Unit=V"
+                for letter in "ABCDEF"
+            ]
+            return TableVisual(
+                page,
+                1,
+                "",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    *common_rows,
+                    f"表格行: T1 | Parameter=Z{unique_identity} | Min=0 | Max={value} | Unit=V",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+                data_rows_fully_represented=True,
+            )
+
+        old_tables = [table(1, "Alpha", 1), table(3, "Beta", 2)]
+        new_tables = [
+            table(1, "Alpha", 10),
+            table(2, "Inserted", 9),
+            table(3, "Beta", 20),
+        ]
+        section = Section(
+            "S", "7 Operating limits", "Operating limits", 1,
+            ("7 Operating limits",), ("7",), 1, 3, "body",
+        )
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[section],
+            new_sections=[section],
+        )
+
+        def unique_identity(group_tables: tuple[TableVisual, ...]) -> str:
+            if not group_tables:
+                return ""
+            identities = [
+                reporting_module._table_row_fields(row).get("parameter", "")
+                for row in group_tables[0].row_texts
+            ]
+            return next(identity for identity in identities if identity.startswith("Z"))
+
+        pairs = {
+            (unique_identity(group.old_tables), unique_identity(group.new_tables))
+            for group in groups
+        }
+        self.assertEqual(
+            {
+                ("ZAlpha", "ZAlpha"),
+                ("ZBeta", "ZBeta"),
+                ("", "ZInserted"),
+            },
+            pairs,
+            "TARGET_REGRESSION: a seventh identity must prevent greedy insertion drift",
+        )
+        self.assertEqual(3, len(groups))
+
+    def test_unnumbered_fuzzy_equal_best_stays_single_sided(self) -> None:
+        """Untitled tables with equal identity evidence must not be paired by index."""
+
+        def table(page: int, value: int) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                "",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter=SharedVoltage | Min=0 | Max={value} | Unit=V",
+                    "表格行: T1 | Parameter=SharedCurrent | Min=0 | Max=2 | Unit=A",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        section = Section(
+            "S", "7 Operating limits", "Operating limits", 1,
+            ("7 Operating limits",), ("7",), 1, 4, "body",
+        )
+        groups = reporting_module._paired_table_visuals(
+            [table(1, 1), table(3, 3)],
+            [table(2, 10), table(4, 30)],
+            old_sections=[section],
+            new_sections=[section],
+        )
+
+        self.assertEqual(4, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups),
+            "mutual-best ties must fail closed instead of falling back to ordinal",
+        )
+
+    def test_unnumbered_fuzzy_rejects_incomplete_or_unreliable_rows(self) -> None:
+        """A unique fuzzy score cannot compensate for missing extraction evidence."""
+
+        def table(page: int, value: int) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                "",
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter=SharedVoltage | Min=0 | Max={value} | Unit=V"
+                ],
+                "structured rows",
+                content_fully_represented=False,
+                row_alignment_reliable=False,
+            )
+
+        section = Section(
+            "S", "7 Operating limits", "Operating limits", 1,
+            ("7 Operating limits",), ("7",), 1, 2, "body",
+        )
+        groups = reporting_module._paired_table_visuals(
+            [table(1, 1)],
+            [table(2, 2)],
+            old_sections=[section],
+            new_sections=[section],
+        )
+        self.assertEqual(2, len(groups))
+        self.assertTrue(
+            all(bool(group.old_tables) != bool(group.new_tables) for group in groups)
+        )
+
+        for content_fully_represented, row_alignment_reliable in (
+            (False, False),
+            (False, True),
+            (True, False),
+        ):
+            with self.subTest(
+                content_fully_represented=content_fully_represented,
+                row_alignment_reliable=row_alignment_reliable,
+            ):
+                exact_fragment = replace(
+                    table(1, 1),
+                    content_fully_represented=content_fully_represented,
+                    row_alignment_reliable=row_alignment_reliable,
+                )
+                peer_fragment = replace(exact_fragment, page_number=2)
+                exact_groups = reporting_module._paired_table_visuals(
+                    [exact_fragment],
+                    [peer_fragment],
+                    old_sections=[section],
+                    new_sections=[section],
+                )
+                self.assertEqual(2, len(exact_groups))
+                self.assertTrue(
+                    all(
+                        bool(group.old_tables) != bool(group.new_tables)
+                        for group in exact_groups
+                    )
+                )
+
+        generic_title_fragment = replace(
+            table(1, 1),
+            title="Receiver limits",
+        )
+        generic_title_groups = reporting_module._paired_table_visuals(
+            [generic_title_fragment],
+            [replace(generic_title_fragment, page_number=2)],
+            old_sections=[section],
+            new_sections=[section],
+        )
+        self.assertEqual(2, len(generic_title_groups))
+
+        old_singleton = replace(
+            table(1, 1),
+            row_texts=[
+                "表格行: T1 | Parameter=Mode | Min=0 | Max=1 | Unit=V"
+            ],
+            content_fully_represented=True,
+            row_alignment_reliable=True,
+        )
+        new_singleton = replace(
+            old_singleton,
+            page_number=2,
+            row_texts=[
+                "表格行: T1 | Parameter=Mode | Min=100 | Max=200 | Unit=ps"
+            ],
+        )
+        singleton_groups = reporting_module._paired_table_visuals(
+            [old_singleton],
+            [new_singleton],
+            old_sections=[section],
+            new_sections=[section],
+        )
+        self.assertEqual(2, len(singleton_groups))
+        self.assertTrue(
+            all(
+                bool(group.old_tables) != bool(group.new_tables)
+                for group in singleton_groups
+            )
+        )
+        titled_old_singleton = replace(
+            old_singleton,
+            title="Receiver limits",
+            data_rows_fully_represented=True,
+        )
+        titled_new_singleton = replace(
+            new_singleton,
+            title="Receiver limits",
+            data_rows_fully_represented=True,
+        )
+        titled_singleton_groups = reporting_module._paired_table_visuals(
+            [titled_old_singleton],
+            [titled_new_singleton],
+            old_sections=[section],
+            new_sections=[section],
+        )
+        self.assertEqual(2, len(titled_singleton_groups))
+        self.assertTrue(
+            all(
+                bool(group.old_tables) != bool(group.new_tables)
+                for group in titled_singleton_groups
+            )
+        )
+
     def test_unique_same_caption_with_disjoint_rows_does_not_cross_pair_sections(self) -> None:
         """A unique caption cannot bypass content evidence when section contexts disagree."""
 
@@ -1557,6 +1883,194 @@ class ReportingGeneralityTests(unittest.TestCase):
             },
             title_pairs,
             "TARGET_REGRESSION: a proven 29→30 table family must not split into add/delete cards",
+        )
+
+    def test_cross_clause_bracket_rejects_stronger_off_ordinal_competitors(self) -> None:
+        """A proven family must still fail closed when two bracketed tables swap."""
+
+        def table(page: int, title: str, identity: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    "表格行: T1 | Parameter=Shared limit | Min=0 | Max=1 | Unit=V",
+                    f"表格行: T1 | Parameter={identity} | Min=0 | Max=2 | Unit=V",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 29-2. Host Transmit Module Receive Electrical Limits", "TX identity"),
+            table(3, "Table 29-3. Module Receive Host Transmit Electrical Limits", "RX identity"),
+            table(4, "Table 29-4. Delta Anchor Limits", "Delta"),
+            table(5, "Table 29-5. Echo Anchor Limits", "Echo"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 30-2. Module Receive Host Transmitter Electrical Limits", "RX identity"),
+            table(3, "Table 30-3. Host Transmit Module Receiver Electrical Limits", "TX identity"),
+            table(4, "Table 30-4. Delta Anchor Limits", "Delta"),
+            table(5, "Table 30-5. Echo Anchor Limits", "Echo"),
+        ]
+        old_section = Section(
+            "OLD", "29 Interface", "Old interface", 1,
+            ("29 Interface",), ("29",), 1, 5, "body",
+        )
+        new_section = Section(
+            "NEW", "30 Interface", "New interface", 1,
+            ("30 Interface",), ("30",), 1, 5, "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+        bilateral = [group for group in groups if group.old_tables and group.new_tables]
+        self.assertEqual(
+            {
+                (old_tables[0].title, new_tables[0].title),
+                (old_tables[3].title, new_tables[3].title),
+                (old_tables[4].title, new_tables[4].title),
+            },
+            {
+                (group.old_tables[0].title, group.new_tables[0].title)
+                for group in bilateral
+            },
+            "TARGET_REGRESSION: a weaker ordinal candidate must not beat a stronger swapped candidate",
+        )
+        self.assertEqual(7, len(groups))
+
+    def test_cross_clause_bracket_rejects_two_empty_short_descriptors(self) -> None:
+        """Two short captions are not a perfect descriptor match inside an anchored family."""
+
+        def table(page: int, title: str, identity: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    f"表格行: T1 | Parameter={identity} | Min=0 | Max=1 | Unit=V",
+                    "表格行: T1 | Parameter=Shared identity | Min=0 | Max=2 | Unit=V",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 29-2. Limits", "Shared"),
+            table(3, "Table 29-3. Gamma Anchor Limits", "Gamma"),
+            table(4, "Table 29-4. Delta Anchor Limits", "Delta"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 30-2. Modes", "Shared"),
+            table(3, "Table 30-3. Gamma Anchor Limits", "Gamma"),
+            table(4, "Table 30-4. Delta Anchor Limits", "Delta"),
+        ]
+        old_section = Section(
+            "OLD", "29 Interface", "Old", 1,
+            ("29 Interface",), ("29",), 1, 4, "body",
+        )
+        new_section = Section(
+            "NEW", "30 Interface", "New", 1,
+            ("30 Interface",), ("30",), 1, 4, "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+        bilateral_titles = {
+            (group.old_tables[0].title, group.new_tables[0].title)
+            for group in groups
+            if group.old_tables and group.new_tables
+        }
+        self.assertNotIn(
+            ("Table 29-2. Limits", "Table 30-2. Modes"),
+            bilateral_titles,
+        )
+        groups_without_sections = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+        )
+        bilateral_without_sections = {
+            (group.old_tables[0].title, group.new_tables[0].title)
+            for group in groups_without_sections
+            if group.old_tables and group.new_tables
+        }
+        self.assertNotIn(
+            ("Table 29-2. Limits", "Table 30-2. Modes"),
+            bilateral_without_sections,
+        )
+
+    def test_cross_clause_bracket_equal_score_tie_stays_single_sided(self) -> None:
+        """A proven family does not authorize arbitrary ordinal tie-breaking."""
+
+        def table(page: int, title: str, identity: str) -> TableVisual:
+            return TableVisual(
+                page,
+                1,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                "",
+                [
+                    "表格行: T1 | Parameter=Shared limit | Min=0 | Max=1 | Unit=V",
+                    f"表格行: T1 | Parameter={identity} | Min=0 | Max=2 | Unit=V",
+                ],
+                "structured rows",
+                content_fully_represented=True,
+                row_alignment_reliable=True,
+            )
+
+        old_tables = [
+            table(1, "Table 29-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 29-2. Shared Electrical Limits", "Shared identity"),
+            table(3, "Table 29-3. Shared Electrical Limits", "Shared identity"),
+            table(4, "Table 29-4. Delta Anchor Limits", "Delta"),
+            table(5, "Table 29-5. Echo Anchor Limits", "Echo"),
+        ]
+        new_tables = [
+            table(1, "Table 30-1. Alpha Anchor Limits", "Alpha"),
+            table(2, "Table 30-2. Shared Electrical Limits", "Shared identity"),
+            table(3, "Table 30-3. Shared Electrical Limits", "Shared identity"),
+            table(4, "Table 30-4. Delta Anchor Limits", "Delta"),
+            table(5, "Table 30-5. Echo Anchor Limits", "Echo"),
+        ]
+        old_section = Section(
+            "OLD", "29 Interface", "Old interface", 1,
+            ("29 Interface",), ("29",), 1, 5, "body",
+        )
+        new_section = Section(
+            "NEW", "30 Interface", "New interface", 1,
+            ("30 Interface",), ("30",), 1, 5, "body",
+        )
+
+        groups = reporting_module._paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+        bilateral = [group for group in groups if group.old_tables and group.new_tables]
+        self.assertEqual(3, len(bilateral))
+        self.assertEqual(7, len(groups))
+        self.assertEqual(
+            {1, 4, 5},
+            {group.old_tables[0].page_number for group in bilateral},
         )
 
     def test_two_cross_clause_captions_do_not_authorize_a_family_mapping(self) -> None:
@@ -1912,6 +2426,330 @@ class ReportingGeneralityTests(unittest.TestCase):
         self.assertTrue(notes[0]["old_value"])
         self.assertTrue(notes[0]["new_value"])
         self.assertEqual("表格说明", row_changes[-1]["item"])
+
+    def test_real_crosstalk_schema_drift_does_not_pair_header_with_data_rows(self) -> None:
+        """The real 112G/224G crosstalk rows must retain their logical identities."""
+
+        old_rows = [
+            "表格行: T2 | Column 1=Parameter 1 | Column 2=Target value | Column 3=Unit | Column 4=Conditions",
+            "表格行: T2 | Column 1=Crosstalk Amplitude differential voltage pk-pk | Column 2=525 | Column 3=mV | Column 4=",
+            "表格行: T2 | Column 1=Crosstalk Slew Time (between -160 mV and +160 mV) | Column 2=15 | Column 3=ps | Column 4=See Note1",
+            (
+                "表格行: T2 | Column 1=NOTES:\n"
+                "1.See 16.C.4.1 Transition Time and Slew Time except use a "
+                "Bessel-Thomson filter bandwidth of\n42GHz. | Column 2= | "
+                "Column 3= | Column 4="
+            ),
+        ]
+        new_rows = [
+            "表格行: T2 | Parameter=Crosstalk Amplitude differential voltage pk-pk | Target value=600 | Unit=mV | Conditions=",
+            "表格行: T2 | Parameter=Crosstalk Slew Time (between -180 mV and +180 mV) | Target value=10 | Unit=ps | Conditions=See Note1",
+            (
+                "表格行: T2 | Parameter=NOTES:\n"
+                "1.See 16.C.4.1 Transition Time and Slew Time except use a "
+                "Bessel-Thomson filter bandwidth of 60GHz. | Target value= | "
+                "Unit= | Conditions="
+            ),
+        ]
+
+        changes = self._table_changes_for_rows(
+            old_rows,
+            new_rows,
+            title="Table 29-6. Crosstalk parameters for module output test and host stressed input test",
+        )
+        self.assertEqual(1, len(changes))
+        row_changes = changes[0]["row_changes"]
+        self.assertEqual(3, len(row_changes))
+        self.assertTrue(
+            all(change["old_value"] and change["new_value"] for change in row_changes)
+        )
+        self.assertFalse(
+            any(
+                change["change_type"] in {"旧表删除行", "新表新增行"}
+                for change in row_changes
+            )
+        )
+
+        def combined(change: dict[str, object]) -> str:
+            return " ".join(
+                str(change[key]) for key in ("item", "old_value", "new_value")
+            )
+
+        self.assertFalse(
+            any("Parameter 1" in combined(change) for change in row_changes),
+            "TARGET_REGRESSION: a generic schema header must never become a changed data row",
+        )
+        amplitude = [
+            change
+            for change in row_changes
+            if "Crosstalk Amplitude" in combined(change)
+        ]
+        self.assertEqual(1, len(amplitude))
+        self.assertIn("525", str(amplitude[0]["old_value"]))
+        self.assertIn("600", str(amplitude[0]["new_value"]))
+
+        slew = [
+            change
+            for change in row_changes
+            if "Crosstalk Slew Time" in combined(change)
+            and "Bessel-Thomson" not in combined(change)
+        ]
+        self.assertEqual(1, len(slew))
+        self.assertIn("-160", str(slew[0]["old_value"]))
+        self.assertIn("15", str(slew[0]["old_value"]))
+        self.assertIn("-180", str(slew[0]["new_value"]))
+        self.assertIn("10", str(slew[0]["new_value"]))
+
+        notes = [
+            change for change in row_changes if "Bessel-Thomson" in combined(change)
+        ]
+        self.assertEqual(1, len(notes))
+        self.assertIn("42GHz", str(notes[0]["old_value"]))
+        self.assertIn("60GHz", str(notes[0]["new_value"]))
+
+    def test_numeric_range_rescue_preserves_identity_numbers_outside_parentheses(self) -> None:
+        """Embedded range repair must not turn Tap 1 into Tap 2."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=Shared Amplitude | Min=0 | Max=525 | Unit=mV",
+            "表格行: T1 | Parameter=Tap 1 (between -160 mV and +160 mV) | Min=0 | Max=15 | Unit=ps",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Shared Amplitude | Min=0 | Max=600 | Unit=mV",
+            "表格行: T1 | Parameter=Tap 2 (between -180 mV and +180 mV) | Min=0 | Max=10 | Unit=ps",
+        ]
+
+        row_changes = self._table_changes_for_rows(old_rows, new_rows)[0]["row_changes"]
+        tap_changes = [
+            change
+            for change in row_changes
+            if "Tap " in " ".join(
+                str(change[key]) for key in ("item", "old_value", "new_value")
+            )
+        ]
+        self.assertEqual(2, len(tap_changes))
+        self.assertTrue(all(bool(change["old_value"]) != bool(change["new_value"]) for change in tap_changes))
+
+    def test_numeric_range_rescue_preserves_technical_identifier_case(self) -> None:
+        """A range edit cannot hide a simultaneous technical-token case change."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=Gain ABC (between -160 mV and +160 mV) | Max=15 | Unit=ps"
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Gain Abc (between -180 mV and +180 mV) | Max=10 | Unit=ps"
+        ]
+
+        row_changes = self._table_changes_for_rows(old_rows, new_rows)[0]["row_changes"]
+        self.assertEqual(2, len(row_changes))
+        self.assertTrue(
+            all(bool(change["old_value"]) != bool(change["new_value"]) for change in row_changes),
+            "ABC and Abc are distinct engineering identifiers even when the range also changes",
+        )
+
+    def test_numeric_range_rescue_keeps_priority_row_reordering_visible(self) -> None:
+        """Identity rescue may pair values but cannot erase first-match order semantics."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=Rule Alpha (between -160 and +160 mV) | Value=first",
+            "表格行: T1 | Parameter=Rule Beta (between -100 and +100 mV) | Value=second",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Rule Beta (between -120 and +120 mV) | Value=now-first",
+            "表格行: T1 | Parameter=Rule Alpha (between -180 and +180 mV) | Value=now-second",
+        ]
+        table = TableVisual(
+            1,
+            1,
+            "Table 1. Priority rules",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            old_rows,
+            "structured rows",
+            row_alignment_reliable=True,
+        )
+
+        changes = reporting_module._table_row_changes(
+            (table,),
+            (replace(table, row_texts=new_rows),),
+        )
+
+        order_changes = [change for change in changes if change.item == "表格行顺序"]
+        self.assertEqual(1, len(order_changes))
+        self.assertEqual("顺序变化", order_changes[0].change_type)
+        self.assertIn("Rule Alpha", order_changes[0].old_value)
+        self.assertIn("Rule Beta", order_changes[0].new_value)
+        bilateral_material = [
+            change
+            for change in changes
+            if change.item != "表格行顺序" and change.old_value and change.new_value
+        ]
+        self.assertEqual(2, len(bilateral_material))
+
+    def test_real_ctle_singleton_row_is_one_bilateral_numeric_change(self) -> None:
+        """The CTLE grid has one data record even though it lacks a Parameter column."""
+
+        old_rows = [
+            "表格行: T1 | min=0 | max=2 | step\nsize=0.5 dB | min=0 | "
+            "max=6 | step\nsize=1.0 dB | 列7=TP1a, TP4"
+        ]
+        new_rows = [
+            "表格行: T1 | min=0 | max=2 | step\nsize=0.5 dB | min=0 | "
+            "max=10 | step size=1.0 dB | 列7=TP1a, TP4",
+            (
+                "表格行: T1 | min=Note: For non-integer values of g round down "
+                "the absolute value to nearest allowed value,\nDC2\npreserving the "
+                "sign. | max= | step\nsize= | min= | max= | step size= | 列7="
+            ),
+        ]
+
+        changes = self._table_changes_for_rows(
+            old_rows,
+            new_rows,
+            title="Table 29-12. CTLE Gain Range",
+            row_alignment_reliable=True,
+            data_rows_fully_represented=True,
+        )
+        self.assertEqual(1, len(changes))
+        row_changes = changes[0]["row_changes"]
+        self.assertEqual(2, len(row_changes))
+        bilateral = [
+            change
+            for change in row_changes
+            if change["old_value"] and change["new_value"]
+        ]
+        self.assertEqual(
+            1,
+            len(bilateral),
+            "TARGET_REGRESSION: the singleton CTLE record must not be split into delete/add",
+        )
+        self.assertIn("max[2]=6", str(bilateral[0]["old_value"]))
+        self.assertIn("max[2]=10", str(bilateral[0]["new_value"]))
+        self.assertEqual("实质变化", bilateral[0]["change_type"])
+        self.assertEqual("Min/Max 参数范围", bilateral[0]["item"])
+
+        notes = [
+            change
+            for change in row_changes
+            if "non-integer" in " ".join(
+                str(change[key]) for key in ("item", "old_value", "new_value")
+            )
+        ]
+        self.assertEqual(1, len(notes))
+        self.assertEqual("", notes[0]["old_value"])
+        self.assertIn("DC2", str(notes[0]["new_value"]))
+        self.assertEqual("表格说明", notes[0]["item"])
+        self.assertEqual("新表新增行", notes[0]["change_type"])
+        self.assertFalse(
+            any(change["change_type"] == "旧表删除行" for change in row_changes)
+        )
+
+    def test_identityless_minmax_rescue_rejects_broad_row_replacement(self) -> None:
+        """Two coincident zero cells cannot prove that a mostly different grid is one row."""
+
+        old_rows = [
+            "表格行: T1 | min=0 | max=2 | step size=0.5 dB | min=0 | "
+            "max=6 | step size=1.0 dB | 列7=TP1a, TP4"
+        ]
+        new_rows = [
+            "表格行: T1 | min=0 | max=20 | step size=5 dB | min=0 | "
+            "max=60 | step size=10 dB | 列7=TP5"
+        ]
+
+        row_changes = self._table_changes_for_rows(old_rows, new_rows)[0]["row_changes"]
+        self.assertEqual(2, len(row_changes))
+        self.assertTrue(
+            all(bool(change["old_value"]) != bool(change["new_value"]) for change in row_changes),
+            "a singleton schema may pair only when exactly one populated fact changed",
+        )
+
+    def test_identityless_minmax_rescue_requires_complete_data_rows(self) -> None:
+        """Reliable alignment alone cannot authorize a partially represented grid row."""
+
+        old_rows = [
+            "表格行: T1 | min=0 | max=2 | step size=0.5 dB | min=0 | "
+            "max=6 | step size=1.0 dB | 列7=TP1a, TP4"
+        ]
+        new_rows = [
+            "表格行: T1 | min=0 | max=2 | step size=0.5 dB | min=0 | "
+            "max=10 | step size=1.0 dB | 列7=TP1a, TP4"
+        ]
+
+        row_changes = self._table_changes_for_rows(
+            old_rows,
+            new_rows,
+            title="Table 29-12. CTLE Gain Range",
+            row_alignment_reliable=True,
+            data_rows_fully_represented=False,
+        )[0]["row_changes"]
+        self.assertEqual(2, len(row_changes))
+        self.assertTrue(
+            all(bool(change["old_value"]) != bool(change["new_value"]) for change in row_changes)
+        )
+
+    def test_short_explicit_note_does_not_reenable_positional_row_matching(self) -> None:
+        """A short NOTE prefix is sufficient when it is the row's only populated cell."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=Alpha | Min=0 | Max=1 | Unit=V",
+            "表格行: T1 | Parameter=Deleted Termination | Min=0 | Max=2 | Unit=V",
+            "表格行: T1 | Parameter=Beta | Min=0 | Max=3 | Unit=V",
+            "表格行: T1 | Parameter=Gamma | Min=0 | Max=4 | Unit=V",
+            "表格行: T1 | Parameter=NOTE: Values measured at TP1a.",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=Alpha | Min=0 | Max=10 | Unit=V",
+            "表格行: T1 | Parameter=Beta | Min=0 | Max=30 | Unit=V",
+            "表格行: T1 | Parameter=Gamma | Min=0 | Max=40 | Unit=V",
+            "表格行: T1 | Parameter=NOTE: Values measured at TP4.",
+        ]
+
+        changes = self._table_changes_for_rows(old_rows, new_rows)
+        row_changes = changes[0]["row_changes"]
+        for identity in ("Alpha", "Beta", "Gamma"):
+            with self.subTest(identity=identity):
+                matches = [change for change in row_changes if change["item"] == identity]
+                self.assertEqual(1, len(matches))
+                self.assertTrue(matches[0]["old_value"])
+                self.assertTrue(matches[0]["new_value"])
+        deleted = [
+            change for change in row_changes if change["item"] == "Deleted Termination"
+        ]
+        self.assertEqual(1, len(deleted))
+        self.assertTrue(deleted[0]["old_value"])
+        self.assertEqual("", deleted[0]["new_value"])
+        notes = [change for change in row_changes if change["item"] == "表格说明"]
+        self.assertEqual(1, len(notes))
+        self.assertIn("TP1a", str(notes[0]["old_value"]))
+        self.assertIn("TP4", str(notes[0]["new_value"]))
+
+    def test_note_word_without_explicit_note_prefix_is_not_narrative(self) -> None:
+        """The word NOTE in a parameter name is not enough to bypass identity checks."""
+
+        self.assertEqual(
+            "",
+            reporting_module._table_narrative_row_text(
+                "表格行: T1 | Parameter=NOTE coefficient | Min=0 | Max=1 | Unit=dB"
+            ),
+        )
+
+    def test_inserted_narrative_note_does_not_shift_later_notes(self) -> None:
+        """Multiple NOTE rows use exact ordered anchors and never positional zipping."""
+
+        old_rows = [
+            "表格行: T1 | Parameter=NOTE: Alpha setup applies.",
+            "表格行: T1 | Parameter=NOTE: Beta setup applies.",
+        ]
+        new_rows = [
+            "表格行: T1 | Parameter=NOTE: Inserted setup applies.",
+            "表格行: T1 | Parameter=NOTE: Alpha setup applies.",
+            "表格行: T1 | Parameter=NOTE: Beta setup applies.",
+        ]
+
+        row_changes = self._table_changes_for_rows(old_rows, new_rows)[0]["row_changes"]
+        self.assertEqual(1, len(row_changes))
+        self.assertEqual("", row_changes[0]["old_value"])
+        self.assertIn("Inserted setup", str(row_changes[0]["new_value"]))
 
     def test_engineering_anchor_does_not_hide_operator_or_identifier_case_changes(self) -> None:
         """Word-order rescue must retain operators and technical identifier case."""

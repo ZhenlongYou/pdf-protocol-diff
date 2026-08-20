@@ -203,6 +203,7 @@ class TableVisual:
     page_bbox: tuple[float, float, float, float] | None = None  # 原页边界用于按页高比例证明真实跨页；旧调用缺省时不猜测。
     content_fully_represented: bool = False  # 只有 bbox 原文守恒且最终结构化行无内容损失时为真，供读者层去除重复表格正文。
     row_alignment_reliable: bool = False  # 多行单元格已取得可靠行对齐时为真；缺证据时禁止据此隐藏正文。
+    data_rows_fully_represented: bool = False  # 允许多层表头留在正文，但每个输出数据行的源字符必须逐列守恒。
 
 
 @dataclass(frozen=True)
