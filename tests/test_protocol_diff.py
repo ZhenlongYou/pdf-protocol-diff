@@ -10748,20 +10748,23 @@ class ProtocolDiffTests(unittest.TestCase):
             selected_end_page=35,
         )
 
+        options = DiffOptions(
+            old_start_page=16,
+            old_end_page=18,
+            new_start_page=33,
+            new_end_page=35,
+        )
         result = compare_extractions(
             old_extraction,
             new_extraction,
-            DiffOptions(
-                old_start_page=16,
-                old_end_page=18,
-                new_start_page=33,
-                new_end_page=35,
-            ),
+            options,
         )
 
         self.assertEqual(1, len(result.changes))
         self.assertEqual("modified", result.changes[0].change_type)
         self.assertEqual("user_page_window_anchor", result.changes[0].match_basis)
+        self.assertGreater(result.changes[0].similarity, 0.0)
+        self.assertLess(result.changes[0].similarity, options.min_section_match_similarity)
         self.assertEqual("Overview of Calibration Steps", result.changes[0].old_section.title)
         self.assertEqual(
             "Starting Configuration, Overview of Calibration",
@@ -10858,6 +10861,171 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn(
             "user_page_window_anchor",
             {change["match_basis"] for change in payload["changes"]},
+        )
+
+    def test_existing_minor_match_does_not_block_the_remaining_procedure_anchor(self) -> None:
+        """A shared side clause cannot consume the user's whole page-window relation."""
+
+        shared_context = (
+            "The selected receiver test window uses the declared compliance fixtures."
+        )
+        shared_steps = "\n".join(
+            f"{index}. Measure receiver calibration marker {index} and save the waveform."
+            for index in range(1, 8)
+        )
+        old_tail = "\n".join(
+            f"{index}. Legacy loopback branch alpha{index} beta{index} gamma{index}."
+            for index in range(8, 45)
+        )
+        new_tail = "\n".join(
+            f"{index}. Revised voltage branch delta{index} epsilon{index} zeta{index}."
+            for index in range(8, 45)
+        )
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-window-with-minor-match.pdf"),
+            pages=[
+                PageText(
+                    page_number=16,
+                    text=(
+                        f"1.1 Shared Context\n{shared_context}\n"
+                        f"1.2 Calibration\n{shared_steps}\n{old_tail}"
+                    ),
+                )
+            ],
+            total_pages=30,
+            selected_start_page=16,
+            selected_end_page=18,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-window-with-minor-match.pdf"),
+            pages=[
+                PageText(
+                    page_number=33,
+                    text=(
+                        f"1.1 Shared Context\n{shared_context}\n"
+                        f"1.3 Calibration\n{shared_steps}\n{new_tail}"
+                    ),
+                )
+            ],
+            total_pages=80,
+            selected_start_page=33,
+            selected_end_page=35,
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+        anchored = [
+            change
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        ]
+
+        self.assertEqual(1, len(anchored))
+        self.assertEqual("Calibration", anchored[0].old_section.title)
+        self.assertEqual("Calibration", anchored[0].new_section.title)
+        self.assertEqual("modified", anchored[0].change_type)
+        self.assertFalse(
+            any(
+                change.change_type in {"added", "deleted"}
+                and change.report_location.endswith("Calibration")
+                for change in result.changes
+            )
+        )
+
+    def test_existing_match_does_not_force_an_unrelated_remainder_pair(self) -> None:
+        """User anchoring must not pair disjoint leftovers after the relation is proven."""
+
+        shared_context = (
+            "The selected receiver test window uses the declared compliance fixtures."
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-window-unrelated-remainder.pdf"),
+                pages=[
+                    PageText(
+                        page_number=16,
+                        text=(
+                            f"1.1 Shared Context\n{shared_context}\n"
+                            "1.2 Legacy Loopback\n" + "alpha beta gamma " * 80
+                        ),
+                    )
+                ],
+                total_pages=30,
+                selected_start_page=16,
+                selected_end_page=18,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-window-unrelated-remainder.pdf"),
+                pages=[
+                    PageText(
+                        page_number=33,
+                        text=(
+                            f"1.1 Shared Context\n{shared_context}\n"
+                            "1.3 Receiver Configuration\n"
+                            + "voltage current impedance " * 80
+                        ),
+                    )
+                ],
+                total_pages=80,
+                selected_start_page=33,
+                selected_end_page=35,
+            ),
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        self.assertNotIn(
+            "user_page_window_anchor",
+            {change.match_basis for change in result.changes},
+        )
+        self.assertEqual(1, sum(change.change_type == "added" for change in result.changes))
+        self.assertEqual(1, sum(change.change_type == "deleted" for change in result.changes))
+
+    def test_user_page_window_anchor_excludes_document_metadata_sections(self) -> None:
+        """The explicit-window relation applies to technical content, not front matter."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-window-metadata.pdf"),
+                pages=[
+                    PageText(
+                        page_number=16,
+                        text="1 Revision History\n" + "legacy publication record " * 80,
+                    )
+                ],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-window-metadata.pdf"),
+                pages=[
+                    PageText(
+                        page_number=33,
+                        text="2 Document Control\n" + "revised approval record " * 80,
+                    )
+                ],
+            ),
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        self.assertNotIn(
+            "user_page_window_anchor",
+            {change.match_basis for change in result.changes},
         )
 
     def test_one_sided_page_selection_does_not_force_unrelated_sections(self) -> None:

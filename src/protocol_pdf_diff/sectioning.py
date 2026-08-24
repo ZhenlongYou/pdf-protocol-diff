@@ -743,6 +743,11 @@ def _looks_like_coordinate_publication_footer(line: str) -> bool:
         candidate,
     ):
         return True
+    if re.search(
+        r"(?i)\b(?:shall|must|should|required|prohibited)\b",
+        candidate,
+    ):
+        return False  # 底边坐标不能授权删除带规范动词的重复技术要求。
     return bool(
         re.search(r"(?i)\btest\s+specification\b", candidate)
         and (

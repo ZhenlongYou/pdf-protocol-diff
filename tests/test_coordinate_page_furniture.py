@@ -196,6 +196,45 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
+    def test_bottom_requirement_shaped_like_a_specification_title_is_preserved(self) -> None:
+        """Bottom geometry cannot delete a repeated normative requirement."""
+
+        def version(name: str, selected_value: int) -> ExtractionResult:
+            pages: list[PageText] = []
+            for page_number in range(1, 4):
+                heading = f"{page_number} Requirement {page_number}"
+                body = "The receiver shall preserve the declared calibration waveform."
+                requirement = f"Receiver shall use Test Specification | {selected_value}"
+                pages.append(
+                    PageText(
+                        page_number=page_number,
+                        text="\n".join((heading, body, requirement)),
+                        blocks=(
+                            _text_block(page_number, heading, 90.0),
+                            _text_block(page_number, body, 300.0),
+                            _text_block(page_number, requirement, 721.0),
+                        ),
+                        page_bbox=(0.0, 0.0, 612.0, 792.0),
+                    )
+                )
+            return ExtractionResult(pdf_path=Path(name), pages=pages, total_pages=3)
+
+        result = compare_extractions(
+            version("old-bottom-requirement.pdf", 3),
+            version("new-bottom-requirement.pdf", 4),
+            DiffOptions(),
+        )
+
+        self.assertTrue(result.changes)
+        changed_text = "\n".join(
+            [
+                *(pair.old for change in result.changes for pair in change.replaced_snippets),
+                *(pair.new for change in result.changes for pair in change.replaced_snippets),
+            ]
+        )
+        self.assertIn("Test Specification | 3", changed_text)
+        self.assertIn("Test Specification | 4", changed_text)
+
     def test_running_title_is_separate_and_changed_value_remains_auditable(self) -> None:
         """Header evidence avoids body noise without hiding a changed identifier."""
 
@@ -277,6 +316,41 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         )
 
         self.assertEqual([], result.changes)
+
+    def test_uniform_running_header_identifier_case_change_remains_visible(self) -> None:
+        """A fixed running header can still carry a case-sensitive identifier."""
+
+        def version(name: str, running_header: str) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Receiver Requirement\nThe receiver shall preserve calibration.",
+                        running_header_texts=(running_header,),
+                    )
+                ],
+                total_pages=1,
+            )
+
+        for old_header, new_header in (
+            ("MODE_FAST", "mode_fast"),
+            ("RX_CAL", "rx_cal"),
+            ("Consortium Protocol ID ALPHA", "Consortium Protocol ID alpha"),
+            ("GT/S LIMIT", "gt/s limit"),
+        ):
+            with self.subTest(old_header=old_header):
+                result = compare_extractions(
+                    version("old-header-identifier.pdf", old_header),
+                    version("new-header-identifier.pdf", new_header),
+                    DiffOptions(),
+                )
+
+                self.assertEqual(1, len(result.changes))
+                self.assertEqual(
+                    "运行页眉（坐标证据）",
+                    result.changes[0].report_location,
+                )
 
     def test_repeated_body_requirement_is_not_removed_as_page_furniture(self) -> None:
         """Repetition alone cannot hide a technical change away from the margin."""

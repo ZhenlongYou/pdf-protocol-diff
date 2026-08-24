@@ -2184,12 +2184,12 @@ def _user_page_window_anchor_pair(
 ) -> tuple[int, int] | None:
     """Use an explicit two-sided page selection as one user-authorized relation.
 
-    Ordinary and structural evidence always runs first.  The user anchor is
-    needed only when none of the technical sections inside the selected windows
-    could be paired automatically.  It chooses one best remaining pair so a
-    low whole-section score cannot collapse the entire requested comparison
-    into unrelated additions and deletions; any other unmatched material stays
-    visible as side-specific content.
+    Ordinary and structural evidence always runs first.  The user anchor then
+    chooses one best remaining technical pair so a low whole-section score
+    cannot collapse the requested core comparison into unrelated additions and
+    deletions.  If another technical pair already proves the window relation,
+    the extra pair must also share procedure or paragraph skeletons; unrelated
+    unmatched material stays visible as side-specific content.
     """
 
     page_bounds = (
@@ -2200,14 +2200,13 @@ def _user_page_window_anchor_pair(
     )
     if any(value is None for value in page_bounds):
         return None  # 只有两侧完整页窗都由用户明确给出时才获得这项配对授权。
-    if any(
+    has_technical_match = any(
         old_index is not None
         and new_index is not None
-        and old_sections[old_index].section_id != "running-header-evidence"
-        and new_sections[new_index].section_id != "running-header-evidence"
+        and old_sections[old_index].role == "technical"
+        and new_sections[new_index].role == "technical"
         for old_index, new_index, _score, _basis in matches
-    ):
-        return None  # 已有正文配对就说明页窗关系已被兑现，不再强配剩余的独立章节。
+    )
 
     def eligible_sections(
         sections: list[Section],
@@ -2221,6 +2220,7 @@ def _user_page_window_anchor_pair(
             )
             for index, section in enumerate(sections)
             if index not in matched_indexes
+            and section.role == "technical"
             and section.section_id != "running-header-evidence"
             and section.body.strip()
         ]
@@ -2233,6 +2233,8 @@ def _user_page_window_anchor_pair(
     for old_index, old_section, old_units in old_candidates:
         for new_index, new_section, new_units in new_candidates:
             matched_count = _review_unit_skeleton_match_count(old_units, new_units)
+            if has_technical_match and matched_count == 0:
+                continue  # 已有正文关系时，只追加确有步骤/段落骨架重合的剩余核心章节。
             shorter_count = min(len(old_units), len(new_units))
             rank = (
                 matched_count,
@@ -2244,6 +2246,8 @@ def _user_page_window_anchor_pair(
                 -old_index,
             )
             ranked_candidates.append((rank, old_index, new_index))
+    if not ranked_candidates:
+        return None  # 已有关系后的不相干尾章仍保持新增/删除，不借用户页窗任意强配。
     _rank, old_index, new_index = max(ranked_candidates)
     return old_index, new_index
 
@@ -3435,9 +3439,11 @@ def _sections_effectively_unchanged(
         ]
         return (
             len(old_header_lines) == len(new_header_lines) == 1
-            and normalize_for_similarity(old_header_lines[0])
-            == normalize_for_similarity(new_header_lines[0])
-        )  # 单一固定出版页眉的纯大小写/空白变化不占技术差异卡；多页观测分布仍保留精确形式。
+            and _publication_header_case_equivalent(
+                old_header_lines[0],
+                new_header_lines[0],
+            )
+        )  # 只中和通用出版标题形状；技术标识符和多页观测分布仍保留精确形式。
 
     if _section_heading_changed(old_section, new_section):
         return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。
@@ -3464,6 +3470,33 @@ def _sections_effectively_unchanged(
         )
         # 短正文整段键可中和PDF分句边界差异；长章节走逐单元键，避免二次复杂度。
     return body_same  # 相似度不能授权猜测复数、动词变化或其他语义等价。
+
+
+def _publication_header_case_equivalent(old_value: str, new_value: str) -> bool:
+    """Ignore casing only for an identifier-free publication heading phrase."""
+
+    old_compact = compact_inline(old_value)
+    new_compact = compact_inline(new_value)
+    if normalize_for_similarity(old_compact) != normalize_for_similarity(new_compact):
+        return False
+    old_words = re.fullmatch(r"[A-Za-z]{4,}(?:\s+[A-Za-z]{4,})+", old_compact)
+    new_words = re.fullmatch(r"[A-Za-z]{4,}(?:\s+[A-Za-z]{4,})+", new_compact)
+    if not old_words or not new_words:
+        return False  # 数字、下划线、斜线、短缩写和混合标点都可能属于技术标识符。
+    publication_nouns = {
+        "chapter",
+        "description",
+        "descriptions",
+        "overview",
+        "procedure",
+        "procedures",
+        "requirement",
+        "requirements",
+        "section",
+        "specification",
+        "specifications",
+    }
+    return bool(set(normalize_for_similarity(old_compact).split()) & publication_nouns)
 
 
 def _delta_is_unverified_pua_mapping_only(
