@@ -79,6 +79,7 @@ _MATCH_BASIS_LABELS = {
     "structural_shift_bracketed_sentence": "前后普通兄弟夹定一致编号偏移+标题相关正文句",
     "structural_mapped_parent_body": "已配对父章节改号+子章节正文相似度",
     "structural_mapped_parent_boundary": "已配对父章节改号+边界兄弟章节+直属子章节",
+    "user_page_window_anchor": "用户指定双侧页窗强关联",
     "unmatched": "未配对",
 }
 _STRUCTURAL_MATCH_BASES = frozenset(
@@ -92,6 +93,16 @@ _STRUCTURAL_MATCH_BASES = frozenset(
         "structural_mapped_parent_boundary",
     }
 )
+_USER_ANCHORED_MATCH_BASES = frozenset({"user_page_window_anchor"})
+_EXPLAINED_MATCH_BASES = _STRUCTURAL_MATCH_BASES | _USER_ANCHORED_MATCH_BASES
+
+
+def _match_basis_explanation(match_basis: str) -> str:
+    """Explain why a below-threshold section pair was still authorized."""
+
+    if match_basis in _USER_ANCHORED_MATCH_BASES:
+        return "用户页窗授权；相似度仍为全文实际值"
+    return "结构证据授权；相似度仍为全文实际值"
 _TABLE_PAIR_SIMILARITY_THRESHOLD = 0.65  # 表格模糊配对与跨章节唯一表题共用同一内容证据门槛。
 _TABLE_PAGE_EDGE_MAX_FRACTION = 0.12  # 实测续表距页边约 7%/10%；留 2% 截图外扩余量仍拒绝中页表。
 _READER_EMPTY_VALUE = "（空白）"  # 读者界面不暴露内部 <empty> 哨兵字符串。
@@ -710,11 +721,11 @@ def _append_markdown_changes(
             )
         if change.old_section and change.new_section:
             lines.append(f"- 相似度: {change.similarity:.3f}")
-            if change.match_basis in _STRUCTURAL_MATCH_BASES:
+            if change.match_basis in _EXPLAINED_MATCH_BASES:
                 lines.append(
                     "- 配对依据: "
                     f"{_MATCH_BASIS_LABELS[change.match_basis]}"
-                    "（结构证据授权；上方相似度仍为全文实际值）"
+                    f"（{_match_basis_explanation(change.match_basis)}）"
                 )
         summary = _change_summary(change)
         if summary:
@@ -1403,11 +1414,11 @@ def _render_change_html(
         else ""
     )
     match_basis_html = ""
-    if change.match_basis in _STRUCTURAL_MATCH_BASES:
+    if change.match_basis in _EXPLAINED_MATCH_BASES:
         match_basis_html = (
             '<div class="match-basis">配对依据：'
             f'{_escape(_MATCH_BASIS_LABELS[change.match_basis])}'
-            '（结构证据授权；相似度仍为全文实际值）</div>'
+            f'（{_escape(_match_basis_explanation(change.match_basis))}）</div>'
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
     review_pairs = _render_review_pairs_html(change.review_replaced_snippets)
@@ -12125,6 +12136,14 @@ def _ordered_table_changes(changes: list[TableChange]) -> list[TableChange]:
 def _comparison_method_note(result: DiffResult) -> str:
     """Describe the matching strategy used for this report."""
 
+    if any(
+        change.match_basis == "user_page_window_anchor"
+        for change in result.changes
+    ):
+        return (
+            "两侧页窗由用户声明为强关联范围；常规章节匹配后，已将页窗内最相关正文锚定比较，"
+            "页码不作逐页硬对齐。"
+        )
     fallback_count = _page_fallback_section_count(result)
     total_sections = len(result.old_sections) + len(result.new_sections)
     if fallback_count and fallback_count == total_sections:

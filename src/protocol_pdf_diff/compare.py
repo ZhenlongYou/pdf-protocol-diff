@@ -2140,6 +2140,30 @@ def _match_sections(
             )
         )  # 编号后移只改变配对授权；报告继续显示实际全文相似度。
 
+    user_window_pair = _user_page_window_anchor_pair(
+        old_sections,
+        new_sections,
+        matches,
+        matched_old,
+        matched_new,
+        options,
+    )
+    if user_window_pair is not None:
+        old_index, new_index = user_window_pair
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                "user_page_window_anchor",
+            )
+        )  # 用户同时限定两侧页窗时，授权最相关的剩余正文进入比较，但不伪造相似度。
+
     for new_index, _new_section in enumerate(new_sections):
         if new_index not in matched_new:
             matches.append((None, new_index, 0.0, "unmatched"))
@@ -2148,6 +2172,80 @@ def _match_sections(
         if old_index not in matched_old:
             matches.append((old_index, None, 0.0, "unmatched"))
     return matches
+
+
+def _user_page_window_anchor_pair(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matches: list[tuple[int | None, int | None, float, str]],
+    matched_old: set[int],
+    matched_new: set[int],
+    options: DiffOptions,
+) -> tuple[int, int] | None:
+    """Use an explicit two-sided page selection as one user-authorized relation.
+
+    Ordinary and structural evidence always runs first.  The user anchor is
+    needed only when none of the technical sections inside the selected windows
+    could be paired automatically.  It chooses one best remaining pair so a
+    low whole-section score cannot collapse the entire requested comparison
+    into unrelated additions and deletions; any other unmatched material stays
+    visible as side-specific content.
+    """
+
+    page_bounds = (
+        options.old_start_page,
+        options.old_end_page,
+        options.new_start_page,
+        options.new_end_page,
+    )
+    if any(value is None for value in page_bounds):
+        return None  # 只有两侧完整页窗都由用户明确给出时才获得这项配对授权。
+    if any(
+        old_index is not None
+        and new_index is not None
+        and old_sections[old_index].section_id != "running-header-evidence"
+        and new_sections[new_index].section_id != "running-header-evidence"
+        for old_index, new_index, _score, _basis in matches
+    ):
+        return None  # 已有正文配对就说明页窗关系已被兑现，不再强配剩余的独立章节。
+
+    def eligible_sections(
+        sections: list[Section],
+        matched_indexes: set[int],
+    ) -> list[tuple[int, Section, list[str]]]:
+        return [
+            (
+                index,
+                section,
+                _paragraph_review_units(section.body, suppressed_table_unit_keys=set()),
+            )
+            for index, section in enumerate(sections)
+            if index not in matched_indexes
+            and section.section_id != "running-header-evidence"
+            and section.body.strip()
+        ]
+
+    old_candidates = eligible_sections(old_sections, matched_old)
+    new_candidates = eligible_sections(new_sections, matched_new)
+    if not old_candidates or not new_candidates:
+        return None  # 抽取为空时仍保持不可比较，用户页窗不能制造缺失的正文证据。
+    ranked_candidates: list[tuple[tuple[int, float, float, float, int, int, int], int, int]] = []
+    for old_index, old_section, old_units in old_candidates:
+        for new_index, new_section, new_units in new_candidates:
+            matched_count = _review_unit_skeleton_match_count(old_units, new_units)
+            shorter_count = min(len(old_units), len(new_units))
+            rank = (
+                matched_count,
+                matched_count / shorter_count if shorter_count else 0.0,
+                _section_similarity(old_section.body, new_section.body),
+                _section_match_score(old_section, new_section),
+                -abs(old_index - new_index),
+                -new_index,
+                -old_index,
+            )
+            ranked_candidates.append((rank, old_index, new_index))
+    _rank, old_index, new_index = max(ranked_candidates)
+    return old_index, new_index
 
 
 _SECTION_IDENTITY_ANCHOR_MIN_CHARS = 80
@@ -3320,6 +3418,26 @@ def _sections_effectively_unchanged(
     options: DiffOptions,
 ) -> bool:
     """Treat only conservatively normalized, exactly equal sections as unchanged."""
+
+    if (
+        old_section.section_id == "running-header-evidence"
+        and new_section.section_id == "running-header-evidence"
+    ):
+        old_header_lines = [
+            compact_inline(line)
+            for line in old_section.body.splitlines()
+            if compact_inline(line)
+        ]
+        new_header_lines = [
+            compact_inline(line)
+            for line in new_section.body.splitlines()
+            if compact_inline(line)
+        ]
+        return (
+            len(old_header_lines) == len(new_header_lines) == 1
+            and normalize_for_similarity(old_header_lines[0])
+            == normalize_for_similarity(new_header_lines[0])
+        )  # 单一固定出版页眉的纯大小写/空白变化不占技术差异卡；多页观测分布仍保留精确形式。
 
     if _section_heading_changed(old_section, new_section):
         return False  # 标题变化始终需要展示，不能被长正文的高相似度掩盖。

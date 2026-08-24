@@ -10717,6 +10717,171 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, change_types.count("added"))  # 无可靠配对时新版章节保守显示为新增。
         self.assertEqual(1, change_types.count("deleted"))  # 无可靠配对时旧版章节保守显示为删除。
 
+    def test_explicit_two_sided_page_windows_force_one_user_anchored_comparison(self) -> None:
+        """Two page windows are a user-declared relation, even when text scores are low."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-user-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=16,
+                    text="2.8.2 Overview of Calibration Steps\n" + "legacy calibration alpha " * 80,
+                )
+            ],
+            total_pages=33,
+            selected_start_page=16,
+            selected_end_page=18,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-user-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=33,
+                    text=(
+                        "2.11.1 Starting Configuration, Overview of Calibration\n"
+                        + "revised receiver voltage " * 80
+                    ),
+                )
+            ],
+            total_pages=80,
+            selected_start_page=33,
+            selected_end_page=35,
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("modified", result.changes[0].change_type)
+        self.assertEqual("user_page_window_anchor", result.changes[0].match_basis)
+        self.assertEqual("Overview of Calibration Steps", result.changes[0].old_section.title)
+        self.assertEqual(
+            "Starting Configuration, Overview of Calibration",
+            result.changes[0].new_section.title,
+        )
+
+    def test_user_page_window_anchor_selects_the_strongest_procedure_overlap(self) -> None:
+        """A multi-section window must anchor its shared procedure, not adjacent short clauses."""
+
+        shared_steps = "\n".join(
+            f"{index}. Measure receiver calibration marker {index} and save the waveform."
+            for index in range(1, 21)
+        )
+        old_tail = "\n".join(
+            f"{index}. Legacy loopback operation alpha{index} beta{index} gamma{index}."
+            for index in range(21, 48)
+        )
+        new_tail = "\n".join(
+            f"{index}. Revised system branch voltage{index} current{index} impedance{index}."
+            for index in range(21, 32)
+        )
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-multi-user-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=16,
+                    text=(
+                        "2.8.2 Overview of Calibration Steps\n"
+                        f"{shared_steps}\n{old_tail}\n"
+                        "2.9 System Receive Jitter Tolerance Test\n"
+                        "The system shall tolerate legacy jitter near the declared limit.\n"
+                        "2.9.1 Starting Configuration\n"
+                        "Connect the legacy system board to the compliance base board."
+                    ),
+                )
+            ],
+            total_pages=33,
+            selected_start_page=16,
+            selected_end_page=18,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-multi-user-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=33,
+                    text=(
+                        "2.11 Add-in Card Receiver Link Equalization Test\n"
+                        "This test covers add-in cards operating at 8.0 GT/s and 16.0 GT/s.\n"
+                        "2.11.1 Starting Configuration, Overview of Calibration Steps at 8.0 GT/s\n"
+                        f"{shared_steps}\n{new_tail}"
+                    ),
+                )
+            ],
+            total_pages=80,
+            selected_start_page=33,
+            selected_end_page=35,
+        )
+        options = DiffOptions(
+            old_start_page=16,
+            old_end_page=18,
+            new_start_page=33,
+            new_end_page=35,
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, options)
+        anchored = [
+            change
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        ]
+
+        self.assertEqual(1, len(anchored))
+        self.assertEqual("Overview of Calibration Steps", anchored[0].old_section.title)
+        self.assertEqual(
+            "Starting Configuration, Overview of Calibration Steps at 8.0 GT/s",
+            anchored[0].new_section.title,
+        )
+        self.assertEqual("modified", anchored[0].change_type)
+        self.assertTrue(
+            any(
+                change.change_type == "deleted"
+                and change.old_section
+                and change.old_section.title == "System Receive Jitter Tolerance Test"
+                for change in result.changes
+            )
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, temp_dir, options)
+            markdown = outputs["markdown"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+        self.assertIn("用户指定双侧页窗强关联", markdown)
+        self.assertIn("用户页窗授权；相似度仍为全文实际值", markdown)
+        self.assertIn("两侧页窗由用户声明为强关联范围", markdown)
+        self.assertIn(
+            "user_page_window_anchor",
+            {change["match_basis"] for change in payload["changes"]},
+        )
+
+    def test_one_sided_page_selection_does_not_force_unrelated_sections(self) -> None:
+        """The user relation exists only when both document windows are explicit."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-one-sided-window.pdf"),
+                pages=[PageText(page_number=16, text="2.8.2 Calibration\n" + "alpha " * 100)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-one-sided-window.pdf"),
+                pages=[PageText(page_number=33, text="2.11.1 Calibration\n" + "voltage " * 100)],
+            ),
+            DiffOptions(old_start_page=16, old_end_page=18),
+        )
+
+        self.assertNotIn(
+            "user_page_window_anchor",
+            {change.match_basis for change in result.changes},
+        )
+        self.assertEqual(1, sum(change.change_type == "added" for change in result.changes))
+        self.assertEqual(1, sum(change.change_type == "deleted" for change in result.changes))
+
     def test_exact_identity_title_does_not_bypass_the_configured_similarity_threshold(self) -> None:
         """A shared number/title cannot replace the requested comparable-text evidence."""
 

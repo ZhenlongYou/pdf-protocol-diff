@@ -709,13 +709,47 @@ def _page_coordinate_margin_candidates(page: PageText) -> list[tuple[str, str, s
     candidates: list[tuple[str, str, str]] = []
     for block in text_blocks:
         line = normalize_line(block.text)
-        if not _looks_like_repeated_margin_furniture(line):
+        if not (
+            _looks_like_repeated_margin_furniture(line)
+            or _looks_like_coordinate_publication_footer(line)
+        ):
             continue
         zone = "top" if block.bbox[1] <= top_limit else "bottom" if block.bbox[3] >= bottom_limit else ""
         if not zone:
             continue
         candidates.append((zone, _margin_furniture_fingerprint(line), line))
     return candidates
+
+
+def _looks_like_coordinate_publication_footer(line: str) -> bool:
+    """Recognize publication metadata only after geometry proves a page margin.
+
+    Revision labels and publication dates can be legitimate body content, so
+    text-only cleanup must continue to preserve them.  This wider vocabulary is
+    intentionally used only by the coordinate-backed, repeated-margin path.
+    """
+
+    candidate = compact_inline(line)
+    if not 2 <= len(candidate) <= 220:
+        return False
+    if re.fullmatch(
+        r"(?i)revision\s+\d+(?:\.\d+)*(?:,\s*version\s+\d+(?:\.\d+)*)?",
+        candidate,
+    ):
+        return True
+    if re.fullmatch(
+        r"(?i)(?:january|february|march|april|may|june|july|august|"
+        r"september|october|november|december)\s+\d{1,2},\s+\d{4}",
+        candidate,
+    ):
+        return True
+    return bool(
+        re.search(r"(?i)\btest\s+specification\b", candidate)
+        and (
+            re.search(r"\|\s*\d+\s*$", candidate)
+            or re.search(r"(?i),\s*revision\s+\d+(?:\.\d+)*\s+\d+\s*$", candidate)
+        )
+    )
 
 
 def _has_dense_line_number_gutter(lines: list[str]) -> bool:

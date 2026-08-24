@@ -156,6 +156,46 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
+    def test_coordinate_proven_pcie_multiline_revision_footer_is_removed(self) -> None:
+        """PCIe title, revision, date, and dynamic page number are one footer cluster."""
+
+        def version(name: str, page_start: int, revision: str, date: str) -> ExtractionResult:
+            pages: list[PageText] = []
+            for logical_index, page_number in enumerate(range(page_start, page_start + 3), start=1):
+                heading = f"2.{logical_index} Receiver Requirement {logical_index}"
+                body = "The receiver shall preserve the declared calibration waveform."
+                title = f"PCI Express Architecture PHY Test Specification | {page_number}"
+                revision_line = f"Revision {revision}"
+                pages.append(
+                    PageText(
+                        page_number=page_number,
+                        text="\n".join((heading, body, title, revision_line, date)),
+                        blocks=(
+                            _text_block(page_number, heading, 90.0),
+                            _text_block(page_number, body, 300.0),
+                            _text_block(page_number, title, 721.0),
+                            _text_block(page_number, revision_line, 734.0),
+                            _text_block(page_number, date, 746.0),
+                        ),
+                        page_bbox=(0.0, 0.0, 612.0, 792.0),
+                    )
+                )
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=pages,
+                total_pages=80,
+                selected_start_page=page_start,
+                selected_end_page=page_start + 2,
+            )
+
+        result = compare_extractions(
+            version("old-pcie-footer.pdf", 16, "3.0", "June 6, 2013"),
+            version("new-pcie-footer.pdf", 33, "4.0, Version 1.2", "August 18, 2021"),
+            DiffOptions(),
+        )
+
+        self.assertEqual([], result.changes)
+
     def test_running_title_is_separate_and_changed_value_remains_auditable(self) -> None:
         """Header evidence avoids body noise without hiding a changed identifier."""
 
@@ -213,6 +253,30 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn("IA-7.0", repeated.changes[0].replaced_snippets[0].new)
         self.assertEqual([], repeated_unchanged.changes)
         self.assertTrue(single_page.changes)
+
+    def test_running_header_case_only_change_is_reader_equivalent(self) -> None:
+        """Publication casing in a running header is furniture, not a technical change."""
+
+        def version(name: str, running_header: str) -> ExtractionResult:
+            return ExtractionResult(
+                pdf_path=Path(name),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="1 Receiver Requirement\nThe receiver shall preserve calibration.",
+                        running_header_texts=(running_header,),
+                    )
+                ],
+                total_pages=1,
+            )
+
+        result = compare_extractions(
+            version("old-header-case.pdf", "TEST DESCRIPTIONS"),
+            version("new-header-case.pdf", "Test Descriptions"),
+            DiffOptions(),
+        )
+
+        self.assertEqual([], result.changes)
 
     def test_repeated_body_requirement_is_not_removed_as_page_furniture(self) -> None:
         """Repetition alone cannot hide a technical change away from the margin."""
