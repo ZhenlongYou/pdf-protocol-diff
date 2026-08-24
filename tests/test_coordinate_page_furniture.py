@@ -338,6 +338,8 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             ("RX_CAL", "rx_cal"),
             ("Consortium Protocol ID ALPHA", "Consortium Protocol ID alpha"),
             ("GT/S LIMIT", "gt/s limit"),
+            ("MODE FAST REQUIREMENTS", "Mode fast requirements"),
+            ("PROTOCOL ALPHA REQUIREMENTS", "Protocol alpha requirements"),
         ):
             with self.subTest(old_header=old_header):
                 result = compare_extractions(

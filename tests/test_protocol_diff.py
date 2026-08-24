@@ -10771,6 +10771,53 @@ class ProtocolDiffTests(unittest.TestCase):
             result.changes[0].new_section.title,
         )
 
+    def test_running_header_match_does_not_consume_the_user_window_relation(self) -> None:
+        """Publication header evidence is not an automatic technical-body match."""
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-window-with-header.pdf"),
+                pages=[
+                    PageText(
+                        page_number=16,
+                        text="2.8.2 Calibration\n" + "legacy calibration alpha " * 80,
+                        running_header_texts=("TEST DESCRIPTIONS",),
+                    )
+                ],
+                total_pages=30,
+                selected_start_page=16,
+                selected_end_page=18,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-window-with-header.pdf"),
+                pages=[
+                    PageText(
+                        page_number=33,
+                        text="2.11.1 Receiver Setup\n" + "revised voltage branch " * 80,
+                        running_header_texts=("Test Descriptions",),
+                    )
+                ],
+                total_pages=80,
+                selected_start_page=33,
+                selected_end_page=35,
+            ),
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        anchored = [
+            change
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        ]
+        self.assertEqual(1, len(anchored))
+        self.assertEqual("Calibration", anchored[0].old_section.title)
+        self.assertEqual("Receiver Setup", anchored[0].new_section.title)
+
     def test_user_page_window_anchor_selects_the_strongest_procedure_overlap(self) -> None:
         """A multi-section window must anchor its shared procedure, not adjacent short clauses."""
 

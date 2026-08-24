@@ -2205,6 +2205,8 @@ def _user_page_window_anchor_pair(
         and new_index is not None
         and old_sections[old_index].role == "technical"
         and new_sections[new_index].role == "technical"
+        and old_sections[old_index].section_id != "running-header-evidence"
+        and new_sections[new_index].section_id != "running-header-evidence"
         for old_index, new_index, _score, _basis in matches
     )
 
@@ -3483,7 +3485,7 @@ def _publication_header_case_equivalent(old_value: str, new_value: str) -> bool:
     new_words = re.fullmatch(r"[A-Za-z]{4,}(?:\s+[A-Za-z]{4,})+", new_compact)
     if not old_words or not new_words:
         return False  # 数字、下划线、斜线、短缩写和混合标点都可能属于技术标识符。
-    publication_nouns = {
+    publication_title_words = {
         "chapter",
         "description",
         "descriptions",
@@ -3493,10 +3495,14 @@ def _publication_header_case_equivalent(old_value: str, new_value: str) -> bool:
         "requirement",
         "requirements",
         "section",
+        "sections",
         "specification",
         "specifications",
+        "test",
+        "tests",
     }
-    return bool(set(normalize_for_similarity(old_compact).split()) & publication_nouns)
+    observed_words = set(normalize_for_similarity(old_compact).split())
+    return observed_words <= publication_title_words
 
 
 def _delta_is_unverified_pua_mapping_only(
