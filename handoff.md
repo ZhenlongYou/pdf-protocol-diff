@@ -7,18 +7,18 @@
 - 目标：当用户同时给定新旧 PDF 起止页时，把双侧页窗视为强关联声明，让最相关的正文进入差异比较，而不是整节新增/删除。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- 代码提交：`03391a75b2794e1c0c93ab4b303a140b3c8a1f61`
+- 代码提交：`07d1fda61a9a6ffbc18ca770171b5f8d526f70da`
 
 ## 已经完成
 
-- 双侧起止页都明确时，常规/结构配对优先；若页窗内没有技术正文配对，则仅锚定步骤/段落重合最强的一对。
+- 双侧起止页都明确时，常规/结构配对优先；若没有技术正文配对，用户页窗本身授权最相关的一对；若已有技术关系，剩余章节还必须有步骤/段落骨架重合才可额外锚定。
 - 锚定只授权配对，报告仍显示实际全文相似度；其余无对应章节保留为新增/删除。
-- 单侧页码、空正文和已有技术配对不会触发额外强配。
+- 单侧页码、空正文、运行页眉和文档元数据不能单独充当技术正文关系；完全无关的剩余章节保留新增/删除。
 - 页边出版元数据清理只在坐标证据和重复页边证据成立时启用，不会靠纯文本规则删除正文版本号或日期。
 - 已处理首轮两名独立 reviewer 的全部发现：页窗内的普通小节配对不再阻断剩余核心正文；但已有技术关系后，剩余章节必须有骨架重合才可锚定；文档元数据排除。
-- 页眉大小写中和已限缩为无标识符的通用出版标题形状；`MODE_FAST/RX_CAL/ID ALPHA/GT/S` 等技术大小写变化仍可见。带 `shall/must/should/required/prohibited` 的底边正文不得被页脚规则删除。
-- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1093/1093 PASS`，475.702 s。
-- 故障注入：隔离副本中禁用用户页窗锚定后，2 项关键回归按预期失败；恢复后 3/3 PASS。
+- 页眉大小写中和已限缩为“整行所有词都属于出版导航词表”的标题；`MODE_FAST/RX_CAL/ID ALPHA/GT/S/MODE FAST REQUIREMENTS` 等技术大小写变化仍可见。带 `shall/must/should/required/prohibited` 的底边正文不得被页脚规则删除。
+- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1094/1094 PASS`，470.308 s。
+- 故障注入：隔离副本中分别重新引入“小节阻断锚定”、“页眉 blanket casefold”和“规范正文被页脚删除”，3 项定向测试全部按预期失败；当前提交 3/3 PASS。
 - 真实 PHY 3.0 p16–18 ↔ PHY 4.0 p33–35 已运行：`2.8.2` ↔ `2.11.1` 是同一个 `modified` 项，`match_basis=user_page_window_anchor`，实际相似度 `0.496694`；旧版 `2.9/2.9.1` 仍保留删除。
 
 ## 当前状态或阻塞
