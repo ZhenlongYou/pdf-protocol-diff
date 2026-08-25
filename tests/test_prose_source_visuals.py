@@ -493,10 +493,40 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             caption_index=0,
             blocking_bboxes=(),
             noise_bboxes=(),
+            vector_graphic_bboxes=((90.0, 150.0, 520.0, 530.0),),
         )
 
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], final_diagram_label.bbox[3])
+
+    def test_unnumbered_formula_below_vector_graphic_ends_the_figure(self) -> None:
+        """An equation below a proven plot is separate even when it has no number."""
+
+        caption = DocumentBlock(
+            1, (80.0, 100.0, 540.0, 118.0), DocumentBlockKind.TEXT,
+            "Figure 30-3. S-parameter limit", 0, "test",
+        )
+        axis_label = DocumentBlock(
+            1, (210.0, 430.0, 400.0, 444.0), DocumentBlockKind.TEXT,
+            "Frequency (GHz)", 1, "test",
+        )
+        formula = DocumentBlock(
+            1, (140.0, 500.0, 480.0, 514.0), DocumentBlockKind.TEXT,
+            "SCD11 ≤ -23+22*(f/fb) dB for 0.05 GHz ≤ f ≤ fb/2", 2, "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, axis_label, formula),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+            vector_graphic_bboxes=((130.0, 180.0, 500.0, 470.0),),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], axis_label.bbox[3])
+        self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
 
     def test_isolated_right_edge_noise_does_not_clip_source_content(self) -> None:
         """One footer fragment near an edge cannot redefine the body boundary."""

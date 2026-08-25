@@ -45,7 +45,7 @@ _MIN_VISIBLE_REGION_WIDTH = 6.0
 _MIN_VISIBLE_REGION_HEIGHT = 3.0
 _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
-_SOURCE_CROP_VERTICAL_PADDING = 2.0
+_SOURCE_CROP_VERTICAL_PADDING = 0.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
     r"^\s*(?:\d+\s+)?\d+(?:\.\d+)*\s+"
@@ -413,6 +413,7 @@ def _build_figure_visuals(
                 caption_index=caption_index,
                 blocking_bboxes=(blocking_bboxes_by_page or {}).get(page_number, ()),
                 noise_bboxes=page.visual_noise_bboxes,
+                vector_graphic_bboxes=page.vector_graphic_bboxes,
             )
             if crop_bbox is None:
                 continue
@@ -444,6 +445,7 @@ def _figure_crop_bbox(
     caption_index: int,
     blocking_bboxes: tuple[tuple[float, float, float, float], ...],
     noise_bboxes: tuple[tuple[float, float, float, float], ...],
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[float, float, float, float] | None:
     """Bound one caption-led Figure at the next prose, heading, Figure, or Table."""
 
@@ -458,6 +460,7 @@ def _figure_crop_bbox(
         page_bbox=page_bbox,
         content_left=left,
         content_right=right,
+        vector_graphic_bboxes=vector_graphic_bboxes,
     )
     if boundary_blocks:
         bottom = min(
@@ -489,6 +492,7 @@ def _figure_boundary_blocks(
     page_bbox: tuple[float, float, float, float],
     content_left: float,
     content_right: float,
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
 ) -> list[DocumentBlock]:
     """Collect content objects that take ownership below a Figure."""
 
@@ -514,6 +518,14 @@ def _figure_boundary_blocks(
     formula = _displayed_formula_boundary(blocks, caption=caption)
     if formula is not None:
         boundaries.append(formula)
+    unnumbered_formula = _unnumbered_formula_boundary(
+        blocks,
+        caption=caption,
+        page_bbox=page_bbox,
+        vector_graphic_bboxes=vector_graphic_bboxes,
+    )
+    if unnumbered_formula is not None:
+        boundaries.append(unnumbered_formula)
     return boundaries
 
 
@@ -574,6 +586,49 @@ def _looks_like_formula_expression(value: str) -> bool:
     operator_count = len(_DISPLAYED_FORMULA_OPERATOR_RE.findall(compact))
     number_count = len(re.findall(r"\d+(?:\.\d+)?", compact))
     return 8 <= len(compact) <= 240 and operator_count >= 2 and number_count >= 1
+
+
+def _unnumbered_formula_boundary(
+    blocks: tuple[DocumentBlock, ...],
+    *,
+    caption: DocumentBlock,
+    page_bbox: tuple[float, float, float, float],
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> DocumentBlock | None:
+    """Stop at unnumbered math only when it is geometrically below the graphic."""
+
+    graphic_bottom = _substantial_figure_graphic_bottom(
+        caption,
+        page_bbox=page_bbox,
+        vector_graphic_bboxes=vector_graphic_bboxes,
+    )
+    if graphic_bottom is None:
+        return None
+    candidates = [
+        block
+        for block in blocks
+        if block.bbox[1] >= graphic_bottom + 6.0
+        and _looks_like_formula_expression(block.text)
+    ]
+    return min(candidates, key=lambda block: (block.bbox[1], block.bbox[0])) if candidates else None
+
+
+def _substantial_figure_graphic_bottom(
+    caption: DocumentBlock,
+    *,
+    page_bbox: tuple[float, float, float, float],
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> float | None:
+    """Return the last edge of a wide or tall graphic below the Figure caption."""
+
+    page_width = max(1.0, page_bbox[2] - page_bbox[0])
+    substantial = [
+        bbox
+        for bbox in vector_graphic_bboxes
+        if bbox[3] > caption.bbox[3]
+        and bbox[2] - bbox[0] >= page_width * 0.18
+    ]
+    return max((bbox[3] for bbox in substantial), default=None)
 
 
 def _looks_like_prose_after_figure(value: str) -> bool:
