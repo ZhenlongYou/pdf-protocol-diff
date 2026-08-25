@@ -284,6 +284,28 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertEqual([], warnings)
             self.assertEqual([], visuals)
 
+    def test_partial_table_overlap_is_subtracted_from_a_prose_highlight(self) -> None:
+        """A text block crossing a table boundary must not tint the table-owned pixels."""
+
+        block = DocumentBlock(
+            page_number=1,
+            bbox=(10.0, 10.0, 100.0, 40.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Receiver voltage limit changes from 100 mV to 120 mV.",
+            reading_order=0,
+            source_engine="test",
+        )
+        table_bbox = (0.0, 30.0, 120.0, 60.0)
+
+        regions, matched_snippets = _highlight_boxes(
+            (block,),
+            ("Receiver voltage limit changes from 100 mV to 120 mV.",),
+            excluded_bboxes=(table_bbox,),
+        )
+
+        self.assertEqual(1, matched_snippets)
+        self.assertEqual(((10.0, 10.0, 100.0, 30.0),), regions)
+
     def test_snapshot_hash_mismatch_falls_back_to_text_without_stale_images(
         self,
     ) -> None:

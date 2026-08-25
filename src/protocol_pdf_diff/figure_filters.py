@@ -29,19 +29,27 @@ def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[s
     visual run and is preserved.
     """
 
+    observed = [(value, compact_inline(value)) for value in values]
+    observed = [(value, compact) for value, compact in observed if compact]
     kept: list[str] = []
-    inside_figure_visual = False
-    for value in values:
-        compact = compact_inline(value)
-        if not compact:
+    index = 0
+    while index < len(observed):
+        value, compact = observed[index]
+        if not _figure_caption_is_identifier_only(compact):
+            kept.append(value)
+            index += 1
             continue
-        if _figure_caption_is_identifier_only(compact):
-            inside_figure_visual = True
-            continue
-        if inside_figure_visual and _is_following_figure_visual_fragment(compact):
-            continue
-        inside_figure_visual = False
-        kept.append(value)
+
+        index += 1  # 独立 Figure 编号本身是定位标签，不作为技术变化展示。
+        fragment_start = index
+        while index < len(observed) and _is_following_figure_visual_fragment(
+            observed[index][1]
+        ):
+            index += 1
+        if index < len(observed):
+            kept.extend(
+                value for value, _compact in observed[fragment_start:index]
+            )  # 后面还有正常正文时，短标签缺少坐标证据，必须保守保留。
     return kept
 
 

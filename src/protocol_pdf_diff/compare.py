@@ -2309,7 +2309,10 @@ def _mapped_parent_unique_child_rescue_pairs(
         "evidence_suppressed_similarity_fallback",
         "unique_title_body_fallback",
     }
-    parent_pairs: dict[tuple[str, ...], tuple[tuple[str, ...], int, int]] = {}
+    parent_candidates: list[
+        tuple[tuple[str, ...], tuple[str, ...], int, int]
+    ] = []
+    source_parent_paths: Counter[tuple[str, ...]] = Counter()
     reverse_parent_paths: Counter[tuple[str, ...]] = Counter()
     for old_index, new_index, _score, basis in matches:
         if old_index is None or new_index is None or basis not in trusted_parent_bases:
@@ -2323,12 +2326,22 @@ def _mapped_parent_unique_child_rescue_pairs(
             != _review_unit_key(new_parent.title)
         ):
             continue
-        parent_pairs[old_parent.number_path] = (
-            new_parent.number_path,
-            old_parent.level,
-            new_parent.level,
+        parent_candidates.append(
+            (
+                old_parent.number_path,
+                new_parent.number_path,
+                old_parent.level,
+                new_parent.level,
+            )
         )
+        source_parent_paths[old_parent.number_path] += 1
         reverse_parent_paths[new_parent.number_path] += 1
+    parent_pairs = {
+        old_path: (new_path, old_level, new_level)
+        for old_path, new_path, old_level, new_level in parent_candidates
+        if source_parent_paths[old_path] == 1
+        and reverse_parent_paths[new_path] == 1
+    }  # 任一侧重复路径都不能靠字典覆盖顺序授权子章配对。
 
     old_child_title_counts = Counter(
         (section.number_path[:-1], _review_unit_key(section.title))

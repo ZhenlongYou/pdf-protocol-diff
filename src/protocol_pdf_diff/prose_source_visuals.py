@@ -282,7 +282,6 @@ def _highlight_boxes(
         if (
             block.text.strip()
             and block.kind is not DocumentBlockKind.TABLE
-            and not _bbox_center_in_any(block.bbox, excluded_bboxes)
         )
     )
     selected: dict[tuple[float, float, float, float], None] = {}
@@ -302,44 +301,52 @@ def _highlight_boxes(
                 overlap >= required
                 and overlap / len(block_tokens) >= _MIN_BLOCK_TOKEN_OVERLAP
             ):
-                clipped_bbox = _clip_outer_noise(block.bbox, excluded_bboxes)
-                if clipped_bbox is not None:
-                    selected[clipped_bbox] = None
+                visible_bboxes = _subtract_excluded_regions(
+                    block.bbox,
+                    excluded_bboxes,
+                )
+                if visible_bboxes:
+                    for visible_bbox in visible_bboxes:
+                        selected[visible_bbox] = None
                     snippet_matched = True
         if snippet_matched:
             matched_snippets += 1
     return tuple(sorted(selected, key=lambda box: (box[1], box[0]))), matched_snippets
 
 
-def _bbox_center_in_any(
+def _subtract_excluded_regions(
     bbox: tuple[float, float, float, float],
     excluded_bboxes: tuple[tuple[float, float, float, float], ...],
-) -> bool:
-    center_x = (bbox[0] + bbox[2]) / 2.0
-    center_y = (bbox[1] + bbox[3]) / 2.0
-    return any(
-        left <= center_x <= right and top <= center_y <= bottom
-        for left, top, right, bottom in excluded_bboxes
-    )
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Subtract every proven table/noise rectangle from one highlight block."""
 
-
-def _clip_outer_noise(
-    bbox: tuple[float, float, float, float],
-    excluded_bboxes: tuple[tuple[float, float, float, float], ...],
-) -> tuple[float, float, float, float] | None:
-    """Keep highlight color out of proven left/right printing-number gutters."""
-
-    left, top, right, bottom = bbox
-    for noise_left, noise_top, noise_right, noise_bottom in excluded_bboxes:
-        if min(bottom, noise_bottom) <= max(top, noise_top):
-            continue
-        if noise_left <= left <= noise_right < right:
-            left = max(left, noise_right)
-        elif left < noise_left <= right <= noise_right:
-            right = min(right, noise_left)
-    if right - left < 1.0 or bottom - top < 1.0:
-        return None
-    return (left, top, right, bottom)
+    pieces = [bbox]
+    for excluded in excluded_bboxes:
+        next_pieces: list[tuple[float, float, float, float]] = []
+        for left, top, right, bottom in pieces:
+            overlap_left = max(left, excluded[0])
+            overlap_top = max(top, excluded[1])
+            overlap_right = min(right, excluded[2])
+            overlap_bottom = min(bottom, excluded[3])
+            if overlap_right <= overlap_left or overlap_bottom <= overlap_top:
+                next_pieces.append((left, top, right, bottom))
+                continue
+            candidates = (
+                (left, top, right, overlap_top),
+                (left, overlap_bottom, right, bottom),
+                (left, overlap_top, overlap_left, overlap_bottom),
+                (overlap_right, overlap_top, right, overlap_bottom),
+            )
+            next_pieces.extend(
+                candidate
+                for candidate in candidates
+                if candidate[2] - candidate[0] >= 1.0
+                and candidate[3] - candidate[1] >= 1.0
+            )
+        pieces = next_pieces
+        if not pieces:
+            break
+    return tuple(pieces)
 
 
 def _tokens(value: str) -> tuple[str, ...]:

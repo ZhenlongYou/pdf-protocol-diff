@@ -16,6 +16,7 @@ from protocol_pdf_diff import reporting as reporting_module
 from protocol_pdf_diff.compare import (
     _covered_table_visual_row_keys,
     _last_table_caption_line,
+    _mapped_parent_unique_child_rescue_pairs,
     _match_sections,
     _paragraph_review_units,
     _review_unit_key,
@@ -114,7 +115,36 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         cleaned = _reader_section_change(change)
 
         self.assertIsNotNone(cleaned)
-        self.assertEqual([requirement], cleaned.removed_snippets)
+        self.assertEqual(["Receiver setup", requirement], cleaned.removed_snippets)
+
+    def test_figure_label_does_not_hide_an_ambiguous_technical_item(self) -> None:
+        """Text shape alone cannot prove that a terse technical item belongs to a figure."""
+
+        technical_item = "Maximum differential voltage"
+        requirement = "The receiver shall meet the declared limit at TP4."
+        section = Section(
+            section_id="ambiguous-figure-neighbor",
+            heading="1 Receiver requirement",
+            title="Receiver requirement",
+            level=1,
+            heading_path=("1 Receiver requirement",),
+            number_path=("1",),
+            start_page=1,
+            end_page=1,
+            body=f"Figure 1-2.\n{technical_item}\n{requirement}",
+        )
+        change = SectionChange(
+            change_type="deleted",
+            old_section=section,
+            new_section=None,
+            similarity=0.0,
+            removed_snippets=["Figure 1-2.", technical_item, requirement],
+        )
+
+        cleaned = _reader_section_change(change)
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([technical_item, requirement], cleaned.removed_snippets)
 
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""
@@ -267,6 +297,52 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual("unique_title_body_fallback", matches[0][3])
         child_match = next(match for match in matches if match[:2] == (1, 1))
         self.assertEqual("structural_mapped_parent_unique_child", child_match[3])
+
+    def test_duplicate_parent_path_cannot_redirect_a_unique_child_rescue(self) -> None:
+        """Repeated extracted paths must fail closed instead of overwriting parent identity."""
+
+        def section(
+            section_id: str,
+            title: str,
+            level: int,
+            number_path: tuple[str, ...],
+        ) -> Section:
+            return Section(
+                section_id=section_id,
+                heading=f"{' '.join(number_path)} {title}",
+                title=title,
+                level=level,
+                heading_path=(title,),
+                number_path=number_path,
+                start_page=1,
+                end_page=1,
+                body=f"{title} shall preserve its own parent identity.",
+            )
+
+        old_sections = [
+            section("old-alpha", "Alpha parent", 1, ("1",)),
+            section("old-method", "Method", 2, ("1", "1.1")),
+            section("old-beta", "Beta parent", 1, ("1",)),
+        ]
+        new_sections = [
+            section("new-alpha", "Alpha parent", 1, ("10",)),
+            section("new-beta", "Beta parent", 1, ("20",)),
+            section("new-method", "Method", 2, ("20", "20.1")),
+        ]
+        matches = [
+            (0, 0, 0.9, "unique_title_body_fallback"),
+            (2, 1, 0.9, "unique_title_body_fallback"),
+        ]
+
+        rescued = _mapped_parent_unique_child_rescue_pairs(
+            old_sections,
+            new_sections,
+            matches,
+            {0, 2},
+            {0, 1},
+        )
+
+        self.assertEqual([], rescued)
 
     def test_exact_table_reconciliation_transposes_only_codec_newlines(self) -> None:
         """A merged header/data row is recoverable without treating `/` as layout."""
