@@ -45,8 +45,9 @@ _MIN_VISIBLE_REGION_WIDTH = 6.0
 _MIN_VISIBLE_REGION_HEIGHT = 3.0
 _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
-_SOURCE_CROP_VERTICAL_PADDING = 0.0
+_SOURCE_CROP_VERTICAL_PADDING = 2.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
+_SOURCE_PARAGRAPH_LINE_MAX_GAP = 4.0
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
     r"^\s*(?:\d+\s+)?\d+(?:\.\d+)*\s+"
     r"(?=[A-Za-z0-9 /()_-]*[A-Za-z]{3})[A-Z][A-Za-z0-9 /()_-]{2,}"
@@ -308,6 +309,15 @@ def _build_side_visuals(
         boxes, matched_snippet_count = _highlight_boxes(
             page.blocks,
             page_snippets,
+            allowed_text=page_body,
+            excluded_bboxes=(
+                *page.visual_noise_bboxes,
+                *(excluded_bboxes_by_page or {}).get(page_number, ()),
+            ),
+        )
+        boxes = _expand_boxes_to_complete_paragraph_lines(
+            page.blocks,
+            boxes,
             allowed_text=page_body,
             excluded_bboxes=(
                 *page.visual_noise_bboxes,
@@ -847,6 +857,70 @@ def _highlight_boxes(
         if snippet_matched:
             matched_snippets += 1
     return tuple(sorted(selected, key=lambda box: (box[1], box[0]))), matched_snippets
+
+
+def _expand_boxes_to_complete_paragraph_lines(
+    blocks: Iterable[DocumentBlock],
+    boxes: tuple[tuple[float, float, float, float], ...],
+    *,
+    allowed_text: str = "",
+    excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Grow matched lines to complete tightly connected source paragraphs.
+
+    Exact snippet matching can stop on a subscript or the penultimate line of a
+    paragraph.  A raw source crop should remain readable context, so include
+    coordinate-adjacent lines that still belong to the same section.  The
+    strict vertical-gap limit prevents the next heading or paragraph from
+    leaking into the crop.
+    """
+
+    if not boxes:
+        return ()
+    candidates: list[tuple[float, float, float, float]] = []
+    for block in blocks:
+        if (
+            not block.text.strip()
+            or block.kind is DocumentBlockKind.TABLE
+            or (
+                allowed_text
+                and not _block_belongs_to_section(block.text, allowed_text)
+            )
+        ):
+            continue
+        candidates.extend(_subtract_excluded_regions(block.bbox, excluded_bboxes))
+
+    expanded = set(boxes)
+    changed = True
+    while changed:
+        changed = False
+        for candidate in candidates:
+            if candidate in expanded:
+                continue
+            if any(
+                _paragraph_lines_are_connected(candidate, selected)
+                for selected in expanded
+            ):
+                expanded.add(candidate)
+                changed = True
+    return tuple(sorted(expanded, key=lambda box: (box[1], box[0])))
+
+
+def _paragraph_lines_are_connected(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> bool:
+    vertical_gap = max(first[1], second[1]) - min(first[3], second[3])
+    if vertical_gap > _SOURCE_PARAGRAPH_LINE_MAX_GAP:
+        return False
+    first_width = max(1.0, first[2] - first[0])
+    second_width = max(1.0, second[2] - second[0])
+    horizontal_overlap = max(
+        0.0,
+        min(first[2], second[2]) - max(first[0], second[0]),
+    )
+    aligned_left = abs(first[0] - second[0]) <= 28.0
+    return aligned_left or horizontal_overlap / min(first_width, second_width) >= 0.35
 
 
 def _block_belongs_to_section(block_text: str, section_page_body: str) -> bool:

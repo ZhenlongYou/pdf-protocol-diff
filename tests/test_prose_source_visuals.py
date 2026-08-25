@@ -28,6 +28,7 @@ from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
     _content_horizontal_bounds,
     _crop_regions,
+    _expand_boxes_to_complete_paragraph_lines,
     _figure_crop_bbox,
     _highlight_boxes,
     _page_contains_figure_caption,
@@ -594,6 +595,52 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual((80, 40), cropped.size)
         self.assertEqual(source.crop((20, 20, 100, 60)).tobytes(), cropped.tobytes())
+
+    def test_prose_crop_expands_to_the_complete_connected_paragraph(self) -> None:
+        """A changed line must not leave the final continuation line half visible."""
+
+        blocks = (
+            DocumentBlock(
+                1,
+                (80.0, 80.0, 530.0, 92.0),
+                DocumentBlockKind.TEXT,
+                "Ceeq is derived from the FFE tap weights and is measured",
+                0,
+                "test",
+            ),
+            DocumentBlock(
+                1,
+                (80.0, 93.0, 520.0, 105.0),
+                DocumentBlockKind.TEXT,
+                "after the CTLE in the reference receiver.",
+                1,
+                "test",
+            ),
+            DocumentBlock(
+                1,
+                (80.0, 106.0, 250.0, 118.0),
+                DocumentBlockKind.TEXT,
+                "measurement methods.",
+                2,
+                "test",
+            ),
+            DocumentBlock(
+                1,
+                (80.0, 140.0, 300.0, 154.0),
+                DocumentBlockKind.TEXT,
+                "29.3.14 Overshoot/Undershoot",
+                3,
+                "test",
+            ),
+        )
+        selected = (blocks[0].bbox, blocks[1].bbox)
+        expanded = _expand_boxes_to_complete_paragraph_lines(
+            blocks,
+            selected,
+            allowed_text=" ".join(block.text for block in blocks[:3]),
+        )
+
+        self.assertEqual((blocks[0].bbox, blocks[1].bbox, blocks[2].bbox), expanded)
 
     def test_tiny_residual_after_margin_subtraction_is_dropped(self) -> None:
         """A one-letter sliver must never be enlarged into a full report panel."""
