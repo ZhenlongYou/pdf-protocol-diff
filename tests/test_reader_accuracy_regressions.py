@@ -120,8 +120,12 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
     def test_figure_label_does_not_hide_an_ambiguous_technical_item(self) -> None:
         """Text shape alone cannot prove that a terse technical item belongs to a figure."""
 
-        technical_item = "Maximum differential voltage"
-        requirement = "The receiver shall meet the declared limit at TP4."
+        technical_items = [
+            "Maximum differential voltage",
+            "VMA = V3 - V0",
+            "Voltage Modulation Amplitude (VMA)",
+            "Ceeq",
+        ]
         section = Section(
             section_id="ambiguous-figure-neighbor",
             heading="1 Receiver requirement",
@@ -131,20 +135,20 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             number_path=("1",),
             start_page=1,
             end_page=1,
-            body=f"Figure 1-2.\n{technical_item}\n{requirement}",
+            body="\n".join(["Figure 1-2.", *technical_items]),
         )
         change = SectionChange(
             change_type="deleted",
             old_section=section,
             new_section=None,
             similarity=0.0,
-            removed_snippets=["Figure 1-2.", technical_item, requirement],
+            removed_snippets=["Figure 1-2.", *technical_items],
         )
 
         cleaned = _reader_section_change(change)
 
         self.assertIsNotNone(cleaned)
-        self.assertEqual([technical_item, requirement], cleaned.removed_snippets)
+        self.assertEqual(technical_items, cleaned.removed_snippets)
 
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""

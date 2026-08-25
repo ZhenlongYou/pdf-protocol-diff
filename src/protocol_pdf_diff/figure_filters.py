@@ -41,15 +41,22 @@ def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[s
             continue
 
         index += 1  # 独立 Figure 编号本身是定位标签，不作为技术变化展示。
-        fragment_start = index
-        while index < len(observed) and _is_following_figure_visual_fragment(
-            observed[index][1]
-        ):
+        protected: list[str] = []
+        while index < len(observed):
+            candidate, candidate_compact = observed[index]
+            if _figure_caption_is_identifier_only(candidate_compact):
+                index += 1
+                continue
+            if _is_figure_visual_prose_boundary(candidate_compact):
+                kept.extend(protected)
+                kept.append(candidate)
+                index += 1
+                break
+            if not _is_following_figure_visual_fragment(candidate_compact):
+                protected.append(candidate)
             index += 1
-        if index < len(observed):
-            kept.extend(
-                value for value, _compact in observed[fragment_start:index]
-            )  # 后面还有正常正文时，短标签缺少坐标证据，必须保守保留。
+        else:
+            kept.extend(protected)
     return kept
 
 
@@ -65,13 +72,24 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
 def _is_following_figure_visual_fragment(value: str) -> bool:
     """Recognize a split caption/diagram line after a naked Figure label."""
 
-    if len(value) > 500:
+    if _is_figure_visual_prose_boundary(value):
         return False
-    if _PROSE_OR_REQUIREMENT_VERB_RE.search(value):
-        return False
-    if re.match(r"^(?:\d+(?:\.\d+)+|[A-Z]?\d+[.)])\s+", value):
-        return False  # A numbered clause/list item starts real document structure.
-    return not re.search(
-        r"[.!?。！？]\s*$",
-        value,
-    )  # A complete sentence after the caption begins prose again.
+    if re.search(r"(?:=|≠|≤|≥|<|>|±|\+|−|\*|/)", value):
+        return False  # Formula/operator syntax is technical evidence without geometry.
+    words = re.findall(r"[A-Za-z0-9_]+", value)
+    if len(words) <= 4:
+        return False  # A terse label is ambiguous; keep it unless coordinates prove ownership.
+    if re.search(r"\([A-Za-z][A-Za-z0-9_]{1,12}\)", value):
+        return False  # Parenthesized acronym/symbol labels remain visible.
+    return True
+
+
+def _is_figure_visual_prose_boundary(value: str) -> bool:
+    """Return whether a fragment clearly resumes ordinary document prose."""
+
+    return bool(
+        len(value) > 500
+        or _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+        or re.match(r"^(?:\d+(?:\.\d+)+|[A-Z]?\d+[.)])\s+", value)
+        or re.search(r"[.!?。！？]\s*$", value)
+    )
