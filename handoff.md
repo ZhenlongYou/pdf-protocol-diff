@@ -3,7 +3,8 @@
 ## 当前任务
 
 - task_id: `pdf-diff-prose-source-visuals-20260825`
-- status: ready for exact-commit acceptance
+- status: ready
+- recorded code commit: `915f8604ce48983907ebea09eebc847b85e37d29`
 - 目标：大段正文变化不再先展示难读的整段删除/新增，而是把新旧 PDF 原文区域截图并排展示，并在原文坐标范围内标出差异；OCR 文字明细默认折叠。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
