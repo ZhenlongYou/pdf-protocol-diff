@@ -18,15 +18,18 @@ _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
     r"provide(?:s|d)?|preserve(?:s|d)?|apply|applies|applied)\b"
     r"|应|必须|不得|要求|规定|显示|说明|描述|定义"
 )
+_FIGURE_PREFIX_RE = re.compile(
+    r"(?i)^\s*Figure\s+[A-Z]?\d+(?:[-.]\d+)*(?:\s*[.:])?\s*(?P<tail>.*)$"
+)
 
 
 def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[str]:
     """Remove Figure labels plus adjacent caption/diagram fragments.
 
     A normal sentence that references a Figure is retained by the extractor's
-    existing classifier. After a naked ``Figure N.`` label, only consecutive
-    non-sentence fragments are removed; the first prose requirement closes the
-    visual run and is preserved.
+    existing classifier. After a naked ``Figure N.`` label, every consecutive
+    non-prose fragment belongs to the source image, including terse VMA/axis
+    labels and formulas. The first genuine prose sentence closes the visual run.
     """
 
     observed = [(value, compact_inline(value)) for value in values]
@@ -35,28 +38,25 @@ def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[s
     index = 0
     while index < len(observed):
         value, compact = observed[index]
+        if _is_combined_figure_visual_fragment(compact):
+            index += 1
+            continue
         if not _figure_caption_is_identifier_only(compact):
             kept.append(value)
             index += 1
             continue
 
         index += 1  # 独立 Figure 编号本身是定位标签，不作为技术变化展示。
-        protected: list[str] = []
         while index < len(observed):
             candidate, candidate_compact = observed[index]
             if _figure_caption_is_identifier_only(candidate_compact):
                 index += 1
                 continue
             if _is_figure_visual_prose_boundary(candidate_compact):
-                kept.extend(protected)
                 kept.append(candidate)
                 index += 1
                 break
-            if not _is_following_figure_visual_fragment(candidate_compact):
-                protected.append(candidate)
             index += 1
-        else:
-            kept.extend(protected)
     return kept
 
 
@@ -69,20 +69,14 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
     )
 
 
-def _is_following_figure_visual_fragment(value: str) -> bool:
-    """Recognize a split caption/diagram line after a naked Figure label."""
+def _is_combined_figure_visual_fragment(value: str) -> bool:
+    """Recognize one extracted block containing a Figure caption plus labels."""
 
-    if _is_figure_visual_prose_boundary(value):
+    match = _FIGURE_PREFIX_RE.match(value)
+    if match is None or _figure_caption_is_identifier_only(value):
         return False
-    if re.search(r"(?:=|≠|≤|≥|<|>|±|\+|−|\*|/)", value):
-        return False  # Formula/operator syntax is technical evidence without geometry.
-    words = re.findall(r"[A-Za-z0-9_]+", value)
-    if len(words) <= 4:
-        return False  # A terse label is ambiguous; keep it unless coordinates prove ownership.
-    return not re.search(
-        r"\([A-Za-z][A-Za-z0-9_]{1,12}\)",
-        value,
-    )  # Parenthesized acronym/symbol labels remain visible.
+    tail = match.group("tail").strip()
+    return bool(tail) and not _is_figure_visual_prose_boundary(tail)
 
 
 def _is_figure_visual_prose_boundary(value: str) -> bool:

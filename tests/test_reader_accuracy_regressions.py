@@ -115,10 +115,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         cleaned = _reader_section_change(change)
 
         self.assertIsNotNone(cleaned)
-        self.assertEqual(["Receiver setup", requirement], cleaned.removed_snippets)
+        self.assertEqual([requirement], cleaned.removed_snippets)
 
-    def test_figure_label_does_not_hide_an_ambiguous_technical_item(self) -> None:
-        """Text shape alone cannot prove that a terse technical item belongs to a figure."""
+    def test_figure_run_is_removed_from_reader_text_when_source_image_owns_it(self) -> None:
+        """Terse VMA/axis labels after a Figure caption belong to its raw image card."""
 
         technical_items = [
             "Maximum differential voltage",
@@ -147,8 +147,36 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         cleaned = _reader_section_change(change)
 
-        self.assertIsNotNone(cleaned)
-        self.assertEqual(technical_items, cleaned.removed_snippets)
+        self.assertIsNone(cleaned)
+
+    def test_combined_figure_caption_and_label_wall_is_not_word_compared(self) -> None:
+        """A caption and diagram labels extracted as one block still stay out of prose diff."""
+
+        old_text = (
+            "Figure 29-1. End-to-end linear channel Host A Host B retimer function "
+            "TP1 TP1a Fiber patchcord TP2 TP3 TP4a TP4 Optical transmitter receiver"
+        )
+        new_text = (
+            "Figure 30-1. End to End Linear Channel TP0 Channel Loss TP1a TP2 TP3 "
+            "TP4a TP4 TP5 Host Tx Driver TIA O/E Host Rx"
+        )
+        old_section = Section(
+            "old-figure", "29.3.1 Channel", "Channel", 2,
+            ("29.3.1 Channel",), ("29.3.1",), 1, 1, old_text,
+        )
+        new_section = Section(
+            "new-figure", "30.3.1 Channel", "Channel", 2,
+            ("30.3.1 Channel",), ("30.3.1",), 1, 1, new_text,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.5,
+            replaced_snippets=[SnippetPair(old_text, new_text)],
+        )
+
+        self.assertIsNone(_reader_section_change(change))
 
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""

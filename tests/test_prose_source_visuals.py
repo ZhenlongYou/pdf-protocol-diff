@@ -26,8 +26,10 @@ from protocol_pdf_diff.models import (
 )
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
-    _annotated_crop,
+    _crop_regions,
     _highlight_boxes,
+    _source_crop,
+    _subtract_excluded_regions,
     build_prose_source_visuals,
 )
 from protocol_pdf_diff.reporting import write_reports
@@ -64,10 +66,10 @@ class _FirstViewText(HTMLParser):
 class ProseSourceVisualReportTests(unittest.TestCase):
     """Exercise the real PDF -> comparison -> standalone HTML path."""
 
-    def test_long_modified_prose_uses_aligned_source_crops_and_collapsed_text(
+    def test_long_modified_prose_leads_with_structured_diff_and_collapses_raw_source(
         self,
     ) -> None:
-        """Long prose must lead with old/new source crops, not a wall of diff text."""
+        """Word-level text is primary; raw PDF crops are optional provenance only."""
 
         common = [
             "The receiver calibration procedure records the signal generator state.",
@@ -105,14 +107,17 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertIn("旧版原文区域", html)
             self.assertIn("新版原文区域", html)
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
-            self.assertIn('class="prose-text-details"', html)
-            self.assertIn("查看文字识别明细", html)
-            self.assertIn("原文坐标浅色标注", html)
+            self.assertIn('class="prose-source-details"', html)
+            self.assertIn("查看原文出处（无颜色对比）", html)
+            self.assertNotIn('class="prose-text-details"', html)
+            self.assertNotIn("查看文字识别明细", html)
+            self.assertNotIn("原文坐标浅色标注", html)
+            self.assertLess(html.index('class="compare-grid"'), html.index('class="prose-source-details"'))
 
             first_view = _FirstViewText()
             first_view.feed(html)
             first_view.close()
-            self.assertNotIn(old_steps[0], "".join(first_view.parts))
+            self.assertIn(old_steps[0], "".join(first_view.parts))
             self.assertIn("Calibration step 1 uses", html)
             self.assertIn("101", html)
 
@@ -120,8 +125,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertEqual(1, len(visuals))
             self.assertEqual([1], visuals[0]["old_pages"])
             self.assertEqual([1], visuals[0]["new_pages"])
-            self.assertGreater(visuals[0]["old_highlight_region_count"], 0)
-            self.assertGreater(visuals[0]["new_highlight_region_count"], 0)
+            self.assertEqual(0, visuals[0]["old_highlight_region_count"])
+            self.assertEqual(0, visuals[0]["new_highlight_region_count"])
             self.assertNotIn("image_data_uri", json.dumps(visuals))
 
     def test_short_change_keeps_compact_text_without_source_screenshot(self) -> None:
@@ -144,30 +149,106 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
             self.assertNotIn('class="prose-source-visual-grid"', html)
-            self.assertNotIn('class="prose-text-details"', html)
+            self.assertNotIn('class="prose-source-details"', html)
             self.assertIn("100", html)
             self.assertIn("120", html)
             self.assertEqual([], payload["prose_source_visuals"])
 
-    def test_source_highlight_is_translucent_enough_to_keep_text_visible(self) -> None:
-        """A pale overlay may tint the source but must not turn text into a color block."""
+    def test_figure_only_change_renders_raw_images_without_text_comparison(self) -> None:
+        """A Figure change remains visible as old/new raw images, never as label-wall diff."""
+
+        old_figure_text = "Legacy VMA diagram TP1 TP2 Optical transmitter receiver"
+        new_figure_text = "Revised VMA diagram TP1a TP3 Driver TIA Host Rx"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                root / "old figure.pdf",
+                [["1 Receiver setup", "Figure 1-1.", old_figure_text]],
+            )
+            new_pdf = write_multipage_text_pdf(
+                root / "new figure.pdf",
+                [["1 Receiver setup", "Figure 1-2.", new_figure_text]],
+            )
+
+            result = run_diff(
+                old_pdf,
+                new_pdf,
+                DiffOptions(visual_watchdog=False),
+            )
+            outputs = write_reports(result, root / "reports", DiffOptions())
+            html = outputs["html"].read_text(encoding="utf-8")
+
+            self.assertIn('class="figure-source-visual-grid"', html)
+            self.assertIn("Figure 原图（不做文字或颜色自动对比）", html)
+            self.assertNotIn("浅色标注", html)
+            first_view = _FirstViewText()
+            first_view.feed(html)
+            first_view.close()
+            visible_text = "".join(first_view.parts)
+            self.assertNotIn(old_figure_text, visible_text)
+            self.assertNotIn(new_figure_text, visible_text)
+            self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
+
+    def test_source_crop_preserves_original_pixels_without_overlay(self) -> None:
+        """Source provenance must stay raw; only structured text owns change colors."""
 
         source = Image.new("RGB", (120, 80), "white")
         draw = ImageDraw.Draw(source)
         draw.rectangle((35, 35, 85, 45), fill="black")
 
-        _crop_bbox, annotated, region_count = _annotated_crop(
+        crop_bbox = (20.0, 20.0, 100.0, 60.0)
+        cropped = _source_crop(
             source,
             page_bbox=(0.0, 0.0, 120.0, 80.0),
-            highlight_boxes=((20.0, 20.0, 100.0, 60.0),),
+            crop_bbox=crop_bbox,
         )
 
-        self.assertEqual(1, region_count)
-        text_pixel = annotated.getpixel((60, 40))
-        background_pixel = annotated.getpixel((60, 30))
-        self.assertLess(max(text_pixel), 50)
-        self.assertNotEqual(source.getpixel((60, 30)), background_pixel)
-        self.assertGreater(min(background_pixel), 220)
+        self.assertEqual((80, 40), cropped.size)
+        self.assertEqual(source.crop((20, 20, 100, 60)).tobytes(), cropped.tobytes())
+
+    def test_tiny_residual_after_margin_subtraction_is_dropped(self) -> None:
+        """A one-letter sliver must never be enlarged into a full report panel."""
+
+        regions = _subtract_excluded_regions(
+            (10.0, 10.0, 100.0, 30.0),
+            ((0.0, 0.0, 97.0, 80.0),),
+        )
+
+        self.assertEqual((), regions)
+
+    def test_source_crop_regions_split_around_a_recognized_table(self) -> None:
+        """Text above and below a Table must become two crops that never include it."""
+
+        table = (20.0, 100.0, 580.0, 300.0)
+        crops = _crop_regions(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            boxes=((40.0, 60.0, 560.0, 82.0), (40.0, 330.0, 560.0, 352.0)),
+            blocking_bboxes=(table,),
+            noise_bboxes=(),
+        )
+
+        self.assertEqual(2, len(crops))
+        self.assertLessEqual(crops[0][3], table[1])
+        self.assertGreaterEqual(crops[1][1], table[3])
+        self.assertTrue(all((crop[2] - crop[0]) / (crop[3] - crop[1]) > 1.2 for crop in crops))
+
+    def test_block_matching_is_restricted_to_the_current_section_page_body(self) -> None:
+        """A parent card cannot borrow a child heading from the same physical page."""
+
+        blocks = (
+            DocumentBlock(1, (40.0, 40.0, 560.0, 60.0), DocumentBlockKind.TEXT, "30.3 Electrical Characteristics", 0, "test"),
+            DocumentBlock(1, (40.0, 70.0, 560.0, 95.0), DocumentBlockKind.TEXT, "Hosts shall meet the applicable specifications defined in Table 30-1.", 1, "test"),
+            DocumentBlock(1, (40.0, 150.0, 560.0, 170.0), DocumentBlockKind.TEXT, "30.3.1 End-to-end linear channel description", 2, "test"),
+        )
+
+        regions, matched = _highlight_boxes(
+            blocks,
+            ("Hosts shall meet the applicable specifications defined in Table 30-1.",),
+            allowed_text="30.3 Electrical Characteristics\nHosts shall meet the applicable specifications defined in Table 30-1.",
+        )
+
+        self.assertEqual(1, matched)
+        self.assertEqual(((40.0, 70.0, 560.0, 95.0),), regions)
 
     def test_source_highlights_exclude_and_clip_proven_gutter_numbers(self) -> None:
         """Printed line numbers must remain outside even when glued to body text."""

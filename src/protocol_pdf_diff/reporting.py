@@ -339,6 +339,11 @@ def write_reports(
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     reader_changes: list[SectionChange] = []
+    figure_visual_identities = {
+        _prose_source_visual_identity(group)
+        for group in result.prose_source_visuals
+        if group.old_figure_visuals or group.new_figure_visuals
+    }
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
         if change.role == "document_metadata":
@@ -347,6 +352,18 @@ def write_reports(
             change,
             reader_table_evidence,
         )
+        if (
+            reader_change is None
+            and _section_change_visual_identity(change) in figure_visual_identities
+        ):
+            reader_change = replace(
+                change,
+                added_snippets=[],
+                removed_snippets=[],
+                replaced_snippets=[],
+                omitted_snippet_count=0,
+                review_replaced_snippets=[],
+            )
         if reader_change is not None:
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
@@ -1118,16 +1135,15 @@ def _render_html(
       font-size: 13px;
       margin-bottom: 8px;
     }}
-    .prose-highlight-key {{
-      display: inline-block;
-      width: 18px;
-      height: 10px;
-      margin-right: 4px;
-      vertical-align: baseline;
-      border: 1px solid #ca6f00;
-      background: rgba(255, 196, 61, 0.18);
-    }}
     .prose-source-visual-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+    }}
+    .figure-source-visual {{ margin-top: 14px; }}
+    .figure-source-visual > h4 {{ margin: 0 0 8px; color: var(--blue); font-size: 15px; }}
+    .figure-source-visual-note {{ margin: 0 0 8px; color: var(--muted); font-size: 13px; }}
+    .figure-source-visual-grid {{
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 12px;
@@ -1165,20 +1181,20 @@ def _render_html(
       background: var(--mod-bg);
       border-top: 1px solid #f1d489;
     }}
-    .prose-text-details {{
+    .prose-source-details {{
       margin-top: 10px;
       border: 1px dashed var(--line);
       border-radius: 8px;
       background: #f8fafc;
     }}
-    .prose-text-details > summary {{
+    .prose-source-details > summary {{
       cursor: pointer;
       padding: 9px 11px;
       color: var(--blue);
       font-weight: 600;
     }}
-    .prose-text-details[open] > summary {{ border-bottom: 1px solid var(--line); }}
-    .prose-text-details-body {{ padding: 0 10px 10px; }}
+    .prose-source-details[open] > summary {{ border-bottom: 1px solid var(--line); }}
+    .prose-source-details-body {{ padding: 10px; }}
     .pane {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1440,6 +1456,7 @@ def _render_html(
       main {{ padding: 14px; }}
       .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: minmax(0, 1fr); }}
       .prose-source-visual-grid {{ grid-template-columns: minmax(0, 1fr); }}
+      .figure-source-visual-grid {{ grid-template-columns: minmax(0, 1fr); }}
       .formula-index-list {{ grid-template-columns: minmax(0, 1fr); }}
       .table-shot-grid, .table-shot {{ min-width: 0; max-width: 100%; }}
       .table-row-summary {{ table-layout: fixed; min-width: 0; }}
@@ -1535,15 +1552,17 @@ def _render_change_html(
     body += added
     body += removed
     body += omitted
-    if not body:
+    figure_html = (
+        _render_figure_source_visual_group(prose_source_visual)
+        if prose_source_visual is not None
+        else ""
+    )
+    if not body and not figure_html:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
+    body += figure_html
     if prose_source_visual is not None:
         source_visual_html = _render_prose_source_visual_group(prose_source_visual)
-        body = (
-            source_visual_html
-            + '<details class="prose-text-details"><summary>查看文字识别明细</summary>'
-            + f'<div class="prose-text-details-body">{body}</div></details>'
-        )
+        body += source_visual_html
     # 公式截图紧跟其条款正文，读者无需在独立公式墙和技术差异之间来回跳转。
     formula_html = _render_inline_formula_group(tuple(formula_placements))
     return f"""
@@ -1577,6 +1596,8 @@ def _prose_source_visual_identity(
 
 
 def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
+    if not group.old_visuals and not group.new_visuals:
+        return ""
     old_side = _render_prose_source_visual_side(
         "旧版原文区域",
         group.old_visuals,
@@ -1590,11 +1611,35 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
         omitted_page_count=group.new_omitted_page_count,
     )
     return (
+        '<details class="prose-source-details"><summary>查看原文出处（无颜色对比）</summary>'
+        '<div class="prose-source-details-body">'
         '<div class="prose-source-visual">'
-        '<div class="prose-source-visual-legend">'
-        '<span class="prose-highlight-key"></span> 原文坐标浅色标注；已排除确认过的页边行号，精确文字仍可展开核对。'
-        '</div>'
+        '<div class="prose-source-visual-legend">原文截图只用于定位核对；差异颜色仅出现在上方结构化文字中。</div>'
         f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
+        '</div></div></details>'
+    )
+
+
+def _render_figure_source_visual_group(group: ProseSourceVisualGroup) -> str:
+    """Render Figure evidence raw and explicitly outside automatic text comparison."""
+
+    if not group.old_figure_visuals and not group.new_figure_visuals:
+        return ""
+    old_side = _render_prose_source_visual_side(
+        "旧版 Figure 原图",
+        group.old_figure_visuals,
+        "旧版无对应 Figure 原图",
+    )
+    new_side = _render_prose_source_visual_side(
+        "新版 Figure 原图",
+        group.new_figure_visuals,
+        "新版无对应 Figure 原图",
+    )
+    return (
+        '<div class="figure-source-visual">'
+        '<h4>Figure 原图（不做文字或颜色自动对比）</h4>'
+        '<p class="figure-source-visual-note">图题、坐标轴、框内标签和重复术语只在原图中呈现；请直接目视核对。</p>'
+        f'<div class="figure-source-visual-grid">{old_side}{new_side}</div>'
         '</div>'
     )
 
@@ -1610,10 +1655,9 @@ def _render_prose_source_visual_side(
     if materialized:
         pages = "".join(
             '<figure class="prose-source-page">'
-            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
-            f'{visual.highlight_region_count} 个浅色标注</figcaption>'
+            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · 原始裁剪，无标色</figcaption>'
             f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
-            f'{_escape(str(visual.page_number))} 页浅色标注截图">'
+            f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
             '</figure>'
             for visual in materialized
         )
@@ -1622,7 +1666,7 @@ def _render_prose_source_visual_side(
     if omitted_page_count:
         pages += (
             '<div class="prose-source-omitted">另有 '
-            f'{omitted_page_count} 个变化页未嵌入；请展开文字明细并回到源 PDF 核对。</div>'
+            f'{omitted_page_count} 个变化页未嵌入；请以上方结构化文字为主并回到源 PDF 核对。</div>'
         )
     return (
         '<section class="prose-source-side">'
@@ -12919,12 +12963,20 @@ def _prose_source_visual_group_to_dict(
 
     old_visuals = tuple(group.old_visuals)
     new_visuals = tuple(group.new_visuals)
+    old_figure_visuals = tuple(group.old_figure_visuals)
+    new_figure_visuals = tuple(group.new_figure_visuals)
     return {
         "change_type": group.change_type,
         "old_section_id": group.old_section_id,
         "new_section_id": group.new_section_id,
         "old_pages": [visual.page_number for visual in old_visuals],
         "new_pages": [visual.page_number for visual in new_visuals],
+        "old_figure_pages": [
+            visual.page_number for visual in old_figure_visuals
+        ],
+        "new_figure_pages": [
+            visual.page_number for visual in new_figure_visuals
+        ],
         "old_highlight_region_count": sum(
             visual.highlight_region_count for visual in old_visuals
         ),
@@ -12939,8 +12991,14 @@ def _prose_source_visual_group_to_dict(
         ),
         "old_omitted_page_count": group.old_omitted_page_count,
         "new_omitted_page_count": group.new_omitted_page_count,
-        "precision": "source-coordinate-region",
-        "has_embedded_images": bool(old_visuals or new_visuals),
+        "precision": "source-coordinate-raw-crop",
+        "figure_precision": "source-figure-uncompared",
+        "has_embedded_images": bool(
+            old_visuals
+            or new_visuals
+            or old_figure_visuals
+            or new_figure_visuals
+        ),
     }
 
 

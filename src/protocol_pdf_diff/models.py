@@ -481,13 +481,20 @@ class ProseSourceVisual:
 
 @dataclass(frozen=True)
 class ProseSourceVisualGroup:
-    """Old/new source crops belonging to one long section change."""
+    """Old/new raw source crops belonging to one section change.
+
+    Prose crops are optional provenance behind the structured text diff. Figure
+    crops are a separate reader channel: they are shown raw and never receive
+    word-level or coordinate-color comparison.
+    """
 
     change_type: str
     old_section_id: str | None
     new_section_id: str | None
     old_visuals: tuple[ProseSourceVisual, ...] = ()
     new_visuals: tuple[ProseSourceVisual, ...] = ()
+    old_figure_visuals: tuple[ProseSourceVisual, ...] = ()
+    new_figure_visuals: tuple[ProseSourceVisual, ...] = ()
     old_omitted_page_count: int = 0
     new_omitted_page_count: int = 0
 
