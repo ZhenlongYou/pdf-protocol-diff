@@ -45,9 +45,8 @@ _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
 _SOURCE_CROP_VERTICAL_PADDING = 16.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
-_SOURCE_CROP_CLUSTER_GAP = 42.0
 _FIGURE_CAPTION_BLOCK_RE = re.compile(
-    r"(?i)^\s*(?:\d+\s+)?Figure\s+[A-Z]?\d+(?:[-.]\d+)+(?:\s*[.:])?"
+    r"(?i)^\s*(?:\d+\s+)?Figure\s+[A-Z]?\d+(?:[-.]\d+)+\s*[.:]"
 )
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
     r"^\s*(?:\d+\.)*\d+(?:\.\d+)+\s+[A-Za-z][A-Za-z0-9 /()_-]{2,}"
@@ -251,10 +250,15 @@ def _build_side_visuals(
         page = pages.get(page_number)
         if page is None or page.page_bbox is None:
             continue
+        page_body = page_body_by_number.get(page_number, "")
+        if (excluded_bboxes_by_page or {}).get(page_number):
+            continue  # Table 页面已有专属结构化卡，不再重复附加正文截图。
+        if _section_page_contains_figure_caption(page_body):
+            continue  # Figure 页面由无标色原图卡独占视觉证据。
         boxes, matched_snippet_count = _highlight_boxes(
             page.blocks,
             page_snippets,
-            allowed_text=page_body_by_number.get(page_number, ""),
+            allowed_text=page_body,
             excluded_bboxes=(
                 *page.visual_noise_bboxes,
                 *(excluded_bboxes_by_page or {}).get(page_number, ()),
@@ -398,7 +402,8 @@ def _figure_crop_bbox(
     left, right = _content_horizontal_bounds(page_bbox, noise_bboxes)
     top = max(page_top, caption.bbox[1] - 10.0)
     bottom = page_bottom
-    for block in blocks[caption_index + 1 :]:
+    boundary_blocks: list[DocumentBlock] = []
+    for block in blocks:
         text = " ".join(block.text.split())
         if block.bbox[1] <= caption.bbox[3] + 4.0:
             continue
@@ -407,8 +412,12 @@ def _figure_crop_bbox(
             or _NUMBERED_HEADING_BLOCK_RE.match(text)
             or _looks_like_prose_after_figure(text)
         ):
-            bottom = min(bottom, block.bbox[1] - 8.0)
-            break
+            boundary_blocks.append(block)
+    if boundary_blocks:
+        bottom = min(
+            bottom,
+            min(block.bbox[1] for block in boundary_blocks) - 8.0,
+        )
     for blocker in blocking_bboxes:
         if blocker[1] >= caption.bbox[3] and blocker[1] < bottom:
             bottom = blocker[1]
@@ -424,10 +433,20 @@ def _looks_like_prose_after_figure(value: str) -> bool:
 
     if not value:
         return False
+    ends_sentence = bool(re.search(r"[.!?。！？]\s*$", value))
     return bool(
-        len(value) >= 90
-        or _PROSE_BOUNDARY_RE.search(value)
-        or re.search(r"[.!?。！？]\s*$", value)
+        (len(value) >= 80 and (_PROSE_BOUNDARY_RE.search(value) or ends_sentence))
+        or (len(value) >= 45 and ends_sentence)
+    )
+
+
+def _section_page_contains_figure_caption(value: str) -> bool:
+    """Return whether one section page body contains a standalone Figure caption."""
+
+    return any(
+        _FIGURE_CAPTION_BLOCK_RE.match(line.strip())
+        for line in value.splitlines()
+        if line.strip()
     )
 
 
@@ -620,7 +639,7 @@ def _crop_regions(
             )
             for blocker in blocking_bboxes
         )
-        if box[1] - previous_bottom > _SOURCE_CROP_CLUSTER_GAP or blocked:
+        if blocked:
             clusters.append([box])
         else:
             clusters[-1].append(box)
@@ -662,15 +681,15 @@ def _content_horizontal_bounds(
 
     x0, _top, x1, _bottom = page_bbox
     width = max(1.0, x1 - x0)
-    left = x0
-    right = x1
+    left = x0 + width * 0.035
+    right = x1 - width * 0.035
     for noise in noise_bboxes:
         if noise[0] <= x0 + width * 0.16 and noise[2] <= x0 + width * 0.22:
             left = max(left, noise[2])
         if noise[2] >= x1 - width * 0.16 and noise[0] >= x1 - width * 0.22:
             right = min(right, noise[0])
     if right - left < width * _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO:
-        return x0, x1
+        return x0 + width * 0.035, x1 - width * 0.035
     return left, right
 
 

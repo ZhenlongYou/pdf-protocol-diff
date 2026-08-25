@@ -27,7 +27,9 @@ from protocol_pdf_diff.models import (
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
     _crop_regions,
+    _figure_crop_bbox,
     _highlight_boxes,
+    _section_page_contains_figure_caption,
     _source_crop,
     _subtract_excluded_regions,
     build_prose_source_visuals,
@@ -188,6 +190,39 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertNotIn(old_figure_text, visible_text)
             self.assertNotIn(new_figure_text, visible_text)
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
+
+    def test_figure_reference_sentence_is_not_misclassified_as_a_caption(self) -> None:
+        """A prose line beginning with Figure N remains text, not a fake image crop."""
+
+        self.assertTrue(_section_page_contains_figure_caption("Figure 29-9. Module output test setup"))
+        self.assertFalse(
+            _section_page_contains_figure_caption(
+                "Figure 29-9 and the method described in Section 30.4.1 are used."
+            )
+        )
+
+    def test_figure_crop_stops_at_geometric_next_heading_even_if_reading_order_is_wrong(self) -> None:
+        """A following clause heading must never appear inside a Figure raw image."""
+
+        heading = DocumentBlock(
+            1, (40.0, 300.0, 560.0, 320.0), DocumentBlockKind.TEXT,
+            "29.3.7 AC Common Mode Noise", 0, "test",
+        )
+        caption = DocumentBlock(
+            1, (40.0, 100.0, 560.0, 120.0), DocumentBlockKind.TEXT,
+            "Figure 29-3. Measurement of VMA voltage levels", 1, "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(heading, caption),
+            caption_index=1,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertLessEqual(crop[3], 292.0)
 
     def test_source_crop_preserves_original_pixels_without_overlay(self) -> None:
         """Source provenance must stay raw; only structured text owns change colors."""
