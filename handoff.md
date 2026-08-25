@@ -3,38 +3,37 @@
 ## 当前任务
 
 - task_id: `pdf-diff-reader-segmentation-20260826`
-- status: implementation complete; final OIF visual acceptance is stored beside the delivered report
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`codex/pdf-diff-reader-segmentation-20260826`
 - 持久项目分支：`project/pdf-protocol-diff`
-- 目标：正文采用结构化词级对比；Table 不在正文证据中重复；Figure 只显示原图；章节截图不跨归属边界、不放大窄残片。
+- 目标：正文采用结构化词级对比；Table 不在正文证据中重复；Figure 只显示原图；所有截图都服从互斥的页面区域归属，禁止页边行号、半截段落和相邻区域泄漏。
 
-## 当前读者行为
+## 已经完成
 
-- 正文卡先显示词级替换/新增/删除；旧版和新版 PDF 原文区域放在默认关闭的“查看原文出处（无颜色对比）”中，截图不再覆盖颜色。
-- 已识别 Table 的页面由 Table 卡独占视觉证据，不再生成正文出处截图。
-- 整页坐标块只要证明存在独立 Figure 图题，该页便退出正文截图通道；Figure 以旧/新原图直接显示，不比较图内 VMA、轴、图号或短标签。
-- Figure 下边界由下一正文段落、章节、Figure、Table 或坐标确认的页脚决定。连续换行正文即使首行没有句号、第二行被打印行号打断，也不会被带进 Figure。
-- 读者层会过滤 Figure 后连续视觉标签，但完整规范句会重新打开正文边界；JSON/CSV 原始审计事实不删除。
-- 正文源截图匹配只允许当前章节的 `page_bodies`，避免父卡借用同页子章节；窄残片和无可读面积的扣除结果直接丢弃。
+- 正文卡先显示词级替换、增加和删除；旧/新 PDF 原文只作为默认折叠的无标色出处，截图不再承担差异标记。
+- 已识别 Table 的页面由 Table 卡独占视觉证据，正文截图不再重复；Table 截图只保留 3 pt 边框安全距离，表题由结构化卡片显示，避免半截表题进入图片。
+- Figure 以旧/新原图直接显示，不比较图内 VMA、坐标轴、图号或短标签；没有坐标授权的 Figure 文字会 fail closed 保留在正文中。
+- Figure 下边界会在下一正文、章节、Figure、Table、公式或坐标证明的页脚之前停止；公式式标签和图内刻度不再误切 Figure。
+- 正文截图只使用当前章节的 `page_bodies`，并把紧密相连的完整段落行纳入同一出处；页边打印行号即使与短末行合并，也不会导致末行被拒绝或只露出上沿。
+- Table、Figure、Formula、prose 采用互斥的视觉归属。报告层只按已授权的槽展示，不重新凭字符串猜测区域类型。
+- 当前实现没有新增第二套 OCR、章节器或渲染引擎。Figure caption 的视觉授权使用统一的坐标块入口；原有字符串过滤仍只用于缺少坐标时的保守匹配回退，不能作为隐藏正文的授权。
 
-## 结构和冗余结论
+## 当前状态或阻塞
 
-- 没有新增第二套 OCR、章节器或渲染引擎；正文语义差异继续由原比较核心产生，截图模块只负责坐标归属和出处证据。
-- Figure caption 判断已收敛为整页 `DocumentBlock` 坐标入口，旧的章节字符串判断已删除，避免两套规则漂移。
-- Table、Figure、prose 三类视觉证据在 `ProseSourceVisualGroup` 中分槽保存；报告层只负责按槽展示，不重新推断归属。
-- 下一阶段若要继续提高复杂版面识别率，应优先引入带类型的页面区域图和 split/merge-aware 匹配，不要继续向字符串启发式叠加协议专用词表。
+- 没有实现阻塞。相关回归已覆盖正文优先、原图无颜色、Table/Figure 互斥、父子章节所有权、Figure/公式边界、页边行号和完整段落截图。
+- 真实 OIF 比对必须继续保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
+- 最终验收证据不在仓库中伪造固定数字；以交付报告旁 `visual_acceptance/` 内的原始测试日志、静态摘要、联系表和独立 agent 审核为准。
 
-## 验证
+## 下一步计划
 
-- 相关回归：150/150 PASS，覆盖词级正文优先、原图无颜色、Table/Figure 互斥、父子章节所有权、窄残片、换行正文边界和两种页脚坐标形态。
-- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → 1121/1121 PASS，482.554 s。
-- 字节码编译与 `git diff --check` 通过。
-- 真实输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`。
-- 最终报告输出根：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_reader_cleanup/`；最终时间戳目录中的 `visual_acceptance/acceptance_report.md` 记录静态检查、视觉总览和独立 agent 审核。
+- 若继续提高复杂版面识别率，优先引入带类型的页面区域图，并用 split/merge-aware 匹配处理一个旧块对应多个新块；不要继续向字符串启发式叠加协议专用词表。
+- 视觉 late-interaction 检索只能作为低置信度候选召回，不能直接成为规范差异结论。
+- 每次改动后必须用真实 OIF 输入生成完整 HTML，检查全部 Table、Figure、prose 联系表，再运行完整测试；单元测试通过不能代替报告视觉验收。
 
-## 已知边界
+## 不要再踩的坑
 
-- OIF 实测仍保持“需人工复核”；视觉哨兵存在未覆盖/歧义页时，不能宣称两份文档可靠一致。
-- Figure 原图保留源 PDF 自带的水印和未能坐标证明为页边栏的行号；它们不再被颜色标记，也不会进入图内文字差异。
-- Table/Figure 页面跳过可选正文出处截图会牺牲一部分截图便利，但结构化文字差异仍保留；这是避免视觉重复的 fail-closed 选择。
+- 不要把 Figure OCR 标签墙当作正文差异，也不要在 Figure 原图上绘制大面积黄色覆盖。
+- 不要让 Table 同时出现在 Table 卡、正文截图和 Figure 截图中；区域所有权必须互斥。
+- 不要用单个右侧数字推断整列页边行号；只有密集且跨越足够页高的坐标簇才能收窄正文边界。
+- 不要只检查截图是否生成；必须确认左右未裁切、上下没有半行、公式没有混入 Figure、表题没有以残片出现。
+- 不要把静态计数写成视觉结论。最终报告需要实际查看联系表，并由独立 reviewer 对同一提交和同一输出目录给出结论。
