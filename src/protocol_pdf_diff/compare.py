@@ -3266,13 +3266,18 @@ def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> s
     for unit in filtered:
         compact = compact_inline(unit)
         if (
-            len(compact) >= 120
+            len(compact) >= _SECTION_SHIFT_PROSE_MIN_CHARS
             and _ends_review_sentence(compact)
             and _SECTION_IDENTITY_PROSE_VERB_RE.search(compact)
-            and len(_meaningful_review_words(compact)) >= 15
+            and len(_meaningful_review_words(compact)) >= 4
         ):
             substantive_prose.append(unit)
-    return "\n".join(substantive_prose or filtered).strip()
+    prose_chars = sum(len(compact_inline(unit)) for unit in substantive_prose)
+    has_substantial_prose = prose_chars >= 120 and (
+        len(substantive_prose) >= 2
+        or any(len(compact_inline(unit)) >= 120 for unit in substantive_prose)
+    )
+    return "\n".join(substantive_prose if has_substantial_prose else filtered).strip()
 
 
 def _exact_identity_similarity(left: str, right: str) -> float | None:
