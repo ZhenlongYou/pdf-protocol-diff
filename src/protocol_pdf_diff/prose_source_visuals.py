@@ -49,7 +49,7 @@ _FIGURE_CAPTION_BLOCK_RE = re.compile(
     r"(?i)^\s*(?:\d+\s+)?Figure\s+[A-Z]?\d+(?:[-.]\d+)+\s*[.:]"
 )
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
-    r"^\s*(?:\d+\.)*\d+(?:\.\d+)+\s+[A-Za-z][A-Za-z0-9 /()_-]{2,}"
+    r"^\s*(?:\d+\s+)?(?:\d+\.)*\d+(?:\.\d+)+\s+[A-Z][A-Za-z0-9 /()_-]{2,}"
 )
 _PROSE_BOUNDARY_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|defines?|"

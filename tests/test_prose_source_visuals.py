@@ -205,24 +205,29 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         """A following clause heading must never appear inside a Figure raw image."""
 
         heading = DocumentBlock(
-            1, (40.0, 300.0, 560.0, 320.0), DocumentBlockKind.TEXT,
-            "29.3.7 AC Common Mode Noise", 0, "test",
+            1, (40.0, 500.0, 560.0, 520.0), DocumentBlockKind.TEXT,
+            "28 29.3.7 AC Common Mode Noise", 0, "test",
         )
         caption = DocumentBlock(
             1, (40.0, 100.0, 560.0, 120.0), DocumentBlockKind.TEXT,
             "Figure 29-3. Measurement of VMA voltage levels", 1, "test",
         )
+        diagram_value = DocumentBlock(
+            1, (340.0, 350.0, 560.0, 365.0), DocumentBlockKind.TEXT,
+            "4.95 dB AC 22", 2, "test",
+        )
 
         crop = _figure_crop_bbox(
             page_bbox=(0.0, 0.0, 612.0, 792.0),
-            blocks=(heading, caption),
+            blocks=(heading, caption, diagram_value),
             caption_index=1,
             blocking_bboxes=(),
             noise_bboxes=(),
         )
 
         self.assertIsNotNone(crop)
-        self.assertLessEqual(crop[3], 292.0)
+        self.assertGreater(crop[3], diagram_value.bbox[3])
+        self.assertLessEqual(crop[3], 492.0)
 
     def test_source_crop_preserves_original_pixels_without_overlay(self) -> None:
         """Source provenance must stay raw; only structured text owns change colors."""
