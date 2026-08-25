@@ -253,7 +253,7 @@ def _build_side_visuals(
         page_body = page_body_by_number.get(page_number, "")
         if (excluded_bboxes_by_page or {}).get(page_number):
             continue  # Table 页面已有专属结构化卡，不再重复附加正文截图。
-        if _section_page_contains_figure_caption(page_body):
+        if _page_contains_figure_caption(page.blocks):
             continue  # Figure 页面由无标色原图卡独占视觉证据。
         boxes, matched_snippet_count = _highlight_boxes(
             page.blocks,
@@ -413,6 +413,14 @@ def _figure_crop_bbox(
             or _looks_like_prose_after_figure(text)
         ):
             boundary_blocks.append(block)
+    wrapped_prose_boundary = _wrapped_prose_boundary(
+        blocks,
+        caption=caption,
+        content_left=left,
+        content_right=right,
+    )
+    if wrapped_prose_boundary is not None:
+        boundary_blocks.append(wrapped_prose_boundary)
     if boundary_blocks:
         bottom = min(
             bottom,
@@ -440,13 +448,66 @@ def _looks_like_prose_after_figure(value: str) -> bool:
     )
 
 
-def _section_page_contains_figure_caption(value: str) -> bool:
-    """Return whether one section page body contains a standalone Figure caption."""
+def _wrapped_prose_boundary(
+    blocks: tuple[DocumentBlock, ...],
+    *,
+    caption: DocumentBlock,
+    content_left: float,
+    content_right: float,
+) -> DocumentBlock | None:
+    """Find a body paragraph whose first physical line is not a full sentence."""
+
+    content_width = max(1.0, content_right - content_left)
+    following = sorted(
+        (
+            block
+            for block in blocks
+            if (
+                block.kind is not DocumentBlockKind.TABLE
+                and block.bbox[1] > caption.bbox[3] + 4.0
+            )
+        ),
+        key=lambda block: (block.bbox[1], block.bbox[0]),
+    )
+    for index, first in enumerate(following):
+        first_text = " ".join(first.text.split())
+        first_words = re.findall(r"[A-Za-z]{2,}", first_text)
+        if (
+            _FIGURE_CAPTION_BLOCK_RE.match(first_text)
+            or _NUMBERED_HEADING_BLOCK_RE.match(first_text)
+            or first.bbox[0] > content_left + content_width * 0.14
+            or (first.bbox[2] - first.bbox[0]) < content_width * 0.62
+            or len(first_words) < 7
+        ):
+            continue
+        for second in following[index + 1 :]:
+            gap = second.bbox[1] - first.bbox[3]
+            if gap > 8.0:
+                break
+            second_text = " ".join(second.text.split())
+            second_words = re.findall(r"[A-Za-z]{2,}", second_text)
+            if (
+                gap < -2.0
+                or second.bbox[0] > content_left + content_width * 0.16
+                or abs(second.bbox[0] - first.bbox[0]) > 40.0
+                or len(second_words) < 4
+            ):
+                continue
+            combined = f"{first_text} {second_text}"
+            if _PROSE_BOUNDARY_RE.search(combined) or len(
+                re.findall(r"[A-Za-z]{2,}", combined)
+            ) >= 16:
+                return first
+    return None
+
+
+def _page_contains_figure_caption(blocks: Iterable[DocumentBlock]) -> bool:
+    """Use full-page coordinates to assign a Figure page to the Figure channel."""
 
     return any(
-        _FIGURE_CAPTION_BLOCK_RE.match(line.strip())
-        for line in value.splitlines()
-        if line.strip()
+        block.kind is not DocumentBlockKind.TABLE
+        and _FIGURE_CAPTION_BLOCK_RE.match(block.text.strip())
+        for block in blocks
     )
 
 

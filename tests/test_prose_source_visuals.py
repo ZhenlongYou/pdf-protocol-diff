@@ -29,7 +29,7 @@ from protocol_pdf_diff.prose_source_visuals import (
     _crop_regions,
     _figure_crop_bbox,
     _highlight_boxes,
-    _section_page_contains_figure_caption,
+    _page_contains_figure_caption,
     _source_crop,
     _subtract_excluded_regions,
     build_prose_source_visuals,
@@ -194,12 +194,25 @@ class ProseSourceVisualReportTests(unittest.TestCase):
     def test_figure_reference_sentence_is_not_misclassified_as_a_caption(self) -> None:
         """A prose line beginning with Figure N remains text, not a fake image crop."""
 
-        self.assertTrue(_section_page_contains_figure_caption("Figure 29-9. Module output test setup"))
-        self.assertFalse(
-            _section_page_contains_figure_caption(
-                "Figure 29-9 and the method described in Section 30.4.1 are used."
-            )
+        caption = DocumentBlock(
+            1,
+            (50.0, 80.0, 560.0, 95.0),
+            DocumentBlockKind.TEXT,
+            "Figure 29-9. Module output test setup",
+            0,
+            "test",
         )
+        reference = DocumentBlock(
+            1,
+            (50.0, 100.0, 560.0, 115.0),
+            DocumentBlockKind.TEXT,
+            "Figure 29-9 and the method described in Section 30.4.1 are used.",
+            0,
+            "test",
+        )
+
+        self.assertTrue(_page_contains_figure_caption((caption,)))
+        self.assertFalse(_page_contains_figure_caption((reference,)))
 
     def test_figure_crop_stops_at_geometric_next_heading_even_if_reading_order_is_wrong(self) -> None:
         """A following clause heading must never appear inside a Figure raw image."""
@@ -228,6 +241,77 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], diagram_value.bbox[3])
         self.assertLessEqual(crop[3], 492.0)
+
+    def test_figure_crop_stops_before_a_wrapped_following_paragraph(self) -> None:
+        """Two ordinary body lines establish the boundary even without punctuation."""
+
+        caption = DocumentBlock(
+            1,
+            (50.0, 80.0, 560.0, 95.0),
+            DocumentBlockKind.TEXT,
+            "Figure 30-15. Cabled module channel reference model",
+            0,
+            "test",
+        )
+        diagram_label = DocumentBlock(
+            1,
+            (210.0, 250.0, 400.0, 264.0),
+            DocumentBlockKind.TEXT,
+            "22.0 dB die-to-die channel loss",
+            1,
+            "test",
+        )
+        first_prose_line = DocumentBlock(
+            1,
+            (72.0, 382.0, 505.0, 394.0),
+            DocumentBlockKind.TEXT,
+            "The third recommended channel includes a Co-Packaged Optics host that",
+            2,
+            "test",
+        )
+        second_prose_line = DocumentBlock(
+            1,
+            (46.0, 395.0, 230.0, 407.0),
+            DocumentBlockKind.TEXT,
+            "25 consists of an optical signal at TP3.",
+            3,
+            "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label, first_prose_line, second_prose_line),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertLessEqual(crop[3], first_prose_line.bbox[1] - 8.0)
+
+    def test_coordinate_figure_caption_owns_page_even_when_section_body_omits_it(self) -> None:
+        """Full-page block evidence prevents a sibling prose card from borrowing a Figure."""
+
+        blocks = (
+            DocumentBlock(
+                1,
+                (50.0, 80.0, 560.0, 95.0),
+                DocumentBlockKind.TEXT,
+                "Figure 30-13. Reference CTLE transfer function",
+                0,
+                "test",
+            ),
+            DocumentBlock(
+                1,
+                (72.0, 420.0, 500.0, 432.0),
+                DocumentBlockKind.TEXT,
+                "The input voltage tolerance tests the accepted amplitude.",
+                1,
+                "test",
+            ),
+        )
+
+        self.assertTrue(_page_contains_figure_caption(blocks))
 
     def test_source_crop_preserves_original_pixels_without_overlay(self) -> None:
         """Source provenance must stay raw; only structured text owns change colors."""
