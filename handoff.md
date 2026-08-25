@@ -2,54 +2,42 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-prose-source-visuals-20260825`
+- task_id: `pdf-diff-evidence-dedup-accuracy-20260825`
 - status: ready
-- recorded code commit: `c2994ab760c6f8f43c166f227e8885dd4aebfb14`
-- 目标：大段正文变化不再先展示难读的整段删除/新增，而是把新旧 PDF 原文区域截图并排展示，并在原文坐标范围内标出差异；OCR 文字明细默认折叠。
+- code commit: `51f6cccfd5fb5b2500bb316840dffbaaa4d9668d`
+- 目标：表格差异只在前置表格卡呈现，不再被长正文截图重复着色；纯 Figure 图注不再冒充正文变化；VMA、Module output 等受表格墙或错误父层级污染的同一章节恢复正确配对。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
 
 ## 已经完成
 
-- 对技术正文中的大段修改、删除和新增生成原文截图证据；旧版与新版使用稳定的左右双栏，窄屏时自动纵向排列。
-- 高亮精度明确为“原文坐标区域级”，不声称是逐字 OCR 高亮；差异行使用正确 alpha 合成的浅黄色底，文字保持清晰。已证明的左右页边打印行号会从标注候选中排除，即使与正文粘在同一坐标块里也会先裁掉页边范围；短变化继续使用紧凑文字卡片。
-- 单侧新增或删除只展示存在的一侧，另一侧明确标注“无对应原文区域”，避免伪造配对。
-- OCR 文本差异放入默认折叠的“查看文字识别明细”，仍保留可搜索、可复制的精确文本证据。
-- 截图前校验源 PDF SHA-256；来源不一致时安全回退为文字报告并给出警告，不使用陈旧截图。
-- 截图页数设有上限并显示省略页数；排除运行页眉与表格，避免重复展示已有的表格视觉证据。
-- 视觉逻辑集中在独立模块，并复用现有 PDF 快照与页面渲染能力，没有复制第二套渲染管线。
-- 新增 3 项针对性测试，覆盖双侧截图、短变化回退和源文件哈希失配。
-- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1099/1099 PASS`，490.850 s。
-- 故障注入：禁用大段正文截图资格后，要求原文截图网格的测试按预期失败；当前实现恢复后通过。
-- Ruff 新模块与新测试、格式检查、`git diff --check` 和字节码编译均通过。
+- 长正文截图同时排除 `visual_noise_bboxes` 和已识别 `TableVisual.bbox`；表格卡拥有的源区域不再二次高亮。
+- 新增保守的 Figure 读者层过滤：只移除独立 Figure 编号及紧邻的非句子图注/图内碎片；正常句子、规范动词正文、公式和普通技术标签保持可见，JSON 原始审计数据不变。
+- 章节匹配只在原始正文分数不足时，剔除已证明的表格/Figure 证据重试；低全文分还必须满足双侧唯一同题。错误父层级场景增加强正文唯一标题兜底，并只允许已强配父章节下的唯一同题直属子章节跟随配对。
+- 候选排序与消费逻辑收敛到一个小函数，没有新增第二套章节或渲染引擎；报告继续显示原始全文相似度，不伪造高分。
+- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → `1106/1106 PASS`，513.336 s。
+- 新模块 Ruff、字节码编译、`git diff --check` 通过；缺失 PDF 的 CLI 故障路径以状态码 2 清楚失败。
+- 功能测试在实现前分别证明以下失败：表格区域仍被染色、VMA 被拆为新增/删除、Figure 图注仍成卡、错误父层级的 Module output 未配对；当前均通过。
 
-## 当前状态或阻塞
+## 最终 OIF 实测
 
-- 无实现阻塞。
-- 下一步只需冻结提交，在同一提交上重跑真实 OIF 对比、完成两名独立 reviewer 复核，并执行 GitHub/交付门禁。
-- 最终 OIF 报告应继续保留其真实的 `degraded / 需人工复核` 结论；原文截图改善的是可读性，不应被表述成消除了核心配对或视觉漏检风险。
+- 输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`
+- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260825_234602/protocol_diff_report.html`
+- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260825_234602/protocol_diff_data.json`
+- provenance build commit：`51f6cccfd5fb5b2500bb316840dffbaaa4d9668d`
+- 结果：60 条原始章节变化、15 个表格变化、32 组长正文原文截图。
+- `29.3.6 VMA` → `30.3.7 VMA` 为一条 modified；`29.4.1.2 Module output` → `30.4.1.2` 及其直属 test method 都为一条 modified。
+- HTML 中 `Figure 29-3.`、`Figure 30-2.`、`Measurement of VMA`、`表格行:` 均为 0 次。
+- 可信度保持 `degraded / 需人工复核`；仍存在源 PDF 标题层级误识别和部分未配对章节，不能把本轮改善描述成全自动准确。
 
-## 最终验收入口
+## 设计边界
 
-```bash
-PROTOCOL_PDF_DIFF_BUILD_COMMIT=<exact-commit> .venv/bin/python main.py \
-  --old-pdf /Users/mac/Desktop/oif2021.405.14.pdf \
-  --new-pdf /Users/mac/Desktop/oif2024.522.06.pdf \
-  --output-dir /Users/mac/Desktop/test/pdf_protocol_diff_oif_prose_visual
-```
+- 不全局降低用户配置的章节相似度阈值。
+- 不按 VMA、OIF、章节号或出版方硬编码；授权来自表格坐标、正文相似度、标题唯一性和父子层级关系。
+- Figure 过滤只影响读者层和匹配身份文本，不删除原始证据，也不把所有含 `Figure` 的句子当噪声。
+- 源截图高亮仍是坐标区域级，不宣称逐字符 OCR 高亮。
 
-## 不要再踩的坑
+## 继续工作建议
 
-- 不要把区域级高亮描述成逐字高亮；它依赖 PDF 原文坐标块与文本片段重合。
-- 不要对所有小变化生成截图，否则报告体积和阅读负担都会显著增加。
-- 不要跳过源文件哈希绑定，也不要在哈希失配时复用旧截图。
-- 不要把单侧新增/删除强行伪造成双侧对应关系。
-- 不要用新截图替代底层文本与表格 oracle；它们是互补证据。
-
-## 建议技能
-
-- `rinysproject-delivery-orchestrator`
-- `reviewer-subagents-gate`
-- `delivery-acceptance-gate`
-- `github-code-handoff`
-- `delivery-cleanup-hygiene`
+- 下一轮若继续降低错误章节标题，应单独修复 PDF 标题层级识别，并用真实跨文档回归证明；不要继续向章节配对层叠加宽松特例。
+- 每次交付继续保留真实报告的 `degraded` 状态和人工复核边界。
