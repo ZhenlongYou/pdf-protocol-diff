@@ -426,6 +426,14 @@ def _figure_crop_bbox(
             bottom,
             min(block.bbox[1] for block in boundary_blocks) - 8.0,
         )
+    footer_boundary = _coordinate_footer_boundary(
+        noise_bboxes,
+        caption_bottom=caption.bbox[3],
+        content_left=left,
+        content_right=right,
+    )
+    if footer_boundary is not None:
+        bottom = min(bottom, footer_boundary - 8.0)
     for blocker in blocking_bboxes:
         if blocker[1] >= caption.bbox[3] and blocker[1] < bottom:
             bottom = blocker[1]
@@ -509,6 +517,47 @@ def _page_contains_figure_caption(blocks: Iterable[DocumentBlock]) -> bool:
         and _FIGURE_CAPTION_BLOCK_RE.match(block.text.strip())
         for block in blocks
     )
+
+
+def _coordinate_footer_boundary(
+    noise_bboxes: tuple[tuple[float, float, float, float], ...],
+    *,
+    caption_bottom: float,
+    content_left: float,
+    content_right: float,
+) -> float | None:
+    """Combine same-baseline footer words into a boundary without using gutters."""
+
+    bands: list[list[tuple[float, float, float, float]]] = []
+    for bbox in sorted(noise_bboxes, key=lambda item: (item[1], item[0])):
+        if bbox[1] <= caption_bottom + 12.0:
+            continue
+        if bands and abs(bbox[1] - bands[-1][0][1]) <= 2.5:
+            bands[-1].append(bbox)
+        else:
+            bands.append([bbox])
+    content_width = max(1.0, content_right - content_left)
+    for band in bands:
+        intervals = sorted(
+            (
+                max(content_left, bbox[0]),
+                min(content_right, bbox[2]),
+            )
+            for bbox in band
+            if min(content_right, bbox[2]) > max(content_left, bbox[0])
+        )
+        covered = 0.0
+        merged_right: float | None = None
+        for interval_left, interval_right in intervals:
+            if merged_right is None or interval_left > merged_right:
+                covered += interval_right - interval_left
+                merged_right = interval_right
+            elif interval_right > merged_right:
+                covered += interval_right - merged_right
+                merged_right = interval_right
+        if covered / content_width >= 0.45:
+            return min(bbox[1] for bbox in band)
+    return None
 
 
 def _assign_snippets_to_pages(

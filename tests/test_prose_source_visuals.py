@@ -289,6 +289,44 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertLessEqual(crop[3], first_prose_line.bbox[1] - 8.0)
 
+    def test_figure_crop_stops_before_coordinate_proven_footer_fragments(self) -> None:
+        """Word-sized footer boxes form one boundary; a side number column does not."""
+
+        caption = DocumentBlock(
+            1,
+            (50.0, 80.0, 560.0, 95.0),
+            DocumentBlockKind.TEXT,
+            "Figure 30-4. S-parameter limit",
+            0,
+            "test",
+        )
+        diagram_label = DocumentBlock(
+            1,
+            (210.0, 500.0, 400.0, 514.0),
+            DocumentBlockKind.TEXT,
+            "Frequency GHz",
+            1,
+            "test",
+        )
+        noise = (
+            (555.0, 100.0, 568.0, 700.0),
+            (70.0, 718.0, 200.0, 730.0),
+            (205.0, 718.0, 350.0, 730.0),
+            (355.0, 718.0, 500.0, 730.0),
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=noise,
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], diagram_label.bbox[3])
+        self.assertLessEqual(crop[3], 710.0)
+
     def test_coordinate_figure_caption_owns_page_even_when_section_body_omits_it(self) -> None:
         """Full-page block evidence prevents a sibling prose card from borrowing a Figure."""
 
