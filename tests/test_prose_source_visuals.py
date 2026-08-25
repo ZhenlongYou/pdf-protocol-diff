@@ -620,7 +620,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
                 1,
                 (80.0, 106.0, 250.0, 118.0),
                 DocumentBlockKind.TEXT,
-                "measurement methods.",
+                "measurement methods. 4",
                 2,
                 "test",
             ),
@@ -637,7 +637,10 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         expanded = _expand_boxes_to_complete_paragraph_lines(
             blocks,
             selected,
-            allowed_text=" ".join(block.text for block in blocks[:3]),
+            allowed_text=(
+                "Ceeq is derived from the FFE tap weights and is measured "
+                "after the CTLE in the reference receiver. measurement methods."
+            ),
         )
 
         self.assertEqual((blocks[0].bbox, blocks[1].bbox, blocks[2].bbox), expanded)

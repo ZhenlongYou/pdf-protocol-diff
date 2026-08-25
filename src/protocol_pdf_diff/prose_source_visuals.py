@@ -884,7 +884,10 @@ def _expand_boxes_to_complete_paragraph_lines(
             or block.kind is DocumentBlockKind.TABLE
             or (
                 allowed_text
-                and not _block_belongs_to_section(block.text, allowed_text)
+                and not _paragraph_line_belongs_to_section(
+                    block.text,
+                    allowed_text,
+                )
             )
         ):
             continue
@@ -904,6 +907,24 @@ def _expand_boxes_to_complete_paragraph_lines(
                 expanded.add(candidate)
                 changed = True
     return tuple(sorted(expanded, key=lambda box: (box[1], box[0])))
+
+
+def _paragraph_line_belongs_to_section(
+    block_text: str,
+    section_page_body: str,
+) -> bool:
+    """Accept a short continuation after removing one merged print line number."""
+
+    if _block_belongs_to_section(block_text, section_page_body):
+        return True
+    without_print_line_number = re.sub(r"\s+\d{1,3}\s*$", "", block_text)
+    return (
+        without_print_line_number != block_text
+        and _block_belongs_to_section(
+            without_print_line_number,
+            section_page_body,
+        )
+    )
 
 
 def _paragraph_lines_are_connected(
