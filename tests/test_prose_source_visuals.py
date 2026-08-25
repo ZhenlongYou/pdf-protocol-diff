@@ -468,6 +468,46 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
 
+    def test_figure_crop_stops_before_a_following_table_caption(self) -> None:
+        """Table captions belong only to Table evidence, never to a Figure crop."""
+
+        caption = DocumentBlock(
+            1,
+            (80.0, 120.0, 540.0, 142.0),
+            DocumentBlockKind.TEXT,
+            "Figure 29-6. Host output reference receiver",
+            0,
+            "test",
+        )
+        diagram_label = DocumentBlock(
+            1,
+            (210.0, 420.0, 400.0, 434.0),
+            DocumentBlockKind.TEXT,
+            "TP1a Reference Rx",
+            1,
+            "test",
+        )
+        table_caption = DocumentBlock(
+            1,
+            (74.0, 548.0, 550.0, 564.0),
+            DocumentBlockKind.TEXT,
+            "Table 29-7. Host output 5-tap Reference FFE Characteristics",
+            2,
+            "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label, table_caption),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], diagram_label.bbox[3])
+        self.assertLessEqual(crop[3], table_caption.bbox[1] - 8.0)
+
     def test_formula_like_figure_labels_do_not_end_the_figure_without_number_anchor(self) -> None:
         """Dimension labels and chart ticks remain Figure content, not standalone equations."""
 

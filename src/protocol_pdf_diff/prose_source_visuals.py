@@ -32,7 +32,7 @@ from .models import (
     SectionChange,
     TableVisual,
 )
-from .pdf_extract import _looks_like_figure_caption
+from .pdf_extract import _looks_like_figure_caption, _looks_like_table_caption
 from .visual_watchdog import _render_page, _snapshot_pdf
 
 PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS = 500
@@ -549,6 +549,7 @@ def _is_figure_boundary_block(
     text = " ".join(block.text.split())
     return bool(
         _looks_like_figure_caption(text)
+        or _looks_like_table_caption(text)
         or _NUMBERED_HEADING_BLOCK_RE.match(text)
         or _looks_like_prose_after_figure(text)
         or _looks_like_bottom_margin_furniture(
