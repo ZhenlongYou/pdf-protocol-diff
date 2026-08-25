@@ -18,6 +18,7 @@ from typing import BinaryIO
 
 from PIL import Image, ImageDraw
 
+from .figure_filters import filter_figure_visual_snippets
 from .models import (
     DiffResult,
     DocumentBlock,
@@ -27,6 +28,7 @@ from .models import (
     ProseSourceVisualGroup,
     Section,
     SectionChange,
+    TableVisual,
 )
 from .visual_watchdog import _render_page, _snapshot_pdf
 
@@ -74,6 +76,8 @@ def build_prose_source_visuals(
         new_document = pypdfium2.PdfDocument(new_snapshot, autoclose=False)
         old_pages = {page.page_number: page for page in old_extraction.pages}
         new_pages = {page.page_number: page for page in new_extraction.pages}
+        old_table_bboxes = _table_bboxes_by_page(result.old_table_visuals)
+        new_table_bboxes = _table_bboxes_by_page(result.new_table_visuals)
         groups: list[ProseSourceVisualGroup] = []
         for change in eligible:
             old_snippets = _change_snippets(change, side="old")
@@ -83,12 +87,14 @@ def build_prose_source_visuals(
                 change.old_section,
                 old_pages,
                 old_snippets,
+                excluded_bboxes_by_page=old_table_bboxes,
             )
             new_visuals, new_omitted_page_count = _build_side_visuals(
                 new_document,
                 change.new_section,
                 new_pages,
                 new_snippets,
+                excluded_bboxes_by_page=new_table_bboxes,
             )
             if old_visuals or new_visuals:
                 groups.append(
@@ -154,7 +160,24 @@ def _change_snippets(change: SectionChange, *, side: str) -> tuple[str, ...]:
             *change.added_snippets,
             *(pair.new for pair in change.replaced_snippets),
         ]
-    return tuple(value for value in values if value.strip())
+    return tuple(filter_figure_visual_snippets(values))
+
+
+def _table_bboxes_by_page(
+    tables: Iterable[TableVisual],
+) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
+    """Group recognized table source regions for prose-highlight exclusion."""
+
+    grouped: dict[int, list[tuple[float, float, float, float]]] = defaultdict(list)
+    for table in tables:
+        bbox = tuple(float(value) for value in table.bbox)
+        if len(bbox) != 4 or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+            continue
+        grouped[int(table.page_number)].append(bbox)
+    return {
+        page_number: tuple(sorted(boxes, key=lambda box: (box[1], box[0])))
+        for page_number, boxes in grouped.items()
+    }
 
 
 def _build_side_visuals(
@@ -162,6 +185,11 @@ def _build_side_visuals(
     section: Section | None,
     pages: dict[int, object],
     snippets: tuple[str, ...],
+    *,
+    excluded_bboxes_by_page: dict[
+        int,
+        tuple[tuple[float, float, float, float], ...],
+    ] | None = None,
 ) -> tuple[list[ProseSourceVisual], int]:
     if section is None or not snippets:
         return [], 0
@@ -176,7 +204,10 @@ def _build_side_visuals(
         boxes, matched_snippet_count = _highlight_boxes(
             page.blocks,
             page_snippets,
-            excluded_bboxes=page.visual_noise_bboxes,
+            excluded_bboxes=(
+                *page.visual_noise_bboxes,
+                *(excluded_bboxes_by_page or {}).get(page_number, ()),
+            ),
         )
         if not boxes:
             continue

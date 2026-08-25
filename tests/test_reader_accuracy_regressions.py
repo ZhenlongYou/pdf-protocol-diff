@@ -61,6 +61,213 @@ from protocol_pdf_diff.reporting import (
 class ReaderAccuracyRegressionTests(unittest.TestCase):
     """Keep extraction artifacts out of user-visible technical differences."""
 
+    def test_standalone_figure_caption_pair_is_absent_from_reader_changes(self) -> None:
+        """Figure pixels and their split caption are source evidence, not prose differences."""
+
+        section = Section(
+            section_id="figure-caption",
+            heading="Section 29.4.1.2.1 using the SSPRQ test pattern.",
+            title="Section 29.4.1.2.1 using the SSPRQ test pattern.",
+            level=1,
+            heading_path=("Section 29.4.1.2.1 using the SSPRQ test pattern.",),
+            number_path=(),
+            start_page=10,
+            end_page=10,
+            body="Figure 29-3.\nMeasurement of VMA voltage levels for EECQ",
+        )
+        change = SectionChange(
+            change_type="deleted",
+            old_section=section,
+            new_section=None,
+            similarity=0.0,
+            removed_snippets=[
+                "Figure 29-3.",
+                "Measurement of VMA voltage levels for EECQ",
+            ],
+        )
+
+        self.assertIsNone(_reader_section_change(change))
+
+    def test_figure_caption_cleanup_preserves_neighboring_normative_prose(self) -> None:
+        """A real requirement remains visible when caption debris shares its section."""
+
+        requirement = "The receiver shall meet the declared VMA limit at TP4."
+        section = Section(
+            section_id="mixed-figure",
+            heading="1 Receiver requirement",
+            title="Receiver requirement",
+            level=1,
+            heading_path=("1 Receiver requirement",),
+            number_path=("1",),
+            start_page=1,
+            end_page=1,
+            body=f"Figure 1-2.\nReceiver setup\n{requirement}",
+        )
+        change = SectionChange(
+            change_type="deleted",
+            old_section=section,
+            new_section=None,
+            similarity=0.0,
+            removed_snippets=["Figure 1-2.", "Receiver setup", requirement],
+        )
+
+        cleaned = _reader_section_change(change)
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([requirement], cleaned.removed_snippets)
+
+    def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
+        """Conflicting diagram labels must not split otherwise corresponding prose sections."""
+
+        def section(number: str, body: str) -> Section:
+            heading = f"{number} End-to-end linear channel description"
+            return Section(
+                section_id=number,
+                heading=heading,
+                title="End-to-end linear channel description",
+                level=3,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        old = section(
+            "29.3.1",
+            "\n".join(
+                (
+                    "The linear interface has normative test points to ensure interoperability between host, module and optical fiber.",
+                    "Figure 29-1.",
+                    "End-to-end linear channel",
+                    "Host A Host B retimer retimer function Fiber function",
+                    "TP1 TP1a patchcord TP2 TP3 TP4a TP4",
+                    "Optical transmitter receiver module host diagram labels",
+                )
+            ),
+        )
+        new = section(
+            "30.3.1",
+            "\n".join(
+                (
+                    "The linear interface has normative test points to ensure interoperability between host, module and optical fiber.",
+                    "Figure 30-1.",
+                    "End to End Linear Channel",
+                    "TP0 channel loss TP1a TP2 TP3 TP4a TP4 TP5",
+                    "Host Tx Driver TIA Driver Host Rx Module Channel Connector",
+                    "Electrical optical conversion diagram labels",
+                )
+            ),
+        )
+
+        matches = _match_sections([old], [new], DiffOptions())
+
+        self.assertEqual([(0, 0)], [(old_index, new_index) for old_index, new_index, _score, _basis in matches])
+        self.assertEqual("evidence_suppressed_similarity_fallback", matches[0][3])
+
+    def test_matching_ignores_combined_figure_caption_and_diagram_ocr(self) -> None:
+        """One caption+diagram unit may be dropped for identity without hiding it from audit."""
+
+        def section(number: str, body: str) -> Section:
+            heading = f"{number} Module output test (TP3 to TP4)"
+            return Section(
+                section_id=number,
+                heading=heading,
+                title="Module output test (TP3 to TP4)",
+                level=4,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        common = (
+            "The module output EECQ is tested at TP4 using a Module Compliance Board."
+        )
+        old = section(
+            "29.4.1.2",
+            common
+            + "\nFigure 29-9. Module output test setup Host A Fiber TP3 TP4 "
+            + "legacy optical diagram label " * 35,
+        )
+        new = section(
+            "30.4.1.2",
+            common
+            + "\nFigure 30-9. Module output test setup Driver TIA TP3 TP4 "
+            + "revised electrical diagram label " * 35,
+        )
+
+        matches = _match_sections([old], [new], DiffOptions())
+
+        self.assertEqual((0, 0), matches[0][:2])
+        self.assertEqual("evidence_suppressed_similarity_fallback", matches[0][3])
+
+    def test_unique_title_and_strong_body_survive_polluted_parent_hierarchy(self) -> None:
+        """A wrong extracted ancestor cannot split one uniquely titled, strongly related clause."""
+
+        old = Section(
+            "old-module",
+            "29.4.1.2 Module output test (TP3 to TP4)",
+            "Module output test (TP3 to TP4)",
+            5,
+            (
+                "Appendix 16.D.",
+                "Section 29.3.12). The signals at the appropriate points in the reference receiver (see",
+                "29.4.1.2 Module output test (TP3 to TP4)",
+            ),
+            ("Appendix 16", "Section 29.3", "29.4.1.2"),
+            17,
+            17,
+            "The module output EECQ is tested at TP4 of Figure 25-1 using a Module Compliance Board as defined in Section 25.3.1. The test setup is shown in Figure 29-9.",
+        )
+        new = Section(
+            "new-module",
+            "30.4.1.2 Module output test (TP3 to TP4)",
+            "Module output test (TP3 to TP4)",
+            4,
+            (
+                "1 All co-propagating and counter-propagating lanes are active as crosstalk sources,",
+                "30.4.1.2 Module output test (TP3 to TP4)",
+            ),
+            ("1", "30.4.1.2"),
+            19,
+            19,
+            "The module output EECQ is tested at TP4 of Figure 25-1 using a Module Compliance Board as defined in IEEE P802.3dj Clause 179B. The test setup is shown in Figure 30-9.",
+        )
+
+        old_child = Section(
+            "old-method",
+            "29.4.1.2.1 Module output test method",
+            "Module output test method",
+            6,
+            (*old.heading_path, "29.4.1.2.1 Module output test method"),
+            (*old.number_path, "29.4.1.2.1"),
+            17,
+            19,
+            "Legacy SSPRQ capture, 42 GHz receiver, 22-tap FFE, and module calibration procedure. "
+            * 12,
+        )
+        new_child = Section(
+            "new-method",
+            "30.4.1.2.1 Module output test method",
+            "Module output test method",
+            5,
+            (*new.heading_path, "30.4.1.2.1 Module output test method"),
+            (*new.number_path, "30.4.1.2.1"),
+            19,
+            21,
+            "Revised 60 GHz receiver, 30-tap FFE, DFE constraints, and host channel procedure. "
+            * 12,
+        )
+
+        matches = _match_sections([old, old_child], [new, new_child], DiffOptions())
+
+        self.assertEqual((0, 0), matches[0][:2])
+        self.assertEqual("unique_title_body_fallback", matches[0][3])
+        child_match = next(match for match in matches if match[:2] == (1, 1))
+        self.assertEqual("structural_mapped_parent_unique_child", child_match[3])
+
     def test_exact_table_reconciliation_transposes_only_codec_newlines(self) -> None:
         """A merged header/data row is recoverable without treating `/` as layout."""
 

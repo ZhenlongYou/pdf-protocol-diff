@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .figure_filters import filter_figure_visual_snippets
 from .formula_visuals import normalized_formula_key
 from .models import (
     DiffOptions,
@@ -1875,7 +1876,13 @@ def compare_sections(
     new_table_unit_keys = common_table_unit_keys | (
         suppressed_new_table_unit_keys or set()
     )  # 旧兼容参数仍可双侧使用；精确重建路径必须传入侧别集合。
-    matches = _match_sections(old_sections, new_sections, options)
+    matches = _match_sections(
+        old_sections,
+        new_sections,
+        options,
+        suppressed_old_table_unit_keys=old_table_unit_keys,
+        suppressed_new_table_unit_keys=new_table_unit_keys,
+    )
     changes: list[SectionChange] = []
     for old_index, new_index, similarity, match_basis in matches:
         old_section = old_sections[old_index] if old_index is not None else None
@@ -1996,6 +2003,9 @@ def _match_sections(
     old_sections: list[Section],
     new_sections: list[Section],
     options: DiffOptions,
+    *,
+    suppressed_old_table_unit_keys: set[str] | None = None,
+    suppressed_new_table_unit_keys: set[str] | None = None,
 ) -> list[tuple[int | None, int | None, float, str]]:
     """Pair old/new sections using exact keys first, then global best scores.
 
@@ -2058,7 +2068,16 @@ def _match_sections(
         matched_new.add(new_index)
         matches.append((old_index, new_index, similarity, "similarity_exact"))
 
-    fallback_candidates: list[tuple[float, int, int]] = []
+    old_table_unit_keys = suppressed_old_table_unit_keys or set()
+    new_table_unit_keys = suppressed_new_table_unit_keys or set()
+    old_title_counts = Counter(
+        _review_unit_key(section.title) for section in old_sections
+    )
+    new_title_counts = Counter(
+        _review_unit_key(section.title) for section in new_sections
+    )
+    fallback_candidates: list[tuple[float, int, int, str]] = []
+    late_fallback_candidates: list[tuple[float, int, int, str]] = []
     for new_index, new_section in enumerate(new_sections):
         if new_index in matched_new:
             continue
@@ -2067,10 +2086,29 @@ def _match_sections(
                 continue
             if (old_index, new_index) in rejected_exact_pairs:
                 continue
-            body_similarity = _section_similarity(
+            raw_body_similarity = _section_similarity(
                 old_section.body,
                 new_section.body,
-            )  # fallback 必须先由正文达到用户配置门槛，标题和位置不能单独证明同一章节。
+            )
+            body_similarity = raw_body_similarity
+            used_evidence_suppression = (
+                raw_body_similarity < options.min_section_match_similarity
+            )
+            if used_evidence_suppression:
+                old_matching_body = _section_matching_body(
+                    old_section.body,
+                    old_table_unit_keys,
+                )
+                new_matching_body = _section_matching_body(
+                    new_section.body,
+                    new_table_unit_keys,
+                )
+                if not old_matching_body or not new_matching_body:
+                    continue
+                body_similarity = _section_similarity(
+                    old_matching_body,
+                    new_matching_body,
+                )  # 原始正文不足时才剔除结构化/已证明表格与 Figure 单元重试。
             if body_similarity < options.min_section_match_similarity:
                 continue  # 正文证据不足时保守保留新增/删除，避免把完全重写的同名章节强配。
             score = _section_match_score(old_section, new_section)
@@ -2080,21 +2118,41 @@ def _match_sections(
                 old_section.comparable_text,
                 new_section.comparable_text,
             )  # 标题/位置组合分只能排序候选，不能替代用户声明的实际可比文本门槛。
-            if comparable_similarity >= options.min_section_match_similarity:
-                fallback_candidates.append((score, old_index, new_index))
+            match_basis = (
+                "evidence_suppressed_similarity_fallback"
+                if used_evidence_suppression
+                else "similarity_fallback"
+            )
+            if comparable_similarity < options.min_section_match_similarity:
+                title_key = _review_unit_key(old_section.title)
+                if (
+                    not title_key
+                    or title_key != _review_unit_key(new_section.title)
+                    or old_title_counts[title_key] != 1
+                    or new_title_counts[title_key] != 1
+                ):
+                    continue  # 低原始全文分只允许双侧唯一同题条款借表格剔除后的正文证据恢复。
+                if not used_evidence_suppression:
+                    if raw_body_similarity < max(
+                        options.min_section_match_similarity,
+                        0.85,
+                    ):
+                        continue  # 错误父层级只能由双侧唯一同题且强正文相似度越过，普通阈值不足以授权。
+                    match_basis = "unique_title_body_fallback"
+            candidate = (score, old_index, new_index, match_basis)
+            if match_basis != "similarity_fallback":
+                late_fallback_candidates.append(candidate)
+            else:
+                fallback_candidates.append(candidate)
 
-    for score, old_index, new_index in sorted(fallback_candidates, reverse=True):
-        if old_index in matched_old or new_index in matched_new:
-            continue
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        similarity = _section_similarity(
-            old_sections[old_index].comparable_text,
-            new_sections[new_index].comparable_text,
-        )
-        matches.append(
-            (old_index, new_index, min(score, similarity), "similarity_fallback")
-        )
+    _consume_section_match_candidates(
+        fallback_candidates,
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )
 
     ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
     for old_index, new_index, match_basis in _structural_identity_rescue_pairs(
@@ -2147,6 +2205,38 @@ def _match_sections(
             )
         )  # 编号后移只改变配对授权；报告继续显示实际全文相似度。
 
+    # 表格/Figure 剔除候选及错误父层级下的唯一同题强正文候选只能兜底：
+    # 先让编号结构、兄弟偏移和父子边界使用更强证据，避免抢走可结构化解释的配对。
+    _consume_section_match_candidates(
+        late_fallback_candidates,
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )
+
+    for old_index, new_index in _mapped_parent_unique_child_rescue_pairs(
+        old_sections,
+        new_sections,
+        matches,
+        matched_old,
+        matched_new,
+    ):
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                "structural_mapped_parent_unique_child",
+            )
+        )
+
     user_window_pair = _user_page_window_anchor_pair(
         old_sections,
         new_sections,
@@ -2179,6 +2269,113 @@ def _match_sections(
         if old_index not in matched_old:
             matches.append((old_index, None, 0.0, "unmatched"))
     return matches
+
+
+def _consume_section_match_candidates(
+    candidates: list[tuple[float, int, int, str]],
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matched_old: set[int],
+    matched_new: set[int],
+    matches: list[tuple[int | None, int | None, float, str]],
+) -> None:
+    """Apply ranked one-to-one section candidates without inflating similarity."""
+
+    for score, old_index, new_index, match_basis in sorted(
+        candidates,
+        key=lambda item: (-item[0], abs(item[1] - item[2]), item[2], item[1]),
+    ):
+        if old_index in matched_old or new_index in matched_new:
+            continue
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        similarity = _section_similarity(
+            old_sections[old_index].comparable_text,
+            new_sections[new_index].comparable_text,
+        )
+        matches.append((old_index, new_index, min(score, similarity), match_basis))
+
+
+def _mapped_parent_unique_child_rescue_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matches: list[tuple[int | None, int | None, float, str]],
+    matched_old: set[int],
+    matched_new: set[int],
+) -> list[tuple[int, int]]:
+    """Pair one direct child after a strong late parent match fixed hierarchy drift."""
+
+    trusted_parent_bases = {
+        "evidence_suppressed_similarity_fallback",
+        "unique_title_body_fallback",
+    }
+    parent_pairs: dict[tuple[str, ...], tuple[tuple[str, ...], int, int]] = {}
+    reverse_parent_paths: Counter[tuple[str, ...]] = Counter()
+    for old_index, new_index, _score, basis in matches:
+        if old_index is None or new_index is None or basis not in trusted_parent_bases:
+            continue
+        old_parent = old_sections[old_index]
+        new_parent = new_sections[new_index]
+        if (
+            not old_parent.number_path
+            or not new_parent.number_path
+            or _review_unit_key(old_parent.title)
+            != _review_unit_key(new_parent.title)
+        ):
+            continue
+        parent_pairs[old_parent.number_path] = (
+            new_parent.number_path,
+            old_parent.level,
+            new_parent.level,
+        )
+        reverse_parent_paths[new_parent.number_path] += 1
+
+    old_child_title_counts = Counter(
+        (section.number_path[:-1], _review_unit_key(section.title))
+        for section in old_sections
+        if section.number_path and _review_unit_key(section.title)
+    )
+    new_children: dict[tuple[tuple[str, ...], str], list[int]] = {}
+    for index, section in enumerate(new_sections):
+        if not section.number_path:
+            continue
+        title_key = _review_unit_key(section.title)
+        if title_key:
+            new_children.setdefault((section.number_path[:-1], title_key), []).append(index)
+
+    rescued: list[tuple[int, int]] = []
+    local_new = set(matched_new)
+    for old_index, old_child in enumerate(old_sections):
+        if old_index in matched_old or len(old_child.number_path) < 2:
+            continue
+        mapped_parent = parent_pairs.get(old_child.number_path[:-1])
+        if mapped_parent is None:
+            continue
+        new_parent_path, old_parent_level, new_parent_level = mapped_parent
+        if reverse_parent_paths[new_parent_path] != 1:
+            continue
+        if old_child.level - old_parent_level != 1:
+            continue
+        title_key = _review_unit_key(old_child.title)
+        if (
+            not title_key
+            or old_child_title_counts[(old_child.number_path[:-1], title_key)] != 1
+        ):
+            continue
+        candidates = [
+            index
+            for index in new_children.get((new_parent_path, title_key), [])
+            if index not in local_new
+            and new_sections[index].level - new_parent_level == 1
+        ]
+        if len(candidates) != 1:
+            continue
+        new_index = candidates[0]
+        if len(new_children[(new_parent_path, title_key)]) != 1:
+            continue  # 双侧父域都必须是唯一同题直属子章，重复方法名不得按顺序猜配。
+        rescued.append((old_index, new_index))
+        local_new.add(new_index)
+    return rescued
 
 
 def _user_page_window_anchor_pair(
@@ -2536,7 +2733,11 @@ def _shifted_section_rescue_pairs(
         for old_index, new_index, _similarity_value, match_basis in ordinary_matches
         if old_index is not None
         and new_index is not None
-        and match_basis in {"similarity_exact", "similarity_fallback"}
+        and match_basis in {
+            "similarity_exact",
+            "similarity_fallback",
+            "evidence_suppressed_similarity_fallback",
+        }
     }
     old_parent_title_counts = Counter(
         (section.number_path[:-1], section.level, _review_unit_key(section.title))
@@ -3038,6 +3239,16 @@ def _section_similarity(left: str, right: str) -> float:
     left_sample = _sample_section_text(left)  # 采样保留章节开头和结尾，兼顾标题、定义和表格续行。
     right_sample = _sample_section_text(right)  # 两边使用同样采样策略，分数才可比较。
     return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
+
+
+def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> str:
+    """Return prose identity text without structured or coordinate-proven table rows."""
+
+    units = _paragraph_review_units(
+        body,
+        suppressed_table_unit_keys=suppressed_table_unit_keys,
+    )
+    return "\n".join(filter_figure_visual_snippets(units)).strip()
 
 
 def _exact_identity_similarity(left: str, right: str) -> float | None:

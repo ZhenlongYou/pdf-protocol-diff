@@ -17,6 +17,7 @@ from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 
+from .figure_filters import filter_figure_visual_snippets, is_figure_visual_pair
 from .formula_visuals import normalized_formula_key
 from .models import (
     DiffOptions,
@@ -74,6 +75,8 @@ _CHANGE_LABELS = {
 _MATCH_BASIS_LABELS = {
     "similarity_exact": "编号结构与正文相似度",
     "similarity_fallback": "正文相似度回退配对",
+    "evidence_suppressed_similarity_fallback": "剔除已识别表格与 Figure 证据后的正文相似度配对",
+    "unique_title_body_fallback": "双侧唯一同题且正文强相似配对",
     "structural_prose_identity": "剔除结构化表格行后正文一致",
     "structural_unique_anchor": "同父同层唯一的标题技术锚点+第二正文证据",
     "structural_adjacent_brackets": "前后相邻章节共同确认",
@@ -81,6 +84,7 @@ _MATCH_BASIS_LABELS = {
     "structural_shift_bracketed_sentence": "前后普通兄弟夹定一致编号偏移+标题相关正文句",
     "structural_mapped_parent_body": "已配对父章节改号+子章节正文相似度",
     "structural_mapped_parent_boundary": "已配对父章节改号+边界兄弟章节+直属子章节",
+    "structural_mapped_parent_unique_child": "强证据父章节配对+双侧唯一同题直属子章节",
     "user_page_window_anchor": "用户指定双侧页窗强关联",
     "unmatched": "未配对",
 }
@@ -93,10 +97,18 @@ _STRUCTURAL_MATCH_BASES = frozenset(
         "structural_shift_bracketed_sentence",
         "structural_mapped_parent_body",
         "structural_mapped_parent_boundary",
+        "structural_mapped_parent_unique_child",
     }
 )
 _USER_ANCHORED_MATCH_BASES = frozenset({"user_page_window_anchor"})
-_EXPLAINED_MATCH_BASES = _STRUCTURAL_MATCH_BASES | _USER_ANCHORED_MATCH_BASES
+_EVIDENCE_SUPPRESSED_MATCH_BASES = frozenset({"evidence_suppressed_similarity_fallback"})
+_UNIQUE_TITLE_BODY_MATCH_BASES = frozenset({"unique_title_body_fallback"})
+_EXPLAINED_MATCH_BASES = (
+    _STRUCTURAL_MATCH_BASES
+    | _USER_ANCHORED_MATCH_BASES
+    | _EVIDENCE_SUPPRESSED_MATCH_BASES
+    | _UNIQUE_TITLE_BODY_MATCH_BASES
+)
 
 
 def _match_basis_explanation(match_basis: str) -> str:
@@ -104,6 +116,10 @@ def _match_basis_explanation(match_basis: str) -> str:
 
     if match_basis in _USER_ANCHORED_MATCH_BASES:
         return "用户页窗授权；相似度仍为全文实际值"
+    if match_basis in _EVIDENCE_SUPPRESSED_MATCH_BASES:
+        return "表格与 Figure 证据去重后正文授权；相似度仍为含原始版面文字的全文实际值"
+    if match_basis in _UNIQUE_TITLE_BODY_MATCH_BASES:
+        return "双侧唯一同题且正文强相似授权；相似度仍为含错误父层级的全文实际值"
     return "结构证据授权；相似度仍为全文实际值"
 _TABLE_PAIR_SIMILARITY_THRESHOLD = 0.65  # 表格模糊配对与跨章节唯一表题共用同一内容证据门槛。
 _TABLE_PAGE_EDGE_MAX_FRACTION = 0.12  # 实测续表距页边约 7%/10%；留 2% 截图外扩余量仍拒绝中页表。
@@ -9759,6 +9775,9 @@ def _reader_section_change(
     )
     if change is None:
         return None
+    change = _reader_change_without_figure_visual_fragments(change)
+    if change is None:
+        return None
     # 已配对同题条款的结构编号只用于定位；读者层移除该片段，原始审计事实保持不变。
     change = _reader_change_without_proven_heading_renumber(change)
     if change is None:
@@ -9780,6 +9799,69 @@ def _reader_section_change(
     if _reader_change_is_layout_reorder_only(change):
         return replace(change, change_type="review")
     return change
+
+
+def _reader_change_without_figure_visual_fragments(
+    change: SectionChange,
+) -> SectionChange | None:
+    """Hide standalone Figure captions/diagram labels only in reader reports."""
+
+    removed = filter_figure_visual_snippets(change.removed_snippets)
+    added = filter_figure_visual_snippets(change.added_snippets)
+    replaced = [
+        pair
+        for pair in change.replaced_snippets
+        if not is_figure_visual_pair(pair.old, pair.new)
+    ]
+    audit_removed = filter_figure_visual_snippets(_audit_removed_snippets(change))
+    audit_added = filter_figure_visual_snippets(_audit_added_snippets(change))
+    audit_replaced = [
+        pair
+        for pair in _audit_replaced_snippets(change)
+        if not is_figure_visual_pair(pair.old, pair.new)
+    ]
+    omitted = change.omitted_snippet_count
+    if all(
+        audit is not None
+        for audit in (
+            change.audit_removed_snippets,
+            change.audit_added_snippets,
+            change.audit_replaced_snippets,
+        )
+    ):
+        omitted = max(
+            0,
+            len(audit_removed)
+            + len(audit_added)
+            + len(audit_replaced)
+            - len(removed)
+            - len(added)
+            - len(replaced),
+        )
+    cleaned = replace(
+        change,
+        removed_snippets=removed,
+        added_snippets=added,
+        replaced_snippets=replaced,
+        omitted_snippet_count=omitted,
+        audit_removed_snippets=(
+            audit_removed if change.audit_removed_snippets is not None else None
+        ),
+        audit_added_snippets=(
+            audit_added if change.audit_added_snippets is not None else None
+        ),
+        audit_replaced_snippets=(
+            audit_replaced if change.audit_replaced_snippets is not None else None
+        ),
+    )
+    if (
+        not cleaned.removed_snippets
+        and not cleaned.added_snippets
+        and not cleaned.replaced_snippets
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
 
 
 def _reader_change_without_locator_renumbering(

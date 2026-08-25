@@ -17,9 +17,19 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from protocol_pdf_diff.compare import run_diff
-from protocol_pdf_diff.models import DiffOptions, DocumentBlock, DocumentBlockKind
-from protocol_pdf_diff.prose_source_visuals import _annotated_crop, _highlight_boxes
+from protocol_pdf_diff.compare import compare_extractions, run_diff
+from protocol_pdf_diff.models import (
+    DiffOptions,
+    DocumentBlock,
+    DocumentBlockKind,
+    TableVisual,
+)
+from protocol_pdf_diff.pdf_extract import extract_pdf_text
+from protocol_pdf_diff.prose_source_visuals import (
+    _annotated_crop,
+    _highlight_boxes,
+    build_prose_source_visuals,
+)
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_multipage_text_pdf
 from protocol_pdf_diff.visual_watchdog import _snapshot_pdf as snapshot_pdf
@@ -200,6 +210,79 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             ((12.0, 10.0, 100.0, 20.0), (20.0, 21.0, 100.0, 31.0)),
             regions,
         )
+
+    def test_recognized_table_region_is_not_repeated_as_colored_prose_evidence(
+        self,
+    ) -> None:
+        """A table card owns its source area; prose screenshots must not tint it again."""
+
+        old_rows = [
+            f"Receiver parameter item {index} has the old tabulated value {100 + index} mV."
+            for index in range(1, 14)
+        ]
+        new_rows = [
+            f"Receiver parameter item {index} has the new tabulated value {120 + index} mV."
+            for index in range(1, 14)
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_pdf = write_multipage_text_pdf(
+                root / "old table.pdf",
+                [["1 Receiver Parameters", *old_rows]],
+            )
+            new_pdf = write_multipage_text_pdf(
+                root / "new table.pdf",
+                [["1 Receiver Parameters", *new_rows]],
+            )
+            old_extraction = extract_pdf_text(old_pdf)
+            new_extraction = extract_pdf_text(new_pdf)
+            result = compare_extractions(
+                old_extraction,
+                new_extraction,
+                DiffOptions(visual_watchdog=False, max_snippets_per_section=20),
+            )
+
+            def table_covering_changed_rows(extraction: object) -> TableVisual:
+                page = extraction.pages[0]
+                row_blocks = [
+                    block
+                    for block in page.blocks
+                    if "Receiver parameter item" in block.text
+                ]
+                bbox = (
+                    min(block.bbox[0] for block in row_blocks),
+                    min(block.bbox[1] for block in row_blocks),
+                    max(block.bbox[2] for block in row_blocks),
+                    max(block.bbox[3] for block in row_blocks),
+                )
+                return TableVisual(
+                    page_number=1,
+                    table_number=1,
+                    title="Table 1. Receiver parameters",
+                    bbox=bbox,
+                    image_data_uri="",
+                    row_texts=[block.text for block in row_blocks],
+                    grid_summary="test table region",
+                    content_fully_represented=True,
+                )
+
+            old_table = table_covering_changed_rows(old_extraction)
+            new_table = table_covering_changed_rows(new_extraction)
+            result = result.__class__(
+                **{
+                    **result.__dict__,
+                    "old_table_visuals": [old_table],
+                    "new_table_visuals": [new_table],
+                }
+            )
+            visuals, warnings = build_prose_source_visuals(
+                result,
+                old_extraction,
+                new_extraction,
+            )
+
+            self.assertEqual([], warnings)
+            self.assertEqual([], visuals)
 
     def test_snapshot_hash_mismatch_falls_back_to_text_without_stale_images(
         self,

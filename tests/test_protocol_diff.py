@@ -15765,6 +15765,70 @@ class ProtocolDiffTests(unittest.TestCase):
                     )
                 )
 
+    def test_renumbered_vma_pairs_after_structured_table_rows_are_removed(self) -> None:
+        """Unique high-similarity prose must not split into add/delete because one side owns table rows."""
+
+        shared_old = "\n".join(
+            (
+                "VMA is the difference between the average voltage V3 and the average voltage V0, as shown in Figure 29-3.",
+                "The waveform is observed through the compliance board and a fourth-order Bessel-Thomson response with a 42 GHz bandwidth.",
+                "For TP1a measurements the waveform is observed through the reference receiver as defined in Section 29.4.1.1.",
+                "For TP4 the VMA is measured at the output of the CTLE in the reference receiver.",
+            )
+        )
+        shared_new = shared_old.replace("29-3", "30-2").replace("42 GHz", "60 GHz").replace(
+            "29.4.1.1", "30.4.1.1"
+        )
+        table_wall = "\n".join(
+            f"表格行: T1 | Parameter=Overload differential voltage item {index} | Value={index} | Units=mV"
+            for index in range(18)
+        )
+        old_text = "\n".join(
+            (
+                "16.D Appendix material",
+                "29.3 Electrical Characteristics",
+                "29.3.6 Voltage Modulation Amplitude (VMA)",
+                shared_old,
+                table_wall,
+            )
+        )
+        new_text = "\n".join(
+            (
+                "30 CEI-224G-LINEAR-PAM4 Interface",
+                "30.3 Electrical Characteristics",
+                "30.3.7 Voltage Modulation Amplitude (VMA)",
+                shared_new,
+            )
+        )
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-vma.pdf"),
+                pages=[PageText(page_number=1, text=old_text)],
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-vma.pdf"),
+                pages=[PageText(page_number=1, text=new_text)],
+            ),
+            DiffOptions(min_section_match_similarity=0.72),
+        )
+        vma_changes = [
+            change
+            for change in result.changes
+            if any(
+                section is not None
+                and section.title == "Voltage Modulation Amplitude (VMA)"
+                for section in (change.old_section, change.new_section)
+            )
+        ]
+
+        self.assertEqual(1, len(vma_changes))
+        self.assertEqual("modified", vma_changes[0].change_type)
+        self.assertEqual(
+            "evidence_suppressed_similarity_fallback",
+            vma_changes[0].match_basis,
+        )
+
     def test_shift_rescue_uses_title_uniqueness_from_the_original_parent_domain(self) -> None:
         """Matching one duplicate first must not make the remaining duplicate look unique."""
 
