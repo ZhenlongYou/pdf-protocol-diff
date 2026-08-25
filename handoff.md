@@ -4,7 +4,7 @@
 
 - task_id: `pdf-diff-prose-source-visuals-20260825`
 - status: ready
-- recorded code commit: `915f8604ce48983907ebea09eebc847b85e37d29`
+- recorded code commit: `e86c0a99cd4ddca77e48c689097e4571caceb6f2`
 - 目标：大段正文变化不再先展示难读的整段删除/新增，而是把新旧 PDF 原文区域截图并排展示，并在原文坐标范围内标出差异；OCR 文字明细默认折叠。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
@@ -12,14 +12,14 @@
 ## 已经完成
 
 - 对技术正文中的大段修改、删除和新增生成原文截图证据；旧版与新版使用稳定的左右双栏，窄屏时自动纵向排列。
-- 高亮精度明确为“原文坐标区域级”，不声称是逐字 OCR 高亮；短变化继续使用紧凑文字卡片。
+- 高亮精度明确为“原文坐标区域级”，不声称是逐字 OCR 高亮；只绘制外扩橙色边框，不填充或覆盖原文字；短变化继续使用紧凑文字卡片。
 - 单侧新增或删除只展示存在的一侧，另一侧明确标注“无对应原文区域”，避免伪造配对。
 - OCR 文本差异放入默认折叠的“查看文字识别明细”，仍保留可搜索、可复制的精确文本证据。
 - 截图前校验源 PDF SHA-256；来源不一致时安全回退为文字报告并给出警告，不使用陈旧截图。
 - 截图页数设有上限并显示省略页数；排除运行页眉与表格，避免重复展示已有的表格视觉证据。
 - 视觉逻辑集中在独立模块，并复用现有 PDF 快照与页面渲染能力，没有复制第二套渲染管线。
 - 新增 3 项针对性测试，覆盖双侧截图、短变化回退和源文件哈希失配。
-- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1097/1097 PASS`，493.274 s。
+- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1098/1098 PASS`，503.959 s。
 - 故障注入：禁用大段正文截图资格后，要求原文截图网格的测试按预期失败；当前实现恢复后通过。
 - Ruff 新模块与新测试、格式检查、`git diff --check` 和字节码编译均通过。
 
