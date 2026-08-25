@@ -79,9 +79,10 @@ def _is_following_figure_visual_fragment(value: str) -> bool:
     words = re.findall(r"[A-Za-z0-9_]+", value)
     if len(words) <= 4:
         return False  # A terse label is ambiguous; keep it unless coordinates prove ownership.
-    if re.search(r"\([A-Za-z][A-Za-z0-9_]{1,12}\)", value):
-        return False  # Parenthesized acronym/symbol labels remain visible.
-    return True
+    return not re.search(
+        r"\([A-Za-z][A-Za-z0-9_]{1,12}\)",
+        value,
+    )  # Parenthesized acronym/symbol labels remain visible.
 
 
 def _is_figure_visual_prose_boundary(value: str) -> bool:
