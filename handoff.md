@@ -4,7 +4,7 @@
 
 - task_id: `pdf-diff-evidence-dedup-accuracy-20260825`
 - status: ready
-- code commit: `b3f4bf31f64acf97b82e6225e551a851d97fe413`
+- code commit: `fab0e7bebb019bb24176fd5e010c128224febb2a`
 - 目标：表格差异只在前置表格卡呈现，不再被长正文截图重复着色；纯 Figure 图注不再冒充正文变化；VMA、Module output 等受表格墙或错误父层级污染的同一章节恢复正确配对。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
@@ -15,17 +15,17 @@
 - 新增保守的 Figure 读者层过滤：移除独立 Figure 编号和纯视觉尾段中的长图注/图墙；短技术标签、公式、完整句和规范动词正文保持可见，JSON 原始审计数据不变。
 - 章节匹配只在原始正文分数不足时，剔除已证明的表格/Figure 证据重试；低全文分还必须满足双侧唯一同题。错误父层级场景增加强正文唯一标题兜底，并只允许已强配父章节下的唯一同题直属子章节跟随配对。
 - 候选排序与消费逻辑收敛到一个小函数，没有新增第二套章节或渲染引擎；报告继续显示原始全文相似度，不伪造高分。
-- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → `1109/1109 PASS`，513.133 s（最终 Figure 身份聚合调整后仍需在最终提交上复跑）。
+- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → `1110/1110 PASS`，510.610 s。
 - 新模块 Ruff、字节码编译、`git diff --check` 通过；缺失 PDF 的 CLI 故障路径以状态码 2 清楚失败。
 - 功能测试在实现前分别证明以下失败：表格区域仍被染色、VMA 被拆为新增/删除、Figure 图注仍成卡、错误父层级的 Module output 未配对；当前均通过。
 
 ## 最终 OIF 实测
 
 - 输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`
-- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_002531/protocol_diff_report.html`
-- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_002531/protocol_diff_data.json`
-- provenance build commit：`b3f4bf31f64acf97b82e6225e551a851d97fe413`
-- 结果：59 条原始章节变化、15 个表格变化、32 组长正文原文截图。
+- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_003819/protocol_diff_report.html`
+- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_003819/protocol_diff_data.json`
+- provenance build commit：`fab0e7bebb019bb24176fd5e010c128224febb2a`
+- 结果：60 条原始章节变化、15 个表格变化、32 组长正文原文截图。
 - `29.3.1 End-to-end linear channel` → `30.3.1` 恢复为一条 modified；受保护的短技术标签仍留在审计层，但不会淹没足量实质正文的身份判断。
 - `29.3.6 VMA` → `30.3.7 VMA` 为一条 modified；`29.4.1.2 Module output` → `30.4.1.2` 及其直属 test method 都为一条 modified。
 - HTML 中 `Figure 29-3.`、`Figure 30-2.`、`Measurement of VMA`、`表格行:` 均为 0 次。
