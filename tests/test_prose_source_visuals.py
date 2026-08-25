@@ -327,6 +327,46 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], 710.0)
 
+    def test_figure_crop_stops_before_a_generic_wide_bottom_furniture_line(self) -> None:
+        """A bottom-margin publication line is excluded without matching its wording."""
+
+        caption = DocumentBlock(
+            1,
+            (50.0, 320.0, 560.0, 335.0),
+            DocumentBlockKind.TEXT,
+            "Figure 29-1. End-to-end channel",
+            0,
+            "test",
+        )
+        diagram_label = DocumentBlock(
+            1,
+            (210.0, 620.0, 400.0, 634.0),
+            DocumentBlockKind.TEXT,
+            "Optical fiber",
+            1,
+            "test",
+        )
+        bottom_furniture = DocumentBlock(
+            1,
+            (72.0, 746.0, 532.0, 756.0),
+            DocumentBlockKind.TEXT,
+            "Example Standards Consortium - Clause 30 4",
+            2,
+            "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label, bottom_furniture),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], diagram_label.bbox[3])
+        self.assertLessEqual(crop[3], bottom_furniture.bbox[1] - 8.0)
+
     def test_coordinate_figure_caption_owns_page_even_when_section_body_omits_it(self) -> None:
         """Full-page block evidence prevents a sibling prose card from borrowing a Figure."""
 

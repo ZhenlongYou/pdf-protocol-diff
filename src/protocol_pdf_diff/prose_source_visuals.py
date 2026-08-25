@@ -411,6 +411,12 @@ def _figure_crop_bbox(
             _FIGURE_CAPTION_BLOCK_RE.match(text)
             or _NUMBERED_HEADING_BLOCK_RE.match(text)
             or _looks_like_prose_after_figure(text)
+            or _looks_like_bottom_margin_furniture(
+                block,
+                page_bbox=page_bbox,
+                content_left=left,
+                content_right=right,
+            )
         ):
             boundary_blocks.append(block)
     wrapped_prose_boundary = _wrapped_prose_boundary(
@@ -453,6 +459,26 @@ def _looks_like_prose_after_figure(value: str) -> bool:
     return bool(
         (len(value) >= 80 and (_PROSE_BOUNDARY_RE.search(value) or ends_sentence))
         or (len(value) >= 45 and ends_sentence)
+    )
+
+
+def _looks_like_bottom_margin_furniture(
+    block: DocumentBlock,
+    *,
+    page_bbox: tuple[float, float, float, float],
+    content_left: float,
+    content_right: float,
+) -> bool:
+    """Recognize one wide, shallow line isolated in the extreme bottom margin."""
+
+    _page_left, page_top, _page_right, page_bottom = page_bbox
+    page_height = max(1.0, page_bottom - page_top)
+    content_width = max(1.0, content_right - content_left)
+    return bool(
+        "\n" not in block.text
+        and block.bbox[1] >= page_top + page_height * 0.90
+        and block.bbox[3] - block.bbox[1] <= page_height * 0.035
+        and block.bbox[2] - block.bbox[0] >= content_width * 0.55
     )
 
 
