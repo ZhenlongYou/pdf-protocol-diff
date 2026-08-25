@@ -3261,7 +3261,18 @@ def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> s
         body,
         suppressed_table_unit_keys=suppressed_table_unit_keys,
     )
-    return "\n".join(filter_figure_visual_snippets(units)).strip()
+    filtered = filter_figure_visual_snippets(units)
+    substantive_prose: list[str] = []
+    for unit in filtered:
+        compact = compact_inline(unit)
+        if (
+            len(compact) >= 120
+            and _ends_review_sentence(compact)
+            and _SECTION_IDENTITY_PROSE_VERB_RE.search(compact)
+            and len(_meaningful_review_words(compact)) >= 15
+        ):
+            substantive_prose.append(unit)
+    return "\n".join(substantive_prose or filtered).strip()
 
 
 def _exact_identity_similarity(left: str, right: str) -> float | None:

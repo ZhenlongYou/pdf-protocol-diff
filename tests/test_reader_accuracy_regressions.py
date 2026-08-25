@@ -199,6 +199,38 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual([(0, 0)], [(old_index, new_index) for old_index, new_index, _score, _basis in matches])
         self.assertEqual("evidence_suppressed_similarity_fallback", matches[0][3])
 
+    def test_substantive_prose_matches_despite_many_ambiguous_figure_labels(self) -> None:
+        """Protected short labels stay auditable but cannot drown a long shared prose identity."""
+
+        def section(number: str, body: str) -> Section:
+            heading = f"{number} End-to-end linear channel description"
+            return Section(
+                section_id=number,
+                heading=heading,
+                title="End-to-end linear channel description",
+                level=3,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        shared = (
+            "The linear interface has normative test points to ensure interoperability "
+            "between the host, module, and optical fiber, and the receiver shall meet "
+            "the declared electrical limits for every supported symbol rate."
+        )
+        old_labels = "\n".join(f"Legacy host label {index}" for index in range(30))
+        new_labels = "\n".join(f"Revised module label {index}" for index in range(30))
+        old = section("29.3.1", f"{shared}\nFigure 29-1.\n{old_labels}")
+        new = section("30.3.1", f"{shared}\nFigure 30-1.\n{new_labels}")
+
+        matches = _match_sections([old], [new], DiffOptions())
+
+        self.assertEqual((0, 0), matches[0][:2])
+        self.assertEqual("evidence_suppressed_similarity_fallback", matches[0][3])
+
     def test_matching_ignores_combined_figure_caption_and_diagram_ocr(self) -> None:
         """One caption+diagram unit may be dropped for identity without hiding it from audit."""
 
