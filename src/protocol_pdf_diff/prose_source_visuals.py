@@ -45,10 +45,11 @@ _MIN_VISIBLE_REGION_WIDTH = 6.0
 _MIN_VISIBLE_REGION_HEIGHT = 3.0
 _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
-_SOURCE_CROP_VERTICAL_PADDING = 16.0
+_SOURCE_CROP_VERTICAL_PADDING = 2.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
-    r"^\s*(?:\d+\s+)?\d+(?:\.\d+)*\s+[A-Z][A-Za-z0-9 /()_-]{2,}"
+    r"^\s*(?:\d+\s+)?\d+(?:\.\d+)*\s+"
+    r"(?=[A-Za-z0-9 /()_-]*[A-Za-z]{3})[A-Z][A-Za-z0-9 /()_-]{2,}"
 )
 _PROSE_BOUNDARY_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|defines?|"
@@ -510,6 +511,9 @@ def _figure_boundary_blocks(
     )
     if wrapped is not None:
         boundaries.append(wrapped)
+    formula = _displayed_formula_boundary(blocks, caption=caption)
+    if formula is not None:
+        boundaries.append(formula)
     return boundaries
 
 
@@ -524,7 +528,6 @@ def _is_figure_boundary_block(
     return bool(
         _looks_like_figure_caption(text)
         or _NUMBERED_HEADING_BLOCK_RE.match(text)
-        or _looks_like_displayed_formula(text)
         or _looks_like_prose_after_figure(text)
         or _looks_like_bottom_margin_furniture(
             block,
@@ -535,20 +538,42 @@ def _is_figure_boundary_block(
     )
 
 
-def _looks_like_displayed_formula(value: str) -> bool:
-    """Recognize a compact equation row after a Figure without reading its math."""
+def _displayed_formula_boundary(
+    blocks: tuple[DocumentBlock, ...],
+    *,
+    caption: DocumentBlock,
+) -> DocumentBlock | None:
+    """Find an equation row only when a numbered formula anchors its geometry."""
+
+    anchors = [
+        block
+        for block in blocks
+        if block.bbox[1] > caption.bbox[3] + 4.0
+        and _DISPLAYED_FORMULA_NUMBER_RE.search(" ".join(block.text.split()))
+    ]
+    if not anchors:
+        return None
+    anchor = min(anchors, key=lambda block: (block.bbox[1], block.bbox[0]))
+    aligned_expressions = [
+        block
+        for block in blocks
+        if caption.bbox[3] + 4.0 < block.bbox[1] <= anchor.bbox[3]
+        and anchor.bbox[1] - block.bbox[1] <= 36.0
+        and _looks_like_formula_expression(block.text)
+    ]
+    return min(
+        (anchor, *aligned_expressions),
+        key=lambda block: (block.bbox[1], block.bbox[0]),
+    )
+
+
+def _looks_like_formula_expression(value: str) -> bool:
+    """Recognize math only inside a nearby numbered-formula evidence group."""
 
     compact = " ".join(value.split())
-    if not 8 <= len(compact) <= 240:
-        return False
-    if _DISPLAYED_FORMULA_NUMBER_RE.search(compact):
-        return True
     operator_count = len(_DISPLAYED_FORMULA_OPERATOR_RE.findall(compact))
     number_count = len(re.findall(r"\d+(?:\.\d+)?", compact))
-    return operator_count >= 2 and number_count >= 1 and not re.search(
-        r"[.!?。！？]\s*$",
-        compact,
-    )
+    return 8 <= len(compact) <= 240 and operator_count >= 2 and number_count >= 1
 
 
 def _looks_like_prose_after_figure(value: str) -> bool:

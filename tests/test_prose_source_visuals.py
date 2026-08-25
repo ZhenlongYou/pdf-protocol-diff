@@ -446,10 +446,18 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             2,
             "test",
         )
+        formula_number = DocumentBlock(
+            1,
+            (508.0, 499.0, 540.0, 512.0),
+            DocumentBlockKind.TEXT,
+            "(29-1)",
+            3,
+            "test",
+        )
 
         crop = _figure_crop_bbox(
             page_bbox=(0.0, 0.0, 612.0, 792.0),
-            blocks=(caption, diagram_label, formula),
+            blocks=(caption, diagram_label, formula, formula_number),
             caption_index=0,
             blocking_bboxes=((150.0, 548.0, 540.0, 564.0),),
             noise_bboxes=(),
@@ -458,6 +466,37 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
+
+    def test_formula_like_figure_labels_do_not_end_the_figure_without_number_anchor(self) -> None:
+        """Dimension labels and chart ticks remain Figure content, not standalone equations."""
+
+        caption = DocumentBlock(
+            1, (80.0, 100.0, 540.0, 118.0), DocumentBlockKind.TEXT,
+            "Figure 30-14. Channel reference model", 0, "test",
+        )
+        dimension = DocumentBlock(
+            1, (230.0, 320.0, 550.0, 334.0), DocumentBlockKind.TEXT,
+            "host PCB < 11.75dB < 2.45 dB + cap < 1.8 dB", 1, "test",
+        )
+        chart_tick = DocumentBlock(
+            1, (46.0, 380.0, 126.0, 394.0), DocumentBlockKind.TEXT,
+            "12 R 0", 2, "test",
+        )
+        final_diagram_label = DocumentBlock(
+            1, (210.0, 500.0, 400.0, 514.0), DocumentBlockKind.TEXT,
+            "Fiber Interconnect", 3, "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, dimension, chart_tick, final_diagram_label),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], final_diagram_label.bbox[3])
 
     def test_isolated_right_edge_noise_does_not_clip_source_content(self) -> None:
         """One footer fragment near an edge cannot redefine the body boundary."""
