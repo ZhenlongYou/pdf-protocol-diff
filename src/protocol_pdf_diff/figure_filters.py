@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import re
 
-from .pdf_extract import _figure_caption_is_identifier_only
+from .pdf_extract import (
+    _figure_caption_is_identifier_only,
+    _looks_like_figure_caption,
+)
 from .text_utils import compact_inline
 
 _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
@@ -18,11 +21,6 @@ _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
     r"provide(?:s|d)?|preserve(?:s|d)?|apply|applies|applied)\b"
     r"|应|必须|不得|要求|规定|显示|说明|描述|定义"
 )
-_FIGURE_PREFIX_RE = re.compile(
-    r"(?i)^\s*Figure\s+[A-Z]?\d+(?:[-.]\d+)*(?:\s*[.:])?\s*(?P<tail>.*)$"
-)
-
-
 def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[str]:
     """Remove Figure labels plus adjacent caption/diagram fragments.
 
@@ -72,11 +70,10 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
 def _is_combined_figure_visual_fragment(value: str) -> bool:
     """Recognize one extracted block containing a Figure caption plus labels."""
 
-    match = _FIGURE_PREFIX_RE.match(value)
-    if match is None or _figure_caption_is_identifier_only(value):
-        return False
-    tail = match.group("tail").strip()
-    return bool(tail) and not _is_figure_visual_prose_boundary(tail)
+    return bool(
+        not _figure_caption_is_identifier_only(value)
+        and _looks_like_figure_caption(value)
+    )
 
 
 def _is_figure_visual_prose_boundary(value: str) -> bool:

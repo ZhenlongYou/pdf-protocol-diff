@@ -25,12 +25,14 @@ from .models import (
     DocumentBlock,
     DocumentBlockKind,
     ExtractionResult,
+    FormulaVisual,
     ProseSourceVisual,
     ProseSourceVisualGroup,
     Section,
     SectionChange,
     TableVisual,
 )
+from .pdf_extract import _looks_like_figure_caption
 from .visual_watchdog import _render_page, _snapshot_pdf
 
 PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS = 500
@@ -45,15 +47,21 @@ _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
 _SOURCE_CROP_VERTICAL_PADDING = 16.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
-_FIGURE_CAPTION_BLOCK_RE = re.compile(
-    r"(?i)^\s*(?:\d+\s+)?Figure\s+[A-Z]?\d+(?:[-.]\d+)+\s*[.:]"
-)
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
-    r"^\s*(?:\d+\s+)?(?:\d+\.)*\d+(?:\.\d+)+\s+[A-Z][A-Za-z0-9 /()_-]{2,}"
+    r"^\s*(?:\d+\s+)?\d+(?:\.\d+)*\s+[A-Z][A-Za-z0-9 /()_-]{2,}"
 )
 _PROSE_BOUNDARY_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|defines?|"
     r"requires?|specifies?|describes?|meets?|uses?|shown)\b"
+)
+_DISPLAYED_FORMULA_NUMBER_RE = re.compile(
+    r"\([A-Z]?\d+(?:[-.]\d+)+\)\s*$",
+    flags=re.IGNORECASE,
+)
+_DISPLAYED_FORMULA_OPERATOR_RE = re.compile(r"[=≤≥<>±×÷*/^∑∫√]|[\ue000-\uf8ff]")
+_BOTTOM_MARGIN_FURNITURE_HINT_RE = re.compile(
+    r"(?i)\b(?:clause|consortium|copyright|draft|edition|forum|page|revision|"
+    r"specification|standard|version|working\s+group|www\.|https?://)\b|©"
 )
 
 
@@ -96,67 +104,14 @@ def build_prose_source_visuals(
         new_snapshot.seek(0)
         old_document = pypdfium2.PdfDocument(old_snapshot, autoclose=False)
         new_document = pypdfium2.PdfDocument(new_snapshot, autoclose=False)
-        old_pages = {page.page_number: page for page in old_extraction.pages}
-        new_pages = {page.page_number: page for page in new_extraction.pages}
-        old_table_bboxes = _table_bboxes_by_page(result.old_table_visuals)
-        new_table_bboxes = _table_bboxes_by_page(result.new_table_visuals)
-        groups: list[ProseSourceVisualGroup] = []
-        for change in candidates:
-            old_snippets = _change_snippets(change, side="old")
-            new_snippets = _change_snippets(change, side="new")
-            if _eligible_change(change):
-                old_visuals, old_omitted_page_count = _build_side_visuals(
-                    old_document,
-                    change.old_section,
-                    old_pages,
-                    old_snippets,
-                    excluded_bboxes_by_page=old_table_bboxes,
-                )
-                new_visuals, new_omitted_page_count = _build_side_visuals(
-                    new_document,
-                    change.new_section,
-                    new_pages,
-                    new_snippets,
-                    excluded_bboxes_by_page=new_table_bboxes,
-                )
-            else:
-                old_visuals, old_omitted_page_count = [], 0
-                new_visuals, new_omitted_page_count = [], 0
-            old_figure_visuals = _build_figure_visuals(
-                old_document,
-                change.old_section,
-                old_pages,
-                blocking_bboxes_by_page=old_table_bboxes,
-            )
-            new_figure_visuals = _build_figure_visuals(
-                new_document,
-                change.new_section,
-                new_pages,
-                blocking_bboxes_by_page=new_table_bboxes,
-            )
-            if old_visuals or new_visuals or old_figure_visuals or new_figure_visuals:
-                groups.append(
-                    ProseSourceVisualGroup(
-                        change_type=change.change_type,
-                        old_section_id=(
-                            change.old_section.section_id
-                            if change.old_section
-                            else None
-                        ),
-                        new_section_id=(
-                            change.new_section.section_id
-                            if change.new_section
-                            else None
-                        ),
-                        old_visuals=tuple(old_visuals),
-                        new_visuals=tuple(new_visuals),
-                        old_figure_visuals=tuple(old_figure_visuals),
-                        new_figure_visuals=tuple(new_figure_visuals),
-                        old_omitted_page_count=old_omitted_page_count,
-                        new_omitted_page_count=new_omitted_page_count,
-                    )
-                )
-        return groups, []
+        return _build_visual_groups(
+            result,
+            candidates,
+            old_document=old_document,
+            new_document=new_document,
+            old_extraction=old_extraction,
+            new_extraction=new_extraction,
+        ), []
     except Exception as exc:  # noqa: BLE001 - 展示增强失败必须回退文字，不能中断主报告。
         return [], [f"长正文原文截图未生成：{type(exc).__name__}，已回退到文字明细。"]
     finally:
@@ -168,6 +123,85 @@ def build_prose_source_visuals(
             old_snapshot.close()
         if new_snapshot is not None:
             new_snapshot.close()
+
+
+def _build_visual_groups(
+    result: DiffResult,
+    candidates: list[SectionChange],
+    *,
+    old_document: object,
+    new_document: object,
+    old_extraction: ExtractionResult,
+    new_extraction: ExtractionResult,
+) -> list[ProseSourceVisualGroup]:
+    """Materialize mutually owned prose, Figure, Table, and Formula regions."""
+
+    old_pages = {page.page_number: page for page in old_extraction.pages}
+    new_pages = {page.page_number: page for page in new_extraction.pages}
+    old_table_bboxes = _visual_bboxes_by_page(result.old_table_visuals)
+    new_table_bboxes = _visual_bboxes_by_page(result.new_table_visuals)
+    old_figure_blockers = _merge_bboxes_by_page(
+        old_table_bboxes,
+        _visual_bboxes_by_page(result.old_formula_visuals),
+    )
+    new_figure_blockers = _merge_bboxes_by_page(
+        new_table_bboxes,
+        _visual_bboxes_by_page(result.new_formula_visuals),
+    )
+    groups: list[ProseSourceVisualGroup] = []
+    for change in candidates:
+        old_snippets = _change_snippets(change, side="old")
+        new_snippets = _change_snippets(change, side="new")
+        if _eligible_change(change):
+            old_visuals, old_omitted_page_count = _build_side_visuals(
+                old_document,
+                change.old_section,
+                old_pages,
+                old_snippets,
+                excluded_bboxes_by_page=old_table_bboxes,
+            )
+            new_visuals, new_omitted_page_count = _build_side_visuals(
+                new_document,
+                change.new_section,
+                new_pages,
+                new_snippets,
+                excluded_bboxes_by_page=new_table_bboxes,
+            )
+        else:
+            old_visuals, old_omitted_page_count = [], 0
+            new_visuals, new_omitted_page_count = [], 0
+        old_figure_visuals = _build_figure_visuals(
+            old_document,
+            change.old_section,
+            old_pages,
+            blocking_bboxes_by_page=old_figure_blockers,
+        )
+        new_figure_visuals = _build_figure_visuals(
+            new_document,
+            change.new_section,
+            new_pages,
+            blocking_bboxes_by_page=new_figure_blockers,
+        )
+        if not (old_visuals or new_visuals or old_figure_visuals or new_figure_visuals):
+            continue
+        groups.append(
+            ProseSourceVisualGroup(
+                change_type=change.change_type,
+                old_section_id=(
+                    change.old_section.section_id if change.old_section else None
+                ),
+                new_section_id=(
+                    change.new_section.section_id if change.new_section else None
+                ),
+                old_visuals=tuple(old_visuals),
+                new_visuals=tuple(new_visuals),
+                old_figure_visuals=tuple(old_figure_visuals),
+                new_figure_visuals=tuple(new_figure_visuals),
+                old_omitted_page_count=old_omitted_page_count,
+                new_omitted_page_count=new_omitted_page_count,
+            )
+        )
+    return groups
 
 
 def _eligible_change(change: SectionChange) -> bool:
@@ -203,17 +237,32 @@ def _change_snippets(change: SectionChange, *, side: str) -> tuple[str, ...]:
     return tuple(filter_figure_visual_snippets(values))
 
 
-def _table_bboxes_by_page(
-    tables: Iterable[TableVisual],
+def _visual_bboxes_by_page(
+    visuals: Iterable[TableVisual | FormulaVisual],
 ) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
-    """Group recognized table source regions for prose-highlight exclusion."""
+    """Group coordinate-owned Table or Formula regions by source page."""
 
     grouped: dict[int, list[tuple[float, float, float, float]]] = defaultdict(list)
-    for table in tables:
-        bbox = tuple(float(value) for value in table.bbox)
+    for visual in visuals:
+        bbox = tuple(float(value) for value in visual.bbox)
         if len(bbox) != 4 or bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
             continue
-        grouped[int(table.page_number)].append(bbox)
+        grouped[int(visual.page_number)].append(bbox)
+    return {
+        page_number: tuple(sorted(boxes, key=lambda box: (box[1], box[0])))
+        for page_number, boxes in grouped.items()
+    }
+
+
+def _merge_bboxes_by_page(
+    *sources: dict[int, tuple[tuple[float, float, float, float], ...]],
+) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
+    """Merge independently owned layout regions without losing page order."""
+
+    grouped: dict[int, list[tuple[float, float, float, float]]] = defaultdict(list)
+    for source in sources:
+        for page_number, boxes in source.items():
+            grouped[page_number].extend(boxes)
     return {
         page_number: tuple(sorted(boxes, key=lambda box: (box[1], box[0])))
         for page_number, boxes in grouped.items()
@@ -345,7 +394,7 @@ def _build_figure_visuals(
             for index, block in enumerate(ordered_blocks)
             if (
                 block.kind is not DocumentBlockKind.TABLE
-                and _FIGURE_CAPTION_BLOCK_RE.match(block.text.strip())
+                and _looks_like_figure_caption(block.text.strip())
                 and _block_belongs_to_section(block.text, page_body)
             )
         ]
@@ -402,31 +451,13 @@ def _figure_crop_bbox(
     left, right = _content_horizontal_bounds(page_bbox, noise_bboxes)
     top = max(page_top, caption.bbox[1] - 10.0)
     bottom = page_bottom
-    boundary_blocks: list[DocumentBlock] = []
-    for block in blocks:
-        text = " ".join(block.text.split())
-        if block.bbox[1] <= caption.bbox[3] + 4.0:
-            continue
-        if (
-            _FIGURE_CAPTION_BLOCK_RE.match(text)
-            or _NUMBERED_HEADING_BLOCK_RE.match(text)
-            or _looks_like_prose_after_figure(text)
-            or _looks_like_bottom_margin_furniture(
-                block,
-                page_bbox=page_bbox,
-                content_left=left,
-                content_right=right,
-            )
-        ):
-            boundary_blocks.append(block)
-    wrapped_prose_boundary = _wrapped_prose_boundary(
+    boundary_blocks = _figure_boundary_blocks(
         blocks,
         caption=caption,
+        page_bbox=page_bbox,
         content_left=left,
         content_right=right,
     )
-    if wrapped_prose_boundary is not None:
-        boundary_blocks.append(wrapped_prose_boundary)
     if boundary_blocks:
         bottom = min(
             bottom,
@@ -448,6 +479,76 @@ def _figure_crop_bbox(
     if bottom - top < 36.0:
         return None
     return (left, top, right, bottom)
+
+
+def _figure_boundary_blocks(
+    blocks: tuple[DocumentBlock, ...],
+    *,
+    caption: DocumentBlock,
+    page_bbox: tuple[float, float, float, float],
+    content_left: float,
+    content_right: float,
+) -> list[DocumentBlock]:
+    """Collect content objects that take ownership below a Figure."""
+
+    boundaries = [
+        block
+        for block in blocks
+        if block.bbox[1] > caption.bbox[3] + 4.0
+        and _is_figure_boundary_block(
+            block,
+            page_bbox=page_bbox,
+            content_left=content_left,
+            content_right=content_right,
+        )
+    ]
+    wrapped = _wrapped_prose_boundary(
+        blocks,
+        caption=caption,
+        content_left=content_left,
+        content_right=content_right,
+    )
+    if wrapped is not None:
+        boundaries.append(wrapped)
+    return boundaries
+
+
+def _is_figure_boundary_block(
+    block: DocumentBlock,
+    *,
+    page_bbox: tuple[float, float, float, float],
+    content_left: float,
+    content_right: float,
+) -> bool:
+    text = " ".join(block.text.split())
+    return bool(
+        _looks_like_figure_caption(text)
+        or _NUMBERED_HEADING_BLOCK_RE.match(text)
+        or _looks_like_displayed_formula(text)
+        or _looks_like_prose_after_figure(text)
+        or _looks_like_bottom_margin_furniture(
+            block,
+            page_bbox=page_bbox,
+            content_left=content_left,
+            content_right=content_right,
+        )
+    )
+
+
+def _looks_like_displayed_formula(value: str) -> bool:
+    """Recognize a compact equation row after a Figure without reading its math."""
+
+    compact = " ".join(value.split())
+    if not 8 <= len(compact) <= 240:
+        return False
+    if _DISPLAYED_FORMULA_NUMBER_RE.search(compact):
+        return True
+    operator_count = len(_DISPLAYED_FORMULA_OPERATOR_RE.findall(compact))
+    number_count = len(re.findall(r"\d+(?:\.\d+)?", compact))
+    return operator_count >= 2 and number_count >= 1 and not re.search(
+        r"[.!?。！？]\s*$",
+        compact,
+    )
 
 
 def _looks_like_prose_after_figure(value: str) -> bool:
@@ -479,6 +580,7 @@ def _looks_like_bottom_margin_furniture(
         and block.bbox[1] >= page_top + page_height * 0.90
         and block.bbox[3] - block.bbox[1] <= page_height * 0.035
         and block.bbox[2] - block.bbox[0] >= content_width * 0.55
+        and _BOTTOM_MARGIN_FURNITURE_HINT_RE.search(block.text)
     )
 
 
@@ -507,7 +609,7 @@ def _wrapped_prose_boundary(
         first_text = " ".join(first.text.split())
         first_words = re.findall(r"[A-Za-z]{2,}", first_text)
         if (
-            _FIGURE_CAPTION_BLOCK_RE.match(first_text)
+            _looks_like_figure_caption(first_text)
             or _NUMBERED_HEADING_BLOCK_RE.match(first_text)
             or first.bbox[0] > content_left + content_width * 0.14
             or (first.bbox[2] - first.bbox[0]) < content_width * 0.62
@@ -540,7 +642,7 @@ def _page_contains_figure_caption(blocks: Iterable[DocumentBlock]) -> bool:
 
     return any(
         block.kind is not DocumentBlockKind.TABLE
-        and _FIGURE_CAPTION_BLOCK_RE.match(block.text.strip())
+        and _looks_like_figure_caption(block.text.strip())
         for block in blocks
     )
 
@@ -758,9 +860,40 @@ def _crop_regions(
         page_bbox,
         noise_bboxes,
     )
-    ordered = sorted(boxes, key=lambda box: (box[1], box[0]))
+    clusters = _cluster_source_boxes(
+        boxes,
+        blocking_bboxes=blocking_bboxes,
+        content_left=content_left,
+        content_right=content_right,
+    )
+    minimum_width = (x1 - x0) * _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO
+    regions: list[tuple[float, float, float, float]] = []
+    for cluster in clusters:
+        candidate = _crop_region_for_cluster(
+            cluster,
+            page_top=top,
+            page_bottom=bottom,
+            content_left=content_left,
+            content_right=content_right,
+            minimum_width=minimum_width,
+            blocking_bboxes=blocking_bboxes,
+        )
+        if candidate is not None:
+            regions.append(candidate)
+    return tuple(regions)
+
+
+def _cluster_source_boxes(
+    boxes: tuple[tuple[float, float, float, float], ...],
+    *,
+    blocking_bboxes: tuple[tuple[float, float, float, float], ...],
+    content_left: float,
+    content_right: float,
+) -> list[list[tuple[float, float, float, float]]]:
+    """Split changed text boxes only where another owned region intervenes."""
+
     clusters: list[list[tuple[float, float, float, float]]] = []
-    for box in ordered:
+    for box in sorted(boxes, key=lambda item: (item[1], item[0])):
         if not clusters:
             clusters.append([box])
             continue
@@ -779,34 +912,95 @@ def _crop_regions(
             clusters.append([box])
         else:
             clusters[-1].append(box)
+    return clusters
 
-    regions: list[tuple[float, float, float, float]] = []
-    minimum_width = (x1 - x0) * _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO
-    for cluster in clusters:
-        left = max(content_left, min(box[0] for box in cluster) - _SOURCE_CROP_HORIZONTAL_PADDING)
-        right = min(content_right, max(box[2] for box in cluster) + _SOURCE_CROP_HORIZONTAL_PADDING)
-        if right - left < minimum_width:
-            extra = minimum_width - (right - left)
-            left = max(content_left, left - extra / 2.0)
-            right = min(content_right, right + extra / 2.0)
-            if right - left < minimum_width:
-                if left <= content_left:
-                    right = min(content_right, content_left + minimum_width)
-                else:
-                    left = max(content_left, content_right - minimum_width)
-        crop_top = max(top, min(box[1] for box in cluster) - _SOURCE_CROP_VERTICAL_PADDING)
-        crop_bottom = min(bottom, max(box[3] for box in cluster) + _SOURCE_CROP_VERTICAL_PADDING)
-        for blocker in blocking_bboxes:
-            if _horizontal_overlap_ratio((left, crop_top, right, crop_bottom), blocker) < 0.45:
-                continue
-            if max(box[3] for box in cluster) <= blocker[1]:
-                crop_bottom = min(crop_bottom, blocker[1])
-            elif min(box[1] for box in cluster) >= blocker[3]:
-                crop_top = max(crop_top, blocker[3])
-        candidate = (left, crop_top, right, crop_bottom)
-        if right - left >= minimum_width and crop_bottom - crop_top >= 8.0:
-            regions.append(candidate)
-    return tuple(regions)
+
+def _crop_region_for_cluster(
+    cluster: list[tuple[float, float, float, float]],
+    *,
+    page_top: float,
+    page_bottom: float,
+    content_left: float,
+    content_right: float,
+    minimum_width: float,
+    blocking_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> tuple[float, float, float, float] | None:
+    """Fit one readable crop and clip it away from independently owned regions."""
+
+    left = max(
+        content_left,
+        min(box[0] for box in cluster) - _SOURCE_CROP_HORIZONTAL_PADDING,
+    )
+    right = min(
+        content_right,
+        max(box[2] for box in cluster) + _SOURCE_CROP_HORIZONTAL_PADDING,
+    )
+    left, right = _expand_crop_to_minimum_width(
+        left,
+        right,
+        content_left=content_left,
+        content_right=content_right,
+        minimum_width=minimum_width,
+    )
+    crop_top = max(
+        page_top,
+        min(box[1] for box in cluster) - _SOURCE_CROP_VERTICAL_PADDING,
+    )
+    crop_bottom = min(
+        page_bottom,
+        max(box[3] for box in cluster) + _SOURCE_CROP_VERTICAL_PADDING,
+    )
+    crop_top, crop_bottom = _clip_crop_to_blockers(
+        (left, crop_top, right, crop_bottom),
+        cluster=cluster,
+        blocking_bboxes=blocking_bboxes,
+    )
+    if right - left < minimum_width or crop_bottom - crop_top < 8.0:
+        return None
+    return (left, crop_top, right, crop_bottom)
+
+
+def _expand_crop_to_minimum_width(
+    left: float,
+    right: float,
+    *,
+    content_left: float,
+    content_right: float,
+    minimum_width: float,
+) -> tuple[float, float]:
+    """Widen a narrow text crop symmetrically, then anchor it to a content edge."""
+
+    if right - left >= minimum_width:
+        return left, right
+    extra = minimum_width - (right - left)
+    left = max(content_left, left - extra / 2.0)
+    right = min(content_right, right + extra / 2.0)
+    if right - left >= minimum_width:
+        return left, right
+    if left <= content_left:
+        return left, min(content_right, content_left + minimum_width)
+    return max(content_left, content_right - minimum_width), right
+
+
+def _clip_crop_to_blockers(
+    crop: tuple[float, float, float, float],
+    *,
+    cluster: list[tuple[float, float, float, float]],
+    blocking_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> tuple[float, float]:
+    """Keep the crop on its side of every horizontally overlapping owner."""
+
+    left, crop_top, right, crop_bottom = crop
+    cluster_top = min(box[1] for box in cluster)
+    cluster_bottom = max(box[3] for box in cluster)
+    for blocker in blocking_bboxes:
+        if _horizontal_overlap_ratio((left, crop_top, right, crop_bottom), blocker) < 0.45:
+            continue
+        if cluster_bottom <= blocker[1]:
+            crop_bottom = min(crop_bottom, blocker[1])
+        elif cluster_top >= blocker[3]:
+            crop_top = max(crop_top, blocker[3])
+    return crop_top, crop_bottom
 
 
 def _content_horizontal_bounds(
@@ -819,14 +1013,70 @@ def _content_horizontal_bounds(
     width = max(1.0, x1 - x0)
     left = x0 + width * 0.035
     right = x1 - width * 0.035
-    for noise in noise_bboxes:
-        if noise[0] <= x0 + width * 0.16 and noise[2] <= x0 + width * 0.22:
-            left = max(left, noise[2])
-        if noise[2] >= x1 - width * 0.16 and noise[0] >= x1 - width * 0.22:
-            right = min(right, noise[0])
+    left_gutter = _proven_side_gutter_bound(
+        page_bbox,
+        noise_bboxes,
+        side="left",
+    )
+    right_gutter = _proven_side_gutter_bound(
+        page_bbox,
+        noise_bboxes,
+        side="right",
+    )
+    if left_gutter is not None:
+        left = max(left, left_gutter)
+    if right_gutter is not None:
+        right = min(right, right_gutter)
     if right - left < width * _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO:
         return x0 + width * 0.035, x1 - width * 0.035
     return left, right
+
+
+def _proven_side_gutter_bound(
+    page_bbox: tuple[float, float, float, float],
+    noise_bboxes: tuple[tuple[float, float, float, float], ...],
+    *,
+    side: str,
+) -> float | None:
+    """Return an inner gutter edge only for a dense, tall column of small boxes."""
+
+    x0, page_top, x1, page_bottom = page_bbox
+    width = max(1.0, x1 - x0)
+    height = max(1.0, page_bottom - page_top)
+    candidates = [
+        box
+        for box in noise_bboxes
+        if (
+            box[2] > box[0]
+            and box[3] > box[1]
+            and box[2] - box[0] <= width * 0.08
+            and (
+                (
+                    side == "left"
+                    and box[0] <= x0 + width * 0.16
+                    and box[2] <= x0 + width * 0.22
+                )
+                or (
+                    side == "right"
+                    and box[2] >= x1 - width * 0.16
+                    and box[0] >= x1 - width * 0.22
+                )
+            )
+        )
+    ]
+    distinct_rows = {
+        round((box[1] + box[3]) / 2.0, 1)
+        for box in candidates
+    }
+    if len(distinct_rows) < 8:
+        return None
+    vertical_span = max(box[3] for box in candidates) - min(
+        box[1] for box in candidates
+    )
+    if vertical_span < height * 0.35:
+        return None
+    inner_edges = sorted(box[2] if side == "left" else box[0] for box in candidates)
+    return inner_edges[len(inner_edges) // 2]
 
 
 def _is_vertical_blocker(

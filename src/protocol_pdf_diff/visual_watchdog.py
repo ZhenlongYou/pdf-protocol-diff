@@ -715,6 +715,14 @@ def _reader_visible_semantic_change_pages(
     )
     table_changes = _ordered_table_changes(_build_table_changes(result))
     table_evidence = [*table_changes, *table_groups]
+    figure_visual_sides_by_identity = {
+        (group.change_type, group.old_section_id, group.new_section_id): (
+            bool(group.old_figure_visuals),
+            bool(group.new_figure_visuals),
+        )
+        for group in result.prose_source_visuals
+        if group.old_figure_visuals or group.new_figure_visuals
+    }
     reader_changes = []
     for change in result.changes:
         if change.role == "document_metadata":
@@ -722,6 +730,14 @@ def _reader_visible_semantic_change_pages(
         reader_change = _reader_section_change(
             change,
             table_evidence,
+            figure_visual_sides=figure_visual_sides_by_identity.get(
+                (
+                    change.change_type,
+                    change.old_section.section_id if change.old_section else None,
+                    change.new_section.section_id if change.new_section else None,
+                ),
+                (False, False),
+            ),
         )
         if reader_change is not None:
             reader_changes.append(reader_change)

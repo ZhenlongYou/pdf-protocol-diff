@@ -339,8 +339,11 @@ def write_reports(
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     reader_changes: list[SectionChange] = []
-    figure_visual_identities = {
-        _prose_source_visual_identity(group)
+    figure_visual_sides_by_identity = {
+        _prose_source_visual_identity(group): (
+            bool(group.old_figure_visuals),
+            bool(group.new_figure_visuals),
+        )
         for group in result.prose_source_visuals
         if group.old_figure_visuals or group.new_figure_visuals
     }
@@ -351,10 +354,15 @@ def write_reports(
         reader_change = _reader_section_change(
             change,
             reader_table_evidence,
+            figure_visual_sides=figure_visual_sides_by_identity.get(
+                _section_change_visual_identity(change),
+                (False, False),
+            ),
         )
         if (
             reader_change is None
-            and _section_change_visual_identity(change) in figure_visual_identities
+            and _section_change_visual_identity(change)
+            in figure_visual_sides_by_identity
         ):
             reader_change = replace(
                 change,
@@ -9801,6 +9809,8 @@ def _reader_section_change(
         list[TableChange | _TableVisualGroup]
         | tuple[TableChange | _TableVisualGroup, ...]
     ) = (),
+    *,
+    figure_visual_sides: tuple[bool, bool] = (False, False),
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
@@ -9819,7 +9829,11 @@ def _reader_section_change(
     )
     if change is None:
         return None
-    change = _reader_change_without_figure_visual_fragments(change)
+    change = _reader_change_without_figure_visual_fragments(
+        change,
+        old_visual_available=figure_visual_sides[0],
+        new_visual_available=figure_visual_sides[1],
+    )
     if change is None:
         return None
     # 已配对同题条款的结构编号只用于定位；读者层移除该片段，原始审计事实保持不变。
@@ -9847,22 +9861,49 @@ def _reader_section_change(
 
 def _reader_change_without_figure_visual_fragments(
     change: SectionChange,
+    *,
+    old_visual_available: bool,
+    new_visual_available: bool,
 ) -> SectionChange | None:
-    """Hide standalone Figure captions/diagram labels only in reader reports."""
+    """Hide Figure text only when the same side has coordinate-backed raw pixels."""
 
-    removed = filter_figure_visual_snippets(change.removed_snippets)
-    added = filter_figure_visual_snippets(change.added_snippets)
+    removed = (
+        filter_figure_visual_snippets(change.removed_snippets)
+        if old_visual_available
+        else list(change.removed_snippets)
+    )
+    added = (
+        filter_figure_visual_snippets(change.added_snippets)
+        if new_visual_available
+        else list(change.added_snippets)
+    )
     replaced = [
         pair
         for pair in change.replaced_snippets
-        if not is_figure_visual_pair(pair.old, pair.new)
+        if not (
+            old_visual_available
+            and new_visual_available
+            and is_figure_visual_pair(pair.old, pair.new)
+        )
     ]
-    audit_removed = filter_figure_visual_snippets(_audit_removed_snippets(change))
-    audit_added = filter_figure_visual_snippets(_audit_added_snippets(change))
+    audit_removed = (
+        filter_figure_visual_snippets(_audit_removed_snippets(change))
+        if old_visual_available
+        else list(_audit_removed_snippets(change))
+    )
+    audit_added = (
+        filter_figure_visual_snippets(_audit_added_snippets(change))
+        if new_visual_available
+        else list(_audit_added_snippets(change))
+    )
     audit_replaced = [
         pair
         for pair in _audit_replaced_snippets(change)
-        if not is_figure_visual_pair(pair.old, pair.new)
+        if not (
+            old_visual_available
+            and new_visual_available
+            and is_figure_visual_pair(pair.old, pair.new)
+        )
     ]
     omitted = change.omitted_snippet_count
     if all(

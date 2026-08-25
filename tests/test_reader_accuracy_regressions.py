@@ -87,7 +87,9 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             ],
         )
 
-        self.assertIsNone(_reader_section_change(change))
+        self.assertIsNone(
+            _reader_section_change(change, figure_visual_sides=(True, False))
+        )
 
     def test_figure_caption_cleanup_preserves_neighboring_normative_prose(self) -> None:
         """A real requirement remains visible when caption debris shares its section."""
@@ -112,7 +114,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             removed_snippets=["Figure 1-2.", "Receiver setup", requirement],
         )
 
-        cleaned = _reader_section_change(change)
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(True, False),
+        )
 
         self.assertIsNotNone(cleaned)
         self.assertEqual([requirement], cleaned.removed_snippets)
@@ -145,7 +150,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             removed_snippets=["Figure 1-2.", *technical_items],
         )
 
-        cleaned = _reader_section_change(change)
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(True, False),
+        )
 
         self.assertIsNone(cleaned)
 
@@ -176,7 +184,35 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             replaced_snippets=[SnippetPair(old_text, new_text)],
         )
 
-        self.assertIsNone(_reader_section_change(change))
+        self.assertIsNone(
+            _reader_section_change(change, figure_visual_sides=(True, True))
+        )
+
+    def test_figure_text_remains_when_no_coordinate_visual_owns_it(self) -> None:
+        """A render/crop failure must fail closed and keep changed diagram values visible."""
+
+        old_section = Section(
+            "old-figure", "1 Setup", "Setup", 1,
+            ("1 Setup",), ("1",), 1, 1,
+            "Figure 1.\nVout = 3.3 V",
+        )
+        new_section = Section(
+            "new-figure", "1 Setup", "Setup", 1,
+            ("1 Setup",), ("1",), 1, 1,
+            "Figure 2.\nVout = 2.5 V",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.8,
+            replaced_snippets=[SnippetPair("Figure 1. Vout = 3.3 V", "Figure 2. Vout = 2.5 V")],
+        )
+
+        cleaned = _reader_section_change(change)
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(change.replaced_snippets, cleaned.replaced_snippets)
 
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""

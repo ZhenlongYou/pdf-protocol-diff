@@ -26,6 +26,7 @@ from protocol_pdf_diff.models import (
 )
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
+    _content_horizontal_bounds,
     _crop_regions,
     _figure_crop_bbox,
     _highlight_boxes,
@@ -159,17 +160,17 @@ class ProseSourceVisualReportTests(unittest.TestCase):
     def test_figure_only_change_renders_raw_images_without_text_comparison(self) -> None:
         """A Figure change remains visible as old/new raw images, never as label-wall diff."""
 
-        old_figure_text = "Legacy VMA diagram TP1 TP2 Optical transmitter receiver"
-        new_figure_text = "Revised VMA diagram TP1a TP3 Driver TIA Host Rx"
+        old_figure_text = "Vout = 3.3 V Legacy VMA diagram TP1 TP2"
+        new_figure_text = "Vout = 2.5 V Revised VMA diagram TP1a TP3"
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             old_pdf = write_multipage_text_pdf(
                 root / "old figure.pdf",
-                [["1 Receiver setup", "Figure 1-1.", old_figure_text]],
+                [["1 Receiver setup", "Figure 1.", old_figure_text]],
             )
             new_pdf = write_multipage_text_pdf(
                 root / "new figure.pdf",
-                [["1 Receiver setup", "Figure 1-2.", new_figure_text]],
+                [["1 Receiver setup", "Figure 2.", new_figure_text]],
             )
 
             result = run_diff(
@@ -366,6 +367,123 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], bottom_furniture.bbox[1] - 8.0)
+
+    def test_figure_crop_stops_before_a_top_level_heading(self) -> None:
+        """A simple heading such as ``2 Requirements`` owns the following content."""
+
+        caption = DocumentBlock(
+            1, (50.0, 100.0, 560.0, 118.0), DocumentBlockKind.TEXT,
+            "Figure 1. Receiver setup", 0, "test",
+        )
+        diagram_label = DocumentBlock(
+            1, (210.0, 500.0, 400.0, 514.0), DocumentBlockKind.TEXT,
+            "Host Rx", 1, "test",
+        )
+        heading = DocumentBlock(
+            1, (80.0, 680.0, 540.0, 700.0), DocumentBlockKind.TEXT,
+            "2 Requirements", 2, "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label, heading),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], diagram_label.bbox[3])
+        self.assertLessEqual(crop[3], heading.bbox[1] - 8.0)
+
+    def test_wide_bottom_axis_label_is_not_mistaken_for_page_furniture(self) -> None:
+        """A Figure may legitimately use a wide shallow label near the page bottom."""
+
+        caption = DocumentBlock(
+            1, (50.0, 100.0, 560.0, 118.0), DocumentBlockKind.TEXT,
+            "Figure 1. Receiver response", 0, "test",
+        )
+        axis_label = DocumentBlock(
+            1, (80.0, 730.0, 540.0, 742.0), DocumentBlockKind.TEXT,
+            "Frequency (GHz) / Output voltage (mV)", 1, "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, axis_label),
+            caption_index=0,
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], axis_label.bbox[3])
+
+    def test_figure_crop_stops_before_a_displayed_formula(self) -> None:
+        """A Figure card must not absorb a following equation owned by Formula evidence."""
+
+        caption = DocumentBlock(
+            1,
+            (80.0, 150.0, 540.0, 175.0),
+            DocumentBlockKind.TEXT,
+            "Figure 29-4. S-parameter limit",
+            0,
+            "test",
+        )
+        diagram_label = DocumentBlock(
+            1,
+            (210.0, 420.0, 400.0, 434.0),
+            DocumentBlockKind.TEXT,
+            "Frequency GHz",
+            1,
+            "test",
+        )
+        formula = DocumentBlock(
+            1,
+            (150.0, 490.0, 440.0, 504.0),
+            DocumentBlockKind.TEXT,
+            "SCD11 ≤ -22+16*(f/fb) dB 0.05 GHz ≤ f ≤ fb/2",
+            2,
+            "test",
+        )
+
+        crop = _figure_crop_bbox(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(caption, diagram_label, formula),
+            caption_index=0,
+            blocking_bboxes=((150.0, 548.0, 540.0, 564.0),),
+            noise_bboxes=(),
+        )
+
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop[3], diagram_label.bbox[3])
+        self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
+
+    def test_isolated_right_edge_noise_does_not_clip_source_content(self) -> None:
+        """One footer fragment near an edge cannot redefine the body boundary."""
+
+        bounds = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            ((508.0, 746.0, 540.0, 756.0),),
+        )
+
+        self.assertEqual((21.42, 590.58), bounds)
+
+    def test_tall_repeated_right_gutter_can_trim_source_content(self) -> None:
+        """Only a dense edge column spanning the page may establish a gutter."""
+
+        gutter = tuple(
+            (555.0, float(top), 568.0, float(top + 10))
+            for top in range(100, 701, 40)
+        )
+
+        left, right = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            gutter,
+        )
+
+        self.assertEqual(21.42, left)
+        self.assertEqual(555.0, right)
 
     def test_coordinate_figure_caption_owns_page_even_when_section_body_omits_it(self) -> None:
         """Full-page block evidence prevents a sibling prose card from borrowing a Figure."""

@@ -1457,6 +1457,11 @@ def _figure_caption_tail_starts_prose(tail: str) -> bool:
             r"(?i)^(?:shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|lists?|is|are|shall|should|must|may|can)\b",
             cleaned_tail,
         )
+        or re.match(
+            r"(?i)^(?:and|but|while)\b.{0,180}\b(?:is|are|was|were|shall|"
+            r"should|must|may|can|describes?|defines?|specifies?|uses?|used)\b",
+            cleaned_tail,
+        )
     )
 
 
