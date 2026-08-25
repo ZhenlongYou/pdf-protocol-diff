@@ -98,7 +98,7 @@ _FIGURE_CAPTION_RE = re.compile(
 )  # 识别图题/图片块，按用户要求不做图片对比。
 _TABLE_HEADER_SCAN_ROWS = 12  # pdfplumber 有时把标题/注释放在表格开头，需要在前十余行内寻找表头。
 _TABLE_SCREENSHOT_RESOLUTION = 144  # 表格截图使用 2x PDF 点阵，兼顾清晰度和 HTML 体积。
-_TABLE_SCREENSHOT_PADDING = 10.0  # 截图在表格 bbox 外保留少量边距，方便看见表题和边框。
+_TABLE_SCREENSHOT_PADDING = 3.0  # 表题已由卡片结构展示；这里只保留完整表格边框所需的安全边距。
 _UNSTRUCTURED_TABLE_MIN_CHARS = 160  # 超过该长度且数字密集的正文行，才可能是表格被抽成的一整行。
 _COLUMN_STRONG_TEXT_WEIGHT = 12  # 少量双栏行只有在两侧都有较强正文证据时才触发布局风险。
 _COLUMN_REORDER_MIN_SUPPORTING_ROWS = 3  # 改写正文顺序比“提示风险”更保守，至少要求三组平行正文行。
@@ -4356,7 +4356,7 @@ def _table_screenshot_image(
 ) -> tuple[object | None, tuple[float, float, float, float], str]:
     """Render a padded table crop and draw the detected bbox in orange."""
 
-    padded_bbox = _padded_bbox(page, bbox, _TABLE_SCREENSHOT_PADDING)  # 截图外扩一点边距，保留表题和边框上下文。
+    padded_bbox = _padded_bbox(page, bbox, _TABLE_SCREENSHOT_PADDING)  # 只保留边框安全边距，避免截进半行表题。
     try:
         cropped_page = page.crop(padded_bbox)  # pdfplumber 使用 PDF 点坐标裁剪页面。
         image = cropped_page.to_image(resolution=_TABLE_SCREENSHOT_RESOLUTION).original.convert("RGB")
@@ -4389,7 +4389,7 @@ def _padded_bbox(
     page_bbox = tuple(float(value) for value in (getattr(page, "bbox", None) or (0.0, 0.0, width, height)))  # 裁剪页可能有非零父坐标。
     page_left, page_top, page_right, page_bottom = page_bbox  # 使用父页面坐标限制截图范围，避免 crop 越界。
     left = max(page_left, bbox[0] - padding)  # 左侧外扩但不越过当前页面视图。
-    top = max(page_top, bbox[1] - padding * 2.5)  # 顶部多留一点空间，尽量包含表题。
+    top = max(page_top, bbox[1] - padding)  # 表题由结构化标题负责，截图不得带入半截相邻文字。
     right = min(page_right, bbox[2] + padding) if page_right else bbox[2] + padding
     bottom = min(page_bottom, bbox[3] + padding) if page_bottom else bbox[3] + padding
     return left, top, right, bottom

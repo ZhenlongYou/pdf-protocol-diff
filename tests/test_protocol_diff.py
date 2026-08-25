@@ -22,6 +22,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from unittest import mock
 
+from PIL import Image
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -82,6 +84,7 @@ from protocol_pdf_diff.pdf_extract import (
     _table_lines_from_rows_with_coverage,  # 结构化行覆盖不足时必须保留 bbox 原始比较文本。
     _table_row_bbox_matches_raw_cells,  # 行级替换必须精确覆盖实际会被删除的字符。
     _table_row_replacement_flags,  # 整表不安全时，只替换逐行完整结构化的数据行。
+    _table_screenshot_image,  # 表格截图不得带入半截表题或上一个内容块。
     extract_pdf_text,
 )
 from protocol_pdf_diff.reporting import (
@@ -202,6 +205,40 @@ def _extract_fake_layout_page(page: _FakeLayoutPage) -> PageText:
 
 class ProtocolDiffTests(unittest.TestCase):
     """End-to-end tests over generated old/new sample PDFs."""
+
+    def test_table_screenshot_padding_does_not_capture_caption_fragments(self) -> None:
+        """The table card already owns its title, so raw pixels need only a safe rim."""
+
+        class Rendered:
+            original = Image.new("RGB", (1020, 420), "white")
+
+        class Cropped:
+            def to_image(self, *, resolution: int) -> Rendered:
+                self.resolution = resolution
+                return Rendered()
+
+        class Page:
+            width = 612.0
+            height = 792.0
+            bbox = (0.0, 0.0, 612.0, 792.0)
+
+            def __init__(self) -> None:
+                self.last_crop: tuple[float, float, float, float] | None = None
+
+            def crop(self, bbox: tuple[float, float, float, float]) -> Cropped:
+                self.last_crop = bbox
+                return Cropped()
+
+        page = Page()
+        image, padded_bbox, status = _table_screenshot_image(
+            page,
+            (50.0, 100.0, 550.0, 300.0),
+        )
+
+        self.assertIsNotNone(image)
+        self.assertEqual("", status)
+        self.assertEqual((47.0, 97.0, 553.0, 303.0), padded_bbox)
+        self.assertEqual(padded_bbox, page.last_crop)
 
     def test_empty_extraction_is_indeterminate(self) -> None:
         """No comparable text or sections must never support an equality claim."""
