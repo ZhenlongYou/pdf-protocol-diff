@@ -3262,6 +3262,7 @@ def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> s
         suppressed_table_unit_keys=suppressed_table_unit_keys,
     )
     filtered = filter_figure_visual_snippets(units)
+    figure_evidence_removed = len(filtered) < len(units)
     substantive_prose: list[str] = []
     for unit in filtered:
         compact = compact_inline(unit)
@@ -3273,7 +3274,7 @@ def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> s
         ):
             substantive_prose.append(unit)
     prose_chars = sum(len(compact_inline(unit)) for unit in substantive_prose)
-    has_substantial_prose = prose_chars >= 120 and (
+    has_substantial_prose = figure_evidence_removed and prose_chars >= 120 and (
         len(substantive_prose) >= 2
         or any(len(compact_inline(unit)) >= 120 for unit in substantive_prose)
     )
