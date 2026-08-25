@@ -289,25 +289,24 @@ def _annotated_crop(
     right = min(x1, max(box[2] for box in highlight_boxes) + 24.0)
     crop_bottom = min(bottom, max(box[3] for box in highlight_boxes) + 36.0)
     crop_bbox = (left, crop_top, right, crop_bottom)
-    annotated = image.convert("RGBA")
-    draw = ImageDraw.Draw(annotated, "RGBA")
+    annotated = image.convert("RGB")
+    draw = ImageDraw.Draw(annotated)
     for box in highlight_boxes:
+        box_padding = 2
         pixel_box = (
-            round((box[0] - x0) * scale_x),
-            round((box[1] - top) * scale_y),
-            round((box[2] - x0) * scale_x),
-            round((box[3] - top) * scale_y),
+            max(0, round((box[0] - x0) * scale_x) - box_padding),
+            max(0, round((box[1] - top) * scale_y) - box_padding),
+            min(image.width - 1, round((box[2] - x0) * scale_x) + box_padding),
+            min(image.height - 1, round((box[3] - top) * scale_y) + box_padding),
         )
-        draw.rectangle(
-            pixel_box, fill=(255, 196, 61, 24), outline=(202, 111, 0, 255), width=2
-        )
+        draw.rectangle(pixel_box, outline=(224, 112, 0), width=3)
     pixel_crop = (
         max(0, round((left - x0) * scale_x)),
         max(0, round((crop_top - top) * scale_y)),
         min(image.width, round((right - x0) * scale_x)),
         min(image.height, round((crop_bottom - top) * scale_y)),
     )
-    return crop_bbox, annotated.crop(pixel_crop).convert("RGB"), len(highlight_boxes)
+    return crop_bbox, annotated.crop(pixel_crop), len(highlight_boxes)
 
 
 def _jpeg_data_uri(image: Image.Image) -> str:

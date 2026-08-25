@@ -10,6 +10,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from unittest import mock
 
+from PIL import Image, ImageDraw
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -17,6 +19,7 @@ if str(SRC_DIR) not in sys.path:
 
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.models import DiffOptions
+from protocol_pdf_diff.prose_source_visuals import _annotated_crop
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_multipage_text_pdf
 from protocol_pdf_diff.visual_watchdog import _snapshot_pdf as snapshot_pdf
@@ -135,6 +138,22 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertIn("100", html)
             self.assertIn("120", html)
             self.assertEqual([], payload["prose_source_visuals"])
+
+    def test_source_region_outline_does_not_cover_original_text(self) -> None:
+        """Highlighting may outline a region but must preserve its interior pixels."""
+
+        source = Image.new("RGB", (120, 80), "white")
+        draw = ImageDraw.Draw(source)
+        draw.rectangle((35, 35, 85, 45), fill="black")
+
+        _crop_bbox, annotated, region_count = _annotated_crop(
+            source,
+            page_bbox=(0.0, 0.0, 120.0, 80.0),
+            highlight_boxes=((20.0, 20.0, 100.0, 60.0),),
+        )
+
+        self.assertEqual(1, region_count)
+        self.assertEqual(source.getpixel((60, 40)), annotated.getpixel((60, 40)))
 
     def test_snapshot_hash_mismatch_falls_back_to_text_without_stale_images(
         self,
