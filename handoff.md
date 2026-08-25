@@ -27,8 +27,8 @@
 
 ## 验证
 
-- 相关回归：149/149 PASS，覆盖词级正文优先、原图无颜色、Table/Figure 互斥、父子章节所有权、窄残片、换行正文边界和页脚裁剪。
-- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → 1120/1120 PASS，503.876 s。
+- 相关回归：150/150 PASS，覆盖词级正文优先、原图无颜色、Table/Figure 互斥、父子章节所有权、窄残片、换行正文边界和两种页脚坐标形态。
+- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → 1121/1121 PASS，482.554 s。
 - 字节码编译与 `git diff --check` 通过。
 - 真实输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`。
 - 最终报告输出根：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_reader_cleanup/`；最终时间戳目录中的 `visual_acceptance/acceptance_report.md` 记录静态检查、视觉总览和独立 agent 审核。
