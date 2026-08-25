@@ -38,6 +38,7 @@ from .pdf_extract import (
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
+from .prose_source_visuals import build_prose_source_visuals
 from .quality import (
     PairAssessment,
     ReliabilityState,
@@ -161,10 +162,16 @@ def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> 
         if result.provenance is not None
         else None
     )
+    prose_source_visuals, prose_visual_warnings = build_prose_source_visuals(
+        result,
+        old_extraction,
+        new_extraction,
+    )  # 仍持有页面坐标与抽取快照散列时生成长正文截图，报告层不再事后猜位置。
     return replace(
         result,
         visual_review_items=visual_review_items,
-        warnings=[*result.warnings, *visual_warnings],
+        prose_source_visuals=prose_source_visuals,
+        warnings=[*result.warnings, *visual_warnings, *prose_visual_warnings],
         assessment=_assessment_with_visual_review(
             result.assessment,
             visual_review_count=len(visual_review_items),

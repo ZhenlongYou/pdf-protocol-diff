@@ -310,14 +310,19 @@ def _semantic_evidence_bboxes(
     return {page: tuple(boxes) for page, boxes in grouped.items()}
 
 
-def _render_page(document: object, page_number: int) -> Image.Image:
+def _render_page(
+    document: object,
+    page_number: int,
+    *,
+    dpi: int = VISUAL_RENDER_DPI,
+) -> Image.Image:
     """Render one source page at a bounded review resolution and release PDFium objects."""
 
     page = document[page_number - 1]
     bitmap = None
     try:
         bitmap = page.render(
-            scale=VISUAL_RENDER_DPI / 72.0,
+            scale=dpi / 72.0,
             limit_image_cache=True,
         )
         return bitmap.to_pil().convert("RGB").copy()

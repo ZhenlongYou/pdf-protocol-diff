@@ -468,6 +468,31 @@ class SectionChange:
 
 
 @dataclass(frozen=True)
+class ProseSourceVisual:
+    """One source-PDF crop with coordinate-backed prose highlights."""
+
+    page_number: int
+    crop_bbox: tuple[float, float, float, float]
+    image_data_uri: str
+    highlight_region_count: int
+    matched_snippet_count: int
+    precision: str = "source-coordinate-region"
+
+
+@dataclass(frozen=True)
+class ProseSourceVisualGroup:
+    """Old/new source crops belonging to one long section change."""
+
+    change_type: str
+    old_section_id: str | None
+    new_section_id: str | None
+    old_visuals: tuple[ProseSourceVisual, ...] = ()
+    new_visuals: tuple[ProseSourceVisual, ...] = ()
+    old_omitted_page_count: int = 0
+    new_omitted_page_count: int = 0
+
+
+@dataclass(frozen=True)
 class DiffResult:
     """Complete comparison result used by the reporting layer."""
 
@@ -495,6 +520,7 @@ class DiffResult:
     visual_review_items: list[VisualReviewItem] = field(default_factory=list)  # 语义层未覆盖的页级视觉变化，只作漏检哨兵。
     old_total_pages_known: bool = False  # 追加在历史位置参数之后；True仅表示抽取入口明确读到源PDF总页数。
     new_total_pages_known: bool = False  # 测试或局部页面推断出的数值不能授权全篇消噪。
+    prose_source_visuals: list[ProseSourceVisualGroup] = field(default_factory=list)  # 长正文变化的旧/新原文区域截图；仅用于读者核对，不改写语义事实。
 
 
 def _normalize_key(value: str) -> str:

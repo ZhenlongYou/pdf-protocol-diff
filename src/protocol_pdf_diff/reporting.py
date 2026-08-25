@@ -24,6 +24,8 @@ from .models import (
     FormulaChange,
     FormulaVisual,
     PageExtractionAudit,
+    ProseSourceVisual,
+    ProseSourceVisualGroup,
     Section,
     SectionChange,
     SnippetPair,
@@ -354,7 +356,12 @@ def write_reports(
         changes=reader_changes,
     )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 继续保存原始比较事实。
     markdown = _render_markdown(reader_result, options, reader_table_changes)
-    html = _render_html(reader_result, options, reader_table_changes)
+    html = _render_html(
+        reader_result,
+        options,
+        reader_table_changes,
+        prose_source_visuals=result.prose_source_visuals,
+    )
     text = _markdown_to_plain_text(markdown)
     csv_rows = _rows_for_csv(result.changes)
     table_csv_rows = _rows_for_table_csv(table_changes)
@@ -392,6 +399,10 @@ def write_reports(
         "visual_review_items": [
             {**_visual_review_item_to_dict(item), "reader_card_id": f"V{index}"}
             for index, item in enumerate(result.visual_review_items, start=1)
+        ],
+        "prose_source_visuals": [
+            _prose_source_visual_group_to_dict(group)
+            for group in result.prose_source_visuals
         ],
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
@@ -817,6 +828,8 @@ def _render_html(
     result: DiffResult,
     options: DiffOptions,
     table_changes: list[TableChange],
+    *,
+    prose_source_visuals: Iterable[ProseSourceVisualGroup] = (),
 ) -> str:
     """Render an easy-to-scan standalone HTML review report."""
 
@@ -836,6 +849,10 @@ def _render_html(
     )
     table_changes = _ordered_table_changes(table_changes)
     indexed_technical = list(enumerate(technical_changes, start=1))
+    prose_visual_lookup = {
+        _prose_source_visual_identity(group): group
+        for group in prose_source_visuals
+    }
     # 公式先绑定到正文条款，后续导航、顶部索引和正文卡共用同一份稳定归属结果。
     formula_placements = _place_formula_changes(
         technical_changes,
@@ -899,6 +916,9 @@ def _render_html(
             index,
             change,
             formula_placements=formulas_by_owner.get(index, ()),
+            prose_source_visual=prose_visual_lookup.get(
+                _section_change_visual_identity(change)
+            ),
         )
         for index, change in indexed_technical
     )
@@ -1076,6 +1096,73 @@ def _render_html(
       gap: 12px;
       margin-top: 12px;
     }}
+    .prose-source-visual {{ margin-top: 12px; }}
+    .prose-source-visual-legend {{
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }}
+    .prose-highlight-key {{
+      display: inline-block;
+      width: 18px;
+      height: 10px;
+      margin-right: 4px;
+      vertical-align: baseline;
+      border: 2px solid #ca6f00;
+      background: rgba(255, 196, 61, 0.35);
+    }}
+    .prose-source-visual-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+    }}
+    .prose-source-side {{
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }}
+    .prose-source-side > h4 {{
+      margin: 0;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 13px;
+      background: #edf1f6;
+      border-bottom: 1px solid var(--line);
+    }}
+    .prose-source-page {{ margin: 0; border-bottom: 1px solid var(--line); }}
+    .prose-source-page:last-child {{ border-bottom: 0; }}
+    .prose-source-page figcaption {{
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+    }}
+    .prose-source-page img {{ display: block; width: 100%; height: auto; background: #fff; }}
+    .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
+    .prose-source-omitted {{
+      padding: 8px 10px;
+      color: var(--mod);
+      font-size: 12px;
+      background: var(--mod-bg);
+      border-top: 1px solid #f1d489;
+    }}
+    .prose-text-details {{
+      margin-top: 10px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }}
+    .prose-text-details > summary {{
+      cursor: pointer;
+      padding: 9px 11px;
+      color: var(--blue);
+      font-weight: 600;
+    }}
+    .prose-text-details[open] > summary {{ border-bottom: 1px solid var(--line); }}
+    .prose-text-details-body {{ padding: 0 10px 10px; }}
     .pane {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1336,6 +1423,7 @@ def _render_html(
       aside {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }}
       main {{ padding: 14px; }}
       .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: minmax(0, 1fr); }}
+      .prose-source-visual-grid {{ grid-template-columns: minmax(0, 1fr); }}
       .formula-index-list {{ grid-template-columns: minmax(0, 1fr); }}
       .table-shot-grid, .table-shot {{ min-width: 0; max-width: 100%; }}
       .table-row-summary {{ table-layout: fixed; min-width: 0; }}
@@ -1396,6 +1484,7 @@ def _render_change_html(
     change: SectionChange,
     *,
     formula_placements: Iterable[_FormulaPlacement] = (),
+    prose_source_visual: ProseSourceVisualGroup | None = None,
 ) -> str:
     """Render one change as a side-by-side HTML block."""
 
@@ -1432,6 +1521,13 @@ def _render_change_html(
     body += omitted
     if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
+    if prose_source_visual is not None:
+        source_visual_html = _render_prose_source_visual_group(prose_source_visual)
+        body = (
+            source_visual_html
+            + '<details class="prose-text-details"><summary>查看文字识别明细</summary>'
+            + f'<div class="prose-text-details-body">{body}</div></details>'
+        )
     # 公式截图紧跟其条款正文，读者无需在独立公式墙和技术差异之间来回跳转。
     formula_html = _render_inline_formula_group(tuple(formula_placements))
     return f"""
@@ -1446,6 +1542,76 @@ def _render_change_html(
         {formula_html}
       </section>
     """
+
+
+def _section_change_visual_identity(
+    change: SectionChange,
+) -> tuple[str, str | None, str | None]:
+    return (
+        change.change_type,
+        change.old_section.section_id if change.old_section else None,
+        change.new_section.section_id if change.new_section else None,
+    )
+
+
+def _prose_source_visual_identity(
+    group: ProseSourceVisualGroup,
+) -> tuple[str, str | None, str | None]:
+    return (group.change_type, group.old_section_id, group.new_section_id)
+
+
+def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
+    old_side = _render_prose_source_visual_side(
+        "旧版原文区域",
+        group.old_visuals,
+        "旧版无对应原文区域",
+        omitted_page_count=group.old_omitted_page_count,
+    )
+    new_side = _render_prose_source_visual_side(
+        "新版原文区域",
+        group.new_visuals,
+        "新版无对应原文区域",
+        omitted_page_count=group.new_omitted_page_count,
+    )
+    return (
+        '<div class="prose-source-visual">'
+        '<div class="prose-source-visual-legend">'
+        '<span class="prose-highlight-key"></span> 原文坐标区域级高亮；截图用于快速定位，精确文字仍可展开核对。'
+        '</div>'
+        f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
+        '</div>'
+    )
+
+
+def _render_prose_source_visual_side(
+    title: str,
+    visuals: Iterable[ProseSourceVisual],
+    empty_message: str,
+    *,
+    omitted_page_count: int = 0,
+) -> str:
+    materialized = tuple(visuals)
+    if materialized:
+        pages = "".join(
+            '<figure class="prose-source-page">'
+            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
+            f'{visual.highlight_region_count} 个高亮区域</figcaption>'
+            f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
+            f'{_escape(str(visual.page_number))} 页高亮截图">'
+            '</figure>'
+            for visual in materialized
+        )
+    else:
+        pages = f'<div class="prose-source-empty">{_escape(empty_message)}</div>'
+    if omitted_page_count:
+        pages += (
+            '<div class="prose-source-omitted">另有 '
+            f'{omitted_page_count} 个变化页未嵌入；请展开文字明细并回到源 PDF 核对。</div>'
+        )
+    return (
+        '<section class="prose-source-side">'
+        f'<h4>{_escape(title)}</h4>{pages}</section>'
+    )
 
 
 def _render_table_changes_html(table_changes: list[TableChange]) -> str:
@@ -12661,6 +12827,38 @@ def _formula_change_to_dict(change: FormulaChange) -> dict[str, object]:
             if change.new_formula is not None
             else None
         ),
+    }
+
+
+def _prose_source_visual_group_to_dict(
+    group: ProseSourceVisualGroup,
+) -> dict[str, object]:
+    """Serialize crop provenance without duplicating embedded JPEG bytes."""
+
+    old_visuals = tuple(group.old_visuals)
+    new_visuals = tuple(group.new_visuals)
+    return {
+        "change_type": group.change_type,
+        "old_section_id": group.old_section_id,
+        "new_section_id": group.new_section_id,
+        "old_pages": [visual.page_number for visual in old_visuals],
+        "new_pages": [visual.page_number for visual in new_visuals],
+        "old_highlight_region_count": sum(
+            visual.highlight_region_count for visual in old_visuals
+        ),
+        "new_highlight_region_count": sum(
+            visual.highlight_region_count for visual in new_visuals
+        ),
+        "old_matched_snippet_count": sum(
+            visual.matched_snippet_count for visual in old_visuals
+        ),
+        "new_matched_snippet_count": sum(
+            visual.matched_snippet_count for visual in new_visuals
+        ),
+        "old_omitted_page_count": group.old_omitted_page_count,
+        "new_omitted_page_count": group.new_omitted_page_count,
+        "precision": "source-coordinate-region",
+        "has_embedded_images": bool(old_visuals or new_visuals),
     }
 
 

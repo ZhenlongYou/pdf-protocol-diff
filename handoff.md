@@ -2,50 +2,52 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-explicit-page-window-anchor-20260824`
-- status: ready
-- 目标：当用户同时给定新旧 PDF 起止页时，把双侧页窗视为强关联声明，让最相关的正文进入差异比较，而不是整节新增/删除。
+- task_id: `pdf-diff-prose-source-visuals-20260825`
+- status: ready for exact-commit acceptance
+- 目标：大段正文变化不再先展示难读的整段删除/新增，而是把新旧 PDF 原文区域截图并排展示，并在原文坐标范围内标出差异；OCR 文字明细默认折叠。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- 代码提交：`07d1fda61a9a6ffbc18ca770171b5f8d526f70da`
 
 ## 已经完成
 
-- 双侧起止页都明确时，常规/结构配对优先；若没有技术正文配对，用户页窗本身授权最相关的一对；若已有技术关系，剩余章节还必须有步骤/段落骨架重合才可额外锚定。
-- 锚定只授权配对，报告仍显示实际全文相似度；其余无对应章节保留为新增/删除。
-- 单侧页码、空正文、运行页眉和文档元数据不能单独充当技术正文关系；完全无关的剩余章节保留新增/删除。
-- 页边出版元数据清理只在坐标证据和重复页边证据成立时启用，不会靠纯文本规则删除正文版本号或日期。
-- 已处理首轮两名独立 reviewer 的全部发现：页窗内的普通小节配对不再阻断剩余核心正文；但已有技术关系后，剩余章节必须有骨架重合才可锚定；文档元数据排除。
-- 页眉大小写中和已限缩为“整行所有词都属于出版导航词表”的标题；`MODE_FAST/RX_CAL/ID ALPHA/GT/S/MODE FAST REQUIREMENTS` 等技术大小写变化仍可见。带 `shall/must/should/required/prohibited` 的底边正文不得被页脚规则删除。
-- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1094/1094 PASS`，470.308 s。
-- 故障注入：隔离副本中分别重新引入“小节阻断锚定”、“页眉 blanket casefold”和“规范正文被页脚删除”，3 项定向测试全部按预期失败；当前提交 3/3 PASS。
-- 真实 PHY 3.0 p16–18 ↔ PHY 4.0 p33–35 已运行：`2.8.2` ↔ `2.11.1` 是同一个 `modified` 项，`match_basis=user_page_window_anchor`，实际相似度 `0.496694`；旧版 `2.9/2.9.1` 仍保留删除。
+- 对技术正文中的大段修改、删除和新增生成原文截图证据；旧版与新版使用稳定的左右双栏，窄屏时自动纵向排列。
+- 高亮精度明确为“原文坐标区域级”，不声称是逐字 OCR 高亮；短变化继续使用紧凑文字卡片。
+- 单侧新增或删除只展示存在的一侧，另一侧明确标注“无对应原文区域”，避免伪造配对。
+- OCR 文本差异放入默认折叠的“查看文字识别明细”，仍保留可搜索、可复制的精确文本证据。
+- 截图前校验源 PDF SHA-256；来源不一致时安全回退为文字报告并给出警告，不使用陈旧截图。
+- 截图页数设有上限并显示省略页数；排除运行页眉与表格，避免重复展示已有的表格视觉证据。
+- 视觉逻辑集中在独立模块，并复用现有 PDF 快照与页面渲染能力，没有复制第二套渲染管线。
+- 新增 3 项针对性测试，覆盖双侧截图、短变化回退和源文件哈希失配。
+- 全仓回归：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest` → `1097/1097 PASS`，493.274 s。
+- 故障注入：禁用大段正文截图资格后，要求原文截图网格的测试按预期失败；当前实现恢复后通过。
+- Ruff 新模块与新测试、格式检查、`git diff --check` 和字节码编译均通过。
 
 ## 当前状态或阻塞
 
 - 无实现阻塞。
-- 最终 exact commit 尚需提交本 handoff，然后在该提交上重新生成真实报告、完成两名独立 reviewer 的第二轮复核、合入/push `main` 并运行交付门禁。
-- 真实报告必须保持 `degraded / 需人工复核`，因为视觉漏检哨兵存在 1 个未安全配对页；这不影响本次正文配对结论，但不得写成“全部可靠”。
+- 下一步只需冻结提交，在同一提交上重跑真实 OIF 对比、完成两名独立 reviewer 复核，并执行 GitHub/交付门禁。
+- 最终 OIF 报告应继续保留其真实的 `degraded / 需人工复核` 结论；原文截图改善的是可读性，不应被表述成消除了核心配对或视觉漏检风险。
 
-## 下一步计划
+## 最终验收入口
 
-1. 提交本 handoff，冻结最终 exact commit。
-2. 用 exact commit 重跑真实 `main.py` 和独立 JSON oracle，只保留最终交付报告。
-3. 让两名独立只读 reviewer 检查同一 exact commit 并登记 attestation。
-4. 使 `project/pdf-protocol-diff`、local `main` 与 GitHub 两引用指向同一 OID，运行 delivery gate。
+```bash
+PROTOCOL_PDF_DIFF_BUILD_COMMIT=<exact-commit> .venv/bin/python main.py \
+  --old-pdf /Users/mac/Desktop/oif2021.405.14.pdf \
+  --new-pdf /Users/mac/Desktop/oif2024.522.06.pdf \
+  --output-dir /Users/mac/Desktop/test/pdf_protocol_diff_oif_prose_visual
+```
 
 ## 不要再踩的坑
 
-- 不要全局降低章节相似度门槛；这会让普通文档产生错配。
-- 不要把页码作为逐页硬对齐；页窗是关系授权，正文证据决定具体配对。
-- 不要伪造高相似度；授权依据与实际分数必须分开展示。
-- 不要把页边元数据规则写死为某个标准或厂商名称；核心规则必须保持通用。
-- 不要把 JSON oracle PASS 外推成整份 PDF 无视觉漏检。
+- 不要把区域级高亮描述成逐字高亮；它依赖 PDF 原文坐标块与文本片段重合。
+- 不要对所有小变化生成截图，否则报告体积和阅读负担都会显著增加。
+- 不要跳过源文件哈希绑定，也不要在哈希失配时复用旧截图。
+- 不要把单侧新增/删除强行伪造成双侧对应关系。
+- 不要用新截图替代底层文本与表格 oracle；它们是互补证据。
 
 ## 建议技能
 
 - `rinysproject-delivery-orchestrator`
-- `test-effectiveness-gate`
 - `reviewer-subagents-gate`
 - `delivery-acceptance-gate`
 - `github-code-handoff`
