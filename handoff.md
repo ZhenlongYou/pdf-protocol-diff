@@ -2,44 +2,39 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-evidence-dedup-accuracy-20260825`
-- status: ready
-- code commit: `a087c9fa0eae3bd69763ca7dd60c3e7f04e0f5d3`
-- 目标：表格差异只在前置表格卡呈现，不再被长正文截图重复着色；纯 Figure 图注不再冒充正文变化；VMA、Module output 等受表格墙或错误父层级污染的同一章节恢复正确配对。
+- task_id: `pdf-diff-reader-segmentation-20260826`
+- status: implementation complete; final OIF visual acceptance is stored beside the delivered report
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
+- 工作分支：`codex/pdf-diff-reader-segmentation-20260826`
 - 持久项目分支：`project/pdf-protocol-diff`
+- 目标：正文采用结构化词级对比；Table 不在正文证据中重复；Figure 只显示原图；章节截图不跨归属边界、不放大窄残片。
 
-## 已经完成
+## 当前读者行为
 
-- 长正文截图从高亮框中完整扣除 `visual_noise_bboxes` 和已识别 `TableVisual.bbox`；跨越表格上下边界的文字块也不会再给表格卡拥有的像素二次着色。
-- 新增保守的 Figure 读者层过滤：移除独立 Figure 编号和纯视觉尾段中的长图注/图墙；短技术标签、公式、完整句和规范动词正文保持可见，JSON 原始审计数据不变。
-- 章节匹配只在原始正文分数不足时，剔除已证明的表格/Figure 证据重试；低全文分还必须满足双侧唯一同题。错误父层级场景增加强正文唯一标题兜底，并只允许已强配父章节下的唯一同题直属子章节跟随配对。
-- 候选排序与消费逻辑收敛到一个小函数，没有新增第二套章节或渲染引擎；报告继续显示原始全文相似度，不伪造高分。
-- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → `1110/1110 PASS`，510.610 s。
-- 新模块 Ruff、字节码编译、`git diff --check` 通过；缺失 PDF 的 CLI 故障路径以状态码 2 清楚失败。
-- 功能测试在实现前分别证明以下失败：表格区域仍被染色、VMA 被拆为新增/删除、Figure 图注仍成卡、错误父层级的 Module output 未配对；当前均通过。
+- 正文卡先显示词级替换/新增/删除；旧版和新版 PDF 原文区域放在默认关闭的“查看原文出处（无颜色对比）”中，截图不再覆盖颜色。
+- 已识别 Table 的页面由 Table 卡独占视觉证据，不再生成正文出处截图。
+- 整页坐标块只要证明存在独立 Figure 图题，该页便退出正文截图通道；Figure 以旧/新原图直接显示，不比较图内 VMA、轴、图号或短标签。
+- Figure 下边界由下一正文段落、章节、Figure、Table 或坐标确认的页脚决定。连续换行正文即使首行没有句号、第二行被打印行号打断，也不会被带进 Figure。
+- 读者层会过滤 Figure 后连续视觉标签，但完整规范句会重新打开正文边界；JSON/CSV 原始审计事实不删除。
+- 正文源截图匹配只允许当前章节的 `page_bodies`，避免父卡借用同页子章节；窄残片和无可读面积的扣除结果直接丢弃。
 
-## 最终 OIF 实测
+## 结构和冗余结论
 
-- 输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`
-- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_005059/protocol_diff_report.html`
-- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_005059/protocol_diff_data.json`
-- provenance build commit：`a087c9fa0eae3bd69763ca7dd60c3e7f04e0f5d3`
-- 结果：60 条原始章节变化、15 个表格变化、32 组长正文原文截图。
-- `29.3.1 End-to-end linear channel` → `30.3.1` 恢复为一条 modified；受保护的短技术标签仍留在审计层，但不会淹没足量实质正文的身份判断。
-- `29.3.6 VMA` → `30.3.7 VMA` 为一条 modified；`29.4.1.2 Module output` → `30.4.1.2` 及其直属 test method 都为一条 modified。
-- HTML 中 `Figure 29-3.`、`Figure 30-2.`、`Measurement of VMA`、`表格行:` 均为 0 次。
-- 可信度保持 `degraded / 需人工复核`；仍存在源 PDF 标题层级误识别和部分未配对章节，不能把本轮改善描述成全自动准确。
+- 没有新增第二套 OCR、章节器或渲染引擎；正文语义差异继续由原比较核心产生，截图模块只负责坐标归属和出处证据。
+- Figure caption 判断已收敛为整页 `DocumentBlock` 坐标入口，旧的章节字符串判断已删除，避免两套规则漂移。
+- Table、Figure、prose 三类视觉证据在 `ProseSourceVisualGroup` 中分槽保存；报告层只负责按槽展示，不重新推断归属。
+- 下一阶段若要继续提高复杂版面识别率，应优先引入带类型的页面区域图和 split/merge-aware 匹配，不要继续向字符串启发式叠加协议专用词表。
 
-## 设计边界
+## 验证
 
-- 不全局降低用户配置的章节相似度阈值。
-- 不按 VMA、OIF、章节号或出版方硬编码；授权来自表格坐标、正文相似度、标题唯一性和父子层级关系。
-- Figure 过滤只影响读者层和匹配身份文本，不删除原始证据，也不把所有含 `Figure` 的句子当噪声。
-- 重复父章节路径在任一侧出现时，直属子章节结构救援直接拒绝，不依赖字典覆盖顺序猜配。
-- 源截图高亮仍是坐标区域级，不宣称逐字符 OCR 高亮。
+- 相关回归：149/149 PASS，覆盖词级正文优先、原图无颜色、Table/Figure 互斥、父子章节所有权、窄残片、换行正文边界和页脚裁剪。
+- 完整回归：`.venv/bin/python -m unittest discover -s tests -v` → 1120/1120 PASS，503.876 s。
+- 字节码编译与 `git diff --check` 通过。
+- 真实输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`。
+- 最终报告输出根：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_reader_cleanup/`；最终时间戳目录中的 `visual_acceptance/acceptance_report.md` 记录静态检查、视觉总览和独立 agent 审核。
 
-## 继续工作建议
+## 已知边界
 
-- 下一轮若继续降低错误章节标题，应单独修复 PDF 标题层级识别，并用真实跨文档回归证明；不要继续向章节配对层叠加宽松特例。
-- 每次交付继续保留真实报告的 `degraded` 状态和人工复核边界。
+- OIF 实测仍保持“需人工复核”；视觉哨兵存在未覆盖/歧义页时，不能宣称两份文档可靠一致。
+- Figure 原图保留源 PDF 自带的水印和未能坐标证明为页边栏的行号；它们不再被颜色标记，也不会进入图内文字差异。
+- Table/Figure 页面跳过可选正文出处截图会牺牲一部分截图便利，但结构化文字差异仍保留；这是避免视觉重复的 fail-closed 选择。
