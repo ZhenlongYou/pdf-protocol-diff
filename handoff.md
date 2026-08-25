@@ -4,7 +4,7 @@
 
 - task_id: `pdf-diff-evidence-dedup-accuracy-20260825`
 - status: ready
-- code commit: `fab0e7bebb019bb24176fd5e010c128224febb2a`
+- code commit: `a087c9fa0eae3bd69763ca7dd60c3e7f04e0f5d3`
 - 目标：表格差异只在前置表格卡呈现，不再被长正文截图重复着色；纯 Figure 图注不再冒充正文变化；VMA、Module output 等受表格墙或错误父层级污染的同一章节恢复正确配对。
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 持久项目分支：`project/pdf-protocol-diff`
@@ -22,9 +22,9 @@
 ## 最终 OIF 实测
 
 - 输入：`/Users/mac/Desktop/oif2021.405.14.pdf` 与 `/Users/mac/Desktop/oif2024.522.06.pdf`
-- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_003819/protocol_diff_report.html`
-- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_003819/protocol_diff_data.json`
-- provenance build commit：`fab0e7bebb019bb24176fd5e010c128224febb2a`
+- HTML：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_005059/protocol_diff_report.html`
+- JSON：`/Users/mac/Desktop/test/pdf_protocol_diff_oif_accuracy_cleanup/protocol_diff_20260826_005059/protocol_diff_data.json`
+- provenance build commit：`a087c9fa0eae3bd69763ca7dd60c3e7f04e0f5d3`
 - 结果：60 条原始章节变化、15 个表格变化、32 组长正文原文截图。
 - `29.3.1 End-to-end linear channel` → `30.3.1` 恢复为一条 modified；受保护的短技术标签仍留在审计层，但不会淹没足量实质正文的身份判断。
 - `29.3.6 VMA` → `30.3.7 VMA` 为一条 modified；`29.4.1.2 Module output` → `30.4.1.2` 及其直属 test method 都为一条 modified。
