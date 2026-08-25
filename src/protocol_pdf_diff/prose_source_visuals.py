@@ -173,7 +173,11 @@ def _build_side_visuals(
         page = pages.get(page_number)
         if page is None or page.page_bbox is None:
             continue
-        boxes, matched_snippet_count = _highlight_boxes(page.blocks, page_snippets)
+        boxes, matched_snippet_count = _highlight_boxes(
+            page.blocks,
+            page_snippets,
+            excluded_bboxes=page.visual_noise_bboxes,
+        )
         if not boxes:
             continue
         matched_extent = sum(max(0.0, box[3] - box[1]) for box in boxes)
@@ -238,11 +242,17 @@ def _assign_snippets_to_pages(
 def _highlight_boxes(
     blocks: Iterable[DocumentBlock],
     snippets: tuple[str, ...],
+    *,
+    excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[tuple[tuple[float, float, float, float], ...], int]:
     materialized = tuple(
         block
         for block in blocks
-        if block.text.strip() and block.kind is not DocumentBlockKind.TABLE
+        if (
+            block.text.strip()
+            and block.kind is not DocumentBlockKind.TABLE
+            and not _bbox_center_in_any(block.bbox, excluded_bboxes)
+        )
     )
     selected: dict[tuple[float, float, float, float], None] = {}
     matched_snippets = 0
@@ -261,11 +271,44 @@ def _highlight_boxes(
                 overlap >= required
                 and overlap / len(block_tokens) >= _MIN_BLOCK_TOKEN_OVERLAP
             ):
-                selected[block.bbox] = None
-                snippet_matched = True
+                clipped_bbox = _clip_outer_noise(block.bbox, excluded_bboxes)
+                if clipped_bbox is not None:
+                    selected[clipped_bbox] = None
+                    snippet_matched = True
         if snippet_matched:
             matched_snippets += 1
     return tuple(sorted(selected, key=lambda box: (box[1], box[0]))), matched_snippets
+
+
+def _bbox_center_in_any(
+    bbox: tuple[float, float, float, float],
+    excluded_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> bool:
+    center_x = (bbox[0] + bbox[2]) / 2.0
+    center_y = (bbox[1] + bbox[3]) / 2.0
+    return any(
+        left <= center_x <= right and top <= center_y <= bottom
+        for left, top, right, bottom in excluded_bboxes
+    )
+
+
+def _clip_outer_noise(
+    bbox: tuple[float, float, float, float],
+    excluded_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> tuple[float, float, float, float] | None:
+    """Keep highlight color out of proven left/right printing-number gutters."""
+
+    left, top, right, bottom = bbox
+    for noise_left, noise_top, noise_right, noise_bottom in excluded_bboxes:
+        if min(bottom, noise_bottom) <= max(top, noise_top):
+            continue
+        if noise_left <= left <= noise_right < right:
+            left = max(left, noise_right)
+        elif left < noise_left <= right <= noise_right:
+            right = min(right, noise_left)
+    if right - left < 1.0 or bottom - top < 1.0:
+        return None
+    return (left, top, right, bottom)
 
 
 def _tokens(value: str) -> tuple[str, ...]:
@@ -289,17 +332,26 @@ def _annotated_crop(
     right = min(x1, max(box[2] for box in highlight_boxes) + 24.0)
     crop_bottom = min(bottom, max(box[3] for box in highlight_boxes) + 36.0)
     crop_bbox = (left, crop_top, right, crop_bottom)
-    annotated = image.convert("RGB")
-    draw = ImageDraw.Draw(annotated)
+    annotated = image.convert("RGBA")
+    overlay = Image.new("RGBA", annotated.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay, "RGBA")
     for box in highlight_boxes:
-        box_padding = 2
         pixel_box = (
-            max(0, round((box[0] - x0) * scale_x) - box_padding),
-            max(0, round((box[1] - top) * scale_y) - box_padding),
-            min(image.width - 1, round((box[2] - x0) * scale_x) + box_padding),
-            min(image.height - 1, round((box[3] - top) * scale_y) + box_padding),
+            max(0, round((box[0] - x0) * scale_x)),
+            max(0, round((box[1] - top) * scale_y)),
+            min(image.width - 1, round((box[2] - x0) * scale_x)),
+            min(
+                image.height - 1,
+                round((box[3] - top) * scale_y),
+            ),
         )
-        draw.rectangle(pixel_box, outline=(224, 112, 0), width=3)
+        draw.rectangle(
+            pixel_box,
+            fill=(255, 196, 61, 38),
+            outline=(202, 111, 0, 140),
+            width=1,
+        )
+    annotated = Image.alpha_composite(annotated, overlay).convert("RGB")
     pixel_crop = (
         max(0, round((left - x0) * scale_x)),
         max(0, round((crop_top - top) * scale_y)),

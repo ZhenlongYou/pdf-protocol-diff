@@ -1108,8 +1108,8 @@ def _render_html(
       height: 10px;
       margin-right: 4px;
       vertical-align: baseline;
-      border: 2px solid #ca6f00;
-      background: rgba(255, 196, 61, 0.35);
+      border: 1px solid #ca6f00;
+      background: rgba(255, 196, 61, 0.18);
     }}
     .prose-source-visual-grid {{
       display: grid;
@@ -1576,7 +1576,7 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
     return (
         '<div class="prose-source-visual">'
         '<div class="prose-source-visual-legend">'
-        '<span class="prose-highlight-key"></span> 原文坐标区域级高亮；截图用于快速定位，精确文字仍可展开核对。'
+        '<span class="prose-highlight-key"></span> 原文坐标浅色标注；已排除确认过的页边行号，精确文字仍可展开核对。'
         '</div>'
         f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
         '</div>'
@@ -1595,9 +1595,9 @@ def _render_prose_source_visual_side(
         pages = "".join(
             '<figure class="prose-source-page">'
             f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
-            f'{visual.highlight_region_count} 个高亮区域</figcaption>'
+            f'{visual.highlight_region_count} 个浅色标注</figcaption>'
             f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
-            f'{_escape(str(visual.page_number))} 页高亮截图">'
+            f'{_escape(str(visual.page_number))} 页浅色标注截图">'
             '</figure>'
             for visual in materialized
         )

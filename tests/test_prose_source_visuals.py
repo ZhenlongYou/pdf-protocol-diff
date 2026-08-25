@@ -18,8 +18,8 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from protocol_pdf_diff.compare import run_diff
-from protocol_pdf_diff.models import DiffOptions
-from protocol_pdf_diff.prose_source_visuals import _annotated_crop
+from protocol_pdf_diff.models import DiffOptions, DocumentBlock, DocumentBlockKind
+from protocol_pdf_diff.prose_source_visuals import _annotated_crop, _highlight_boxes
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.sample_data import write_multipage_text_pdf
 from protocol_pdf_diff.visual_watchdog import _snapshot_pdf as snapshot_pdf
@@ -97,7 +97,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
             self.assertIn('class="prose-text-details"', html)
             self.assertIn("查看文字识别明细", html)
-            self.assertIn("原文坐标区域级高亮", html)
+            self.assertIn("原文坐标浅色标注", html)
 
             first_view = _FirstViewText()
             first_view.feed(html)
@@ -139,8 +139,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertIn("120", html)
             self.assertEqual([], payload["prose_source_visuals"])
 
-    def test_source_region_outline_does_not_cover_original_text(self) -> None:
-        """Highlighting may outline a region but must preserve its interior pixels."""
+    def test_source_highlight_is_translucent_enough_to_keep_text_visible(self) -> None:
+        """A pale overlay may tint the source but must not turn text into a color block."""
 
         source = Image.new("RGB", (120, 80), "white")
         draw = ImageDraw.Draw(source)
@@ -153,7 +153,53 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         )
 
         self.assertEqual(1, region_count)
-        self.assertEqual(source.getpixel((60, 40)), annotated.getpixel((60, 40)))
+        text_pixel = annotated.getpixel((60, 40))
+        background_pixel = annotated.getpixel((60, 30))
+        self.assertLess(max(text_pixel), 50)
+        self.assertNotEqual(source.getpixel((60, 30)), background_pixel)
+        self.assertGreater(min(background_pixel), 220)
+
+    def test_source_highlights_exclude_and_clip_proven_gutter_numbers(self) -> None:
+        """Printed line numbers must remain outside even when glued to body text."""
+
+        blocks = (
+            DocumentBlock(
+                page_number=1,
+                bbox=(3.0, 10.0, 9.0, 18.0),
+                kind=DocumentBlockKind.TEXT,
+                text="25",
+                reading_order=0,
+                source_engine="test",
+            ),
+            DocumentBlock(
+                page_number=1,
+                bbox=(3.0, 10.0, 100.0, 20.0),
+                kind=DocumentBlockKind.TEXT,
+                text="25 Receiver limit is 25 mV.",
+                reading_order=1,
+                source_engine="test",
+            ),
+            DocumentBlock(
+                page_number=1,
+                bbox=(20.0, 21.0, 100.0, 31.0),
+                kind=DocumentBlockKind.TEXT,
+                text="The operator records the result.",
+                reading_order=2,
+                source_engine="test",
+            ),
+        )
+
+        regions, matched_snippets = _highlight_boxes(
+            blocks,
+            ("Receiver limit is 25 mV. The operator records the result.",),
+            excluded_bboxes=((0.0, 0.0, 12.0, 80.0),),
+        )
+
+        self.assertEqual(1, matched_snippets)
+        self.assertEqual(
+            ((12.0, 10.0, 100.0, 20.0), (20.0, 21.0, 100.0, 31.0)),
+            regions,
+        )
 
     def test_snapshot_hash_mismatch_falls_back_to_text_without_stale_images(
         self,
