@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from difflib import SequenceMatcher
 
 from .pdf_extract import (
     _figure_caption_is_identifier_only,
@@ -83,28 +84,107 @@ def strip_coordinate_owned_figure_fragment(
     removed.
     """
 
+    return strip_coordinate_owned_visual_fragment(value, source_texts)
+
+
+def strip_coordinate_owned_visual_fragment(
+    value: str,
+    source_texts: tuple[str, ...] | list[str],
+) -> str:
+    """Remove prefixes proven by individual coordinate-owned visual crops."""
+
     compact = compact_inline(value)
     if not compact or not source_texts:
         return compact
-    source_tokens = Counter(
-        token
-        for source_text in source_texts
-        for token, _start, _end in _figure_text_tokens(source_text)
-    )
-    observed = _figure_text_tokens(compact)
-    if not source_tokens or not observed:
-        return compact
+    # One crop must prove one contiguous removal.  Never merge occurrence
+    # budgets from several Figures: two unrelated images cannot jointly erase
+    # an ordinary sentence that happens to reuse words from both.
+    remaining = compact
+    used_sources: set[int] = set()
+    while remaining:
+        candidates: list[tuple[int, str, int]] = []
+        for source_index, source_text in enumerate(source_texts):
+            if source_index in used_sources:
+                continue
+            candidate = _strip_one_coordinate_figure_prefix(remaining, source_text)
+            if candidate != remaining:
+                candidates.append(
+                    (len(remaining) - len(candidate), candidate, source_index)
+                )
+        if not candidates:
+            break
+        _removed_chars, remaining, source_index = max(candidates, key=lambda item: item[0])
+        used_sources.add(source_index)
+        remaining = remaining.strip(" \t\n,;:|/\\-–—")
+        if not remaining:
+            return ""
+        if _is_figure_visual_prose_boundary(remaining):
+            return remaining
+    return compact
 
-    observed_counts = Counter(token for token, _start, _end in observed)
-    matched_count = sum(
-        min(count, source_tokens[token])
-        for token, count in observed_counts.items()
-    )
-    coverage = matched_count / len(observed)
-    if matched_count >= 3 and coverage >= 0.86:
+
+def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
+    """Strip a whole value or one prefix using exactly one Figure crop."""
+
+    observed = _figure_text_tokens(value)
+    source = _figure_text_tokens(source_text)
+    if not observed or not source:
+        return value
+    source_canonical = _figure_text_canonical(source_text)
+    observed_canonical = _figure_text_canonical(value)
+    if (
+        len(observed_canonical) >= 8
+        and observed_canonical in source_canonical
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+    character_coverage = sum(
+        (Counter(observed_canonical) & Counter(source_canonical)).values()
+    ) / max(len(observed_canonical), 1)
+    sequence_similarity = SequenceMatcher(
+        None,
+        observed_canonical,
+        source_canonical,
+        autojunk=False,
+    ).ratio()
+    if (
+        len(observed_canonical) >= 20
+        and character_coverage >= 0.94
+        and sequence_similarity >= 0.65
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
         return ""
 
-    remaining = source_tokens.copy()
+    source_counts = Counter(token for token, _start, _end in source)
+    observed_counts = Counter(token for token, _start, _end in observed)
+    matched_count = sum(
+        min(count, source_counts[token])
+        for token, count in observed_counts.items()
+    )
+    if (
+        matched_count >= 3
+        and matched_count / len(observed) >= 0.86
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    # PDF text layers may split a reversed axis label into single letters while
+    # the section assembler joins them again.  Whitespace-insensitive character
+    # containment restores that same-crop proof without protocol vocabulary.
+    for token_index in range(len(observed) - 1, -1, -1):
+        _token, _start, end = observed[token_index]
+        prefix = value[:end]
+        prefix_canonical = _figure_text_canonical(prefix)
+        if (
+            token_index + 1 < 3
+            or len(prefix_canonical) < 8
+            or prefix_canonical not in source_canonical
+            or _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+        ):
+            continue
+        return value[end:]
+
+    remaining = source_counts.copy()
     prefix_count = 0
     prefix_end = 0
     for token, _start, end in observed:
@@ -113,12 +193,14 @@ def strip_coordinate_owned_figure_fragment(
         remaining[token] -= 1
         prefix_count += 1
         prefix_end = end
-    if prefix_count < 5 or prefix_count / len(observed) < 0.25:
-        return compact
-    prose_tail = compact[prefix_end:].strip(" \t\n,;:|/\\-–—")
-    if not prose_tail or not _is_figure_visual_prose_boundary(prose_tail):
-        return compact
-    return prose_tail
+    prefix = value[:prefix_end]
+    if (
+        prefix_count >= 5
+        and prefix_count / len(observed) >= 0.25
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+    ):
+        return value[prefix_end:]
+    return value
 
 
 def _figure_text_tokens(value: str) -> list[tuple[str, int, int]]:
@@ -130,6 +212,13 @@ def _figure_text_tokens(value: str) -> list[tuple[str, int, int]]:
         if normalized:
             tokens.append((normalized, match.start(), match.end()))
     return tokens
+
+
+def _figure_text_canonical(value: str) -> str:
+    """Normalize spacing-fragmented Figure text for same-crop containment."""
+
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(character for character in normalized if character.isalnum())
 
 
 def _is_combined_figure_visual_fragment(value: str) -> bool:

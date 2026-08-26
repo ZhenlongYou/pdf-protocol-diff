@@ -21,6 +21,7 @@ from .figure_filters import (
     filter_figure_visual_snippets,
     is_figure_visual_pair,
     strip_coordinate_owned_figure_fragment,
+    strip_coordinate_owned_visual_fragment,
 )
 from .models import (
     DiffOptions,
@@ -9420,6 +9421,9 @@ def _reader_section_change(
 
     if _reader_change_is_coordinate_proven_table_body_duplicate(change, table_evidence):
         return None
+    change = _reader_change_without_coordinate_table_fragments(change, table_evidence)
+    if change is None:
+        return None
     # 混合章节不能整卡删除；只剔除由同章节完整表格截图逐片段证明的重复表体。
     change = _reader_change_without_evidenced_table_body_fragments(
         change,
@@ -9474,6 +9478,18 @@ def _reader_change_without_figure_visual_fragments(
     new_visual_texts: tuple[str, ...] = (),
 ) -> SectionChange | None:
     """Hide Figure text only when the same side has coordinate-backed raw pixels."""
+
+    change = _reader_change_without_coordinate_owned_fragments(
+        change,
+        old_source_texts=old_visual_texts if old_visual_available else (),
+        new_source_texts=new_visual_texts if new_visual_available else (),
+    )
+    if change is None:
+        return None
+    # The generic coordinate pass has already consumed source-backed text.
+    # The remaining Figure-specific pass handles legacy standalone captions.
+    old_visual_texts = ()
+    new_visual_texts = ()
 
     def clean_value(
         value: str,
@@ -9560,6 +9576,128 @@ def _reader_change_without_figure_visual_fragments(
             else:
                 cleaned_added.append(new_value)
         return cleaned_removed, cleaned_added, cleaned_replaced
+
+    removed, added, replaced = clean_lists(
+        list(change.removed_snippets),
+        list(change.added_snippets),
+        list(change.replaced_snippets),
+    )
+    audit_removed, audit_added, audit_replaced = clean_lists(
+        list(_audit_removed_snippets(change)),
+        list(_audit_added_snippets(change)),
+        list(_audit_replaced_snippets(change)),
+    )
+    omitted = change.omitted_snippet_count
+    if all(
+        audit is not None
+        for audit in (
+            change.audit_removed_snippets,
+            change.audit_added_snippets,
+            change.audit_replaced_snippets,
+        )
+    ):
+        omitted = max(
+            0,
+            len(audit_removed)
+            + len(audit_added)
+            + len(audit_replaced)
+            - len(removed)
+            - len(added)
+            - len(replaced),
+        )
+    cleaned = replace(
+        change,
+        removed_snippets=removed,
+        added_snippets=added,
+        replaced_snippets=replaced,
+        omitted_snippet_count=omitted,
+        audit_removed_snippets=(
+            audit_removed if change.audit_removed_snippets is not None else None
+        ),
+        audit_added_snippets=(
+            audit_added if change.audit_added_snippets is not None else None
+        ),
+        audit_replaced_snippets=(
+            audit_replaced if change.audit_replaced_snippets is not None else None
+        ),
+    )
+    if (
+        not cleaned.removed_snippets
+        and not cleaned.added_snippets
+        and not cleaned.replaced_snippets
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
+
+
+def _reader_change_without_coordinate_table_fragments(
+    change: SectionChange,
+    table_evidence: (
+        list[TableChange | _TableVisualGroup]
+        | tuple[TableChange | _TableVisualGroup, ...]
+    ),
+) -> SectionChange | None:
+    """Remove only text proven to lie inside a same-side Table crop."""
+
+    old_sources = tuple(
+        table.source_text
+        for table in _reader_tables_for_change_side(change, table_evidence, side="old")
+        if compact_inline(table.source_text)
+    )
+    new_sources = tuple(
+        table.source_text
+        for table in _reader_tables_for_change_side(change, table_evidence, side="new")
+        if compact_inline(table.source_text)
+    )
+    if not old_sources and not new_sources:
+        return change
+    return _reader_change_without_coordinate_owned_fragments(
+        change,
+        old_source_texts=old_sources,
+        new_source_texts=new_sources,
+    )
+
+
+def _reader_change_without_coordinate_owned_fragments(
+    change: SectionChange,
+    *,
+    old_source_texts: tuple[str, ...],
+    new_source_texts: tuple[str, ...],
+) -> SectionChange | None:
+    """Apply one coordinate-owned visual cleanup consistently to all deltas."""
+
+    def clean_value(value: str, source_texts: tuple[str, ...]) -> str:
+        if not source_texts:
+            return value
+        return strip_coordinate_owned_visual_fragment(value, source_texts)
+
+    def clean_lists(
+        removed_values: list[str],
+        added_values: list[str],
+        replaced_values: list[SnippetPair],
+    ) -> tuple[list[str], list[str], list[SnippetPair]]:
+        removed = [
+            cleaned
+            for value in removed_values
+            if (cleaned := clean_value(value, old_source_texts))
+        ]
+        added = [
+            cleaned
+            for value in added_values
+            if (cleaned := clean_value(value, new_source_texts))
+        ]
+        replaced: list[SnippetPair] = []
+        for pair in replaced_values:
+            old_value = clean_value(pair.old, old_source_texts)
+            new_value = clean_value(pair.new, new_source_texts)
+            if old_value and new_value:
+                replaced.append(SnippetPair(old_value, new_value))
+            elif old_value:
+                removed.append(old_value)
+            elif new_value:
+                added.append(new_value)
+        return removed, added, replaced
 
     removed, added, replaced = clean_lists(
         list(change.removed_snippets),

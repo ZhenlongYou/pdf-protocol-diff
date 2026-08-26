@@ -3357,6 +3357,7 @@ def _extract_table_lines_and_visuals(
             ),
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
+            source_text=_table_bbox_source_text(geometry_words, bbox),
         )  # 只为通过过滤的表格生成截图证据。
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
@@ -4314,6 +4315,7 @@ def _build_table_visual(
     content_fully_represented: bool = False,
     row_alignment_reliable: bool = False,
     data_rows_fully_represented: bool = False,
+    source_text: str = "",
 ) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
@@ -4345,8 +4347,36 @@ def _build_table_visual(
             content_fully_represented=content_fully_represented,
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
+            source_text=source_text,
         ),
         "",
+    )
+
+
+def _table_bbox_source_text(
+    geometry_words: list[dict[str, object]],
+    bbox: tuple[float, float, float, float] | None,
+) -> str:
+    """Return words whose centers are inside one detected Table bbox."""
+
+    if bbox is None:
+        return ""
+    owned = [
+        word
+        for word in geometry_words
+        if _word_effective_size(word) < _WATERMARK_MIN_FONT_SIZE
+        and _layout_word_center_inside_box(word, bbox)
+    ]
+    owned.sort(
+        key=lambda word: (
+            round(float(word.get("top", 0.0) or 0.0), 1),
+            float(word.get("x0", 0.0) or 0.0),
+        )
+    )
+    return " ".join(
+        text
+        for word in owned
+        if (text := normalize_line(str(word.get("text", ""))))
     )
 
 

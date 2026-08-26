@@ -33,6 +33,8 @@ from protocol_pdf_diff.models import (
     DocumentBlockKind,
     ExtractionResult,
     PageText,
+    ProseSourceVisual,
+    ProseSourceVisualGroup,
     Section,
     SectionChange,
     SnippetPair,
@@ -315,6 +317,130 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertIsNotNone(cleaned)
         self.assertEqual([prose], cleaned.added_snippets)
+
+    def test_spacing_fragmented_figure_axis_is_removed_from_all_reader_formats(self) -> None:
+        """One coordinate crop owns joined OCR labels in HTML, Markdown, and TXT."""
+
+        labels = (
+            "Module output (TP4) reference Rx and measurement points Oscilloscope "
+            "– TP4 Reference Equalizer CTLE 30-tap FFE )Bd( esnopseR ELTC"
+        )
+        source_text = (
+            "Figure 30-8. Module output (TP4) reference Rx and measurement points "
+            "Oscilloscope –TP4 Reference Equalizer CTLE 30-tap FFE ) B d ( e s "
+            "nop s e R E L T C"
+        )
+        prose = "The receiver shall meet the EECQ limit at TP4."
+        old_section = Section(
+            "old-method", "29.4 Method", "Method", 2,
+            ("29.4 Method",), ("29.4",), 1, 1, prose,
+        )
+        new_section = replace(old_section, section_id="new-method", body=f"{labels} {prose}")
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.6,
+            replaced_snippets=[SnippetPair(prose, f"{labels} {prose}")],
+        )
+        visual = ProseSourceVisual(
+            1,
+            (10.0, 10.0, 300.0, 200.0),
+            "data:image/png;base64,iVBORw0KGgo=",
+            0,
+            0,
+            "source-figure-uncompared",
+        )
+        result = DiffResult(
+            Path("old.pdf"),
+            Path("new.pdf"),
+            [old_section],
+            [new_section],
+            [change],
+            [],
+            old_total_pages=1,
+            new_total_pages=1,
+            prose_source_visuals=(
+                ProseSourceVisualGroup(
+                    "modified",
+                    "old-method",
+                    "new-method",
+                    new_figure_visuals=(visual,),
+                    new_figure_captions=("Figure 30-8. Module output reference Rx",),
+                    new_figure_texts=(source_text,),
+                ),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reports = [
+                paths[key].read_text(encoding="utf-8")
+                for key in ("html", "markdown", "text")
+            ]
+
+        for report in reports:
+            self.assertIn(prose, report)
+            self.assertNotIn("Oscilloscope", report)
+            self.assertNotIn("esnopseR", report)
+
+    def test_two_figure_crops_cannot_union_delete_one_sentence(self) -> None:
+        """Separate crops cannot combine token budgets to claim real prose."""
+
+        sentence = "The receiver shall preserve amplitude during calibration."
+        section = Section(
+            "new-requirement", "1 Requirement", "Requirement", 1,
+            ("1 Requirement",), ("1",), 1, 1, sentence,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[sentence]
+        )
+
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(False, True),
+            figure_visual_texts=(
+                (),
+                (
+                    "The receiver shall preserve",
+                    "amplitude during calibration",
+                ),
+            ),
+        )
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([sentence], cleaned.added_snippets)
+
+    def test_interleaved_figure_columns_are_removed_by_one_crop(self) -> None:
+        """Column-interleaved letters still belong to one coordinate Figure."""
+
+        source = (
+            "Figure 30-1. End to End Linear Channel TP0 Channel Loss TP1a TP4a "
+            "Channel Loss TP2 TP3 TP4 TP5 TP0 TP1a TP4a TP5 Host Tx Driver TIA "
+            "Driver Host Rx Tx host channel Connector Module Channel Connector "
+            "Module Channel E/O O/E Rx Host channel Tx IC Rx IC TP1 BER 2 10-4"
+        )
+        interleaved = (
+            "TP0 C T h P a 0 n n e T l P L 1 o a ss TP1a TP2 TP3 TP4a TP4 "
+            "C T h P a 4 n a n e l T L P o 5 ss TP5 Host Tx Driver TIA Driver "
+            "Host Rx Tx host channel Connector Module Channel Connector Module "
+            "Channel E/O O/E Rx Host channel TP1 Tx IC Rx IC BER 2 10-4"
+        )
+        section = Section(
+            "new-channel", "30.3.1 Channel", "Channel", 2,
+            ("30.3.1 Channel",), ("30.3.1",), 1, 1, interleaved,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[interleaved]
+        )
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                figure_visual_sides=(False, True),
+                figure_visual_texts=((), (source,)),
+            )
+        )
 
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""
@@ -2885,6 +3011,53 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         cleaned = _reader_section_change(change, [evidence])
         self.assertIsNotNone(cleaned)
         self.assertEqual([table_wall], cleaned.removed_snippets)
+
+    def test_coordinate_table_header_is_hidden_even_when_row_structure_is_incomplete(self) -> None:
+        """Raw bbox words can de-duplicate a short header without claiming the table rows."""
+
+        old_header = "DC2 DC step step min max min."
+        new_header = "gDC2 gDC Location step min max min."
+        old_section = Section(
+            "old-ctle", "29.4.1.5 CTLE", "CTLE", 2,
+            ("29.4.1.5 CTLE",), ("29.4.1.5",), 23, 23, old_header,
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-ctle",
+            start_page=26,
+            end_page=26,
+            body=new_header,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.4,
+            replaced_snippets=[SnippetPair(old_header, new_header)],
+        )
+        old_table = TableVisual(
+            23,
+            1,
+            "Table 29-12. CTLE Gain Range",
+            (10.0, 20.0, 500.0, 200.0),
+            "",
+            ["表格行: min=0 | max=6 | step size=1 dB"],
+            "structured rows",
+            content_fully_represented=False,
+            row_alignment_reliable=True,
+            source_text=old_header,
+        )
+        new_table = replace(
+            old_table,
+            page_number=26,
+            title="Table 30-13. CTLE Gain Range",
+            source_text=new_header,
+        )
+        evidence = TableChange(
+            "modified", (old_table,), (new_table,), 0.8, False, ()
+        )
+
+        self.assertIsNone(_reader_section_change(change, [evidence]))
 
     def test_table_wall_filter_preserves_readable_normative_suffixes(self) -> None:
         """A table-heavy snippet may be shortened, but its changed prose tail must survive."""
