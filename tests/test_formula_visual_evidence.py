@@ -137,6 +137,53 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             any("公式自动对比已关闭" in warning for warning in result.warnings)
         )
 
+    def test_displayed_formula_body_is_not_republished_as_prose_delta(self) -> None:
+        """关闭公式对比后，公式墙也不能改名为正文替换重新进入机器结果。"""
+
+        old_text = (
+            "31.3.8 Conversion\n"
+            "The limit is defined by Equation (31-1).\n"
+            "SCD11 <= -18+6*(f/fb) dB for 0.05 GHz <= f <= fb/2 (31-1)"
+        )
+        new_text = (
+            "31.3.8 Conversion\n"
+            "The revised limit is defined by Equation (31-2).\n"
+            "SCD11 <= -12 dB for fb/2 < f < fb (31-2)"
+        )
+
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old.pdf"),
+                pages=[PageText(1, old_text)],
+                total_pages=1,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new.pdf"),
+                pages=[PageText(1, new_text)],
+                total_pages=1,
+            ),
+            DiffOptions(),
+        )
+
+        published = " ".join(
+            [
+                *(
+                    snippet
+                    for change in result.changes
+                    for snippet in change.added_snippets + change.removed_snippets
+                ),
+                *(
+                    value
+                    for change in result.changes
+                    for pair in change.replaced_snippets
+                    for value in (pair.old, pair.new)
+                ),
+            ]
+        )
+        self.assertIn("The revised limit", published)
+        self.assertNotIn("0.05 GHz", published)
+        self.assertNotIn("fb/2 < f < fb", published)
+
     def test_legacy_formula_change_is_not_published_by_reports(self) -> None:
         """旧调用方即使注入公式变化，报告也必须按禁比契约忽略。"""
 

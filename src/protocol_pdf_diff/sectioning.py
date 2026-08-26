@@ -1493,6 +1493,11 @@ def _looks_like_forbidden_heading_candidate(
     ):
         return True
     numeric_kind = kind in {"numeric", "named_numeric", "annex_numeric", "numeric_letter"}  # ``Section N`` 也可能来自跨页引用续句，沿用正文碎片门禁。
+    if kind == "named_numeric" and re.match(
+        r"(?i)^(?:and|or|as|for|to|using|with|when|where|which|that)\b",
+        normalized_title,
+    ):
+        return True  # ``Section 29.4.1.2.1 using ...`` 是跨行引用续句，不是新章节。
     if numeric_kind and _looks_like_scope_acronym_figure_label(normalized_title):
         return True
     if numeric_kind and _looks_like_unit_only_heading(normalized_title):

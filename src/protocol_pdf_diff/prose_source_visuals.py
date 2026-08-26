@@ -47,7 +47,7 @@ _MIN_VISIBLE_REGION_WIDTH = 6.0
 _MIN_VISIBLE_REGION_HEIGHT = 3.0
 _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
-_SOURCE_CROP_VERTICAL_PADDING = 2.0
+_SOURCE_CROP_VERTICAL_PADDING = 0.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
 _SOURCE_PARAGRAPH_LINE_MAX_GAP = 4.0
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
@@ -684,6 +684,10 @@ def _build_side_visuals(
             context_anchor_boxes,
             allowed_text=page_body,
             excluded_bboxes=owned_exclusions,
+            blocking_bboxes=(
+                *(excluded_bboxes_by_page or {}).get(page_number, ()),
+                *section_boundary_bboxes,
+            ),
         )
         if not context_boxes:
             continue
@@ -1458,7 +1462,7 @@ def _highlight_boxes(
             and not _is_caption_led_figure(block.text)
             and (
                 not allowed_text
-                or _block_belongs_to_section(block.text, allowed_text)
+                or _paragraph_line_belongs_to_section(block.text, allowed_text)
             )
         )
     )
@@ -1486,7 +1490,9 @@ def _highlight_boxes(
                 ordered_snippet_tokens,
                 autojunk=False,
             )
-            ordered_overlap = matcher.find_longest_match().size
+            ordered_overlap = sum(
+                match.size for match in matcher.get_matching_blocks()
+            )
             required = min(_MIN_MATCHED_BLOCK_TOKENS, len(block_tokens))
             if (
                 ordered_overlap >= required
@@ -1588,6 +1594,7 @@ def _expand_boxes_to_complete_paragraph_lines(
     *,
     allowed_text: str = "",
     excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    blocking_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Grow matched lines to complete tightly connected source paragraphs.
 
@@ -1616,9 +1623,23 @@ def _expand_boxes_to_complete_paragraph_lines(
             )
         ):
             continue
-        candidates.extend(_subtract_excluded_regions(block.bbox, excluded_bboxes))
+        candidates.extend(
+            _readable_block_line_boxes(
+                block,
+                excluded_bboxes=excluded_bboxes,
+                blocking_bboxes=blocking_bboxes,
+            )
+        )
 
-    expanded = set(boxes)
+    # 输入锚点可能已被宽公式框切成上/下或左右残片；只用它们选择完整的
+    # 可读物理行，绝不把残片本身带进裁剪聚类。
+    expanded = {
+        candidate
+        for candidate in candidates
+        if any(_bboxes_overlap(candidate, anchor) for anchor in boxes)
+    }
+    if not expanded:
+        return ()
     changed = True
     while changed:
         changed = False
@@ -1634,6 +1655,57 @@ def _expand_boxes_to_complete_paragraph_lines(
     return tuple(sorted(expanded, key=lambda box: (box[1], box[0])))
 
 
+def _readable_block_line_boxes(
+    block: DocumentBlock,
+    *,
+    excluded_bboxes: tuple[tuple[float, float, float, float], ...],
+    blocking_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Return complete physical lines, dropping any line owned by another region."""
+
+    if not block.word_boxes:
+        if any(_bboxes_overlap(block.bbox, blocker) for blocker in blocking_bboxes):
+            return ()
+        return _subtract_excluded_regions(block.bbox, excluded_bboxes)
+
+    lines: list[list[tuple[str, float, float, float, float]]] = []
+    for word_box in sorted(block.word_boxes, key=lambda item: (item[2], item[1])):
+        if lines and abs(word_box[2] - lines[-1][0][2]) <= 2.5:
+            lines[-1].append(word_box)
+        else:
+            lines.append([word_box])
+
+    readable: list[tuple[float, float, float, float]] = []
+    for line in lines:
+        line_bbox = (
+            min(word[1] for word in line),
+            min(word[2] for word in line),
+            max(word[3] for word in line),
+            max(word[4] for word in line),
+        )
+        if any(_bboxes_overlap(line_bbox, blocker) for blocker in blocking_bboxes):
+            continue
+        visible_words = [
+            word
+            for word in line
+            if not any(
+                _bboxes_overlap(word[1:], excluded)
+                for excluded in excluded_bboxes
+            )
+        ]
+        if not visible_words:
+            continue
+        readable.append(
+            (
+                min(word[1] for word in visible_words),
+                min(word[2] for word in visible_words),
+                max(word[3] for word in visible_words),
+                max(word[4] for word in visible_words),
+            )
+        )
+    return tuple(readable)
+
+
 def _paragraph_line_belongs_to_section(
     block_text: str,
     section_page_body: str,
@@ -1642,14 +1714,35 @@ def _paragraph_line_belongs_to_section(
 
     if _block_belongs_to_section(block_text, section_page_body):
         return True
-    without_print_line_number = re.sub(r"\s+\d{1,3}\s*$", "", block_text)
-    return (
-        without_print_line_number != block_text
-        and _block_belongs_to_section(
-            without_print_line_number,
-            section_page_body,
+    candidates = {
+        re.sub(r"\s+\d{1,3}\s*$", "", block_text),
+        re.sub(r"^\s*\d{1,3}\s+", "", block_text),
+    }
+    return any(
+        candidate != block_text
+        and (
+            _block_belongs_to_section(candidate, section_page_body)
+            or _ordered_section_token_coverage(candidate, section_page_body) >= 0.80
         )
+        for candidate in candidates
     )
+
+
+def _ordered_section_token_coverage(block_text: str, section_page_body: str) -> float:
+    """Measure ordered coverage across a tiny subscript or glyph extraction gap."""
+
+    block_tokens = _tokens(block_text)
+    body_tokens = _tokens(section_page_body)
+    if not block_tokens or not body_tokens:
+        return 0.0
+    matcher = difflib.SequenceMatcher(
+        None,
+        block_tokens,
+        body_tokens,
+        autojunk=False,
+    )
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return matched / len(block_tokens)
 
 
 def _paragraph_lines_are_connected(

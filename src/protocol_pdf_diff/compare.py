@@ -113,6 +113,16 @@ class _SourceTableCaptionEvidence:
     leading_text: str
 
 
+_DISPLAYED_FORMULA_LABEL_RE = re.compile(
+    r"(?<![A-Za-z0-9])\([A-Z]?\d+(?:[-.]\d+)+\)(?![A-Za-z0-9])",
+    flags=re.IGNORECASE,
+)
+_DISPLAYED_FORMULA_RELATION_RE = re.compile(
+    r"(?:<=|>=|≠|≈|≤|≥|=|<|>|[\uf03c\uf03d\uf03e\uf0a3])"
+)
+_DISPLAYED_FORMULA_ARITHMETIC_RE = re.compile(r"[+*/^√∑∫]")
+
+
 def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
     """Run the complete extraction, sectioning, and comparison pipeline."""
 
@@ -4137,11 +4147,42 @@ def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) 
         unit
         for unit in units
         if not _is_table_review_unit(unit)
+        and not _is_displayed_formula_review_unit(unit)
         and (
             not suppressed_table_unit_keys
             or _review_unit_key(unit) not in suppressed_table_unit_keys
         )
     ]  # 结构化表格行及已由跨侧精确重建覆盖的原始整单元都不再进入正文卡片。
+
+
+def _is_displayed_formula_review_unit(value: str) -> bool:
+    """Exclude a displayed equation wall without hiding ordinary Equation prose.
+
+    A numbered equation reference inside a sentence is still useful normative
+    text.  We only suppress a label that is not introduced by ``Equation`` and
+    whose same review unit also carries a mathematical relation.  This keeps
+    the gate narrow while preventing failed PDF math ordering from being
+    republished as an alleged prose replacement.
+    """
+
+    compact = compact_inline(value)
+    if not compact:
+        return False
+    standalone_labels = [
+        match
+        for match in _DISPLAYED_FORMULA_LABEL_RE.finditer(compact)
+        if re.search(r"(?i)\bEquation\s*$", compact[: match.start()]) is None
+    ]
+    if not standalone_labels:
+        return False
+    relation_count = len(_DISPLAYED_FORMULA_RELATION_RE.findall(compact))
+    private_glyph_count = len(re.findall(r"[\ue000-\uf8ff]", compact))
+    arithmetic_count = len(_DISPLAYED_FORMULA_ARITHMETIC_RE.findall(compact))
+    return (
+        relation_count >= 2
+        or private_glyph_count >= 2
+        or (relation_count >= 1 and arithmetic_count >= 1)
+    )
 
 
 def _split_units(text: str) -> list[str]:

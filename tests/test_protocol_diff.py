@@ -54,10 +54,10 @@ from protocol_pdf_diff.desktop_gui import (
     run_smoke_test,
 )
 from protocol_pdf_diff.models import (
-    DocumentBlock,
-    DocumentBlockKind,
     DiffOptions,
     DiffResult,
+    DocumentBlock,
+    DocumentBlockKind,
     ExtractionResult,
     PageText,
     Section,
@@ -3869,6 +3869,11 @@ class ProtocolDiffTests(unittest.TestCase):
                 "Section 29.3.12). The signals at the appropriate points in the reference receiver (see"
             )
         )  # 跨页引用续句不是新的 Section 容器。
+        self.assertIsNone(
+            detect_heading(
+                "Section 29.4.1.2.1 using the SSPRQ test pattern."
+            )
+        )  # 小写 using 延续前一行引用，不能切断 VMA 段落。
         self.assertIsNone(
             detect_heading(
                 "1 All co-propagating and counter-propagating lanes are active as crosstalk sources,"

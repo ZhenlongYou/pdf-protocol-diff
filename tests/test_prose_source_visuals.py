@@ -42,6 +42,7 @@ from protocol_pdf_diff.prose_source_visuals import (
     _looks_like_numbered_figure_boundary_heading,
     _page_contains_figure_caption,
     _pair_figure_evidence,
+    _paragraph_line_belongs_to_section,
     _section_heading_bboxes_by_page,
     _section_page_boundary_bboxes,
     _subtract_excluded_regions,
@@ -976,6 +977,65 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual((blocks[0].bbox, blocks[1].bbox, blocks[2].bbox), expanded)
 
+    def test_formula_block_drops_the_complete_intersecting_physical_line(self) -> None:
+        """公式隔离不得把同一物理行切成可见的左右或上下残片。"""
+
+        block = DocumentBlock(
+            page_number=1,
+            bbox=(40.0, 100.0, 560.0, 132.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Readable prose before the formula. receiver may be adjusted.",
+            reading_order=0,
+            source_engine="test",
+            word_boxes=(
+                ("Readable", 40.0, 100.0, 86.0, 110.0),
+                ("prose", 90.0, 100.0, 120.0, 110.0),
+                ("before", 124.0, 100.0, 160.0, 110.0),
+                ("the", 164.0, 100.0, 182.0, 110.0),
+                ("formula.", 186.0, 100.0, 230.0, 110.0),
+                ("receiver", 40.0, 120.0, 84.0, 130.0),
+                ("may", 88.0, 120.0, 108.0, 130.0),
+                ("be", 112.0, 120.0, 126.0, 130.0),
+                ("adjusted.", 130.0, 120.0, 180.0, 130.0),
+            ),
+        )
+        formula_bbox = (100.0, 116.0, 536.0, 134.0)
+        expanded = _expand_boxes_to_complete_paragraph_lines(
+            (block,),
+            (
+                (40.0, 100.0, 230.0, 110.0),
+                (40.0, 120.0, 100.0, 130.0),
+            ),
+            allowed_text=block.text,
+            excluded_bboxes=(formula_bbox,),
+            blocking_bboxes=(formula_bbox,),
+        )
+
+        self.assertEqual(((40.0, 100.0, 230.0, 110.0),), expanded)
+
+    def test_printed_leading_line_number_does_not_break_wrapped_prose(self) -> None:
+        """页边行号后接 ``2)`` 的换行仍属于当前完整正文段落。"""
+
+        self.assertTrue(
+            _paragraph_line_belongs_to_section(
+                "18 2) (illustrated in Figure 30-3 for fb =112 GHz).",
+                "2) (illustrated in Figure 30-3 for fb =112 GHz).",
+            )
+        )
+
+    def test_subscript_split_does_not_drop_the_rest_of_a_wrapped_line(self) -> None:
+        """下标被独立坐标块抽走时，普通引用句的余下整行仍须保留。"""
+
+        self.assertTrue(
+            _paragraph_line_belongs_to_section(
+                "18 2) (illustrated in Figure 30-3 for f =112 GHz). "
+                "The common mode to differential mode",
+                "Equation (30-1) and Equation (30-\n"
+                "2) (illustrated in Figure 30-3 for fb =112 GHz). "
+                "The common mode to differential mode",
+            )
+        )
+
     def test_tiny_residual_after_margin_subtraction_is_dropped(self) -> None:
         """A one-letter sliver must never be enlarged into a full report panel."""
 
@@ -1001,6 +1061,19 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertLessEqual(crops[0][3], table[1])
         self.assertGreaterEqual(crops[1][1], table[3])
         self.assertTrue(all((crop[2] - crop[0]) / (crop[3] - crop[1]) > 1.2 for crop in crops))
+
+    def test_source_crop_does_not_reveal_an_unselected_adjacent_line(self) -> None:
+        """正文裁剪上下边界贴合完整行，不能用留白带出下一行上沿。"""
+
+        crops = _crop_regions(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            boxes=((40.0, 100.0, 560.0, 110.0),),
+            blocking_bboxes=(),
+            noise_bboxes=(),
+        )
+
+        self.assertEqual(1, len(crops))
+        self.assertEqual((100.0, 110.0), (crops[0][1], crops[0][3]))
 
     def test_block_matching_is_restricted_to_the_current_section_page_body(self) -> None:
         """A parent card cannot borrow a child heading from the same physical page."""
@@ -1089,6 +1162,50 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual(1, matched)
         self.assertEqual(((84.0, 10.0, 102.0, 20.0),), regions)
+
+    def test_source_highlight_survives_one_subscript_gap_in_a_long_reference(self) -> None:
+        """``fb`` 拆成 ``f`` 时仍须浅色标出其后的真实数值变化。"""
+
+        words = (
+            "(illustrated",
+            "in",
+            "Figure",
+            "30-3",
+            "for",
+            "f",
+            "=112",
+            "GHz).",
+            "The",
+            "common",
+            "mode",
+            "to",
+            "differential",
+            "mode",
+        )
+        block = DocumentBlock(
+            page_number=1,
+            bbox=(10.0, 10.0, 430.0, 20.0),
+            kind=DocumentBlockKind.TEXT,
+            text=" ".join(words),
+            reading_order=0,
+            source_engine="test",
+            word_boxes=tuple(
+                (word, 10.0 + index * 30.0, 10.0, 36.0 + index * 30.0, 20.0)
+                for index, word in enumerate(words)
+            ),
+        )
+        changed_snippet = SimpleNamespace(
+            text=(
+                "Earlier normative context remains unchanged "
+                "(illustrated in Figure 30-3 for fb =112 GHz)."
+            ),
+            changed_token_indexes=frozenset({11}),
+        )
+
+        regions, matched = _highlight_boxes((block,), (changed_snippet,))
+
+        self.assertEqual(1, matched)
+        self.assertEqual(((190.0, 10.0, 216.0, 20.0),), regions)
 
     def test_insert_only_replacement_keeps_old_context_without_old_highlight(self) -> None:
         """An insertion still needs its unchanged old source sentence beside the new one."""
