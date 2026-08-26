@@ -10120,6 +10120,22 @@ def _reader_evidenced_fragment_flags(
         )
         for snippet in snippets
     ]
+    # A review unit can join prose at one page edge with table text from the
+    # next page.  Fall back only to table evidence already contained by this
+    # section, and still require the strict table-fragment shape below.
+    bound_texts = [
+        bound_text
+        or (
+            table_text
+            if (
+                section is not None
+                and section.end_page - section.start_page <= 2
+                and _reader_snippet_is_evidenced_table_fragment(snippet, table_text)
+            )
+            else ""
+        )
+        for snippet, bound_text in zip(snippets, bound_texts)
+    ]
     candidates = [
         bool(bound_text)
         and _reader_snippet_is_evidenced_table_fragment(snippet, bound_text)
@@ -10220,7 +10236,8 @@ def _reader_filter_evidenced_table_fragments(
             continue
         visible = _reader_strip_evidenced_table_suffix(
             snippet,
-            bound_texts[index],
+            bound_texts[index]
+            or _reader_nearby_table_fallback_text(section, table_text),
         )
         if visible:
             kept.append(visible)
@@ -10259,11 +10276,13 @@ def _reader_filter_evidenced_table_pairs(
         if not (old_covered and new_covered):
             old_visible = _reader_strip_evidenced_table_suffix(
                 pair.old,
-                old_bound_texts[index],
+                old_bound_texts[index]
+                or _reader_nearby_table_fallback_text(old_section, old_table_text),
             )
             new_visible = _reader_strip_evidenced_table_suffix(
                 pair.new,
-                new_bound_texts[index],
+                new_bound_texts[index]
+                or _reader_nearby_table_fallback_text(new_section, new_table_text),
             )
             if old_visible and new_visible:
                 kept.append(SnippetPair(old_visible, new_visible))
@@ -10455,6 +10474,17 @@ def _reader_strip_evidenced_table_suffix(value: str, table_text: str) -> str:
         if not (Counter(suffix_tokens) - table_counts):
             return prefix
     return compact
+
+
+def _reader_nearby_table_fallback_text(
+    section: Section | None,
+    table_text: str,
+) -> str:
+    """Allow page-edge table cleanup only inside a compact three-page section."""
+
+    if section is None or section.end_page - section.start_page > 2:
+        return ""
+    return table_text
 
 
 def _reader_change_without_covered_standalone_table_references(

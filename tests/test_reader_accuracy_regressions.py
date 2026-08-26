@@ -3236,6 +3236,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
         new_section = replace(
             new_section,
+            start_page=9,
+            end_page=10,
             body=" ".join(
                 (
                     "Parameter Min.",
@@ -3245,7 +3247,20 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                     "Peak to Peak AC Common Mode Voltage See Note 1,",
                 )
             ),
-            page_bodies=((10, " ".join(("Parameter Min.", new_voltage_row, new_normative, "- 15 mV", "Peak to Peak AC Common Mode Voltage See Note 1,"))),),
+            page_bodies=(
+                (9, new_normative),
+                (
+                    10,
+                    " ".join(
+                        (
+                            "Parameter Min.",
+                            new_voltage_row,
+                            "- 15 mV",
+                            "Peak to Peak AC Common Mode Voltage See Note 1,",
+                        )
+                    ),
+                ),
+            ),
         )
         change = SectionChange(
             "modified",
