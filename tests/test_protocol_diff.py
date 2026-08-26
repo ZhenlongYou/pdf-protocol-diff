@@ -3865,6 +3865,25 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIsNone(detect_heading("4.3u DRMS 03"))  # 抖动符号和下标残片不是章节标题。
         self.assertIsNone(detect_heading("802.3dj)"))  # 标准名残片不是章节标题。
         self.assertIsNone(
+            detect_heading(
+                "Section 29.3.12). The signals at the appropriate points in the reference receiver (see"
+            )
+        )  # 跨页引用续句不是新的 Section 容器。
+        self.assertIsNone(
+            detect_heading(
+                "1 All co-propagating and counter-propagating lanes are active as crosstalk sources,"
+            )
+        )  # 打印行号加正文续句不能污染后续章节层级。
+        self.assertIsNone(detect_heading("60 GHz BT"))  # Figure 内的滤波器标签不是顶层章节。
+        self.assertIsNone(
+            detect_heading("1 + j ------ 1 + j ------ 1 + j -------")
+        )  # 分母公式行不能截断后续真实章节。
+        self.assertIsNone(
+            detect_heading(
+                "30.4.1.5) with the optimal peaking value and the methodology defined in Section"
+            )
+        )  # 跨行章节引用续句不能抢占真实 30.4.1.5 标题。
+        self.assertIsNone(
             detect_heading("32.3.1. The test transmitter is constrained such that for any transmitter equalizer setting")
         )  # 长正文句子不能被当作章节路径。
         self.assertIsNotNone(detect_heading("2 400G Interfaces"))  # 合法协议章节仍应识别。
@@ -6039,7 +6058,19 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("50", html)  # 旧版值必须在表格摘要或截图区可见。
         self.assertIn("Np = 53", snippet_text)  # 已知真实正文数值变化必须继续保留。
         self.assertIn("Np = 60", snippet_text)
-        combined_report = html + json.dumps(payload["table_changes"], ensure_ascii=False) + table_csv
+        # 内嵌截图是不可搜索的 Base64 二进制；随机字节可能偶然拼出 ``foAr``
+        # 之类的短串。这里只检查读者可搜索文字与结构化表格证据，避免把图片编码
+        # 误判为 DRAFT 水印或列错位残片。
+        searchable_html = re.sub(
+            r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
+            "",
+            html,
+        )
+        combined_report = (
+            searchable_html
+            + json.dumps(payload["table_changes"], ensure_ascii=False)
+            + table_csv
+        )
         for false_positive in (
             "foAr",
             "vaTlues",
@@ -9837,6 +9868,71 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual("General requirements remain stable.", numbered_child.body)
 
+        # 在 Appendix/Annex 容器下，数字章节的内部 level 会整体加一。
+        # 恢复稠密子标题时必须按编号前缀找父节点，不能把对侧
+        # outline 已证明的真实子条款吞进父节正文。
+        appendix_lines = (
+            "Appendix 16 Reference material",
+            "29.4 Host and Module testing",
+            "29.4.1 Host and module output and input tests",
+            "29.4.1.4 Module (TP1) stressed input test",
+            "29.4.1.4.1 Host (TP4a) and Module (TP1) stressed input test method",
+            "Method body remains visible.",
+            "29.4.1.4.1.1 Host input test signal calibration",
+            "Host calibration body.",
+            "29.4.1.4.1.2 Module input test signal calibration",
+            "Module calibration body.",
+        )
+        appendix_sections = section_document(
+            ExtractionResult(
+                pdf_path=Path("appendix_dense_children.pdf"),
+                pages=[
+                    PageText(
+                        page_number=1,
+                        text="\n".join(appendix_lines),
+                        blocks=tuple(
+                            DocumentBlock(
+                                page_number=1,
+                                bbox=(72.0, 20.0 + index * 18.0, 540.0, 32.0 + index * 18.0),
+                                kind=DocumentBlockKind.TEXT,
+                                text=line,
+                                reading_order=index,
+                                source_engine="pdfplumber",
+                                font_names=(
+                                    ("Synthetic+Body",)
+                                    if line.endswith("body.") or line == "Method body remains visible."
+                                    else ("Synthetic+Heading",)
+                                ),
+                            )
+                            for index, line in enumerate(appendix_lines)
+                        ),
+                    )
+                ],
+                peer_outline_heading_paths=((
+                    "30.4 Host and Module testing",
+                    "30.4.1 Host and module output and input tests",
+                    "30.4.1.4 Module (TP1) stressed input test",
+                    "30.4.1.4.1 Host (TP4a) and Module (TP1) stressed input test method",
+                ), (
+                    "30.4 Host and Module testing",
+                    "30.4.1 Host and module output and input tests",
+                    "30.4.1.4 Module (TP1) stressed input test",
+                    "30.4.1.4.1 Host (TP4a) and Module (TP1) stressed input test method",
+                    "30.4.1.4.1.1 Host input test signal calibration",
+                ), (
+                    "30.4 Host and Module testing",
+                    "30.4.1 Host and module output and input tests",
+                    "30.4.1.4 Module (TP1) stressed input test",
+                    "30.4.1.4.1 Host (TP4a) and Module (TP1) stressed input test method",
+                    "30.4.1.4.1.2 Module input test signal calibration",
+                )),
+            )
+        )
+        appendix_headings = {section.heading for section in appendix_sections}
+        self.assertIn(appendix_lines[4], appendix_headings)
+        self.assertIn(appendix_lines[6], appendix_headings)
+        self.assertIn(appendix_lines[8], appendix_headings)
+
         # 即使编号与父章节吻合，空格分列的稠密数值行仍是表格事实，不能
         # 借父层级变成章节；后续 TP4a 表注也必须留在父正文。
         table_sections = section_document(
@@ -10754,6 +10850,62 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(1, change_types.count("added"))  # 无可靠配对时新版章节保守显示为新增。
         self.assertEqual(1, change_types.count("deleted"))  # 无可靠配对时旧版章节保守显示为删除。
 
+    def test_child_body_merged_into_matched_parent_is_not_reported_as_deleted(self) -> None:
+        """Removing only a subheading must not turn retained prose into add/delete noise."""
+
+        retained_one = (
+            "Host insertion loss and module insertion loss are recommended limits only."
+        )
+        retained_two = (
+            "Achieving these recommended limits does not signify compliance nor "
+            "guarantee successful communication between two devices."
+        )
+        old = ExtractionResult(
+            pdf_path=Path("old_child_clause.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Recommended channels\n"
+                        "The parent introduction remains stable.\n"
+                        "1.1 Insertion Loss\n"
+                        f"{retained_one}\n{retained_two}\n"
+                        "The old equation explanation is removed."
+                    ),
+                )
+            ],
+        )
+        new = ExtractionResult(
+            pdf_path=Path("new_merged_parent.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Recommended channels\n"
+                        "The parent introduction remains stable.\n"
+                        f"Diagram labels {retained_one}\n{retained_two}\n"
+                        "The new channel allocation note is added."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old, new, DiffOptions())
+
+        self.assertFalse(any(change.change_type == "deleted" for change in result.changes))
+        parent_change = next(
+            change
+            for change in result.changes
+            if change.new_section is not None
+            and change.new_section.heading == "1 Recommended channels"
+        )
+        self.assertTrue(
+            any("old equation explanation" in value for value in parent_change.removed_snippets)
+        )
+        self.assertTrue(
+            any("new channel allocation" in value for value in parent_change.added_snippets)
+        )
+
     def test_explicit_two_sided_page_windows_force_one_user_anchored_comparison(self) -> None:
         """Two page windows are a user-declared relation, even when text scores are low."""
 
@@ -10806,6 +10958,283 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(
             "Starting Configuration, Overview of Calibration",
             result.changes[0].new_section.title,
+        )
+
+    def test_explicit_two_sided_page_windows_rescue_multiple_related_sections(self) -> None:
+        """A declared related window must not stop after repairing only one clear pair."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-multi-anchor-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=16,
+                    text=(
+                        "1.1 Host Calibration\n"
+                        "Measure the host calibration marker and save the waveform.\n"
+                        + "legacy alpha beta gamma " * 55
+                        + "\n1.2 Receiver Calibration\n"
+                        "Measure the receiver calibration marker and save the waveform.\n"
+                        + "legacy delta epsilon zeta " * 55
+                    ),
+                )
+            ],
+            total_pages=30,
+            selected_start_page=16,
+            selected_end_page=18,
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-multi-anchor-window.pdf"),
+            pages=[
+                PageText(
+                    page_number=33,
+                    text=(
+                        "2.1 Host Calibration\n"
+                        "Measure the host calibration marker and save the waveform.\n"
+                        + "revised voltage current impedance " * 55
+                        + "\n2.2 Receiver Calibration\n"
+                        "Measure the receiver calibration marker and save the waveform.\n"
+                        + "revised phase frequency amplitude " * 55
+                    ),
+                )
+            ],
+            total_pages=80,
+            selected_start_page=33,
+            selected_end_page=35,
+        )
+
+        result = compare_extractions(
+            old_extraction,
+            new_extraction,
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+        anchored = [
+            change
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        ]
+
+        self.assertEqual(2, len(anchored))
+        self.assertEqual(
+            {"Host Calibration", "Receiver Calibration"},
+            {change.old_section.title for change in anchored},
+        )
+        self.assertFalse(
+            any(
+                change.change_type in {"added", "deleted"}
+                and change.report_location.endswith("Calibration")
+                for change in result.changes
+            )
+        )
+
+    def test_multi_anchor_window_keeps_same_title_but_disjoint_remainder_unpaired(self) -> None:
+        """The window relation cannot pair a same-title remainder without a shared unit."""
+
+        shared = "Measure the selected calibration marker and save the waveform."
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-safe-multi-anchor.pdf"),
+                pages=[
+                    PageText(
+                        page_number=16,
+                        text=(
+                            "1.1 Calibration\n"
+                            f"{shared}\n"
+                            + "legacy alpha beta gamma " * 55
+                            + "\n1.2 Diagnostics\n"
+                            + "legacy loopback counter state " * 55
+                        ),
+                    )
+                ],
+                selected_start_page=16,
+                selected_end_page=18,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-safe-multi-anchor.pdf"),
+                pages=[
+                    PageText(
+                        page_number=33,
+                        text=(
+                            "2.1 Calibration\n"
+                            f"{shared}\n"
+                            + "revised voltage current impedance " * 55
+                            + "\n2.2 Diagnostics\n"
+                            + "unrelated optical wavelength budget " * 55
+                        ),
+                    )
+                ],
+                selected_start_page=33,
+                selected_end_page=35,
+            ),
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        anchored = [
+            change
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        ]
+        self.assertEqual(1, len(anchored))
+        self.assertEqual("Calibration", anchored[0].old_section.title)
+        self.assertTrue(
+            any(
+                change.change_type == "deleted"
+                and change.old_section
+                and change.old_section.title == "Diagnostics"
+                for change in result.changes
+            )
+        )
+        self.assertTrue(
+            any(
+                change.change_type == "added"
+                and change.new_section
+                and change.new_section.title == "Diagnostics"
+                for change in result.changes
+            )
+        )
+
+    def test_multi_anchor_window_rejects_sparse_boilerplate_overlap(self) -> None:
+        """Two generic sentences cannot pair otherwise unrelated long sections."""
+
+        shared = (
+            "The device shall meet the applicable specification at the declared test point.\n"
+            "The measurements are performed using the specified compliance fixture."
+        )
+        old_unique = "\n".join(
+            f"Legacy channel trace loss marker alpha{index} is recorded."
+            for index in range(20)
+        )
+        new_unique = "\n".join(
+            f"Revised overload voltage marker omega{index} is recorded."
+            for index in range(20)
+        )
+        result = compare_extractions(
+            ExtractionResult(
+                pdf_path=Path("old-sparse-boilerplate-window.pdf"),
+                pages=[
+                    PageText(
+                        page_number=16,
+                        text=(
+                            "1.1 Calibration\nMeasure calibration marker and save waveform.\n"
+                            + "legacy alpha beta gamma " * 50
+                            + "\n1.2 Recommended Electrical Channel\n"
+                            + shared
+                            + "\n"
+                            + old_unique
+                        ),
+                    )
+                ],
+                selected_start_page=16,
+                selected_end_page=18,
+            ),
+            ExtractionResult(
+                pdf_path=Path("new-sparse-boilerplate-window.pdf"),
+                pages=[
+                    PageText(
+                        page_number=33,
+                        text=(
+                            "2.1 Calibration\nMeasure calibration marker and save waveform.\n"
+                            + "revised voltage current impedance " * 50
+                            + "\n2.2 Input Overload Voltage Tolerance\n"
+                            + shared
+                            + "\n"
+                            + new_unique
+                        ),
+                    )
+                ],
+                selected_start_page=33,
+                selected_end_page=35,
+            ),
+            DiffOptions(
+                old_start_page=16,
+                old_end_page=18,
+                new_start_page=33,
+                new_end_page=35,
+            ),
+        )
+
+        anchored_titles = {
+            (change.old_section.title, change.new_section.title)
+            for change in result.changes
+            if change.match_basis == "user_page_window_anchor"
+        }
+        self.assertIn(("Calibration", "Calibration"), anchored_titles)
+        self.assertNotIn(
+            ("Recommended Electrical Channel", "Input Overload Voltage Tolerance"),
+            anchored_titles,
+        )
+        old_sections = [
+            Section(
+                "old-anchor",
+                "1.1 Calibration",
+                "Calibration",
+                2,
+                ("1.1 Calibration",),
+                ("1.1",),
+                16,
+                16,
+                "Measure calibration marker and save waveform.",
+            ),
+            Section(
+                "old-remainder",
+                "1.2 Recommended Electrical Channel",
+                "Recommended Electrical Channel",
+                2,
+                ("1.2 Recommended Electrical Channel",),
+                ("1.2",),
+                16,
+                18,
+                shared + "\n" + old_unique,
+            ),
+        ]
+        new_sections = [
+            Section(
+                "new-anchor",
+                "2.1 Calibration",
+                "Calibration",
+                2,
+                ("2.1 Calibration",),
+                ("2.1",),
+                33,
+                33,
+                "Measure calibration marker and save waveform.",
+            ),
+            Section(
+                "new-remainder",
+                "2.2 Input Overload Voltage Tolerance",
+                "Input Overload Voltage Tolerance",
+                2,
+                ("2.2 Input Overload Voltage Tolerance",),
+                ("2.2",),
+                33,
+                35,
+                shared + "\n" + new_unique,
+            ),
+        ]
+        self.assertEqual(
+            [],
+            compare_module._user_page_window_anchor_pairs(
+                old_sections,
+                new_sections,
+                [(0, 0, 1.0, "similarity_exact")],
+                {0},
+                {0},
+                DiffOptions(
+                    old_start_page=16,
+                    old_end_page=18,
+                    new_start_page=33,
+                    new_end_page=35,
+                ),
+            ),
         )
 
     def test_running_header_match_does_not_consume_the_user_window_relation(self) -> None:

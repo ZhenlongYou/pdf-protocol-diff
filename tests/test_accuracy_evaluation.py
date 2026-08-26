@@ -847,8 +847,8 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
         )
         self.assertTrue(event["reader_visible"])
 
-    def test_gold_unplaced_formula_uses_its_own_html_card_scope(self) -> None:
-        """An unplaced F card remains visible beside an unrelated text card."""
+    def test_reports_drop_injected_formula_before_accuracy_scoring(self) -> None:
+        """报告边界禁用公式后，准确率事件也不得重新出现公式卡。"""
 
         old_section = Section(
             section_id="old-a",
@@ -924,13 +924,9 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
                 "text": _read_text_evidence(outputs["text"]),
             }
 
-        formula_event = next(
-            event for event in _actual_events(payload, surfaces) if event["kind"] == "formula"
-        )
-        self.assertEqual("F1", payload["formula_changes"][0]["reader_card_id"])
-        self.assertEqual(
-            {"html": True, "markdown": True, "text": True},
-            formula_event["reader_visibility"],
+        self.assertEqual([], payload["formula_changes"])
+        self.assertFalse(
+            any(event["kind"] == "formula" for event in _actual_events(payload, surfaces))
         )
 
     def test_gold_case_fails_when_visual_watchdog_coverage_is_incomplete(self) -> None:

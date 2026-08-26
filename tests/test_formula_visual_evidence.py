@@ -23,7 +23,6 @@ from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.reporting import write_reports
 from protocol_pdf_diff.text_utils import readable_symbol_font_glyphs
 
-
 OIF_532_05 = Path("/Users/mac/Documents/文件对比工具/oif2024.532.05.pdf")
 OIF_532_04 = Path("/Users/mac/Documents/文件对比工具/oif2024.532.04.pdf")
 
@@ -87,8 +86,8 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             ),
         )
 
-    def test_same_number_different_formula_meaning_stays_separate(self) -> None:
-        """编号相同但语义不同的公式不能伪装成同一条修改。"""
+    def test_formula_visuals_are_not_automatically_compared(self) -> None:
+        """复杂公式只能作为抽取证据，不能生成自动增删或修改结论。"""
 
         # 构造同号但主体差异很大的公式，验证编号复用不能覆盖语义证据。
         old_formula = FormulaVisual(
@@ -133,18 +132,13 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             DiffOptions(),
         )
 
-        # 公式号会因版本增删而被复用；语义证据不足时必须分别呈现删除和新增。
-        self.assertEqual(2, len(result.formula_changes))
-        self.assertEqual(
-            {"deleted", "added"},
-            {item.change_type for item in result.formula_changes},
+        self.assertEqual([], result.formula_changes)
+        self.assertTrue(
+            any("公式自动对比已关闭" in warning for warning in result.warnings)
         )
-        by_type = {item.change_type: item for item in result.formula_changes}
-        self.assertEqual(old_formula, by_type["deleted"].old_formula)
-        self.assertEqual(new_formula, by_type["added"].new_formula)
 
-    def test_formula_number_only_change_stays_visual_without_core_technical_change(self) -> None:
-        """公式号顺延保留源截图核对，但不能抬高核心技术变化数量。"""
+    def test_legacy_formula_change_is_not_published_by_reports(self) -> None:
+        """旧调用方即使注入公式变化，报告也必须按禁比契约忽略。"""
 
         # 两侧公式主体、上下标语义和截图指纹保持一致，唯一变化是显示编号。
         old_formula = FormulaVisual(
@@ -190,22 +184,14 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             markdown = outputs["markdown"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-        # 公式源截图和说明仍可见，而正文核心技术变化保持为零。
-        self.assertIn('id="formula-index"', html)
-        self.assertIn("公式主体文字一致，公式编号发生顺延或调整", markdown)
+        # 禁比规则在报告边界再次失败关闭，不能依赖比较器永远传入空列表。
+        self.assertNotIn('id="formula-index"', html)
+        self.assertNotIn("公式主体文字一致，公式编号发生顺延或调整", markdown)
         self.assertIn("<strong>0</strong><span>核心技术变化</span>", html)
-        self.assertEqual(1, len(payload["formula_changes"]))
-        self.assertEqual(
-            "(31-1)",
-            payload["formula_changes"][0]["old_formula"]["formula_number"],
-        )
-        self.assertEqual(
-            "(31-2)",
-            payload["formula_changes"][0]["new_formula"]["formula_number"],
-        )
+        self.assertEqual([], payload["formula_changes"])
 
-    def test_html_embeds_formula_evidence_in_owning_section_card(self) -> None:
-        """公式截图应跟随所属正文条款，顶部只留下可跳转的紧凑索引。"""
+    def test_html_never_embeds_injected_formula_evidence(self) -> None:
+        """公式证据不得重新进入正文条款、索引或放大交互。"""
 
         # 旧版公式位于被替换条款，正文保留公式号以提供与源页不同的独立归属锚点。
         old_section = Section(
@@ -324,33 +310,16 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             outputs = write_reports(result, temp_dir, DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
 
-        # 顶部索引只负责跳转，旧版集中公式截图板块必须消失。
-        self.assertIn('id="formula-index"', html)
-        self.assertIn('href="#formula-1"', html)
-        self.assertIn('href="#formula-2"', html)
-        self.assertNotIn('id="formula-changes"', html)
-        self.assertLess(
-            html.index('id="formula-index"'),
-            html.index('id="text-changes"'),
-        )
-        # 删除和新增公式必须分别进入旧、新条款，不能因复用编号而挤在同一卡片。
-        change_one_start = html.index('id="change-1"')
-        change_two_start = html.index('id="change-2"')
-        formula_one_start = html.index('id="formula-1"')
-        formula_two_start = html.index('id="formula-2"')
-        self.assertLess(change_one_start, formula_one_start)
-        self.assertLess(formula_one_start, change_two_start)
-        self.assertLess(change_two_start, formula_two_start)
-        self.assertIn(
-            "31.3.9 Common-Mode Return Loss",
-            html[change_two_start:formula_two_start],
-        )
-        # 每张源裁图都应提供可发现的放大按钮，并复用一个离线对话框显示原始像素。
-        self.assertEqual(2, html.count('class="formula-shot-open"'))
-        self.assertIn('id="formula-zoom-dialog"', html)
+        self.assertNotIn('id="formula-index"', html)
+        self.assertNotIn('href="#formula-1"', html)
+        self.assertNotIn('href="#formula-2"', html)
+        self.assertNotIn('class="formula-shot-open"', html)
+        self.assertNotIn('id="formula-zoom-dialog"', html)
+        self.assertIn('id="change-1"', html)
+        self.assertIn('id="change-2"', html)
 
-    def test_html_keeps_formula_unplaced_without_text_or_number_anchor(self) -> None:
-        """同页但没有正文或公式号锚点时，公式必须留在未归属复核区。"""
+    def test_html_drops_unplaced_injected_formula(self) -> None:
+        """无归属的遗留公式同样不能绕过全局禁比规则。"""
 
         # 两个同页新增条款都与公式无关，页码和 added 偏置不能替代真实归属证据。
         sections = [
@@ -410,11 +379,8 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             outputs = write_reports(result, temp_dir, DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
 
-        self.assertIn('id="unplaced-formulas"', html)
-        self.assertGreater(
-            html.index('id="formula-1"'),
-            html.index('id="unplaced-formulas"'),
-        )
+        self.assertNotIn('id="unplaced-formulas"', html)
+        self.assertNotIn('id="formula-1"', html)
 
     @unittest.skipUnless(OIF_532_05.is_file(), "本地 OIF 2024.532.05 样本不存在")
     def test_real_532_table_inline_fb_subscript_is_not_moved_after_ghz(self) -> None:
@@ -451,30 +417,27 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         OIF_532_04.is_file() and OIF_532_05.is_file(),
         "本地 OIF 2024.532.04/05 样本不存在",
     )
-    def test_real_532_report_renders_formula_scripts_and_source_crops(self) -> None:
-        """真实 532 公式应跟随正文条款，并保留索引、上下标和可放大源裁图。"""
+    def test_real_532_report_does_not_render_automatic_formula_comparison(self) -> None:
+        """真实复杂公式不得生成自动配对、相似度或颜色差分。"""
 
         old = extract_pdf_text(OIF_532_04, start_page=25, end_page=25)
         new = extract_pdf_text(OIF_532_05, start_page=24, end_page=24)
         result = compare_extractions(old, new, DiffOptions())
 
-        self.assertEqual(3, len(result.formula_changes))
+        self.assertEqual([], result.formula_changes)
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-        # 公式索引只负责跳转，旧版集中截图区不能再次出现在真实报告。
-        self.assertIn("公式复核索引", html)
-        self.assertIn('id="formula-index"', html)
-        self.assertIn('<span class="nav-label">公式</span>', html)
-        self.assertIn('<div class="nav-body"><strong>复核索引</strong>', html)
+        self.assertIn("公式自动对比已关闭", html)
+        self.assertNotIn("公式复核索引", html)
+        self.assertNotIn('id="formula-index"', html)
+        self.assertNotIn('<span class="nav-label">公式</span>', html)
         self.assertNotIn('id="formula-changes"', html)
-        self.assertIn("本条款相关公式证据", html)
-        self.assertIn("SDD<sub>MTFmin</sub>", html)
-        self.assertIn("f<sup>1.5</sup>", html)
-        self.assertEqual(6, html.count('class="formula-shot-open"'))
-        self.assertIn('id="formula-zoom-dialog"', html)
+        self.assertNotIn("本条款相关公式证据", html)
+        self.assertEqual(0, html.count('class="formula-shot-open"'))
+        self.assertNotIn('id="formula-zoom-dialog"', html)
         self.assertIn(
             ".summary, .compare-grid, .table-shot-grid { grid-template-columns: minmax(0, 1fr); }",
             html,
@@ -491,10 +454,7 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             ".table-row-summary th, .table-row-summary td { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }",
             html,
         )
-        self.assertEqual(3, len(payload["formula_changes"]))
-        self.assertTrue(
-            payload["formula_changes"][0]["old_formula"]["has_embedded_image"]
-        )
+        self.assertEqual([], payload["formula_changes"])
 
 if __name__ == "__main__":
     unittest.main()

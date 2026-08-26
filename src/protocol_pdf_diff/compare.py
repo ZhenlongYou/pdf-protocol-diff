@@ -11,19 +11,16 @@ from __future__ import annotations
 
 import difflib
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .figure_filters import filter_figure_visual_snippets
-from .formula_visuals import normalized_formula_key
 from .models import (
     DiffOptions,
     DiffResult,
     ExtractionResult,
-    FormulaChange,
-    FormulaVisual,
     PageText,
     Section,
     SectionChange,
@@ -32,6 +29,7 @@ from .models import (
     VisualWatchdogAudit,
     snapshot_page_extraction_audit,
 )
+from .monotonic_alignment import maximum_weight_monotonic_pairs
 from .page_ocr import normalize_ocr_language
 from .pdf_extract import (
     _looks_like_known_atomic_unit,
@@ -306,14 +304,9 @@ def compare_extractions(
     new_covered_table_unit_keys = _covered_table_visual_row_keys(new_table_visuals)
     old_covered_table_unit_keys.update(old_reconciled_table_unit_keys)
     new_covered_table_unit_keys.update(new_reconciled_table_unit_keys)
-    formula_changes = (
-        []
-        if identical_inputs
-        else _compare_formula_visuals(
-            old_extraction.formula_visuals,
-            new_extraction.formula_visuals,
-        )
-    )
+    # 复杂数学版式的文字层会把分式、根号、上下标和式号拆成错误顺序。
+    # 这些坐标仍可用于阻止正文误染色，但不能授权任何公式增删或修改结论。
+    formula_changes = []
     changes = (
         []
         if identical_inputs
@@ -326,6 +319,11 @@ def compare_extractions(
         )
     )  # 同一快照页窗不存在语义差异；不同输入仍只在各自版本隐藏已证明的表格原文单元。
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
+    if old_extraction.formula_visuals or new_extraction.formula_visuals:
+        warnings.append(
+            "公式自动对比已关闭：分式、根号、上下标和式号仅作版面隔离，"
+            "不生成公式增删、修改、相似度或颜色差分结论。"
+        )
     changes, suppressed_noise_count = _suppress_global_noise_changes(changes)
     if suppressed_noise_count:
         warnings.append(
@@ -498,136 +496,6 @@ def _running_header_observations_by_page(
                 values.append(compact)
         observations[page.page_number] = tuple(values)
     return observations
-
-
-def _compare_formula_visuals(
-    old_formulas: list[FormulaVisual],
-    new_formulas: list[FormulaVisual],
-) -> list[FormulaChange]:
-    """Pair displayed formulas by geometry-aware semantics, then report deltas."""
-
-    changes: list[FormulaChange] = []
-    used_old: set[int] = set()
-    used_new: set[int] = set()
-    old_by_key: dict[str, list[int]] = {}
-    new_by_key: dict[str, list[int]] = {}
-    for index, formula in enumerate(old_formulas):
-        old_by_key.setdefault(normalized_formula_key(formula.semantic_text), []).append(index)
-    for index, formula in enumerate(new_formulas):
-        new_by_key.setdefault(normalized_formula_key(formula.semantic_text), []).append(index)
-
-    for key in sorted(set(old_by_key) & set(new_by_key)):
-        for old_index, new_index in zip(old_by_key[key], new_by_key[key], strict=False):
-            old_formula = old_formulas[old_index]
-            new_formula = new_formulas[new_index]
-            used_old.add(old_index)
-            used_new.add(new_index)
-            visual_similarity = _formula_visual_similarity(old_formula, new_formula)
-            if old_formula.formula_number != new_formula.formula_number:
-                changes.append(
-                    FormulaChange(
-                        change_type="modified",
-                        old_formula=old_formula,
-                        new_formula=new_formula,
-                        similarity=1.0,
-                        visual_similarity=visual_similarity,
-                        reason="公式主体文字一致，公式编号发生顺延或调整。",
-                    )
-                )
-            elif visual_similarity < 0.78:
-                changes.append(
-                    FormulaChange(
-                        change_type="review",
-                        old_formula=old_formula,
-                        new_formula=new_formula,
-                        similarity=1.0,
-                        visual_similarity=visual_similarity,
-                        reason="可抽取公式文字一致，但源截图结构差异较大，需回到源 PDF 核对根号、分式或矢量符号。",
-                    )
-                )
-
-    fuzzy_candidates: list[tuple[float, float, int, int]] = []
-    for old_index, old_formula in enumerate(old_formulas):
-        if old_index in used_old:
-            continue
-        old_key = normalized_formula_key(old_formula.semantic_text)
-        for new_index, new_formula in enumerate(new_formulas):
-            if new_index in used_new:
-                continue
-            new_key = normalized_formula_key(new_formula.semantic_text)
-            similarity = difflib.SequenceMatcher(None, old_key, new_key).ratio()
-            score = similarity + (
-                0.08 if old_formula.formula_number == new_formula.formula_number else 0.0
-            )
-            if similarity >= 0.55 and score >= 0.72:
-                fuzzy_candidates.append((score, similarity, old_index, new_index))
-    for _score, similarity, old_index, new_index in sorted(
-        fuzzy_candidates,
-        key=lambda item: (-item[0], item[2], item[3]),
-    ):
-        if old_index in used_old or new_index in used_new:
-            continue
-        old_formula = old_formulas[old_index]
-        new_formula = new_formulas[new_index]
-        used_old.add(old_index)
-        used_new.add(new_index)
-        changes.append(
-            FormulaChange(
-                change_type="modified",
-                old_formula=old_formula,
-                new_formula=new_formula,
-                similarity=similarity,
-                visual_similarity=_formula_visual_similarity(old_formula, new_formula),
-                reason="公式可抽取文字或坐标已证明的上下标发生变化。",
-            )
-        )
-
-    for old_index, old_formula in enumerate(old_formulas):
-        if old_index not in used_old:
-            changes.append(
-                FormulaChange(
-                    change_type="deleted",
-                    old_formula=old_formula,
-                    new_formula=None,
-                    similarity=0.0,
-                    visual_similarity=0.0,
-                    reason="旧版显示公式在新版中没有可靠配对。",
-                )
-            )
-    for new_index, new_formula in enumerate(new_formulas):
-        if new_index not in used_new:
-            changes.append(
-                FormulaChange(
-                    change_type="added",
-                    old_formula=None,
-                    new_formula=new_formula,
-                    similarity=0.0,
-                    visual_similarity=0.0,
-                    reason="新版出现未能与旧版可靠配对的显示公式。",
-                )
-            )
-    return sorted(changes, key=_formula_change_sort_key)
-
-
-def _formula_visual_similarity(old: FormulaVisual, new: FormulaVisual) -> float:
-    """Convert two 64-bit dHashes into a bounded review-only similarity."""
-
-    if not old.image_dhash or not new.image_dhash:
-        return 1.0  # 截图缺失已有抽取警告，不再伪造视觉变化。
-    try:
-        distance = (int(old.image_dhash, 16) ^ int(new.image_dhash, 16)).bit_count()
-    except ValueError:
-        return 1.0
-    return max(0.0, 1.0 - distance / 64.0)
-
-
-def _formula_change_sort_key(change: FormulaChange) -> tuple[int, str, int]:
-    """Order formula findings by visible source location and side."""
-
-    formula = change.new_formula or change.old_formula
-    assert formula is not None
-    side_rank = 0 if change.old_formula is not None else 1
-    return formula.page_number, formula.formula_number, side_rank
 
 
 def _covered_table_visual_row_keys(*table_groups: list[TableVisual]) -> set[str]:
@@ -1883,6 +1751,11 @@ def compare_sections(
         suppressed_old_table_unit_keys=old_table_unit_keys,
         suppressed_new_table_unit_keys=new_table_unit_keys,
     )
+    old_sections, new_sections, matches = _fold_moved_children_into_matched_parents(
+        old_sections,
+        new_sections,
+        matches,
+    )
     changes: list[SectionChange] = []
     for old_index, new_index, similarity, match_basis in matches:
         old_section = old_sections[old_index] if old_index is not None else None
@@ -1997,6 +1870,172 @@ def compare_sections(
             )
 
     return sorted(changes, key=_change_sort_key)
+
+
+def _fold_moved_children_into_matched_parents(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matches: list[tuple[int | None, int | None, float, str]],
+) -> tuple[
+    list[Section],
+    list[Section],
+    list[tuple[int | None, int | None, float, str]],
+]:
+    """Reconcile a child clause whose text was merged into its paired parent.
+
+    A revision may remove only a subheading while retaining its prose in the
+    parent clause.  One-to-one section assignment otherwise reports the parent
+    text as added and the child as deleted even though the reader can see the
+    same sentences on both sides.  Two substantial contained review units plus
+    an already matched ancestor are required before folding; one repeated
+    boilerplate sentence is never sufficient.
+    """
+
+    old_reconciled = list(old_sections)
+    new_reconciled = list(new_sections)
+    paired = [
+        (old_index, new_index)
+        for old_index, new_index, _similarity, _basis in matches
+        if old_index is not None and new_index is not None
+    ]
+    consumed_old: set[int] = set()
+    consumed_new: set[int] = set()
+
+    for old_index, new_index, _similarity, _basis in matches:
+        if old_index is None or new_index is not None:
+            continue
+        child = old_reconciled[old_index]
+        ancestor_pair = _deepest_matched_ancestor_pair(
+            child,
+            paired,
+            sections=old_reconciled,
+            side="old",
+        )
+        if ancestor_pair is None:
+            continue
+        ancestor_old_index, ancestor_new_index = ancestor_pair
+        if not _moved_child_body_is_contained(
+            child.body,
+            new_reconciled[ancestor_new_index].body,
+        ):
+            continue
+        old_reconciled[ancestor_old_index] = _section_with_descendant_body(
+            old_reconciled[ancestor_old_index],
+            child,
+        )
+        consumed_old.add(old_index)
+
+    for old_index, new_index, _similarity, _basis in matches:
+        if new_index is None or old_index is not None:
+            continue
+        child = new_reconciled[new_index]
+        ancestor_pair = _deepest_matched_ancestor_pair(
+            child,
+            paired,
+            sections=new_reconciled,
+            side="new",
+        )
+        if ancestor_pair is None:
+            continue
+        ancestor_old_index, ancestor_new_index = ancestor_pair
+        if not _moved_child_body_is_contained(
+            child.body,
+            old_reconciled[ancestor_old_index].body,
+        ):
+            continue
+        new_reconciled[ancestor_new_index] = _section_with_descendant_body(
+            new_reconciled[ancestor_new_index],
+            child,
+        )
+        consumed_new.add(new_index)
+
+    reconciled_matches = [
+        match
+        for match in matches
+        if not (
+            (match[0] is not None and match[0] in consumed_old and match[1] is None)
+            or (match[1] is not None and match[1] in consumed_new and match[0] is None)
+        )
+    ]
+    return old_reconciled, new_reconciled, reconciled_matches
+
+
+def _deepest_matched_ancestor_pair(
+    child: Section,
+    paired: list[tuple[int, int]],
+    *,
+    sections: list[Section],
+    side: str,
+) -> tuple[int, int] | None:
+    """Return the deepest already paired ancestor for one unmatched child."""
+
+    candidates: list[tuple[int, int, int]] = []
+    for old_index, new_index in paired:
+        section_index = old_index if side == "old" else new_index
+        ancestor = sections[section_index]
+        if (
+            ancestor.number_path
+            and len(ancestor.number_path) < len(child.number_path)
+            and child.number_path[: len(ancestor.number_path)] == ancestor.number_path
+        ):
+            candidates.append((len(ancestor.number_path), old_index, new_index))
+    if not candidates:
+        return None
+    _depth, old_index, new_index = max(candidates)
+    return old_index, new_index
+
+
+def _moved_child_body_is_contained(child_body: str, target_parent_body: str) -> bool:
+    """Require two long child units to occur verbatim inside the target parent."""
+
+    child_units = [
+        _review_unit_key(unit)
+        for unit in _split_units(child_body)
+        if len(_review_unit_key(unit)) >= 40
+    ]
+    target_units = [
+        _review_unit_key(unit)
+        for unit in _split_units(target_parent_body)
+        if len(_review_unit_key(unit)) >= 40
+    ]
+    matched_lengths: list[int] = []
+    used_target_indexes: set[int] = set()
+    for child_key in child_units:
+        target_index = next(
+            (
+                index
+                for index, target_key in enumerate(target_units)
+                if index not in used_target_indexes
+                and (child_key in target_key or target_key in child_key)
+            ),
+            None,
+        )
+        if target_index is None:
+            continue
+        used_target_indexes.add(target_index)
+        matched_lengths.append(len(child_key))
+    return len(matched_lengths) >= 2 and sum(matched_lengths) >= 120
+
+
+def _section_with_descendant_body(parent: Section, child: Section) -> Section:
+    """Append a structurally moved child's source body to its matched parent."""
+
+    page_lines: dict[int, list[str]] = defaultdict(list)
+    for section in (parent, child):
+        page_bodies = section.page_bodies or ((section.start_page, section.body),)
+        for page_number, body in page_bodies:
+            if body.strip():
+                page_lines[page_number].append(body.strip())
+    return replace(
+        parent,
+        start_page=min(parent.start_page, child.start_page),
+        end_page=max(parent.end_page, child.end_page),
+        body="\n".join(value for value in (parent.body, child.body) if value.strip()),
+        page_bodies=tuple(
+            (page_number, "\n".join(values))
+            for page_number, values in sorted(page_lines.items())
+        ),
+    )
 
 
 def _match_sections(
@@ -2237,16 +2276,14 @@ def _match_sections(
             )
         )
 
-    user_window_pair = _user_page_window_anchor_pair(
+    for old_index, new_index in _user_page_window_anchor_pairs(
         old_sections,
         new_sections,
         matches,
         matched_old,
         matched_new,
         options,
-    )
-    if user_window_pair is not None:
-        old_index, new_index = user_window_pair
+    ):
         matched_old.add(old_index)
         matched_new.add(new_index)
         matches.append(
@@ -2391,22 +2428,23 @@ def _mapped_parent_unique_child_rescue_pairs(
     return rescued
 
 
-def _user_page_window_anchor_pair(
+def _user_page_window_anchor_pairs(
     old_sections: list[Section],
     new_sections: list[Section],
     matches: list[tuple[int | None, int | None, float, str]],
     matched_old: set[int],
     matched_new: set[int],
     options: DiffOptions,
-) -> tuple[int, int] | None:
-    """Use an explicit two-sided page selection as one user-authorized relation.
+) -> list[tuple[int, int]]:
+    """Use explicit two-sided page windows to rescue proven related sections.
 
     Ordinary and structural evidence always runs first.  The user anchor then
-    chooses one best remaining technical pair so a low whole-section score
-    cannot collapse the requested core comparison into unrelated additions and
-    deletions.  If another technical pair already proves the window relation,
-    the extra pair must also share procedure or paragraph skeletons; unrelated
-    unmatched material stays visible as side-specific content.
+    aligns every remaining pair that shares a unique title plus a paragraph
+    skeleton, or at least two paragraph skeletons.  The selected pairs remain
+    monotonic, so repeated boilerplate cannot arbitrarily cross the document.
+    If the window has no such evidence and no technical match yet, one strongest
+    pair preserves the user's explicit relation.  Unrelated remainder stays
+    visible as side-specific content.
     """
 
     page_bounds = (
@@ -2416,7 +2454,7 @@ def _user_page_window_anchor_pair(
         options.new_end_page,
     )
     if any(value is None for value in page_bounds):
-        return None  # 只有两侧完整页窗都由用户明确给出时才获得这项配对授权。
+        return []  # 只有两侧完整页窗都由用户明确给出时才获得这项配对授权。
     has_technical_match = any(
         old_index is not None
         and new_index is not None
@@ -2447,17 +2485,38 @@ def _user_page_window_anchor_pair(
     old_candidates = eligible_sections(old_sections, matched_old)
     new_candidates = eligible_sections(new_sections, matched_new)
     if not old_candidates or not new_candidates:
-        return None  # 抽取为空时仍保持不可比较，用户页窗不能制造缺失的正文证据。
-    ranked_candidates: list[tuple[tuple[int, float, float, float, int, int, int], int, int]] = []
+        return []  # 抽取为空时仍保持不可比较，用户页窗不能制造缺失的正文证据。
+    existing_pairs = tuple(
+        (old_index, new_index)
+        for old_index, new_index, _score, _basis in matches
+        if old_index is not None and new_index is not None
+    )
+
+    def preserves_existing_order(old_index: int, new_index: int) -> bool:
+        return all(
+            (old_index - paired_old) * (new_index - paired_new) >= 0
+            for paired_old, paired_new in existing_pairs
+        )
+
+    ranked_candidates: list[
+        tuple[tuple[int, float, float, float, int, int, int], int, int]
+    ] = []
+    evidence_scores: dict[tuple[int, int], float] = {}
     for old_index, old_section, old_units in old_candidates:
         for new_index, new_section, new_units in new_candidates:
+            if not preserves_existing_order(old_index, new_index):
+                continue
             matched_count = _review_unit_skeleton_match_count(old_units, new_units)
-            if has_technical_match and matched_count == 0:
-                continue  # 已有正文关系时，只追加确有步骤/段落骨架重合的剩余核心章节。
             shorter_count = min(len(old_units), len(new_units))
+            overlap_ratio = matched_count / shorter_count if shorter_count else 0.0
+            old_title_key = _review_unit_key(old_section.title)
+            titles_match = bool(
+                old_title_key
+                and old_title_key == _review_unit_key(new_section.title)
+            )
             rank = (
                 matched_count,
-                matched_count / shorter_count if shorter_count else 0.0,
+                overlap_ratio,
                 _section_similarity(old_section.body, new_section.body),
                 _section_match_score(old_section, new_section),
                 -abs(old_index - new_index),
@@ -2465,10 +2524,36 @@ def _user_page_window_anchor_pair(
                 -old_index,
             )
             ranked_candidates.append((rank, old_index, new_index))
-    if not ranked_candidates:
-        return None  # 已有关系后的不相干尾章仍保持新增/删除，不借用户页窗任意强配。
+            if matched_count and (
+                titles_match
+                or (matched_count >= 2 and overlap_ratio >= 0.20)
+            ):
+                evidence_scores[(old_index, new_index)] = (
+                    (100.0 if titles_match else 0.0)
+                    + matched_count * 10.0
+                    + overlap_ratio * 3.0
+                    + rank[2]
+                    + rank[3]
+                )
+
+    if evidence_scores:
+        old_order = [index for index, _section, _units in old_candidates]
+        new_order = [index for index, _section, _units in new_candidates]
+        return [
+            (old_order[old_position], new_order[new_position])
+            for old_position, new_position in maximum_weight_monotonic_pairs(
+                len(old_order),
+                len(new_order),
+                lambda old_position, new_position: evidence_scores.get(
+                    (old_order[old_position], new_order[new_position])
+                ),
+            )
+        ]
+
+    if has_technical_match or not ranked_candidates:
+        return []  # 已有关系后的不相干尾章仍保持新增/删除，不借用户页窗任意强配。
     _rank, old_index, new_index = max(ranked_candidates)
-    return old_index, new_index
+    return [(old_index, new_index)]
 
 
 _SECTION_IDENTITY_ANCHOR_MIN_CHARS = 80

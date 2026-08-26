@@ -6,13 +6,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping  # 接受 pdfplumber 返回的映射对象，同时避免依赖其私有类型。
-from dataclasses import replace  # 冻结 dataclass 需要 replace 才能安全重写阅读序号。
 import math  # 坐标必须是有限实数，避免 NaN/Infinity 破坏稳定排序。
+from collections.abc import (  # 接受 pdfplumber 返回的映射对象，同时避免依赖其私有类型。
+    Iterable,
+    Mapping,
+)
+from dataclasses import replace  # 冻结 dataclass 需要 replace 才能安全重写阅读序号。
 
 from .models import DocumentBlock, DocumentBlockKind, TableVisual
 from .text_utils import normalize_line
-
 
 # 相差不超过 3pt 的词通常属于同一条 PDF 文字基线；该值与既有阅读顺序检查保持一致。
 _WORD_LINE_TOP_TOLERANCE = 3.0
@@ -386,6 +388,16 @@ def _text_block_from_word_line(
                     and str(word["fontname"]).strip()
                 }
             )
+        ),
+        word_boxes=tuple(
+            (
+                str(word["text"]),
+                float(word["x0"]),
+                float(word["top"]),
+                float(word["x1"]),
+                float(word["bottom"]),
+            )
+            for word in word_line
         ),
     )
 

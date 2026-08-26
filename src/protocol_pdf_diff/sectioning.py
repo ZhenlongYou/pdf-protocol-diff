@@ -1271,8 +1271,9 @@ def _detect_dense_numbered_heading_under_parent(
 
     点分数字、标题词和 ``TP4a`` 等技术记号都可能出现在表格、版本号或
     寄存器记录中，不能单独证明章节身份。这里要求候选完整命中 PDF 自带
-    outline/bookmark。当前 PDF 若因打印丢失 outline，对侧 outline 只能辅助，
-    当前侧还必须独立证明同字体父标题和两个同字体直接子标题。
+    outline/bookmark。本侧精确 bookmark 与同字体物理行已是直接证据；
+    当前 PDF 若因打印丢失 outline，对侧 outline 只能辅助，当前侧还必须
+    独立证明同字体父标题和两个同字体直接子标题。
     """
 
     if "|" in line or "\t" in line:
@@ -1285,28 +1286,29 @@ def _detect_dense_numbered_heading_under_parent(
         return None
     number = match.group("number")
     title = match.group("title")
-    level = number.count(".") + 1
+    expected_parent_number = number.rsplit(".", 1)[0].casefold()
     parent = next(
-        (item for item in reversed(heading_stack) if item.level == level - 1),
+        (
+            item
+            for item in reversed(heading_stack)
+            if canonical_number_identity(item.number) == expected_parent_number
+        ),
         None,
     )
+    level = number.count(".") + 1  # 保持未上下文化层级；后续统一在 Appendix/Annex 容器下增加一层。
     if (
         parent is None
         or open_section is None
-        or canonical_number_identity(parent.number)
-        != number.rsplit(".", 1)[0].casefold()
         or not open_section.number_path
-        or canonical_number_identity(open_section.number_path[-1])
-        != canonical_number_identity(parent.number)
+        or canonical_number_identity(parent.number)
+        not in {
+            canonical_number_identity(item)
+            for item in open_section.number_path
+        }
     ):
-        return None
+        return None  # 可从父章节的深层子条款回到下一个直接兄弟，但父路径必须真实活跃。
     parent_title_key = normalize_for_similarity(parent.title)
     title_key = normalize_for_similarity(title)
-    if len(
-        _meaningful_heading_words(parent_title_key)
-        & _meaningful_heading_words(title_key)
-    ) < 2:
-        return None  # outline 里的技术记录若偏离当前父章节主题，不能借层级外形获得章节身份。
     own_outline_records = {
         (
             canonical_number_identity(parent_record[0]),
@@ -1327,8 +1329,14 @@ def _detect_dense_numbered_heading_under_parent(
         canonical_number_identity(number),
         title_key,
     )
+    own_record_is_exact = own_record in own_outline_records
     proof_outline_paths = outline_heading_paths
-    if own_record not in own_outline_records:
+    if not own_record_is_exact:
+        if len(
+            _meaningful_heading_words(parent_title_key)
+            & _meaningful_heading_words(title_key)
+        ) < 2:
+            return None  # 只有借用对侧 outline 时才需要额外主题重叠；本侧精确 bookmark 已经是直接证据。
         peer_outline_pairs = {
             (
                 normalize_for_similarity(parent_record[1]),
@@ -1349,15 +1357,18 @@ def _detect_dense_numbered_heading_under_parent(
         not candidate_fonts
         or not open_section.heading_font_names
         or candidate_fonts != open_section.heading_font_names
-        or not _has_two_outline_backed_direct_children(
-            number,
-            level,
-            candidate_fonts,
-            cleaned_pages,
-            page_index,
-            line_index,
-            title_key,
-            proof_outline_paths,
+        or (
+            not own_record_is_exact
+            and not _has_two_outline_backed_direct_children(
+                number,
+                level,
+                candidate_fonts,
+                cleaned_pages,
+                page_index,
+                line_index,
+                title_key,
+                proof_outline_paths,
+            )
         )
     ):
         return None
@@ -1481,7 +1492,7 @@ def _looks_like_forbidden_heading_candidate(
         )
     ):
         return True
-    numeric_kind = kind in {"numeric", "annex_numeric", "numeric_letter"}  # 混合层级沿用技术碎片防误识别规则。
+    numeric_kind = kind in {"numeric", "named_numeric", "annex_numeric", "numeric_letter"}  # ``Section N`` 也可能来自跨页引用续句，沿用正文碎片门禁。
     if numeric_kind and _looks_like_scope_acronym_figure_label(normalized_title):
         return True
     if numeric_kind and _looks_like_unit_only_heading(normalized_title):
@@ -2541,7 +2552,17 @@ def _looks_like_unit_only_heading(title: str) -> bool:
         r"(?i)^(?:ui|uipp|uirms|mv|v|db|dbc|ghz|mhz|hz|ps|ns|us|ms|"
         r"ohm|ω|ff|pf|ph|mm|ns/mm|1/mm|v2/ghz|gb/s|gsym/s|gt/s|%)$"
     )
-    return bool(re.fullmatch(unit_pattern, title.strip()))
+    candidate = title.strip()
+    if re.fullmatch(unit_pattern, candidate):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?i)(?:ui|uipp|uirms|mv|v|db|dbc|ghz|mhz|hz|ps|ns|us|ms|"
+            r"ohm|ω|ff|pf|ph|mm|ns/mm|1/mm|v2/ghz|gb/s|gsym/s|gt/s|%)"
+            r"(?:\s+[A-Z][A-Za-z0-9]{0,4}){1,2}",
+            candidate,
+        )
+    )  # `60 GHz BT` 一类图中单位+短标签不是顶层章节。
 
 
 def _looks_like_axis_label_heading(title: str) -> bool:
@@ -2573,13 +2594,30 @@ def _looks_like_sentence_fragment_heading(number: str, title: str) -> bool:
     """Return True when a long prose sentence was misread as a dotted heading."""
 
     candidate = normalize_line(title)
-    if "." not in number:
+    candidate = re.sub(
+        r"^(?:\d+(?:\.\d+)*\)?[.):]\s*|[).,:;\-–—]+\s*)+",
+        "",
+        candidate,
+    )  # ``Section 29.3.12). The ...`` 会因正则回溯把 ``12).`` 落进标题侧。
+    if len(candidate) < 45:
         return False
-    if len(candidate) < 55:
-        return False
+    begins_like_sentence = bool(
+        re.match(
+            r"(?i)^(?:the|a|an|this|that|all|each|if|when|where|with|using|as|and|or)\b",
+            candidate,
+        )
+    )
     return bool(
-        re.match(r"(?i)^(?:the|a|an|this|that)\b", candidate)
-        and re.search(r"(?i)\b(?:is|are|shall|should|must|will|can|be)\b", candidate)
+        begins_like_sentence
+        and (
+            re.search(
+                r"(?i)\b(?:is|are|shall|should|must|will|can|be|uses?|meets?|"
+                r"includes?|contains?|provides?|requires?|defined|described|shown|"
+                r"measured|specified|used)\b",
+                candidate,
+            )
+            or re.search(r"(?i)\(\s*(?:see)?\s*$", candidate)
+        )
     )
 
 
@@ -2591,6 +2629,10 @@ def _looks_like_formula_or_table_value_heading(number: str, title: str) -> bool:
         return True
     if re.fullmatch(r"[A-Za-z]", title):
         return True  # 数字后只有一个符号字母时，更像表格值/公式残片，不是章节标题。
+    if re.match(r"^[+−–—-]\s*[A-Za-z]", title) and len(
+        re.findall(r"[+−–—\-/]", title)
+    ) >= 3:
+        return True  # `1 + j ------ 1 + j ...` 是被 PDF 拆开的公式行。
     if re.fullmatch(
         r"(?i)[a-z][a-z0-9_]{0,7}\s*[-—]?\s*[+-]?\d+(?:\.\d+)?\s*"
         r"(?:ui|uipp|uirms|mv|v|db|ghz|mhz|ps|ns|us|ms)",

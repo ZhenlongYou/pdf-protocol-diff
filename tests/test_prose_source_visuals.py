@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from PIL import Image, ImageDraw
@@ -22,18 +23,29 @@ from protocol_pdf_diff.models import (
     DiffOptions,
     DocumentBlock,
     DocumentBlockKind,
+    SectionChange,
+    SnippetPair,
     TableVisual,
 )
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
+    _annotated_source_crop,
+    _change_highlights,
     _content_horizontal_bounds,
     _crop_regions,
     _expand_boxes_to_complete_paragraph_lines,
     _figure_crop_bbox,
+    _FigureEvidence,
+    _formula_block_bboxes_by_page,
     _highlight_boxes,
+    _is_caption_led_figure,
+    _looks_like_numbered_figure_boundary_heading,
     _page_contains_figure_caption,
-    _source_crop,
+    _pair_figure_evidence,
+    _section_heading_bboxes_by_page,
+    _section_page_boundary_bboxes,
     _subtract_excluded_regions,
+    _visual_bboxes_by_page,
     build_prose_source_visuals,
 )
 from protocol_pdf_diff.reporting import write_reports
@@ -70,10 +82,10 @@ class _FirstViewText(HTMLParser):
 class ProseSourceVisualReportTests(unittest.TestCase):
     """Exercise the real PDF -> comparison -> standalone HTML path."""
 
-    def test_long_modified_prose_leads_with_structured_diff_and_collapses_raw_source(
+    def test_long_modified_prose_leads_with_highlighted_source_and_collapses_text_detail(
         self,
     ) -> None:
-        """Word-level text is primary; raw PDF crops are optional provenance only."""
+        """The PDF view is primary; OCR text remains available as secondary audit detail."""
 
         common = [
             "The receiver calibration procedure records the signal generator state.",
@@ -111,17 +123,16 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertIn("旧版原文区域", html)
             self.assertIn("新版原文区域", html)
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
-            self.assertIn('class="prose-source-details"', html)
-            self.assertIn("查看原文出处（无颜色对比）", html)
-            self.assertNotIn('class="prose-text-details"', html)
-            self.assertNotIn("查看文字识别明细", html)
-            self.assertNotIn("原文坐标浅色标注", html)
-            self.assertLess(html.index('class="compare-grid"'), html.index('class="prose-source-details"'))
+            self.assertNotIn('class="prose-source-details"', html)
+            self.assertIn('class="prose-text-details"', html)
+            self.assertIn("查看文字识别明细", html)
+            self.assertIn("原文坐标浅色标注", html)
+            self.assertLess(html.index('class="prose-source-visual-grid"'), html.index('class="prose-text-details"'))
 
             first_view = _FirstViewText()
             first_view.feed(html)
             first_view.close()
-            self.assertIn(old_steps[0], "".join(first_view.parts))
+            self.assertNotIn(old_steps[0], "".join(first_view.parts))
             self.assertIn("Calibration step 1 uses", html)
             self.assertIn("101", html)
 
@@ -129,8 +140,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertEqual(1, len(visuals))
             self.assertEqual([1], visuals[0]["old_pages"])
             self.assertEqual([1], visuals[0]["new_pages"])
-            self.assertEqual(0, visuals[0]["old_highlight_region_count"])
-            self.assertEqual(0, visuals[0]["new_highlight_region_count"])
+            self.assertGreater(visuals[0]["old_highlight_region_count"], 0)
+            self.assertGreater(visuals[0]["new_highlight_region_count"], 0)
             self.assertNotIn("image_data_uri", json.dumps(visuals))
 
     def test_short_change_keeps_compact_text_without_source_screenshot(self) -> None:
@@ -183,7 +194,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
 
             self.assertIn('class="figure-source-visual-grid"', html)
-            self.assertIn("Figure 原图（不做文字或颜色自动对比）", html)
+            self.assertIn("Figure 原图核对", html)
             self.assertNotIn("浅色标注", html)
             first_view = _FirstViewText()
             first_view.feed(html)
@@ -192,6 +203,58 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertNotIn(old_figure_text, visible_text)
             self.assertNotIn(new_figure_text, visible_text)
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
+
+    def test_figure_pairing_is_global_monotonic_and_ignores_clause_renumbering(self) -> None:
+        """Related Figures pair even when their owning section changes were split apart."""
+
+        def evidence(page: int, caption: str, owner: str) -> _FigureEvidence:
+            return _FigureEvidence(
+                owner_section_id=owner,
+                caption=caption,
+                visual=mock.Mock(page_number=page),
+                document_order=page,
+            )
+
+        old = (
+            evidence(21, "Figure 29-11. Module input test setup", "S0034"),
+            evidence(
+                24,
+                "Figure 29-12. Host and module output reference CTLE transfer function for 0 to 6 dB of high frequency gain and 0 dB of low frequency gain at 50 Gsym/s",
+                "S0037",
+            ),
+            evidence(
+                24,
+                "Figure 29-13. Host and module output reference CTLE transfer function for 6 dB of high frequency gain and 0 dB to 2.0 dB of low frequency gain at 50 Gsym/s",
+                "S0037",
+            ),
+        )
+        new = (
+            evidence(23, "Figure 30-11. Module input test setup", "S0035"),
+            evidence(
+                26,
+                "Figure 30-12. Host and module output reference CTLE transfer function for 0 to 10 dB of high frequency gain and 0 dB of low frequency gain at 106.25 Gsym/s",
+                "S0039",
+            ),
+            evidence(
+                27,
+                "Figure 30-13. Host and module output reference CTLE transfer function for 10 dB of high frequency gain and 0 dB to 2.0 dB of low frequency gain at 106.25 Gsym/s",
+                "S0039",
+            ),
+        )
+
+        pairs = _pair_figure_evidence(old, new)
+
+        self.assertEqual(
+            [(21, 23), (24, 26), (24, 27)],
+            [
+                (
+                    pair.old.visual.page_number if pair.old else None,
+                    pair.new.visual.page_number if pair.new else None,
+                )
+                for pair in pairs
+            ],
+        )
+        self.assertTrue(all(pair.old and pair.new for pair in pairs))
 
     def test_figure_reference_sentence_is_not_misclassified_as_a_caption(self) -> None:
         """A prose line beginning with Figure N remains text, not a fake image crop."""
@@ -215,6 +278,12 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertTrue(_page_contains_figure_caption((caption,)))
         self.assertFalse(_page_contains_figure_caption((reference,)))
+        self.assertTrue(_is_caption_led_figure(caption.text))
+        self.assertFalse(
+            _is_caption_led_figure(
+                "Figure 29-6) shall meet the specifications listed in Section 29.3.3."
+            )
+        )
 
     def test_figure_crop_stops_at_geometric_next_heading_even_if_reading_order_is_wrong(self) -> None:
         """A following clause heading must never appear inside a Figure raw image."""
@@ -243,6 +312,19 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], diagram_value.bbox[3])
         self.assertLessEqual(crop[3], 492.0)
+
+    def test_print_line_numbered_diagram_label_is_not_a_clause_heading(self) -> None:
+        """Labels such as ``22 Host A`` stay inside the Figure image."""
+
+        self.assertFalse(_looks_like_numbered_figure_boundary_heading("22 Host A"))
+        self.assertFalse(
+            _looks_like_numbered_figure_boundary_heading("3 Host up to 12.0 dB")
+        )
+        self.assertTrue(
+            _looks_like_numbered_figure_boundary_heading(
+                "28 30.4.1.4.1 Host stressed input test method"
+            )
+        )
 
     def test_figure_crop_stops_before_a_wrapped_following_paragraph(self) -> None:
         """Two ordinary body lines establish the boundary even without punctuation."""
@@ -468,6 +550,198 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
 
+    def test_displayed_formula_rows_are_owned_outside_prose_highlights(self) -> None:
+        """A numbered multi-line equation must be blocked without swallowing following prose."""
+
+        blocks = (
+            DocumentBlock(30, (46.0, 539.0, 396.0, 554.0), DocumentBlockKind.TEXT, "37 SDD21 = -0.01 - 10.75 f/fb", 0, "test"),
+            DocumentBlock(30, (252.0, 561.0, 532.0, 573.0), DocumentBlockKind.TEXT, "b b (29-7)", 1, "test"),
+            DocumentBlock(30, (202.0, 581.0, 390.0, 593.0), DocumentBlockKind.TEXT, "\uf0e6 \uf0f6 \uf0e6 \uf0f6 b", 2, "test"),
+            DocumentBlock(30, (46.0, 584.0, 444.0, 606.0), DocumentBlockKind.TEXT, "40 SDD21 = (-9.7) f/fb - 32.6 (f/fb)^2", 3, "test"),
+            DocumentBlock(30, (46.0, 621.0, 510.0, 636.0), DocumentBlockKind.TEXT, "43 In addition it is recommended that the channel meet the ERL limit.", 4, "test"),
+        )
+        page = SimpleNamespace(blocks=blocks)
+
+        boxes = _formula_block_bboxes_by_page({30: page})[30]
+
+        self.assertEqual(1, len(boxes))
+        self.assertLessEqual(boxes[0][1], 539.0)
+        self.assertGreaterEqual(boxes[0][3], 606.0)
+        self.assertLess(boxes[0][3], 621.0)
+
+    def test_numbered_section_headings_bound_prose_crops(self) -> None:
+        """A following section heading belongs to its own card, never the prior one."""
+
+        page = SimpleNamespace(
+            blocks=(
+                DocumentBlock(
+                    page_number=3,
+                    bbox=(48.0, 80.0, 500.0, 94.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text="30.3.13 Electrical Eye Closure PAM4 (EECQ)",
+                    reading_order=0,
+                    source_engine="test",
+                ),
+                DocumentBlock(
+                    page_number=3,
+                    bbox=(48.0, 180.0, 500.0, 194.0),
+                    kind=DocumentBlockKind.TEXT,
+                    text="30.3.14 Electrical Eye Closure PAM4 (Ceeq)",
+                    reading_order=1,
+                    source_engine="test",
+                ),
+            )
+        )
+
+        blockers = _section_heading_bboxes_by_page({3: page})
+
+        self.assertEqual(
+            ((48.0, 80.0, 500.0, 94.0), (48.0, 180.0, 500.0, 194.0)),
+            blockers[3],
+        )
+
+    def test_section_page_boundaries_exclude_neighboring_clause_text(self) -> None:
+        """Same-page crops are clipped between the current and next heading."""
+
+        page = SimpleNamespace(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=(
+                DocumentBlock(3, (48.0, 80.0, 500.0, 94.0), DocumentBlockKind.TEXT, "30.3.13 Electrical Eye Closure PAM4 (EECQ)", 0, "test"),
+                DocumentBlock(3, (48.0, 180.0, 500.0, 194.0), DocumentBlockKind.TEXT, "30.3.14 Electrical Eye Closure PAM4 (Ceeq)", 1, "test"),
+            ),
+        )
+        section = SimpleNamespace(
+            heading="30.3.13 Electrical Eye Closure PAM4 (EECQ)",
+            start_page=3,
+            end_page=3,
+        )
+
+        blockers = _section_page_boundary_bboxes(page, section, page_number=3)
+
+        self.assertEqual(
+            ((0.0, 0.0, 612.0, 94.0), (0.0, 180.0, 612.0, 792.0)),
+            blockers,
+        )
+
+    def test_wrapped_bold_heading_continuation_stays_out_of_prose_crop(self) -> None:
+        """A bold wrapped title word is not presented as changed body prose."""
+
+        heading = (
+            "30.3.11 Common to differential mode and differential to common mode "
+            "conversion"
+        )
+        page = SimpleNamespace(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            ambiguous_line_number_sides=("left",),
+            blocks=(
+                DocumentBlock(
+                    13,
+                    (72.0, 185.0, 491.0, 197.0),
+                    DocumentBlockKind.TEXT,
+                    "30.3.11 Common to differential mode and differential to common mode",
+                    0,
+                    "test",
+                    font_names=("Arial,Bold",),
+                ),
+                DocumentBlock(
+                    13,
+                    (47.0, 195.0, 60.0, 207.0),
+                    DocumentBlockKind.TEXT,
+                    "10",
+                    1,
+                    "test",
+                ),
+                DocumentBlock(
+                    13,
+                    (137.0, 198.0, 201.0, 210.0),
+                    DocumentBlockKind.TEXT,
+                    "conversion",
+                    2,
+                    "test",
+                    font_names=("Arial,Bold",),
+                ),
+                DocumentBlock(
+                    13,
+                    (47.0, 221.0, 492.0, 235.0),
+                    DocumentBlockKind.TEXT,
+                    "The common mode conversion specifications are intended to limit energy.",
+                    3,
+                    "test",
+                ),
+            ),
+        )
+        section = SimpleNamespace(heading=heading, start_page=13, end_page=13)
+
+        self.assertEqual(
+            ((0.0, 0.0, 612.0, 210.0),),
+            _section_page_boundary_bboxes(page, section, page_number=13),
+        )
+        self.assertEqual(
+            ((72.0, 185.0, 491.0, 210.0),),
+            _section_heading_bboxes_by_page({13: page})[13],
+        )
+
+    def test_section_boundary_strips_only_a_proven_right_gutter_number(self) -> None:
+        """A printed line number may trail a heading only on a detected gutter."""
+
+        heading = "30.4.1.4.1.1 Host input test signal calibration"
+        blocks = (
+            DocumentBlock(
+                24,
+                (80.0, 78.0, 562.0, 91.0),
+                DocumentBlockKind.TEXT,
+                f"{heading} 1",
+                0,
+                "test",
+                word_boxes=(
+                    ("30.4.1.4.1.1", 80.0, 78.0, 144.0, 91.0),
+                    ("Host", 153.0, 78.0, 180.0, 91.0),
+                    ("input", 183.0, 78.0, 213.0, 91.0),
+                    ("test", 216.0, 78.0, 238.0, 91.0),
+                    ("signal", 240.0, 78.0, 276.0, 91.0),
+                    ("calibration", 279.0, 78.0, 340.0, 91.0),
+                    ("1", 555.0, 78.0, 562.0, 90.0),
+                ),
+            ),
+            DocumentBlock(
+                24,
+                (80.0, 312.0, 568.0, 326.0),
+                DocumentBlockKind.TEXT,
+                "30.4.1.4.1.2 Module input test signal calibration 19",
+                1,
+                "test",
+            ),
+        )
+        section = SimpleNamespace(heading=heading, start_page=24, end_page=24)
+        unproven_page = SimpleNamespace(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=blocks,
+            ambiguous_line_number_sides=(),
+        )
+        proven_page = SimpleNamespace(
+            page_bbox=(0.0, 0.0, 612.0, 792.0),
+            blocks=blocks,
+            ambiguous_line_number_sides=(),
+            visual_noise_bboxes=((555.0, 78.0, 562.0, 90.0),),
+        )
+
+        self.assertEqual(
+            ((0.0, 78.0, 612.0, 792.0),),
+            _section_page_boundary_bboxes(
+                unproven_page,
+                section,
+                page_number=24,
+            ),
+        )
+        self.assertEqual(
+            ((0.0, 0.0, 612.0, 91.0), (0.0, 312.0, 612.0, 792.0)),
+            _section_page_boundary_bboxes(
+                proven_page,
+                section,
+                page_number=24,
+            ),
+        )
+
     def test_figure_crop_stops_before_a_following_table_caption(self) -> None:
         """Table captions belong only to Table evidence, never to a Figure crop."""
 
@@ -619,22 +893,39 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertTrue(_page_contains_figure_caption(blocks))
 
-    def test_source_crop_preserves_original_pixels_without_overlay(self) -> None:
-        """Source provenance must stay raw; only structured text owns change colors."""
+    def test_annotated_source_crop_uses_readable_side_specific_translucent_color(self) -> None:
+        """Old/new tint is visible on white while preserving dark source glyphs."""
 
         source = Image.new("RGB", (120, 80), "white")
         draw = ImageDraw.Draw(source)
         draw.rectangle((35, 35, 85, 45), fill="black")
 
         crop_bbox = (20.0, 20.0, 100.0, 60.0)
-        cropped = _source_crop(
+        old_crop = _annotated_source_crop(
             source,
             page_bbox=(0.0, 0.0, 120.0, 80.0),
             crop_bbox=crop_bbox,
+            highlight_boxes=((30.0, 30.0, 90.0, 50.0),),
+            side="old",
+        )
+        new_crop = _annotated_source_crop(
+            source,
+            page_bbox=(0.0, 0.0, 120.0, 80.0),
+            crop_bbox=crop_bbox,
+            highlight_boxes=((30.0, 30.0, 90.0, 50.0),),
+            side="new",
         )
 
-        self.assertEqual((80, 40), cropped.size)
-        self.assertEqual(source.crop((20, 20, 100, 60)).tobytes(), cropped.tobytes())
+        self.assertEqual((80, 40), old_crop.size)
+        self.assertEqual((80, 40), new_crop.size)
+        old_tint = old_crop.getpixel((12, 12))
+        new_tint = new_crop.getpixel((12, 12))
+        self.assertGreater(old_tint[0], old_tint[1])
+        self.assertGreater(new_tint[1], new_tint[0])
+        self.assertGreater(min(old_tint), 190)
+        self.assertGreater(min(new_tint), 190)
+        self.assertLess(max(old_crop.getpixel((40, 20))), 50)
+        self.assertLess(max(new_crop.getpixel((40, 20))), 50)
 
     def test_prose_crop_expands_to_the_complete_connected_paragraph(self) -> None:
         """A changed line must not leave the final continuation line half visible."""
@@ -771,6 +1062,79 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             regions,
         )
 
+    def test_source_highlight_uses_word_boxes_for_only_the_changed_token(self) -> None:
+        """A one-value replacement must not tint the unchanged words on its line."""
+
+        block = DocumentBlock(
+            page_number=1,
+            bbox=(10.0, 10.0, 180.0, 20.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Voltage limit is 620 mV.",
+            reading_order=0,
+            source_engine="test",
+            word_boxes=(
+                ("Voltage", 10.0, 10.0, 42.0, 20.0),
+                ("limit", 46.0, 10.0, 68.0, 20.0),
+                ("is", 72.0, 10.0, 80.0, 20.0),
+                ("620", 84.0, 10.0, 102.0, 20.0),
+                ("mV.", 106.0, 10.0, 124.0, 20.0),
+            ),
+        )
+        changed_snippet = SimpleNamespace(
+            text="Voltage limit is 620 mV.",
+            changed_token_indexes=frozenset({3}),
+        )
+
+        regions, matched = _highlight_boxes((block,), (changed_snippet,))
+
+        self.assertEqual(1, matched)
+        self.assertEqual(((84.0, 10.0, 102.0, 20.0),), regions)
+
+    def test_insert_only_replacement_keeps_old_context_without_old_highlight(self) -> None:
+        """An insertion still needs its unchanged old source sentence beside the new one."""
+
+        change = SectionChange(
+            change_type="modified",
+            old_section=None,
+            new_section=None,
+            similarity=0.5,
+            replaced_snippets=[
+                SnippetPair(
+                    old="The receiver opens the eye.",
+                    new="The receiver uses a 15-tap FFE and opens the eye.",
+                )
+            ],
+        )
+
+        old_highlights = _change_highlights(change, side="old")
+        new_highlights = _change_highlights(change, side="new")
+
+        self.assertEqual(1, len(old_highlights))
+        self.assertEqual(frozenset(), old_highlights[0].changed_token_indexes)
+        self.assertTrue(new_highlights[0].changed_token_indexes)
+
+    def test_reference_renumbering_stays_visible_without_colored_locator_tokens(self) -> None:
+        """Table/Figure/Section locators have dedicated evidence and remain untinted."""
+
+        change = SectionChange(
+            change_type="modified",
+            old_section=None,
+            new_section=None,
+            similarity=0.9,
+            replaced_snippets=[
+                SnippetPair(
+                    old="The points are shown in Figure 29-1 and Table 29-2.",
+                    new="The points are shown in Figure 30-1 and Table 30-2.",
+                )
+            ],
+        )
+
+        old_highlight = _change_highlights(change, side="old")[0]
+        new_highlight = _change_highlights(change, side="new")[0]
+
+        self.assertEqual(frozenset(), old_highlight.changed_token_indexes)
+        self.assertEqual(frozenset(), new_highlight.changed_token_indexes)
+
     def test_recognized_table_region_is_not_repeated_as_colored_prose_evidence(
         self,
     ) -> None:
@@ -865,6 +1229,72 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual(1, matched_snippets)
         self.assertEqual(((10.0, 10.0, 100.0, 30.0),), regions)
+
+    def test_table_and_figure_captions_never_receive_prose_highlight(self) -> None:
+        """Caption pixels belong only to their dedicated Table/Figure evidence."""
+
+        blocks = (
+            DocumentBlock(
+                1,
+                (40.0, 40.0, 560.0, 58.0),
+                DocumentBlockKind.TEXT,
+                "Table 29-3. Crosstalk parameters for host output test",
+                0,
+                "test",
+            ),
+            DocumentBlock(
+                1,
+                (40.0, 100.0, 560.0, 118.0),
+                DocumentBlockKind.TEXT,
+                "Figure 29-11. Module input test setup",
+                1,
+                "test",
+            ),
+        )
+
+        regions, matched = _highlight_boxes(
+            blocks,
+            tuple(block.text for block in blocks),
+        )
+
+        self.assertEqual((), regions)
+        self.assertEqual(0, matched)
+
+    def test_table_owned_bbox_expands_to_a_wrapped_caption(self) -> None:
+        """Both lines of a Table title are excluded from prose screenshot paint."""
+
+        caption = DocumentBlock(
+            1,
+            (90.0, 360.0, 568.0, 377.0),
+            DocumentBlockKind.TEXT,
+            "Table 29-3. Crosstalk parameters for host output test",
+            0,
+            "test",
+        )
+        continuation = DocumentBlock(
+            1,
+            (264.0, 377.0, 568.0, 389.0),
+            DocumentBlockKind.TEXT,
+            "calibration at TP4",
+            1,
+            "test",
+        )
+        table = TableVisual(
+            page_number=1,
+            table_number=3,
+            title="Table 29-3. Crosstalk parameters",
+            bbox=(77.0, 395.0, 543.0, 495.0),
+            image_data_uri="",
+            row_texts=[],
+            grid_summary="test",
+        )
+
+        owned = _visual_bboxes_by_page(
+            (table,),
+            pages={1: SimpleNamespace(blocks=(caption, continuation))},
+        )
+
+        self.assertEqual(((77.0, 360.0, 568.0, 495.0),), owned[1])
 
     def test_snapshot_hash_mismatch_falls_back_to_text_without_stale_images(
         self,

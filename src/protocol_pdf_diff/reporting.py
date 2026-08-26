@@ -18,11 +18,9 @@ from itertools import pairwise
 from pathlib import Path
 
 from .figure_filters import filter_figure_visual_snippets, is_figure_visual_pair
-from .formula_visuals import normalized_formula_key
 from .models import (
     DiffOptions,
     DiffResult,
-    FormulaChange,
     FormulaVisual,
     PageExtractionAudit,
     ProseSourceVisual,
@@ -296,16 +294,6 @@ class _NumberedTableRun:
     descriptor: str  # 去除严格表号后的长描述；短标题保持空串，不能充当锚点。
 
 
-@dataclass(frozen=True)
-class _FormulaPlacement:
-    """One formula review item and its reader-facing owning section."""
-
-    report_index: int  # 公式在整份报告中的稳定 F 编号，索引和正文锚点共用。
-    change: FormulaChange  # 保留旧/新公式、截图和保守结论的完整事实。
-    owner_index: int | None  # 对应技术正文卡序号；None 表示当前证据无法可靠归属。
-    owner_location: str  # 索引显示的条款位置；未归属时使用明确的人工复核文案。
-
-
 def write_reports(
     result: DiffResult,
     output_dir: str | Path,
@@ -339,13 +327,15 @@ def write_reports(
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     reader_changes: list[SectionChange] = []
-    figure_visual_sides_by_identity = {
-        _prose_source_visual_identity(group): (
-            bool(group.old_figure_visuals),
-            bool(group.new_figure_visuals),
-        )
+    old_figure_owner_ids = {
+        group.old_section_id
         for group in result.prose_source_visuals
-        if group.old_figure_visuals or group.new_figure_visuals
+        if group.old_figure_visuals and group.old_section_id is not None
+    }
+    new_figure_owner_ids = {
+        group.new_section_id
+        for group in result.prose_source_visuals
+        if group.new_figure_visuals and group.new_section_id is not None
     }
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
@@ -354,24 +344,17 @@ def write_reports(
         reader_change = _reader_section_change(
             change,
             reader_table_evidence,
-            figure_visual_sides=figure_visual_sides_by_identity.get(
-                _section_change_visual_identity(change),
-                (False, False),
+            figure_visual_sides=(
+                bool(
+                    change.old_section
+                    and change.old_section.section_id in old_figure_owner_ids
+                ),
+                bool(
+                    change.new_section
+                    and change.new_section.section_id in new_figure_owner_ids
+                ),
             ),
         )
-        if (
-            reader_change is None
-            and _section_change_visual_identity(change)
-            in figure_visual_sides_by_identity
-        ):
-            reader_change = replace(
-                change,
-                added_snippets=[],
-                removed_snippets=[],
-                replaced_snippets=[],
-                omitted_snippet_count=0,
-                review_replaced_snippets=[],
-            )
         if reader_change is not None:
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
@@ -433,10 +416,9 @@ def write_reports(
             }
             for change in table_changes
         ],
-        "formula_changes": [
-            {**_formula_change_to_dict(change), "reader_card_id": f"F{index}"}
-            for index, change in enumerate(result.formula_changes, start=1)
-        ],
+        # 公式自动对比已经关闭；即使旧调用方注入遗留 FormulaChange，
+        # 读者报告和机器结果也不能重新发布不可靠的公式结论。
+        "formula_changes": [],
         "visual_review_items": [
             {**_visual_review_item_to_dict(item), "reader_card_id": f"V{index}"}
             for index, item in enumerate(result.visual_review_items, start=1)
@@ -602,7 +584,7 @@ def _render_markdown(
         f"| 核心技术变化 | {material_technical_count} |",
         f"| 正文字符复核项 | {technical_review_count} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
-        f"| 公式视觉核对项 | {len(result.formula_changes)} |",
+        "| 公式自动对比项（已关闭） | 0 |",
         f"| 视觉漏检核对项 | {len(result.visual_review_items)} |",
         f"| 变化表格 | {len(material_table_changes)} |",
         f"| 表格行变化 | {table_row_change_count} |",
@@ -610,41 +592,9 @@ def _render_markdown(
         "",
     ]
 
-    # 表格截图和行级事实是读者的首要对比证据，必须先于公式索引和长篇技术正文。
+    # 表格截图和行级事实是读者的首要对比证据，必须先于长篇技术正文。
     if table_changes:
         _append_markdown_table_changes(lines, table_changes)
-
-    if result.formula_changes:
-        lines.extend(
-            [
-                "## 公式视觉核对",
-                "",
-                "说明: `_{} / ^{}` 只表示字号和坐标已证明的上下标；根号、分式和矢量结构以 HTML 中的源 PDF 截图为准。",
-                "",
-            ]
-        )
-        for index, formula_change in enumerate(result.formula_changes, start=1):
-            old_formula = formula_change.old_formula
-            new_formula = formula_change.new_formula
-            lines.append(f"### F{index}. {_formula_change_title(formula_change)}")
-            lines.append(f"- 类型: {_CHANGE_LABELS.get(formula_change.change_type, formula_change.change_type)}")
-            lines.append(f"- 说明: {formula_change.reason}")
-            if old_formula is not None:
-                lines.append(
-                    f"- 旧版: 第 {old_formula.page_number} 页 {old_formula.formula_number} "
-                    f"`{old_formula.semantic_text}`"
-                )
-            if new_formula is not None:
-                lines.append(
-                    f"- 新版: 第 {new_formula.page_number} 页 {new_formula.formula_number} "
-                    f"`{new_formula.semantic_text}`"
-                )
-            if old_formula is not None and new_formula is not None:
-                lines.append(
-                    f"- 语义/视觉相似度: {formula_change.similarity:.3f} / "
-                    f"{formula_change.visual_similarity:.3f}"
-                )
-            lines.append("")
 
     if result.visual_review_items:
         lines.extend(
@@ -679,7 +629,7 @@ def _render_markdown(
     if not technical_changes:
         message = (
             _empty_report_message(result)
-            if not table_changes and not result.formula_changes and not result.visual_review_items
+            if not table_changes and not result.visual_review_items
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         lines.extend([message, ""])
@@ -890,23 +840,17 @@ def _render_html(
     )
     table_changes = _ordered_table_changes(table_changes)
     indexed_technical = list(enumerate(technical_changes, start=1))
+    materialized_source_visuals = tuple(prose_source_visuals)
     prose_visual_lookup = {
         _prose_source_visual_identity(group): group
-        for group in prose_source_visuals
+        for group in materialized_source_visuals
+        if group.old_visuals or group.new_visuals
     }
-    # 公式先绑定到正文条款，后续导航、顶部索引和正文卡共用同一份稳定归属结果。
-    formula_placements = _place_formula_changes(
-        technical_changes,
-        result.formula_changes,
+    figure_source_visuals = tuple(
+        group
+        for group in materialized_source_visuals
+        if group.old_figure_visuals or group.new_figure_visuals
     )
-    formulas_by_owner: dict[int, list[_FormulaPlacement]] = {}
-    unplaced_formulas: list[_FormulaPlacement] = []
-    for placement in formula_placements:
-        # 有可靠条款归属的公式跟随正文卡；其余公式进入明确兜底区，避免伪造上下文。
-        if placement.owner_index is None:
-            unplaced_formulas.append(placement)
-        else:
-            formulas_by_owner.setdefault(placement.owner_index, []).append(placement)
     title = "协议 PDF 差异报告"
     technical_nav_items = "\n".join(
         _render_nav_item(index, change) for index, change in indexed_technical
@@ -922,19 +866,6 @@ def _render_html(
     if technical_nav_items:
         technical_nav_class = "nav-title nav-section-gap" if nav_parts else "nav-title"
         nav_parts.extend([f'<div class="{technical_nav_class}">技术正文变化与复核</div>', technical_nav_items])
-    if result.formula_changes:
-        nav_parts.extend(
-            [
-                '<div class="nav-title nav-section-gap">公式复核</div>',
-                (
-                    '<a class="nav-item nav-formula" href="#formula-index">'
-                    '<span class="nav-label">公式</span>'
-                    '<div class="nav-body"><strong>复核索引</strong>'
-                    f'<div class="nav-location">{len(result.formula_changes)} 项待核对</div>'
-                    '</div></a>'
-                ),
-            ]
-        )
     if result.visual_review_items:
         nav_parts.extend(
             [
@@ -956,7 +887,6 @@ def _render_html(
         _render_change_html(
             index,
             change,
-            formula_placements=formulas_by_owner.get(index, ()),
             prose_source_visual=prose_visual_lookup.get(
                 _section_change_visual_identity(change)
             ),
@@ -966,16 +896,12 @@ def _render_html(
     if not technical_cards:
         technical_message = (
             _empty_report_message(result)
-            if not table_changes and not result.formula_changes and not result.visual_review_items
+            if not table_changes and not result.visual_review_items
             else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
         )
         technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
     table_visual_html = _render_table_changes_html(table_changes)
-    # 顶部只显示轻量跳转索引；实际截图不再脱离条款集中堆叠。
-    formula_index_html = _render_formula_index_html(formula_placements)
-    unplaced_formula_html = _render_unplaced_formula_changes_html(unplaced_formulas)
-    # 放大对话框只在存在公式截图时输出，避免无公式报告携带无意义交互代码。
-    formula_zoom_html = _render_formula_zoom_dialog_html(bool(formula_placements))
+    figure_visual_html = _render_figure_source_visual_groups(figure_source_visuals)
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
@@ -1149,6 +1075,10 @@ def _render_html(
       gap: 12px;
     }}
     .figure-source-visual {{ margin-top: 14px; }}
+    .figure-source-section {{
+      margin-top: 18px;
+      padding: 0 0 4px;
+    }}
     .figure-source-visual > h4 {{ margin: 0 0 8px; color: var(--blue); font-size: 15px; }}
     .figure-source-visual-note {{ margin: 0 0 8px; color: var(--muted); font-size: 13px; }}
     .figure-source-visual-grid {{
@@ -1189,20 +1119,20 @@ def _render_html(
       background: var(--mod-bg);
       border-top: 1px solid #f1d489;
     }}
-    .prose-source-details {{
+    .prose-text-details {{
       margin-top: 10px;
       border: 1px dashed var(--line);
       border-radius: 8px;
       background: #f8fafc;
     }}
-    .prose-source-details > summary {{
+    .prose-text-details > summary {{
       cursor: pointer;
       padding: 9px 11px;
       color: var(--blue);
       font-weight: 600;
     }}
-    .prose-source-details[open] > summary {{ border-bottom: 1px solid var(--line); }}
-    .prose-source-details-body {{ padding: 10px; }}
+    .prose-text-details[open] > summary {{ border-bottom: 1px solid var(--line); }}
+    .prose-text-details-body {{ padding: 10px; }}
     .pane {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1310,105 +1240,6 @@ def _render_html(
       height: auto;
       background: #fff;
     }}
-    .formula-shot-open {{
-      display: block;
-      width: 100%;
-      margin: 0;
-      padding: 0;
-      border: 0;
-      background: #fff;
-      cursor: zoom-in;
-      text-align: inherit;
-    }}
-    .formula-shot-open:focus-visible {{ outline: 3px solid #7da7d9; outline-offset: -3px; }}
-    .formula-semantic {{
-      margin: 0;
-      padding: 10px 12px;
-      overflow-wrap: anywhere;
-      font-family: "SFMono-Regular", Consolas, monospace;
-      background: #f8fafc;
-      border-bottom: 1px solid var(--line);
-    }}
-    .formula-note {{ margin: 8px 0 0; color: var(--muted); font-size: 13px; }}
-    .formula-index {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      margin-bottom: 18px;
-      padding: 16px;
-    }}
-    .formula-index-head {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; }}
-    .formula-index-head h2 {{ font-size: 20px; }}
-    .formula-index-head span {{ color: var(--blue); font-weight: 700; }}
-    .formula-index > p {{ margin: 8px 0 12px; color: var(--muted); }}
-    .formula-index-list {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }}
-    .formula-index-list a {{
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 2px 10px;
-      padding: 9px 10px;
-      color: var(--text);
-      text-decoration: none;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fbfcfe;
-    }}
-    .formula-index-list a:hover {{ border-color: #a9c4e3; background: #f4f8fd; }}
-    .formula-index-list strong {{ color: var(--blue); }}
-    .formula-index-list small {{ grid-column: 2; color: var(--muted); overflow-wrap: anywhere; }}
-    .inline-formula-group {{
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px solid var(--line);
-    }}
-    .inline-formula-group > h4 {{ margin: 0 0 10px; color: var(--blue); font-size: 15px; }}
-    .inline-formula-evidence {{
-      border: 1px solid #c9dcf3;
-      border-radius: 8px;
-      padding: 12px;
-      background: #f8fbff;
-      scroll-margin-top: 12px;
-    }}
-    .inline-formula-evidence + .inline-formula-evidence {{ margin-top: 12px; }}
-    .inline-formula-head h4 {{ margin: 0; font-size: 16px; }}
-    .inline-formula-evidence .change-summary {{ margin-bottom: 10px; }}
-    .formula-zoom-dialog {{
-      width: min(1100px, calc(100vw - 32px));
-      max-height: calc(100vh - 32px);
-      padding: 0;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: 0 18px 48px rgba(15, 34, 56, 0.28);
-    }}
-    .formula-zoom-dialog::backdrop {{ background: rgba(15, 25, 38, 0.72); }}
-    .formula-zoom-toolbar {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #f7f9fc;
-    }}
-    .formula-zoom-toolbar strong {{ overflow-wrap: anywhere; }}
-    .formula-zoom-close {{
-      flex: none;
-      padding: 6px 12px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      color: var(--text);
-      background: #fff;
-      cursor: pointer;
-    }}
-    .formula-zoom-image {{ display: block; max-width: 100%; height: auto; margin: 0 auto; background: #fff; }}
     .table-shot-page {{
       border-bottom: 1px solid var(--line);
     }}
@@ -1465,7 +1296,6 @@ def _render_html(
       .summary, .compare-grid, .table-shot-grid {{ grid-template-columns: minmax(0, 1fr); }}
       .prose-source-visual-grid {{ grid-template-columns: minmax(0, 1fr); }}
       .figure-source-visual-grid {{ grid-template-columns: minmax(0, 1fr); }}
-      .formula-index-list {{ grid-template-columns: minmax(0, 1fr); }}
       .table-shot-grid, .table-shot {{ min-width: 0; max-width: 100%; }}
       .table-row-summary {{ table-layout: fixed; min-width: 0; }}
       .table-row-summary th, .table-row-summary td {{ overflow-wrap: anywhere; word-break: break-word; min-width: 0; }}
@@ -1488,7 +1318,7 @@ def _render_html(
       <section class="summary">
         <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
         <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
-        <div class="metric"><strong>{len(result.formula_changes)}</strong><span>公式视觉核对</span></div>
+        <div class="metric"><strong>0</strong><span>公式自动对比（已关闭）</span></div>
         <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉漏检核对</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
@@ -1507,14 +1337,12 @@ def _render_html(
         </dl>
       </section>
       {table_visual_html}
-      {formula_index_html}
+      {figure_visual_html}
       {visual_review_html}
       <h2 class="section-heading" id="text-changes">技术正文变化</h2>
       {technical_cards}
-      {unplaced_formula_html}
     </main>
   </div>
-  {formula_zoom_html}
 </body>
 </html>
 """
@@ -1524,7 +1352,6 @@ def _render_change_html(
     index: int,
     change: SectionChange,
     *,
-    formula_placements: Iterable[_FormulaPlacement] = (),
     prose_source_visual: ProseSourceVisualGroup | None = None,
 ) -> str:
     """Render one change as a side-by-side HTML block."""
@@ -1555,24 +1382,24 @@ def _render_change_html(
     added = _render_single_list("新增片段", change.added_snippets, "ins")
     removed = _render_single_list("删除片段", change.removed_snippets, "del")
     omitted = _render_omitted_html(change.omitted_snippet_count)
-    body = pairs or ""
-    body += review_pairs
-    body += added
-    body += removed
-    body += omitted
-    figure_html = (
-        _render_figure_source_visual_group(prose_source_visual)
+    text_body = (pairs or "") + review_pairs + added + removed + omitted
+    source_visual_html = (
+        _render_prose_source_visual_group(prose_source_visual)
         if prose_source_visual is not None
         else ""
     )
-    if not body and not figure_html:
+    if source_visual_html:
+        text_detail = (
+            '<details class="prose-text-details"><summary>查看文字识别明细</summary>'
+            f'<div class="prose-text-details-body">{text_body}</div></details>'
+            if text_body
+            else ""
+        )
+        body = source_visual_html + text_detail
+    else:
+        body = text_body
+    if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
-    body += figure_html
-    if prose_source_visual is not None:
-        source_visual_html = _render_prose_source_visual_group(prose_source_visual)
-        body += source_visual_html
-    # 公式截图紧跟其条款正文，读者无需在独立公式墙和技术差异之间来回跳转。
-    formula_html = _render_inline_formula_group(tuple(formula_placements))
     return f"""
       <section class="change-card" id="change-{index}">
         <div class="change-head">
@@ -1582,7 +1409,6 @@ def _render_change_html(
         {match_basis_html}
         {summary_html}
         {body}
-        {formula_html}
       </section>
     """
 
@@ -1611,20 +1437,34 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
         group.old_visuals,
         "旧版无对应原文区域",
         omitted_page_count=group.old_omitted_page_count,
+        display_mode="old-highlight",
     )
     new_side = _render_prose_source_visual_side(
         "新版原文区域",
         group.new_visuals,
         "新版无对应原文区域",
         omitted_page_count=group.new_omitted_page_count,
+        display_mode="new-highlight",
     )
     return (
-        '<details class="prose-source-details"><summary>查看原文出处（无颜色对比）</summary>'
-        '<div class="prose-source-details-body">'
         '<div class="prose-source-visual">'
-        '<div class="prose-source-visual-legend">原文截图只用于定位核对；差异颜色仅出现在上方结构化文字中。</div>'
+        '<div class="prose-source-visual-legend">原文坐标浅色标注（逐词）：旧版淡红、新版淡绿；表格、Figure 与页边行号不进入正文标色。</div>'
         f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
-        '</div></div></details>'
+        '</div>'
+    )
+
+
+def _render_figure_source_visual_groups(
+    groups: Iterable[ProseSourceVisualGroup],
+) -> str:
+    cards = "".join(_render_figure_source_visual_group(group) for group in groups)
+    if not cards:
+        return ""
+    return (
+        '<section class="figure-source-section" id="figure-source-evidence">'
+        '<h2 class="section-heading">Figure 原图核对</h2>'
+        '<p class="figure-source-visual-note">Figure 按图题与文档顺序配对；只并排呈现原图，不自动标色或解析图内标签。</p>'
+        f'{cards}</section>'
     )
 
 
@@ -1637,16 +1477,26 @@ def _render_figure_source_visual_group(group: ProseSourceVisualGroup) -> str:
         "旧版 Figure 原图",
         group.old_figure_visuals,
         "旧版无对应 Figure 原图",
+        display_mode="raw",
     )
     new_side = _render_prose_source_visual_side(
         "新版 Figure 原图",
         group.new_figure_visuals,
         "新版无对应 Figure 原图",
+        display_mode="raw",
+    )
+    old_caption = group.old_figure_captions[0] if group.old_figure_captions else "旧版 Figure"
+    new_caption = group.new_figure_captions[0] if group.new_figure_captions else "新版 Figure"
+    pair_title = f"{old_caption} ↔ {new_caption}"
+    pairing_note = (
+        f"图题顺序配对 · 相似度 {group.figure_similarity:.3f}"
+        if group.figure_similarity is not None
+        else "仅单侧识别到 Figure，需回源 PDF 核对"
     )
     return (
         '<div class="figure-source-visual">'
-        '<h4>Figure 原图（不做文字或颜色自动对比）</h4>'
-        '<p class="figure-source-visual-note">图题、坐标轴、框内标签和重复术语只在原图中呈现；请直接目视核对。</p>'
+        f'<h4>{_escape(pair_title)}</h4>'
+        f'<p class="figure-source-visual-note">{_escape(pairing_note)}；图内文字请直接目视核对。</p>'
         f'<div class="figure-source-visual-grid">{old_side}{new_side}</div>'
         '</div>'
     )
@@ -1658,12 +1508,18 @@ def _render_prose_source_visual_side(
     empty_message: str,
     *,
     omitted_page_count: int = 0,
+    display_mode: str = "raw",
 ) -> str:
     materialized = tuple(visuals)
     if materialized:
+        mode_label = {
+            "old-highlight": "淡红差异标注",
+            "new-highlight": "淡绿差异标注",
+            "raw": "原始裁剪，无标色",
+        }.get(display_mode, "原始裁剪")
         pages = "".join(
             '<figure class="prose-source-page">'
-            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · 原始裁剪，无标色</figcaption>'
+            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label)}</figcaption>'
             f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
             f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
             '</figure>'
@@ -1749,285 +1605,6 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
           <div class="table-shot" style="margin-top: 12px"><h4>差异掩膜</h4>{diff_image}</div>
         </article>
     """
-
-
-def _place_formula_changes(
-    technical_changes: list[SectionChange],
-    formula_changes: list[FormulaChange],
-) -> list[_FormulaPlacement]:
-    """Bind formula evidence to the most specific changed technical section."""
-
-    placements: list[_FormulaPlacement] = []
-    for report_index, formula_change in enumerate(formula_changes, start=1):
-        # 新版结构是读者当前要理解的主路径；新版无法定位时再回退到旧版删除位置。
-        owner_index = _formula_owner_index(technical_changes, formula_change)
-        if owner_index is None:
-            owner_location = "未能可靠归属到技术正文条款"
-        else:
-            owner_location = _display_change_location(technical_changes[owner_index - 1])
-        placements.append(
-            _FormulaPlacement(
-                report_index=report_index,
-                change=formula_change,
-                owner_index=owner_index,
-                owner_location=owner_location,
-            )
-        )
-    return placements
-
-
-def _formula_owner_index(
-    technical_changes: list[SectionChange],
-    formula_change: FormulaChange,
-) -> int | None:
-    """Return the one-based reader card that best contains a formula source crop."""
-
-    # 优先按新版页码和编号定位；删除公式没有新版证据时自然回退到旧版。
-    anchors = (
-        ("new", formula_change.new_formula),
-        ("old", formula_change.old_formula),
-    )
-    for side, formula in anchors:
-        if formula is None:
-            continue
-        candidates: list[tuple[tuple[int, int, int, int, int, int], int]] = []
-        for owner_index, change in enumerate(technical_changes, start=1):
-            # 每一侧只使用同版本章节范围，禁止借另一版页码巧合伪造归属。
-            section = change.new_section if side == "new" else change.old_section
-            if section is None or not section.start_page <= formula.page_number <= section.end_page:
-                continue
-            contains_formula_text = int(_section_contains_formula_text(section, formula))
-            contains_number = int(
-                _section_contains_formula_number(section, formula.formula_number)
-            )
-            # 页码只限定候选范围；正文和编号均未命中时必须失败关闭到未归属区。
-            if not contains_formula_text and not contains_number:
-                continue
-            preferred_added_owner = int(side == "new" and change.change_type == "added")
-            depth = len(section.number_path) or len(section.heading_path)
-            page_span = section.end_page - section.start_page
-            # 公式正文命中比复用编号更强；其后才考虑编号、新增条款、章节深度和页幅。
-            score = (
-                contains_formula_text,
-                contains_number,
-                preferred_added_owner,
-                depth,
-                -page_span,
-                -owner_index,
-            )
-            candidates.append((score, owner_index))
-        if candidates:
-            return max(candidates)[1]
-    return None
-
-
-def _section_contains_formula_text(section: Section, formula: FormulaVisual) -> bool:
-    """Match a formula body to section prose without relying on reused numbering."""
-
-    # 源文字最接近 Section.body 的 PDF 抽取结果；语义文字补充上下标已被规范化的情况。
-    section_key = normalized_formula_key(section.body)
-    formula_number_key = normalized_formula_key(formula.formula_number)
-    for candidate in (formula.source_text, formula.semantic_text):
-        candidate_key = normalized_formula_key(candidate)
-        # 公式号可能落在相邻条款或图题中；这里只比较主体，避免编号复用误放。
-        if formula_number_key:
-            candidate_key = candidate_key.replace(formula_number_key, "")
-        if len(candidate_key) >= 12 and candidate_key in section_key:
-            return True
-        # PDF 偶尔把下标移到行尾；带比较符和数值的公式左端仍是稳定锚点。
-        leading_expression, separator, _ = candidate_key.partition("for")
-        has_limit_signature = bool(re.search(r"[<>=≤≥].*\d", leading_expression))
-        if (
-            separator
-            and len(leading_expression) >= 8
-            and has_limit_signature
-            and leading_expression in section_key
-        ):
-            return True
-    return False
-
-
-def _section_contains_formula_number(section: Section, formula_number: str) -> bool:
-    """Check a visible equation-number anchor without interpreting formula math."""
-
-    # 空白和常见破折号只属于 PDF 排版差异；数字层级和括号仍须逐字符一致。
-    normalized_number = re.sub(r"\s+", "", formula_number).replace("–", "-").replace("—", "-")
-    normalized_body = re.sub(r"\s+", "", section.body).replace("–", "-").replace("—", "-")
-    return bool(normalized_number and normalized_number in normalized_body)
-
-
-def _render_formula_index_html(placements: list[_FormulaPlacement]) -> str:
-    """Render a compact jump list while keeping all source crops inside sections."""
-
-    if not placements:
-        return ""
-    items = "\n".join(
-        (
-            '<li><a href="#formula-'
-            f'{placement.report_index}"><strong>F{placement.report_index}</strong>'
-            f'<span>{_escape(_formula_change_title(placement.change))}</span>'
-            f'<small>{_escape(placement.owner_location)}</small></a></li>'
-        )
-        for placement in placements
-    )
-    return f"""
-      <section class="formula-index" id="formula-index">
-        <div class="formula-index-head"><h2>公式复核索引</h2><span>{len(placements)} 项</span></div>
-        <p>公式截图已放入对应技术条款；点击索引可直接跳到正文上下文。复杂根号、分式、堆叠极限和矢量绘制仍以源 PDF 裁剪为准。</p>
-        <ol class="formula-index-list">{items}</ol>
-      </section>
-    """
-
-
-def _render_inline_formula_group(placements: tuple[_FormulaPlacement, ...]) -> str:
-    """Render all formula evidence owned by one technical change card."""
-
-    if not placements:
-        return ""
-    cards = "\n".join(_render_formula_change_html(placement) for placement in placements)
-    return f"""
-        <div class="inline-formula-group">
-          <h4>本条款相关公式证据</h4>
-          {cards}
-        </div>
-    """
-
-
-def _render_unplaced_formula_changes_html(
-    placements: list[_FormulaPlacement],
-) -> str:
-    """Keep unassigned formulas visible without pretending they belong to a section."""
-
-    if not placements:
-        return ""
-    cards = "\n".join(_render_formula_change_html(placement) for placement in placements)
-    return f"""
-      <section class="table-visuals unplaced-formulas" id="unplaced-formulas">
-        <h2>未归属公式复核</h2>
-        <p class="change-summary">以下公式缺少足够的条款页码或编号锚点，未强行放入正文卡片；请按源页码人工定位。</p>
-        {cards}
-      </section>
-    """
-
-
-def _render_formula_change_html(placement: _FormulaPlacement) -> str:
-    """Render one contextual old/new formula pair with readable source crops."""
-
-    change = placement.change
-    # 标题事实先组合再统一转义，避免长模板重复拼接并保持用户输入安全。
-    badge_text = (
-        f"F{placement.report_index} · "
-        f"{_CHANGE_LABELS.get(change.change_type, change.change_type)}"
-    )
-    old_side = _render_formula_side("旧版源公式", change.old_formula)
-    new_side = _render_formula_side("新版源公式", change.new_formula)
-    similarity = ""
-    if change.old_formula is not None and change.new_formula is not None:
-        similarity = (
-            f'<p class="formula-note">语义相似度 {change.similarity:.3f} · '
-            f'视觉 dHash 相似度 {change.visual_similarity:.3f}</p>'
-        )
-    return f"""
-        <section class="inline-formula-evidence" id="formula-{placement.report_index}">
-          <div class="inline-formula-head">
-            <h4><span class="badge badge-{_escape(change.change_type)}">{_escape(badge_text)}</span> {_escape(_formula_change_title(change))}</h4>
-          </div>
-          <p class="change-summary">{_escape(change.reason)}</p>
-          <div class="table-shot-grid formula-shot-grid">{old_side}{new_side}</div>
-          {similarity}
-        </section>
-    """
-
-
-def _render_formula_side(label: str, formula: FormulaVisual | None) -> str:
-    """Render one source formula or an explicit missing-side placeholder."""
-
-    if formula is None:
-        return (
-            f'<div class="table-shot"><h4>{_escape(label)}</h4>'
-            '<div class="empty-side">该版本无配对公式</div></div>'
-        )
-    caption = f"{label} · 第 {formula.page_number} 页 · {formula.formula_number}"
-    semantic = _formula_semantic_html(formula.semantic_text)
-    image_html = (
-        '<button type="button" class="formula-shot-open" aria-haspopup="dialog" '
-        f'aria-label="放大查看 {_escape(caption)}">'
-        f'<img alt="{_escape(caption)}" src="{formula.image_data_uri}">'
-        '</button>'
-        if formula.image_data_uri
-        else '<div class="empty-side">源截图生成失败，请按页码回到 PDF 复核。</div>'
-    )
-    return (
-        '<div class="table-shot">'
-        f'<h4>{_escape(caption)}</h4>'
-        f'<p class="formula-semantic">{semantic}</p>'
-        f'{image_html}'
-        '</div>'
-    )
-
-
-def _render_formula_zoom_dialog_html(enabled: bool) -> str:
-    """Render one offline dialog shared by every formula crop button."""
-
-    if not enabled:
-        return ""
-    # 脚本只读取按钮内已有图片，不联网、不复制 data URI，也不改变报告审计事实。
-    return """
-  <dialog class="formula-zoom-dialog" id="formula-zoom-dialog" aria-labelledby="formula-zoom-title">
-    <div class="formula-zoom-toolbar">
-      <strong id="formula-zoom-title">公式源截图</strong>
-      <button type="button" class="formula-zoom-close">关闭</button>
-    </div>
-    <img class="formula-zoom-image" alt="">
-  </dialog>
-  <script>
-    (() => {
-      const dialog = document.getElementById("formula-zoom-dialog");
-      const dialogImage = dialog.querySelector(".formula-zoom-image");
-      const dialogTitle = dialog.querySelector("#formula-zoom-title");
-      const closeButton = dialog.querySelector(".formula-zoom-close");
-      document.addEventListener("click", (event) => {
-        const opener = event.target.closest(".formula-shot-open");
-        if (!opener) return;
-        const sourceImage = opener.querySelector("img");
-        dialogImage.src = sourceImage.src;
-        dialogImage.alt = sourceImage.alt;
-        dialogTitle.textContent = sourceImage.alt;
-        if (typeof dialog.showModal === "function") dialog.showModal();
-        else dialog.setAttribute("open", "");
-      });
-      closeButton.addEventListener("click", () => dialog.close());
-      dialog.addEventListener("click", (event) => {
-        if (event.target === dialog) dialog.close();
-      });
-    })();
-  </script>
-    """
-
-
-def _formula_semantic_html(value: str) -> str:
-    """Render the module's bounded ``_{} / ^{}`` notation as HTML scripts."""
-
-    rendered = _escape(value)
-    rendered = re.sub(r"_\{([^{}]+)\}", r"<sub>\1</sub>", rendered)
-    rendered = re.sub(r"\^\{([^{}]+)\}", r"<sup>\1</sup>", rendered)
-    return rendered
-
-
-def _formula_change_title(change: FormulaChange) -> str:
-    """Build a short location title for Markdown, navigation, and HTML."""
-
-    old_label = (
-        f"第 {change.old_formula.page_number} 页 {change.old_formula.formula_number}"
-        if change.old_formula is not None
-        else "旧版无配对"
-    )
-    new_label = (
-        f"第 {change.new_formula.page_number} 页 {change.new_formula.formula_number}"
-        if change.new_formula is not None
-        else "新版无配对"
-    )
-    return f"{old_label} → {new_label}"
 
 
 def _build_table_changes(result: DiffResult) -> list[TableChange]:
@@ -5055,10 +4632,6 @@ def _paired_table_order_previews(
                 pairs,
                 key=lambda pair: int(re.search(r"\d+", pair[0]).group()),
             )
-            column_numbers = [
-                int(re.search(r"\d+", field).group())
-                for field, _value in sorted_pairs
-            ]
             return sorted_pairs
         return pairs
         # PDF提取可能打乱同一行的物理字段顺序；pure Column N 宽行先按列号
@@ -5427,12 +5000,13 @@ def _paired_table_order_previews(
         suffix = f"；共{total_rows}行" if total_rows > 4 else ""
         if distinguishing_peer_fields:
             peer_cells = [
-                f"{distinguishing_peer_fields[index][0]}="
-                f"{paired_excerpt(
+                distinguishing_peer_fields[index][0]
+                + "="
+                + paired_excerpt(
                     distinguishing_peer_fields[index][1],
                     old_focus_fields[index][1] if index < len(old_focus_fields) else '',
                     64,
-                )}"
+                )
                 for index in selected_indexes
                 if index < len(distinguishing_peer_fields)
             ]
@@ -12490,11 +12064,12 @@ def _report_scope_note(options: DiffOptions) -> str:
     """Explain output boundaries that matter during protocol review."""
 
     return (
-        "主要比较 PDF 中可抽取文字，表格会额外提供截图辅助复核，编号显示公式会提供源裁剪和坐标已证明的上下标；"
+        "主要比较 PDF 中可抽取文字，正文以源 PDF 截图作为第一视觉层，"
+        "表格会额外提供截图辅助复核；"
+        "公式自动对比已关闭：分式、根号、上下标和式号只用于版面隔离，不生成公式增删、修改、相似度或颜色差分结论；"
         "文字一致页的图片、印章和普通矢量图变化会由视觉漏检哨兵提示，但不会自动解释图形语义；"
         "重复页眉页脚和动态页码会尽量过滤；"
         "章节、Figure、表格和条件的引用编号、列表及范围变化不计入读者差异，数值、限值和单位仍严格比较；"
-        "公式编号顺延仍保留源截图视觉核对，但不计入核心技术变化；"
         f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
     )
 
@@ -12508,8 +12083,8 @@ def _empty_report_message(result: DiffResult) -> str:
     if assessment.state is ReliabilityState.DEGRADED:
         return "未检出差异，但不能据此确认一致。"
     if _page_fallback_section_count(result):
-        return "未检出受支持的可抽取文字、结构化表格或编号显示公式差异。"
-    return "未检出受支持的可抽取文字、结构化表格或编号显示公式差异。"
+        return "未检出受支持的可抽取正文或结构化表格差异；公式未自动比较。"
+    return "未检出受支持的可抽取正文或结构化表格差异；公式未自动比较。"
 
 
 def _assessment_for_report(result: DiffResult) -> PairAssessment:
@@ -12976,27 +12551,6 @@ def _formula_visual_to_dict(formula: FormulaVisual) -> dict[str, object]:
     }
 
 
-def _formula_change_to_dict(change: FormulaChange) -> dict[str, object]:
-    """Serialize one formula finding and both source-side metadata records."""
-
-    return {
-        "change_type": change.change_type,
-        "reason": change.reason,
-        "similarity": change.similarity,
-        "visual_similarity": change.visual_similarity,
-        "old_formula": (
-            _formula_visual_to_dict(change.old_formula)
-            if change.old_formula is not None
-            else None
-        ),
-        "new_formula": (
-            _formula_visual_to_dict(change.new_formula)
-            if change.new_formula is not None
-            else None
-        ),
-    }
-
-
 def _prose_source_visual_group_to_dict(
     group: ProseSourceVisualGroup,
 ) -> dict[str, object]:
@@ -13018,6 +12572,10 @@ def _prose_source_visual_group_to_dict(
         "new_figure_pages": [
             visual.page_number for visual in new_figure_visuals
         ],
+        "old_figure_captions": list(group.old_figure_captions),
+        "new_figure_captions": list(group.new_figure_captions),
+        "figure_match_basis": group.figure_match_basis,
+        "figure_similarity": group.figure_similarity,
         "old_highlight_region_count": sum(
             visual.highlight_region_count for visual in old_visuals
         ),
@@ -13032,7 +12590,7 @@ def _prose_source_visual_group_to_dict(
         ),
         "old_omitted_page_count": group.old_omitted_page_count,
         "new_omitted_page_count": group.new_omitted_page_count,
-        "precision": "source-coordinate-raw-crop",
+        "precision": "source-coordinate-word-translucent-highlight",
         "figure_precision": "source-figure-uncompared",
         "has_embedded_images": bool(
             old_visuals

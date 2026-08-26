@@ -81,6 +81,11 @@ class DocumentBlock:
         compare=False,
         repr=False,
     )  # 原生文字行保留实际字体集合；OCR/表格默认为空，禁止据此猜测标题样式。
+    word_boxes: tuple[tuple[str, float, float, float, float], ...] = field(
+        default=(),
+        compare=False,
+        repr=False,
+    )  # 原生文字行保留逐词 bbox，供截图精确标色；OCR/表格缺少词级证据时保持空。
 
 
 @dataclass(frozen=True)
@@ -481,11 +486,12 @@ class ProseSourceVisual:
 
 @dataclass(frozen=True)
 class ProseSourceVisualGroup:
-    """Old/new raw source crops belonging to one section change.
+    """Old/new source crops for one prose change or global Figure pair.
 
-    Prose crops are optional provenance behind the structured text diff. Figure
-    crops are a separate reader channel: they are shown raw and never receive
-    word-level or coordinate-color comparison.
+    Prose crops lead the reader card with translucent coordinate highlights;
+    extracted text remains a collapsed audit detail. Figure crops use an
+    independent global pairing channel and stay raw without automatic color or
+    text comparison.
     """
 
     change_type: str
@@ -495,6 +501,10 @@ class ProseSourceVisualGroup:
     new_visuals: tuple[ProseSourceVisual, ...] = ()
     old_figure_visuals: tuple[ProseSourceVisual, ...] = ()
     new_figure_visuals: tuple[ProseSourceVisual, ...] = ()
+    old_figure_captions: tuple[str, ...] = ()
+    new_figure_captions: tuple[str, ...] = ()
+    figure_match_basis: str = ""
+    figure_similarity: float | None = None
     old_omitted_page_count: int = 0
     new_omitted_page_count: int = 0
 
