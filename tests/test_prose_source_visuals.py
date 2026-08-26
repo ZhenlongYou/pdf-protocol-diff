@@ -953,6 +953,32 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual((21.42, 590.58), bounds)
 
+    def test_single_short_left_revision_bar_is_outside_source_crop(self) -> None:
+        """One short revision mark at the document margin is enough when geometry is specific."""
+
+        left, right = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            (),
+            vector_graphic_bboxes=((64.08, 444.94, 66.0, 456.94),),
+        )
+
+        self.assertGreaterEqual(left, 70.0)
+        self.assertEqual(590.58, right)
+
+    def test_repeated_inner_figure_marks_cannot_clip_left_prose(self) -> None:
+        """Narrow marks deeper inside the page may belong to a Figure or table grid."""
+
+        bounds = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            (),
+            vector_graphic_bboxes=tuple(
+                (95.52, float(top), 96.96, float(top + 6.5))
+                for top in (478, 496, 515, 533, 551)
+            ),
+        )
+
+        self.assertEqual((21.42, 590.58), bounds)
+
     def test_cross_page_snippet_keeps_adjacent_sentence_start_as_context(self) -> None:
         """A high-overlap continuation must not hide the sentence start on the prior page."""
 

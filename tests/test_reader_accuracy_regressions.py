@@ -3211,17 +3211,56 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             body="Parameter Min. The module shall support the revised mode.",
             page_bodies=((10, "Parameter Min. The module shall support the revised mode."),),
         )
+        old_voltage_row = "Differential Voltage, pk-pk 300 720 mV See Note 1"
+        new_voltage_row = (
+            "Unit Conditions 300 700 mV Host can request voltage "
+            "Differential Voltage, pk-pk level within this range."
+        )
+        old_normative = "The module shall support the legacy mode in Section 29.4.1.1."
+        new_normative = (
+            "The module shall support the revised mode in Section 30.4.1.1 "
+            "Parameter Test Point Min."
+        )
+        old_section = replace(
+            old_section,
+            body=" ".join(
+                (
+                    "Parameter Min.",
+                    old_voltage_row,
+                    old_normative,
+                    "See Section",
+                    "Mismatch 29.3.8",
+                )
+            ),
+            page_bodies=((8, " ".join(("Parameter Min.", old_voltage_row, old_normative, "See Section", "Mismatch 29.3.8"))),),
+        )
+        new_section = replace(
+            new_section,
+            body=" ".join(
+                (
+                    "Parameter Min.",
+                    new_voltage_row,
+                    new_normative,
+                    "- 15 mV",
+                    "Peak to Peak AC Common Mode Voltage See Note 1,",
+                )
+            ),
+            page_bodies=((10, " ".join(("Parameter Min.", new_voltage_row, new_normative, "- 15 mV", "Peak to Peak AC Common Mode Voltage See Note 1,"))),),
+        )
         change = SectionChange(
             "modified",
             old_section,
             new_section,
             0.9,
+            added_snippets=[
+                "- 15 mV",
+                "Peak to Peak AC Common Mode Voltage See Note 1,",
+            ],
+            removed_snippets=["See Section", "Mismatch 29.3.8"],
             replaced_snippets=[
                 SnippetPair("Parameter Min.", "Parameter Min."),
-                SnippetPair(
-                    "The module shall support the legacy mode.",
-                    "The module shall support the revised mode.",
-                ),
+                SnippetPair(old_voltage_row, new_voltage_row),
+                SnippetPair(old_normative, new_normative),
             ],
         )
         old_table = TableVisual(
@@ -3230,7 +3269,11 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "Table 29-4. Module-to-Host Electrical Specifications",
             (40.0, 200.0, 560.0, 600.0),
             "",
-            ("Parameter Min. Max. Unit Conditions",),
+            (
+                "Parameter Min. Max. Unit Conditions",
+                "Differential Voltage, pk-pk 300 720 mV See Note 1",
+                "Differential Termination Resistance Mismatch See Section 29.3.8",
+            ),
             "structured rows",
             content_fully_represented=True,
             row_alignment_reliable=False,
@@ -3239,17 +3282,24 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             old_table,
             page_number=10,
             title="Table 30-4. Module-to-Host Electrical Specifications",
+            row_texts=(
+                "Parameter Min. Max. Unit Conditions Test Point",
+                "Differential Voltage, pk-pk 300 700 mV Host can request voltage level within this range.",
+                "Peak to Peak AC Common Mode Voltage Min=- Max=15 Unit=mV See Note 1",
+            ),
         )
         evidence = TableChange("review", (old_table,), (new_table,), 0.8, True, ())
 
         cleaned = _reader_section_change(change, [evidence])
 
         self.assertIsNotNone(cleaned)
+        self.assertEqual([], cleaned.added_snippets)
+        self.assertEqual([], cleaned.removed_snippets)
         self.assertEqual(
             [
                 SnippetPair(
-                    "The module shall support the legacy mode.",
-                    "The module shall support the revised mode.",
+                    old_normative,
+                    "The module shall support the revised mode in Section 30.4.1.1",
                 )
             ],
             cleaned.replaced_snippets,

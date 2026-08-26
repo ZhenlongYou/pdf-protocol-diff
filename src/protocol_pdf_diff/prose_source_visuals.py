@@ -2083,7 +2083,7 @@ def _proven_left_revision_bar_edge(
         if (
             0.0 < box[2] - box[0] <= max(3.0, width * 0.008)
             and 6.0 <= box[3] - box[1] <= height * 0.25
-            and x0 + width * 0.07 <= box[0] <= x0 + width * 0.18
+            and x0 + width * 0.07 <= box[0] <= x0 + width * 0.125
             and box[1] < page_bottom - height * 0.08
         )
     ]
@@ -2095,12 +2095,22 @@ def _proven_left_revision_bar_edge(
                 break
         else:
             groups.append([box])
-    proven = [
+    repeated = [
         group
         for group in groups
         if len(group) >= 2
         and sum(box[3] - box[1] for box in group) >= height * 0.035
     ]
+    single_short = [
+        group
+        for group in groups
+        if (
+            len(group) == 1
+            and x0 + width * 0.09 <= group[0][0] <= x0 + width * 0.115
+            and group[0][3] - group[0][1] <= min(40.0, height * 0.06)
+        )
+    ]
+    proven = [*repeated, *single_short]
     if not proven:
         return None
     strongest = max(

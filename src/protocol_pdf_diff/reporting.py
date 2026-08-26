@@ -10180,9 +10180,29 @@ def _reader_filter_evidenced_table_fragments(
         table_text=table_text,
         table_text_by_page=table_text_by_page,
     )
+    # PDF extraction often splits `See Section | -10 | % | Max.` into adjacent
+    # review units.  Let one strongly proven row authorize only its short,
+    # exact-token table-shaped neighbors; ordinary prose never enters this path.
+    expanded_coverage = list(strongly_covered)
+    changed = True
+    while changed:
+        changed = False
+        for index, snippet in enumerate(snippets):
+            if expanded_coverage[index]:
+                continue
+            neighbor_covered = (
+                (index > 0 and expanded_coverage[index - 1])
+                or (index + 1 < len(snippets) and expanded_coverage[index + 1])
+            )
+            if neighbor_covered and _reader_adjacent_table_bridge_is_covered(
+                snippet,
+                bound_texts[index],
+            ):
+                expanded_coverage[index] = True
+                changed = True
     kept: list[str] = []
     for index, snippet in enumerate(snippets):
-        if strongly_covered[index]:
+        if expanded_coverage[index]:
             # PDF extractors can concatenate a long table body and the following
             # normative sentence.  Keep only that readable suffix instead of
             # deleting the whole occurrence or restoring the table wall.
@@ -10198,7 +10218,12 @@ def _reader_filter_evidenced_table_fragments(
             and _reader_tiny_table_bridge_is_covered(snippet, bound_texts[index])
         ):
             continue
-        kept.append(snippet)
+        visible = _reader_strip_evidenced_table_suffix(
+            snippet,
+            bound_texts[index],
+        )
+        if visible:
+            kept.append(visible)
     return kept
 
 
@@ -10214,23 +10239,36 @@ def _reader_filter_evidenced_table_pairs(
 ) -> list[SnippetPair]:
     """Drop a replacement only when both complete sides are table-backed."""
 
-    old_flags, _old_bound_texts = _reader_evidenced_fragment_flags(
+    old_flags, old_bound_texts = _reader_evidenced_fragment_flags(
         [pair.old for pair in pairs],
         section=old_section,
         table_text=old_table_text,
         table_text_by_page=old_table_text_by_page,
     )
-    new_flags, _new_bound_texts = _reader_evidenced_fragment_flags(
+    new_flags, new_bound_texts = _reader_evidenced_fragment_flags(
         [pair.new for pair in pairs],
         section=new_section,
         table_text=new_table_text,
         table_text_by_page=new_table_text_by_page,
     )
     kept: list[SnippetPair] = []
-    for pair, old_covered, new_covered in zip(pairs, old_flags, new_flags):
+    for index, (pair, old_covered, new_covered) in enumerate(
+        zip(pairs, old_flags, new_flags)
+    ):
         # 任一侧仍含未证明正文时保留整对，避免把真实术语或限值修改拆丢。
         if not (old_covered and new_covered):
-            kept.append(pair)
+            old_visible = _reader_strip_evidenced_table_suffix(
+                pair.old,
+                old_bound_texts[index],
+            )
+            new_visible = _reader_strip_evidenced_table_suffix(
+                pair.new,
+                new_bound_texts[index],
+            )
+            if old_visible and new_visible:
+                kept.append(SnippetPair(old_visible, new_visible))
+            else:
+                kept.append(pair)  # 不把单侧残余伪装成空值替换。
             continue
         old_tail = _reader_visible_prose_tail(pair.old)
         new_tail = _reader_visible_prose_tail(pair.new)
@@ -10255,9 +10293,6 @@ def _reader_snippet_is_evidenced_table_fragment(
     if not compact or not table_index.compact:
         return False
     collapse_kind = _reader_snippet_collapse_kind(compact)
-    # 可读规范句即使出现在表格附近也继续展示；长线性化表体由 layout 强证据单独处理。
-    if collapse_kind != "layout" and _READER_PROSE_VERB_RE.search(compact):
-        return False
     # 字段标签的大小写来自序列化格式而非技术语义；覆盖比较统一 casefold，但仍保留数字和符号形态。
     snippet_tokens = [
         token.casefold() for token in _reader_table_body_tokens(compact)
@@ -10279,6 +10314,27 @@ def _reader_snippet_is_evidenced_table_fragment(
             compact,
         )
     )
+    has_measurement_unit = any(
+        token.casefold() in {"mv", "v", "db", "%", "ps", "ns", "ghz", "ui"}
+        for token in snippet_tokens
+    )
+    has_short_technical_row_label = bool(
+        re.search(
+            r"(?i)\b(?:mismatch|resistance|tolerance|voltage|current|noise)\b",
+            compact,
+        )
+    )
+    # 可读规范句继续展示，除非表头字段和高覆盖率同时证明它是表格条件单元格。
+    if (
+        collapse_kind != "layout"
+        and _READER_PROSE_VERB_RE.search(compact)
+        and not (
+            len(snippet_tokens) >= 8
+            and coverage >= 0.85
+            and (header_count >= 2 or has_row_label)
+        )
+    ):
+        return False
     row_shape_proven = bool(
         header_count >= 2
         or has_row_label
@@ -10290,6 +10346,16 @@ def _reader_snippet_is_evidenced_table_fragment(
     )
     if header_count >= 2 and shared_count == len(snippet_tokens):
         return True  # `Parameter Min.` 等短表头只在完整同页表格逐词覆盖时去重。
+    if (
+        2 <= len(snippet_tokens) <= 4
+        and shared_count == len(snippet_tokens)
+        and (
+            header_count >= 1
+            or (has_numeric_or_operator and has_measurement_unit)
+            or (has_numeric_or_operator and has_short_technical_row_label)
+        )
+    ):
+        return True  # 单独的 `-15 mV` / `Mismatch 29.3.8` 仅凭完整同页表格授权去重。
     return bool(
         len(snippet_tokens) >= 3
         and shared_count >= 3
@@ -10344,6 +10410,51 @@ def _reader_tiny_table_bridge_is_covered(snippet: str, table_text: str) -> bool:
         not (Counter(tokens) - table_counts)
         or compact.casefold() in compact_inline(table_text).casefold()
     )
+
+
+def _reader_adjacent_table_bridge_is_covered(snippet: str, table_text: str) -> bool:
+    """Recognize a short table label only when next to an already proven table row."""
+
+    if _reader_tiny_table_bridge_is_covered(snippet, table_text):
+        return True
+    compact = compact_inline(snippet)
+    tokens = [token.casefold() for token in _reader_table_body_tokens(compact)]
+    if not 1 <= len(tokens) <= 4 or _READER_PROSE_VERB_RE.search(compact):
+        return False
+    if not re.fullmatch(
+        r"(?i)(?:see\s+(?:section|note)|(?:parameter|symbol|value|units?|conditions?|"
+        r"min(?:imum)?|max(?:imum)?|test\s+point))(?:\s*[.,:])?",
+        compact,
+    ):
+        return False
+    table_counts = _reader_table_text_index(table_text).token_counts
+    return not (Counter(tokens) - table_counts)
+
+
+def _reader_strip_evidenced_table_suffix(value: str, table_text: str) -> str:
+    """Strip a short trailing table header wall while preserving preceding prose."""
+
+    compact = compact_inline(value)
+    if not compact or not table_text or not _READER_PROSE_VERB_RE.search(compact):
+        return compact
+    matches = list(_READER_LAYOUT_HEADER_RE.finditer(compact))
+    for match in matches:
+        prefix = compact[: match.start()].rstrip(" ,;:-")
+        suffix = compact[match.start() :]
+        suffix_tokens = [
+            token.casefold() for token in _reader_table_body_tokens(suffix)
+        ]
+        if (
+            len(prefix) < 40
+            or not _READER_PROSE_VERB_RE.search(prefix)
+            or not 2 <= len(_READER_LAYOUT_HEADER_RE.findall(suffix))
+            or not 2 <= len(suffix_tokens) <= 10
+        ):
+            continue
+        table_counts = _reader_table_text_index(table_text).token_counts
+        if not (Counter(suffix_tokens) - table_counts):
+            return prefix
+    return compact
 
 
 def _reader_change_without_covered_standalone_table_references(
