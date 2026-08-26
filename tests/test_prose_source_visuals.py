@@ -23,6 +23,7 @@ from protocol_pdf_diff.models import (
     DiffOptions,
     DocumentBlock,
     DocumentBlockKind,
+    Section,
     SectionChange,
     SnippetPair,
     TableVisual,
@@ -30,8 +31,10 @@ from protocol_pdf_diff.models import (
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
     _annotated_source_crop,
+    _assign_snippets_to_pages,
     _build_visual_groups,
     _change_highlights,
+    _clip_crop_to_blockers,
     _content_horizontal_bounds,
     _crop_regions,
     _expand_boxes_to_complete_paragraph_lines,
@@ -923,6 +926,70 @@ class ProseSourceVisualReportTests(unittest.TestCase):
 
         self.assertEqual(21.42, left)
         self.assertEqual(555.0, right)
+
+    def test_repeated_left_revision_bars_are_outside_source_crop(self) -> None:
+        """Repeated narrow revision marks at the body edge are source furniture."""
+
+        left, right = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            (),
+            vector_graphic_bboxes=(
+                (60.96, 110.0, 61.92, 140.0),
+                (60.96, 250.0, 61.92, 282.0),
+            ),
+        )
+
+        self.assertGreaterEqual(left, 65.92)
+        self.assertEqual(590.58, right)
+
+    def test_one_left_plot_axis_cannot_redefine_source_crop(self) -> None:
+        """A single thin plot axis is not enough proof of a revision-bar gutter."""
+
+        bounds = _content_horizontal_bounds(
+            (0.0, 0.0, 612.0, 792.0),
+            (),
+            vector_graphic_bboxes=((60.96, 110.0, 61.92, 500.0),),
+        )
+
+        self.assertEqual((21.42, 590.58), bounds)
+
+    def test_cross_page_snippet_keeps_adjacent_sentence_start_as_context(self) -> None:
+        """A high-overlap continuation must not hide the sentence start on the prior page."""
+
+        section = Section(
+            "cross-page",
+            "30.4.1.4 Calibration",
+            "Calibration",
+            1,
+            ("30.4.1.4 Calibration",),
+            ("30.4.1.4",),
+            10,
+            11,
+            (
+                "When measured with the reference receiver at the output test point, "
+                "the signal shall meet the calibrated limit."
+            ),
+            page_bodies=(
+                (10, "When measured with the reference receiver at the"),
+                (11, "output test point, the signal shall meet the calibrated limit."),
+            ),
+        )
+
+        assigned = _assign_snippets_to_pages(section, (section.body,))
+
+        self.assertEqual({10, 11}, set(assigned))
+
+    def test_crop_stops_before_blocker_with_glyph_safety_gap(self) -> None:
+        """A crop ending above a formula must not include the next row's glyph tops."""
+
+        crop_top, crop_bottom = _clip_crop_to_blockers(
+            (20.0, 100.0, 590.0, 230.0),
+            cluster=[(50.0, 110.0, 560.0, 180.0)],
+            blocking_bboxes=((40.0, 200.0, 570.0, 240.0),),
+        )
+
+        self.assertEqual(100.0, crop_top)
+        self.assertLessEqual(crop_bottom, 198.0)
 
     def test_coordinate_figure_caption_owns_page_even_when_section_body_omits_it(self) -> None:
         """Full-page block evidence prevents a sibling prose card from borrowing a Figure."""

@@ -3185,6 +3185,76 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual([new_section.body], cleaned.added_snippets)
 
+    def test_complete_same_side_table_hides_reader_rows_without_reliable_alignment(self) -> None:
+        """A complete screenshot owns table text even when cross-version row alignment is uncertain."""
+
+        old_section = Section(
+            "old-mixed-table",
+            "29.3.4 Module-to-Host Electrical Specifications",
+            "Module-to-Host Electrical Specifications",
+            1,
+            ("29.3.4 Module-to-Host Electrical Specifications",),
+            ("29.3.4",),
+            8,
+            8,
+            "Parameter Min. The module shall support the legacy mode.",
+            page_bodies=((8, "Parameter Min. The module shall support the legacy mode."),),
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-mixed-table",
+            heading="30.3.4 Module-to-Host Electrical Specifications",
+            heading_path=("30.3.4 Module-to-Host Electrical Specifications",),
+            number_path=("30.3.4",),
+            start_page=10,
+            end_page=10,
+            body="Parameter Min. The module shall support the revised mode.",
+            page_bodies=((10, "Parameter Min. The module shall support the revised mode."),),
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.9,
+            replaced_snippets=[
+                SnippetPair("Parameter Min.", "Parameter Min."),
+                SnippetPair(
+                    "The module shall support the legacy mode.",
+                    "The module shall support the revised mode.",
+                ),
+            ],
+        )
+        old_table = TableVisual(
+            8,
+            1,
+            "Table 29-4. Module-to-Host Electrical Specifications",
+            (40.0, 200.0, 560.0, 600.0),
+            "",
+            ("Parameter Min. Max. Unit Conditions",),
+            "structured rows",
+            content_fully_represented=True,
+            row_alignment_reliable=False,
+        )
+        new_table = replace(
+            old_table,
+            page_number=10,
+            title="Table 30-4. Module-to-Host Electrical Specifications",
+        )
+        evidence = TableChange("review", (old_table,), (new_table,), 0.8, True, ())
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(
+            [
+                SnippetPair(
+                    "The module shall support the legacy mode.",
+                    "The module shall support the revised mode.",
+                )
+            ],
+            cleaned.replaced_snippets,
+        )
+
     def test_coordinate_table_dedup_preserves_changed_normative_tail(self) -> None:
         """A real prose edit after a table wall must never be hidden with the table."""
 

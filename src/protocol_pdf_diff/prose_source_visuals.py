@@ -48,6 +48,7 @@ _MIN_VISIBLE_REGION_HEIGHT = 3.0
 _MIN_VISIBLE_REGION_AREA_RATIO = 0.08
 _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO = 0.64
 _SOURCE_CROP_VERTICAL_PADDING = 0.0
+_SOURCE_BLOCKER_CROP_GAP = 2.0
 _SOURCE_CROP_HORIZONTAL_PADDING = 14.0
 _SOURCE_PARAGRAPH_LINE_MAX_GAP = 4.0
 _NUMBERED_HEADING_BLOCK_RE = re.compile(
@@ -705,6 +706,7 @@ def _build_side_visuals(
                 *section_boundary_bboxes,
             ),
             noise_bboxes=page.visual_noise_bboxes,
+            vector_graphic_bboxes=page.vector_graphic_bboxes,
         )
         if not crop_regions:
             continue
@@ -1097,7 +1099,11 @@ def _figure_crop_bbox(
 
     caption = blocks[caption_index]
     x0, page_top, x1, page_bottom = page_bbox
-    left, right = _content_horizontal_bounds(page_bbox, noise_bboxes)
+    left, right = _content_horizontal_bounds(
+        page_bbox,
+        noise_bboxes,
+        vector_graphic_bboxes=vector_graphic_bboxes,
+    )
     top = max(page_top, caption.bbox[1] - 10.0)
     bottom = page_bottom
     boundary_blocks = _figure_boundary_blocks(
@@ -1446,8 +1452,29 @@ def _assign_snippets_to_pages(
         if not scored:
             continue
         score, page_number = max(scored)
-        if score >= 0.20:
-            assigned[page_number].append(snippet)
+        if score < 0.20:
+            continue
+        assigned[page_number].append(snippet)
+        # A sentence may cross a physical page.  Keep an adjacent page when it
+        # contributes several otherwise missing words and materially improves
+        # full-snippet coverage, so the screenshot does not begin mid-sentence.
+        best_tokens = page_tokens[page_number]
+        for adjacent_score, adjacent_page in scored:
+            if abs(adjacent_page - page_number) != 1 or score < 0.60:
+                continue
+            adjacent_tokens = page_tokens[adjacent_page]
+            unique_contribution = (
+                snippet_tokens & adjacent_tokens
+            ) - best_tokens
+            union_coverage = len(
+                snippet_tokens & (best_tokens | adjacent_tokens)
+            ) / len(snippet_tokens)
+            if (
+                adjacent_score >= 0.30
+                and len(unique_contribution) >= 3
+                and union_coverage - score >= 0.12
+            ):
+                assigned[adjacent_page].append(snippet)
     return {page: tuple(values) for page, values in assigned.items()}
 
 
@@ -1849,6 +1876,7 @@ def _crop_regions(
     boxes: tuple[tuple[float, float, float, float], ...],
     blocking_bboxes: tuple[tuple[float, float, float, float], ...] = (),
     noise_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Build readable raw-source crops without crossing Table-owned regions."""
 
@@ -1858,6 +1886,7 @@ def _crop_regions(
     content_left, content_right = _content_horizontal_bounds(
         page_bbox,
         noise_bboxes,
+        vector_graphic_bboxes=vector_graphic_bboxes,
     )
     clusters = _cluster_source_boxes(
         boxes,
@@ -1996,15 +2025,17 @@ def _clip_crop_to_blockers(
         if _horizontal_overlap_ratio((left, crop_top, right, crop_bottom), blocker) < 0.45:
             continue
         if cluster_bottom <= blocker[1]:
-            crop_bottom = min(crop_bottom, blocker[1])
+            crop_bottom = min(crop_bottom, blocker[1] - _SOURCE_BLOCKER_CROP_GAP)
         elif cluster_top >= blocker[3]:
-            crop_top = max(crop_top, blocker[3])
+            crop_top = max(crop_top, blocker[3] + _SOURCE_BLOCKER_CROP_GAP)
     return crop_top, crop_bottom
 
 
 def _content_horizontal_bounds(
     page_bbox: tuple[float, float, float, float],
     noise_bboxes: tuple[tuple[float, float, float, float], ...],
+    *,
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[float, float]:
     """Use coordinate-proven side furniture to keep source crops inside body lanes."""
 
@@ -2024,11 +2055,59 @@ def _content_horizontal_bounds(
     )
     if left_gutter is not None:
         left = max(left, left_gutter)
+    revision_bar_edge = _proven_left_revision_bar_edge(
+        page_bbox,
+        vector_graphic_bboxes,
+    )
+    if revision_bar_edge is not None:
+        left = max(left, revision_bar_edge)
     if right_gutter is not None:
         right = min(right, right_gutter)
     if right - left < width * _SOURCE_CROP_MIN_PAGE_WIDTH_RATIO:
         return x0 + width * 0.035, x1 - width * 0.035
     return left, right
+
+
+def _proven_left_revision_bar_edge(
+    page_bbox: tuple[float, float, float, float],
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> float | None:
+    """Return the inner edge of repeated narrow revision bars near the left body lane."""
+
+    x0, page_top, x1, page_bottom = page_bbox
+    width = max(1.0, x1 - x0)
+    height = max(1.0, page_bottom - page_top)
+    candidates = [
+        box
+        for box in vector_graphic_bboxes
+        if (
+            0.0 < box[2] - box[0] <= max(3.0, width * 0.008)
+            and 6.0 <= box[3] - box[1] <= height * 0.25
+            and x0 + width * 0.07 <= box[0] <= x0 + width * 0.18
+            and box[1] < page_bottom - height * 0.08
+        )
+    ]
+    groups: list[list[tuple[float, float, float, float]]] = []
+    for box in sorted(candidates, key=lambda item: item[0]):
+        for group in groups:
+            if abs(box[0] - group[0][0]) <= 0.6:
+                group.append(box)
+                break
+        else:
+            groups.append([box])
+    proven = [
+        group
+        for group in groups
+        if len(group) >= 2
+        and sum(box[3] - box[1] for box in group) >= height * 0.035
+    ]
+    if not proven:
+        return None
+    strongest = max(
+        proven,
+        key=lambda group: (sum(box[3] - box[1] for box in group), -group[0][0]),
+    )
+    return max(box[2] for box in strongest) + 4.0
 
 
 def _proven_side_gutter_bound(

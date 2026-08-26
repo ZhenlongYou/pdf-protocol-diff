@@ -9766,49 +9766,39 @@ def _reader_change_without_evidenced_table_body_fragments(
         | tuple[TableChange | _TableVisualGroup, ...]
     ),
 ) -> SectionChange | None:
-    """Hide only mixed-section snippets already preserved by a visible table card.
+    """Hide table-shaped snippets already preserved by complete same-side screenshots.
 
-    The proof is deliberately stricter than generic text similarity: both PDF
-    sides need the same paired caption, complete bbox character coverage,
-    section/page containment, and either reliable rows or an explicit table
-    review row.  Raw ``SectionChange`` data is never mutated; this helper only
-    builds the reader copy used by HTML/Markdown/TXT.
+    Cross-version row alignment is not required for reader de-duplication: a
+    complete source screenshot owns its own side's table text.  Exact token
+    coverage, table-shaped syntax, and same-page section provenance still fail
+    closed, while raw ``SectionChange`` audit facts remain untouched.
     """
 
-    # 单侧新增/删除没有成对章节坐标，不能调用只适用于 paired modified section 的证明函数。
-    if (
-        change.change_type != "modified"
-        or change.old_section is None
-        or change.new_section is None
-    ):
-        return change
-    # 复用整卡去重的坐标/标题/完整性门禁，避免远处或不完整截图误删正文。
-    eligible_evidence = [
-        evidence
-        for evidence in table_evidence
-        if _reader_table_change_proves_section_duplicate(change, evidence)
-    ]
-    if not eligible_evidence:
+    old_tables = tuple(
+        table
+        for table in _reader_tables_for_change_side(
+            change,
+            table_evidence,
+            side="old",
+        )
+        if table.content_fully_represented
+    )
+    new_tables = tuple(
+        table
+        for table in _reader_tables_for_change_side(
+            change,
+            table_evidence,
+            side="new",
+        )
+        if table.content_fully_represented
+    )
+    if not old_tables and not new_tables:
         return change
     # 每一侧只与自己的表格审计文字比对，页码平移不会造成跨版本误覆盖。
-    old_table_text = " ".join(
-        _reader_table_group_audit_text(evidence.old_tables)
-        for evidence in eligible_evidence
-    )
-    new_table_text = " ".join(
-        _reader_table_group_audit_text(evidence.new_tables)
-        for evidence in eligible_evidence
-    )
-    old_table_text_by_page = _reader_table_text_by_page(
-        table
-        for evidence in eligible_evidence
-        for table in evidence.old_tables
-    )
-    new_table_text_by_page = _reader_table_text_by_page(
-        table
-        for evidence in eligible_evidence
-        for table in evidence.new_tables
-    )
+    old_table_text = _reader_table_group_audit_text(old_tables)
+    new_table_text = _reader_table_group_audit_text(new_tables)
+    old_table_text_by_page = _reader_table_text_by_page(old_tables)
+    new_table_text_by_page = _reader_table_text_by_page(new_tables)
     # 可见列表和完整审计列表分别过滤，之后重算真正仍未展示的读者片段数。
     removed = _reader_filter_evidenced_table_fragments(
         change.removed_snippets,
@@ -10298,6 +10288,8 @@ def _reader_snippet_is_evidenced_table_fragment(
             and len(snippet_tokens) >= 5
         )
     )
+    if header_count >= 2 and shared_count == len(snippet_tokens):
+        return True  # `Parameter Min.` 等短表头只在完整同页表格逐词覆盖时去重。
     return bool(
         len(snippet_tokens) >= 3
         and shared_count >= 3

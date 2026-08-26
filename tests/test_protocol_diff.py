@@ -3864,6 +3864,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIsNone(detect_heading("4.3u03 RMS03"))  # 抖动符号残片不是章节标题。
         self.assertIsNone(detect_heading("4.3u DRMS 03"))  # 抖动符号和下标残片不是章节标题。
         self.assertIsNone(detect_heading("802.3dj)"))  # 标准名残片不是章节标题。
+        self.assertIsNone(detect_heading("30.3.8 (VCM )"))  # 表格单元格中的条款引用+缩写不是新章节。
         self.assertIsNone(
             detect_heading(
                 "Section 29.3.12). The signals at the appropriate points in the reference receiver (see"
@@ -3895,6 +3896,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIsNotNone(
             detect_heading("2.13.2 Overview of Calibration Steps at 16.0 GT/s")
         )  # 带 GT/s 单位的深层章节标题仍应识别。
+        self.assertIsNotNone(detect_heading("30.3.8 Common Mode Noise"))  # 同编号真实标题必须保留。
         self.assertIsNotNone(detect_heading("1 The Protocol Architecture."))  # 合法 The 开头标题不能被脚注规则误删。
         cleaned_heading = detect_heading("32.1 RequirRements")  # 没有版面证据时，混合大小写属于源文字。
         self.assertIsNotNone(cleaned_heading)  # 保留原文后仍应识别为合法章节。

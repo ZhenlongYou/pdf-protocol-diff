@@ -2582,6 +2582,9 @@ def _looks_like_symbol_fragment_heading(number: str, title: str) -> bool:
     """Return True for symbol/value fragments misread as numeric headings."""
 
     candidate = normalize_line(title)
+    compact_candidate = re.sub(r"\s+", "", candidate)
+    if "." in number and re.fullmatch(r"\([A-Z][A-Z0-9_]{1,7}\)", compact_candidate):
+        return True  # `30.3.8 (VCM)` 是表格内条款引用+符号，不足以证明新章节。
     if "." in number and re.fullmatch(r"(?i)[a-z]{1,4}\)?", candidate):
         return True  # 带字母后缀的 dotted identifier 残片不是章节标题。
     if not number.isdigit():
