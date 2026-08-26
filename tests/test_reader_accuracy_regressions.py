@@ -512,6 +512,34 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertIsNone(_reader_section_change(change, [evidence]))
 
+    def test_interleaved_table_header_is_removed_after_real_prose(self) -> None:
+        """A Table header after a period is removed without trimming prose."""
+
+        source = (
+            "g g Location DC2 DC step min max min. max. step size size "
+            "0 2 0.5 dB 0 10 1.0 dB TP1a, TP4"
+        )
+        prose = "The allowed ranges are provided in Table 30-13."
+        fragment = f"{prose} gDC2 gDC Location step min max min."
+        section = Section(
+            "new-ctle-tail", "30.4.1.5 CTLE", "CTLE", 4,
+            ("30.4.1.5 CTLE",), ("30.4.1.5",), 1, 1, fragment,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[fragment]
+        )
+        table = TableVisual(
+            1, 1, "Table 30-13. CTLE Gain Range", (10.0, 10.0, 300.0, 200.0),
+            "", ["表格行: T1 | gDC2=min | gDC=min | Location=TP1a"], "grid",
+            source_text=source,
+        )
+        evidence = TableChange("added", (), (table,), 0.0, True, ())
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([prose], cleaned.added_snippets)
+
     def test_table_character_inventory_cannot_trim_a_real_sentence_prefix(self) -> None:
         """Unordered Table proof removes labels, not prose sharing its letters."""
 

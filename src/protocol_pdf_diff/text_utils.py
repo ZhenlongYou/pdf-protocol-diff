@@ -46,7 +46,8 @@ _KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES = {
     "R": frozenset({"d"}),
     "RL": frozenset({"cd"}),
     "Z": frozenset({"c", "p"}),
-    "f": frozenset({"b"}),
+    "f": frozenset({"b", "LF", "p1", "p2", "z", "z1"}),
+    "g": frozenset({"DC", "DC2"}),
     "z": frozenset({"c", "p"}),
 }
 _MEASUREMENT_CONTEXT_WORDS = frozenset(

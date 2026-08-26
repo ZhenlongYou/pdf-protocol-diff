@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from pathlib import Path
 import sys
 import unittest
-
+from collections import Counter
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -45,6 +44,51 @@ def _visible_characters(value: str) -> Counter[str]:
 
 
 class BodyVisualSubscriptTests(unittest.TestCase):
+    def test_coordinate_proven_ctle_gain_subscripts_rejoin_inline(self) -> None:
+        """Lowered DC/DC2 suffixes stay attached to their visible g symbols."""
+
+        words = [
+            _word("parameters", 10.0, 60.0, 100.0, 112.0),
+            _word("g", 64.0, 71.0, 100.0, 112.0),
+            _word("and", 88.0, 105.0, 100.0, 112.0),
+            _word("g", 109.0, 116.0, 100.0, 112.0),
+            _word("are", 140.0, 157.0, 100.0, 112.0),
+            _word("used.", 161.0, 188.0, 100.0, 112.0),
+            _word("DC", 70.9, 84.0, 104.8, 114.4),
+            _word("DC2", 115.9, 136.0, 104.8, 114.4),
+        ]
+        raw = "parameters g DC and g DC2 are used."
+
+        repaired = _repair_body_visual_subscript_order(raw, words)
+
+        self.assertEqual("parameters gDC and gDC2 are used.", repaired)
+        self.assertEqual(_visible_characters(raw), _visible_characters(repaired))
+
+    def test_coordinate_proven_ctle_frequency_subscripts_rejoin_inline(self) -> None:
+        """CTLE pole, zero, and low-frequency suffixes remain on their f bases."""
+
+        words = [
+            _word("values", 10.0, 42.0, 100.0, 112.0),
+            _word("f", 46.0, 52.0, 100.0, 112.0),
+            _word(",", 65.0, 68.0, 100.0, 112.0),
+            _word("f", 72.0, 78.0, 100.0, 112.0),
+            _word(",", 91.0, 94.0, 100.0, 112.0),
+            _word("f", 98.0, 104.0, 100.0, 112.0),
+            _word(",", 111.0, 114.0, 100.0, 112.0),
+            _word("f", 118.0, 124.0, 100.0, 112.0),
+            _word("apply.", 141.0, 175.0, 100.0, 112.0),
+            _word("p1", 51.9, 64.0, 104.8, 114.4),
+            _word("p2", 77.9, 90.0, 104.8, 114.4),
+            _word("z", 103.9, 110.0, 104.8, 114.4),
+            _word("LF", 123.9, 138.0, 104.8, 114.4),
+        ]
+        raw = "values f p1 , f p2 , f z , f LF apply."
+
+        repaired = _repair_body_visual_subscript_order(raw, words)
+
+        self.assertEqual("values fp1 , fp2 , fz , fLF apply.", repaired)
+        self.assertEqual(_visible_characters(raw), _visible_characters(repaired))
+
     def test_coordinate_proven_return_loss_suffix_rejoins(self) -> None:
         """The lowered `cd` belongs to RL; ordinary adjacent text stays separate."""
 

@@ -117,12 +117,18 @@ def strip_coordinate_owned_visual_fragment(
             return ""
         candidates: list[tuple[int, str, int]] = []
         for source_index, source_text in enumerate(source_texts):
-            candidate = _strip_one_coordinate_figure_prefix(
+            prefix_candidate = _strip_one_coordinate_figure_prefix(
                 remaining,
                 source_text,
                 allow_interleaved_prefix=allow_interleaved_prefix,
             )
-            if candidate != remaining:
+            suffix_candidate = _strip_one_coordinate_visual_suffix(
+                remaining,
+                source_text,
+            )
+            for candidate in (prefix_candidate, suffix_candidate):
+                if candidate == remaining:
+                    continue
                 candidates.append(
                     (len(remaining) - len(candidate), candidate, source_index)
                 )
@@ -286,6 +292,36 @@ def _strip_one_coordinate_figure_prefix(
         and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
     ):
         return value[prefix_end:]
+    return value
+
+
+def _strip_one_coordinate_visual_suffix(value: str, source_text: str) -> str:
+    """Strip a non-prose tail proven by one crop after a sentence boundary."""
+
+    observed = _figure_text_tokens(value)
+    source_canonical = _figure_text_canonical(source_text)
+    if len(observed) < 4 or not source_canonical:
+        return value
+    for token_index in range(1, len(observed) - 2):
+        _token, start, _end = observed[token_index]
+        prose_prefix = value[:start].rstrip()
+        if not prose_prefix.endswith((".", ":", ";")):
+            continue
+        suffix = value[start:]
+        suffix_canonical = _figure_text_canonical(suffix)
+        if len(suffix_canonical) < 8 or _PROSE_OR_REQUIREMENT_VERB_RE.search(suffix):
+            continue
+        character_coverage = sum(
+            (Counter(suffix_canonical) & Counter(source_canonical)).values()
+        ) / max(len(suffix_canonical), 1)
+        if (
+            suffix_canonical in source_canonical
+            or (
+                character_coverage >= 0.98
+                and len(source_canonical) <= len(suffix_canonical) * 8
+            )
+        ):
+            return prose_prefix
     return value
 
 
