@@ -186,13 +186,21 @@ def _build_visual_groups(
         result.new_table_visuals,
         pages=new_pages,
     )
+    old_formula_bboxes = _merge_bboxes_by_page(
+        _visual_bboxes_by_page(result.old_formula_visuals),
+        _formula_block_bboxes_by_page(old_pages),
+    )
+    new_formula_bboxes = _merge_bboxes_by_page(
+        _visual_bboxes_by_page(result.new_formula_visuals),
+        _formula_block_bboxes_by_page(new_pages),
+    )
     old_figure_blockers = _merge_bboxes_by_page(
         old_table_bboxes,
-        _visual_bboxes_by_page(result.old_formula_visuals),
+        old_formula_bboxes,
     )
     new_figure_blockers = _merge_bboxes_by_page(
         new_table_bboxes,
-        _visual_bboxes_by_page(result.new_formula_visuals),
+        new_formula_bboxes,
     )
     old_figure_evidence = _collect_figure_evidence(
         old_document,
@@ -209,13 +217,11 @@ def _build_visual_groups(
     old_prose_blockers = _merge_bboxes_by_page(
         old_figure_blockers,
         _figure_evidence_bboxes_by_page(old_figure_evidence),
-        _formula_block_bboxes_by_page(old_pages),
         _section_heading_bboxes_by_page(old_pages),
     )
     new_prose_blockers = _merge_bboxes_by_page(
         new_figure_blockers,
         _figure_evidence_bboxes_by_page(new_figure_evidence),
-        _formula_block_bboxes_by_page(new_pages),
         _section_heading_bboxes_by_page(new_pages),
     )
     groups: list[ProseSourceVisualGroup] = []

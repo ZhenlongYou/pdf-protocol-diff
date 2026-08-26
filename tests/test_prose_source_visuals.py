@@ -30,6 +30,7 @@ from protocol_pdf_diff.models import (
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import (
     _annotated_source_crop,
+    _build_visual_groups,
     _change_highlights,
     _content_horizontal_bounds,
     _crop_regions,
@@ -550,6 +551,59 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertIsNotNone(crop)
         self.assertGreater(crop[3], diagram_label.bbox[3])
         self.assertLessEqual(crop[3], formula.bbox[1] - 8.0)
+
+    def test_figure_collection_receives_formula_geometry_when_formula_diff_is_disabled(
+        self,
+    ) -> None:
+        """Detected equation rows must still bound Figure crops after formula diff is closed."""
+
+        formula = DocumentBlock(
+            30,
+            (46.0, 545.0, 444.0, 599.0),
+            DocumentBlockKind.TEXT,
+            "SDD21 = (-9.7) f/fb - 32.6 (f/fb)^2",
+            0,
+            "test",
+        )
+        formula_number = DocumentBlock(
+            30,
+            (508.0, 561.0, 540.0, 574.0),
+            DocumentBlockKind.TEXT,
+            "(29-7)",
+            1,
+            "test",
+        )
+        old_page = SimpleNamespace(
+            page_number=30,
+            blocks=(formula, formula_number),
+        )
+        old_extraction = SimpleNamespace(pages=(old_page,))
+        new_extraction = SimpleNamespace(pages=())
+        result = SimpleNamespace(
+            old_table_visuals=(),
+            new_table_visuals=(),
+            old_formula_visuals=(),
+            new_formula_visuals=(),
+            old_sections=(),
+            new_sections=(),
+        )
+
+        with mock.patch(
+            "protocol_pdf_diff.prose_source_visuals._collect_figure_evidence",
+            side_effect=((), ()),
+        ) as collect:
+            _build_visual_groups(
+                result,
+                [],
+                old_document=object(),
+                new_document=object(),
+                old_extraction=old_extraction,
+                new_extraction=new_extraction,
+            )
+
+        old_blockers = collect.call_args_list[0].kwargs["blocking_bboxes_by_page"]
+        self.assertIn(30, old_blockers)
+        self.assertLessEqual(old_blockers[30][0][1], formula.bbox[1])
 
     def test_displayed_formula_rows_are_owned_outside_prose_highlights(self) -> None:
         """A numbered multi-line equation must be blocked without swallowing following prose."""
