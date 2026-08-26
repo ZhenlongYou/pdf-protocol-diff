@@ -24,6 +24,10 @@ _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
     r"provide(?:s|d)?|preserve(?:s|d)?|apply|applies|applied)\b"
     r"|应|必须|不得|要求|规定|显示|说明|描述|定义"
 )
+_PROSE_SENTENCE_OPENER_RE = re.compile(
+    r"(?i)^(?:a|an|all|any|each|either|every|it|neither|one|the|these|"
+    r"this|those|we)$"
+)
 def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[str]:
     """Remove Figure labels plus adjacent caption/diagram fragments.
 
@@ -90,23 +94,34 @@ def strip_coordinate_owned_figure_fragment(
 def strip_coordinate_owned_visual_fragment(
     value: str,
     source_texts: tuple[str, ...] | list[str],
+    *,
+    allow_interleaved_prefix: bool = True,
 ) -> str:
     """Remove prefixes proven by individual coordinate-owned visual crops."""
 
     compact = compact_inline(value)
     if not compact or not source_texts:
         return compact
+    if not any(character.isalnum() for character in compact):
+        return ""
     # One crop must prove one contiguous removal.  Never merge occurrence
     # budgets from several Figures: two unrelated images cannot jointly erase
     # an ordinary sentence that happens to reuse words from both.
     remaining = compact
-    used_sources: set[int] = set()
-    while remaining:
+    changed = False
+    # A single crop may be emitted as several consecutive OCR runs.  Reusing
+    # that same crop is safe because every iteration must shorten the value;
+    # a hard bound protects against malformed tokenization.
+    for _iteration in range(max(4, len(source_texts) * 8)):
+        if not remaining:
+            return ""
         candidates: list[tuple[int, str, int]] = []
         for source_index, source_text in enumerate(source_texts):
-            if source_index in used_sources:
-                continue
-            candidate = _strip_one_coordinate_figure_prefix(remaining, source_text)
+            candidate = _strip_one_coordinate_figure_prefix(
+                remaining,
+                source_text,
+                allow_interleaved_prefix=allow_interleaved_prefix,
+            )
             if candidate != remaining:
                 candidates.append(
                     (len(remaining) - len(candidate), candidate, source_index)
@@ -114,21 +129,28 @@ def strip_coordinate_owned_visual_fragment(
         if not candidates:
             break
         _removed_chars, remaining, source_index = max(candidates, key=lambda item: item[0])
-        used_sources.add(source_index)
+        changed = True
         remaining = remaining.strip(" \t\n,;:|/\\-–—")
         if not remaining:
             return ""
-        if _is_figure_visual_prose_boundary(remaining):
+        if _coordinate_value_starts_with_prose(remaining):
             return remaining
-    return compact
+    return remaining if changed else compact
 
 
-def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
+def _strip_one_coordinate_figure_prefix(
+    value: str,
+    source_text: str,
+    *,
+    allow_interleaved_prefix: bool,
+) -> str:
     """Strip a whole value or one prefix using exactly one Figure crop."""
 
     observed = _figure_text_tokens(value)
     source = _figure_text_tokens(source_text)
     if not observed or not source:
+        return value
+    if _coordinate_value_starts_with_prose(value):
         return value
     source_canonical = _figure_text_canonical(source_text)
     observed_canonical = _figure_text_canonical(value)
@@ -147,6 +169,12 @@ def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
         source_canonical,
         autojunk=False,
     ).ratio()
+    observed_letters = "".join(
+        character for character in observed_canonical if character.isalpha()
+    )
+    source_letters = "".join(
+        character for character in source_canonical if character.isalpha()
+    )
     if (
         len(observed_canonical) >= 20
         and character_coverage >= 0.94
@@ -154,6 +182,29 @@ def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
         and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
     ):
         return ""
+    if (
+        len(observed_letters) >= 6
+        and observed_letters in source_letters
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    prose_start = _coordinate_mixed_prose_start(value, observed)
+    if allow_interleaved_prefix and prose_start is not None:
+        prefix = value[:prose_start]
+        prefix_canonical = _figure_text_canonical(prefix)
+        prefix_coverage = sum(
+            (
+                Counter(prefix_canonical)
+                & Counter(source_canonical)
+            ).values()
+        ) / max(len(prefix_canonical), 1)
+        if (
+            len(prefix_canonical) >= 8
+            and prefix_coverage >= 0.94
+            and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+        ):
+            return value[prose_start:]
 
     source_counts = Counter(token for token, _start, _end in source)
     observed_counts = Counter(token for token, _start, _end in observed)
@@ -168,6 +219,29 @@ def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
     ):
         return ""
 
+    # Table headers and diagram labels may be emitted column-first while the
+    # bbox source is row-first (for example ``gDC2 gDC Location ...`` versus
+    # ``g g Location DC2 DC ...``).  Near-complete character ownership by one
+    # crop is sufficient only for a non-sentence fragment; raw audit data stays
+    # untouched even when the reader layer omits it.
+    if (
+        len(observed_canonical) >= 4
+        and character_coverage >= 0.98
+        and len(source_canonical) <= len(observed_canonical) * 8
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    # A lone Figure/Table label such as ``TP1a`` or ``HCB`` is not a useful
+    # prose delta when an individual coordinate crop contains that exact token.
+    if (
+        len(observed) <= 2
+        and matched_count == len(observed)
+        and len(source) >= 5
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
     # PDF text layers may split a reversed axis label into single letters while
     # the section assembler joins them again.  Whitespace-insensitive character
     # containment restores that same-crop proof without protocol vocabulary.
@@ -175,10 +249,22 @@ def _strip_one_coordinate_figure_prefix(value: str, source_text: str) -> str:
         _token, _start, end = observed[token_index]
         prefix = value[:end]
         prefix_canonical = _figure_text_canonical(prefix)
+        prefix_coverage = sum(
+            (
+                Counter(prefix_canonical)
+                & Counter(source_canonical)
+            ).values()
+        ) / max(len(prefix_canonical), 1)
         if (
             token_index + 1 < 3
             or len(prefix_canonical) < 8
-            or prefix_canonical not in source_canonical
+            or (
+                prefix_canonical not in source_canonical
+                and (
+                    not allow_interleaved_prefix
+                    or prefix_coverage < 0.98
+                )
+            )
             or _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
         ):
             continue
@@ -219,6 +305,56 @@ def _figure_text_canonical(value: str) -> str:
 
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return "".join(character for character in normalized if character.isalnum())
+
+
+def _coordinate_mixed_prose_start(
+    value: str,
+    tokens: list[tuple[str, int, int]],
+) -> int | None:
+    """Find a grammatical prose suffix after at least three visual tokens."""
+
+    for token_index, (_token, start, _end) in enumerate(tokens):
+        if token_index < 3:
+            continue
+        if not _coordinate_tokens_start_prose(value, tokens, token_index):
+            continue
+        return start
+    return None
+
+
+def _coordinate_value_starts_with_prose(value: str) -> bool:
+    """Protect a grammatical suffix before reusing the same visual crop."""
+
+    tokens = _figure_text_tokens(value)
+    return bool(tokens and _coordinate_tokens_start_prose(value, tokens, 0))
+
+
+def _coordinate_tokens_start_prose(
+    value: str,
+    tokens: list[tuple[str, int, int]],
+    token_index: int,
+) -> bool:
+    """Recognize a generic sentence start without protocol-specific labels."""
+
+    token, start, _end = tokens[token_index]
+    first_character = value[start : start + 1]
+    if not first_character or not (
+        first_character.isupper()
+        or "\u3400" <= first_character <= "\u9fff"
+    ):
+        return False
+    short_end = tokens[min(len(tokens), token_index + 3) - 1][2]
+    long_end = tokens[min(len(tokens), token_index + 12) - 1][2]
+    has_immediate_verb = bool(
+        _PROSE_OR_REQUIREMENT_VERB_RE.search(value[start:short_end])
+    )
+    has_nearby_verb = bool(
+        _PROSE_OR_REQUIREMENT_VERB_RE.search(value[start:long_end])
+    )
+    return has_immediate_verb or (
+        bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(token))
+        and has_nearby_verb
+    )
 
 
 def _is_combined_figure_visual_fragment(value: str) -> bool:

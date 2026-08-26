@@ -411,6 +411,238 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual([sentence], cleaned.added_snippets)
 
+    def test_one_figure_crop_can_remove_two_consecutive_label_runs(self) -> None:
+        """A crop remains usable until every label run it proves is consumed."""
+
+        labels = "Alpha Beta Gamma Delta Epsilon"
+        repeated_labels = f"{labels} {labels}"
+        section = Section(
+            "new-figure", "1 Figure", "Figure", 1,
+            ("1 Figure",), ("1",), 1, 1, repeated_labels,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[repeated_labels]
+        )
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                figure_visual_sides=(False, True),
+                figure_visual_texts=((), (labels,)),
+            )
+        )
+
+    def test_column_interleaved_figure_prefix_keeps_following_prose(self) -> None:
+        """Character-owned label soup is removed before a real prose boundary."""
+
+        source = (
+            "Figure 30-8. Module output (TP4) reference Rx and measurement points "
+            "Oscilloscope TP4 Reference Equalizer TP3 TP4 CTLE 30-tap FFE "
+            "Linear LPO 60 GHz BT DFE MCB 6 pre main Module LPF 1-tap DFE "
+            "23 post-cursors Pk-Pk Voltage Overshoot VMA EECQ Ceeq EECQ G "
+            "CM Voltage Undershoot ERL"
+        )
+        labels = (
+            "M e o a d r/ u L l P e O MCB 60 G LP H F z BT 23 (6 p p o r s e "
+            "t - - , c m ur a s i o n r , s ) (1-ta D p F E DFE) P C k- M P k "
+            "V o Vo lt l a t g ag e e O Un v d er e s r h s o h o o t o , t "
+            "VMA VMA EECQ G EECQ, Ceeq ERL"
+        )
+        prose = "All co-propagating lanes are active as crosstalk sources."
+        mixed = f"{labels} {prose}"
+        section = Section(
+            "new-output", "30.4 Output", "Output", 2,
+            ("30.4 Output",), ("30.4",), 1, 1, mixed,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[mixed]
+        )
+
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(False, True),
+            figure_visual_texts=((), (source,)),
+        )
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([prose], cleaned.added_snippets)
+
+    def test_spacing_fragmented_reversed_axis_label_is_not_prose(self) -> None:
+        """Digits between source letters do not publish a reversed axis label."""
+
+        source = "10 27 ) 28 B d 29 ( e 30 s 5 nop 31 32 s e 33 R 0 E L T C"
+        fragment = ")Bd( esnopseR"
+        section = Section(
+            "new-axis", "30.5 Boards", "Boards", 2,
+            ("30.5 Boards",), ("30.5",), 1, 1, fragment,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[fragment]
+        )
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                figure_visual_sides=(False, True),
+                figure_visual_texts=((), (source,)),
+            )
+        )
+
+    def test_interleaved_table_header_is_removed_by_bbox_character_proof(self) -> None:
+        """Column-order interleaving must not publish a proven Table header."""
+
+        source = (
+            "g g Location DC2 DC step min max min. max. step size size "
+            "0 2 0.5 dB 0 10 1.0 dB TP1a, TP4"
+        )
+        fragment = "gDC2 gDC Location step min max min."
+        section = Section(
+            "new-ctle", "30.4.1.5 CTLE", "CTLE", 4,
+            ("30.4.1.5 CTLE",), ("30.4.1.5",), 1, 1, fragment,
+        )
+        change = SectionChange(
+            "added", None, section, 0.0, added_snippets=[fragment]
+        )
+        table = TableVisual(
+            1, 1, "Table 30-13. CTLE Gain Range", (10.0, 10.0, 300.0, 200.0),
+            "", ["表格行: T1 | gDC2=min | gDC=min | Location=TP1a"], "grid",
+            source_text=source,
+        )
+        evidence = TableChange("added", (), (table,), 0.0, True, ())
+
+        self.assertIsNone(_reader_section_change(change, [evidence]))
+
+    def test_table_character_inventory_cannot_trim_a_real_sentence_prefix(self) -> None:
+        """Unordered Table proof removes labels, not prose sharing its letters."""
+
+        source = (
+            "Parameter Target value Unit Conditions Crosstalk Amplitude "
+            "Differential Voltage pk-pk 700 mV Crosstalk Slew Time between "
+            "210 mV and 210 mV 10 ps See Note1"
+        )
+        sentence = (
+            "Amplitude and Transition Times for counter-propagating lanes "
+            "are defined in Table 29-3."
+        )
+        old_section = Section(
+            "old-host", "29.4 Host", "Host", 2,
+            ("29.4 Host",), ("29.4",), 1, 1, sentence,
+        )
+        new_sentence = sentence.replace("Amplitude", "Magnitude").replace(
+            "29-3", "30-3"
+        )
+        new_section = replace(old_section, section_id="new-host", body=new_sentence)
+        change = SectionChange(
+            "modified", old_section, new_section, 0.9,
+            replaced_snippets=[SnippetPair(sentence, new_sentence)],
+        )
+        old_table = TableVisual(
+            1, 1, "Table 29-3. Crosstalk", (10.0, 10.0, 300.0, 200.0),
+            "", ["表格行: T1 | Amplitude=700"], "grid", source_text=source,
+        )
+        new_table = replace(old_table, title="Table 30-3. Crosstalk")
+        evidence = TableChange(
+            "modified", (old_table,), (new_table,), 1.0, True, ()
+        )
+
+        cleaned = _reader_section_change(change, [evidence])
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(sentence, cleaned.replaced_snippets[0].old)
+
+    def test_plain_table_caption_left_after_bbox_prefix_is_not_published(self) -> None:
+        """A visible Table card owns its standalone number after body stripping."""
+
+        source = "Resistance Mismatch 29.3.8"
+        fragment = f"{source} Table 29-3."
+        section = Section(
+            "old-table", "29.3.3 Limits", "Limits", 3,
+            ("29.3.3 Limits",), ("29.3.3",), 1, 1, fragment,
+        )
+        change = SectionChange(
+            "deleted", section, None, 0.0, removed_snippets=[fragment]
+        )
+        table = TableVisual(
+            1, 1, "Table 29-3. Crosstalk parameters", (10.0, 10.0, 300.0, 200.0),
+            "", ["表格行: T1 | Resistance Mismatch=29.3.8"], "grid",
+            source_text=source,
+        )
+        evidence = TableChange("deleted", (table,), (), 0.0, True, ())
+
+        self.assertIsNone(_reader_section_change(change, [evidence]))
+
+    def test_table_and_figure_captions_joined_by_reading_order_are_not_prose(self) -> None:
+        """A visible Table number can expose the following coordinate Figure run."""
+
+        old_fragment = (
+            "Table 29-8. Recommended g and g settings vs. Channel Insertion "
+            "Loss (IL) DC DC2 Figure 29-7. TP1a and TP4 EECQ measurement"
+        )
+        new_fragment = "TP1a and TP4 EECQ measurement"
+        old_section = Section(
+            "old-host", "29.4.1.1 Host", "Host", 4,
+            ("29.4.1.1 Host",), ("29.4.1.1",), 1, 1, old_fragment,
+        )
+        new_section = replace(old_section, section_id="new-host", body=new_fragment)
+        change = SectionChange(
+            "modified", old_section, new_section, 0.5,
+            replaced_snippets=[SnippetPair(old_fragment, new_fragment)],
+        )
+        old_table = TableVisual(
+            1, 1, "Table 29-8. Recommended gDC and gDC2 settings",
+            (10.0, 10.0, 300.0, 120.0), "", ["表格行: T1 | gDC=0"], "grid",
+            source_text="g g DC DC2 Channel Insertion Loss",
+        )
+        table_evidence = TableChange("deleted", (old_table,), (), 0.0, True, ())
+        figure_source = "Figure 29-7. TP1a and TP4 EECQ measurement"
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                [table_evidence],
+                figure_visual_sides=(True, True),
+                figure_visual_texts=((figure_source,), (figure_source,)),
+            )
+        )
+
+    def test_figure_crop_is_applied_to_child_change_on_the_same_page(self) -> None:
+        """Physical page ownership repairs imperfect Figure section ownership."""
+
+        fragment = "TP1a HCB"
+        child = Section(
+            "child", "30.4.1.3 Host stressed input", "Host stressed input", 4,
+            ("30.4.1.3 Host stressed input",), ("30.4.1.3",), 1, 1, fragment,
+        )
+        change = SectionChange(
+            "added", None, child, 0.0, added_snippets=[fragment]
+        )
+        visual = ProseSourceVisual(
+            1, (10.0, 10.0, 300.0, 200.0),
+            "data:image/png;base64,iVBORw0KGgo=", 0, 0, "source-figure-uncompared",
+        )
+        result = DiffResult(
+            Path("old.pdf"), Path("new.pdf"), [], [child], [change], [],
+            old_total_pages=1, new_total_pages=1,
+            prose_source_visuals=(
+                ProseSourceVisualGroup(
+                    "figure", None, "parent",
+                    new_figure_visuals=(visual,),
+                    new_figure_captions=("Figure 30-10. Host input test setup",),
+                    new_figure_texts=("Figure 30-10. Host input test setup TP1a HCB",),
+                ),
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            reports = [
+                paths[key].read_text(encoding="utf-8")
+                for key in ("html", "markdown", "text")
+            ]
+
+        for report in reports:
+            self.assertNotIn(fragment, report)
+
     def test_interleaved_figure_columns_are_removed_by_one_crop(self) -> None:
         """Column-interleaved letters still belong to one coordinate Figure."""
 

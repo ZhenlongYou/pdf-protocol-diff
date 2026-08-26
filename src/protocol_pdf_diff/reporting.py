@@ -332,18 +332,10 @@ def write_reports(
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     reader_changes: list[SectionChange] = []
-    old_figure_owner_ids = {
-        group.old_section_id
-        for group in result.prose_source_visuals
-        if group.old_figure_visuals and group.old_section_id is not None
-    }
-    new_figure_owner_ids = {
-        group.new_section_id
-        for group in result.prose_source_visuals
-        if group.new_figure_visuals and group.new_section_id is not None
-    }
     old_figure_texts_by_owner: dict[str, list[str]] = {}
     new_figure_texts_by_owner: dict[str, list[str]] = {}
+    old_figure_texts_by_page: dict[int, list[str]] = {}
+    new_figure_texts_by_page: dict[int, list[str]] = {}
     for group in result.prose_source_visuals:
         if group.old_section_id and group.old_figure_texts:
             old_figure_texts_by_owner.setdefault(group.old_section_id, []).extend(
@@ -353,36 +345,63 @@ def write_reports(
             new_figure_texts_by_owner.setdefault(group.new_section_id, []).extend(
                 group.new_figure_texts
             )
+        for visual, source_text in zip(
+            group.old_figure_visuals,
+            group.old_figure_texts,
+            strict=False,
+        ):
+            if compact_inline(source_text):
+                old_figure_texts_by_page.setdefault(visual.page_number, []).append(
+                    source_text
+                )
+        for visual, source_text in zip(
+            group.new_figure_visuals,
+            group.new_figure_texts,
+            strict=False,
+        ):
+            if compact_inline(source_text):
+                new_figure_texts_by_page.setdefault(visual.page_number, []).append(
+                    source_text
+                )
+
+    def figure_sources_for_section(
+        section: Section | None,
+        by_owner: dict[str, list[str]],
+        by_page: dict[int, list[str]],
+    ) -> tuple[str, ...]:
+        """Return individual crops owned by the section or its physical pages."""
+
+        if section is None:
+            return ()
+        observed = list(by_owner.get(section.section_id, ()))
+        for page_number in range(section.start_page, section.end_page + 1):
+            observed.extend(by_page.get(page_number, ()))
+        return tuple(dict.fromkeys(observed))
+
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
         if change.role == "document_metadata":
             continue
+        old_figure_sources = figure_sources_for_section(
+            change.old_section,
+            old_figure_texts_by_owner,
+            old_figure_texts_by_page,
+        )
+        new_figure_sources = figure_sources_for_section(
+            change.new_section,
+            new_figure_texts_by_owner,
+            new_figure_texts_by_page,
+        )
         reader_change = _reader_section_change(
             change,
             reader_table_evidence,
             figure_visual_sides=(
-                bool(
-                    change.old_section
-                    and change.old_section.section_id in old_figure_owner_ids
-                ),
-                bool(
-                    change.new_section
-                    and change.new_section.section_id in new_figure_owner_ids
-                ),
+                bool(old_figure_sources),
+                bool(new_figure_sources),
             ),
             figure_visual_texts=(
-                tuple(
-                    old_figure_texts_by_owner.get(
-                        change.old_section.section_id if change.old_section else "",
-                        (),
-                    )
-                ),
-                tuple(
-                    new_figure_texts_by_owner.get(
-                        change.new_section.section_id if change.new_section else "",
-                        (),
-                    )
-                ),
+                old_figure_sources,
+                new_figure_sources,
             ),
         )
         if reader_change is not None:
@@ -9656,6 +9675,7 @@ def _reader_change_without_coordinate_table_fragments(
         change,
         old_source_texts=old_sources,
         new_source_texts=new_sources,
+        allow_interleaved_prefix=False,
     )
 
 
@@ -9664,13 +9684,18 @@ def _reader_change_without_coordinate_owned_fragments(
     *,
     old_source_texts: tuple[str, ...],
     new_source_texts: tuple[str, ...],
+    allow_interleaved_prefix: bool = True,
 ) -> SectionChange | None:
     """Apply one coordinate-owned visual cleanup consistently to all deltas."""
 
     def clean_value(value: str, source_texts: tuple[str, ...]) -> str:
         if not source_texts:
             return value
-        return strip_coordinate_owned_visual_fragment(value, source_texts)
+        return strip_coordinate_owned_visual_fragment(
+            value,
+            source_texts,
+            allow_interleaved_prefix=allow_interleaved_prefix,
+        )
 
     def clean_lists(
         removed_values: list[str],
@@ -10819,15 +10844,28 @@ def _reader_change_without_evidenced_table_caption_fragments(
     new_tables = _reader_tables_for_change_side(change, table_evidence, side="new")
     removed = _reader_clean_single_side_table_fragments(change.removed_snippets, old_tables)
     added = _reader_clean_single_side_table_fragments(change.added_snippets, new_tables)
-    replaced = [
-        pair
-        for pair in change.replaced_snippets
-        if not _reader_replaced_table_reference_is_evidenced(
+    replaced: list[SnippetPair] = []
+    for pair in change.replaced_snippets:
+        if _reader_replaced_table_reference_is_evidenced(
             pair,
             change,
             table_evidence,
+        ):
+            continue
+        old_value = next(
+            iter(_reader_clean_single_side_table_fragments([pair.old], old_tables)),
+            "",
         )
-    ]
+        new_value = next(
+            iter(_reader_clean_single_side_table_fragments([pair.new], new_tables)),
+            "",
+        )
+        if old_value and new_value:
+            replaced.append(SnippetPair(old_value, new_value))
+        elif old_value:
+            removed.append(old_value)
+        elif new_value:
+            added.append(new_value)
     cleaned = replace(
         change,
         removed_snippets=removed,
@@ -10950,6 +10988,29 @@ def _reader_strip_evidenced_table_caption_prefix(
     """Remove an exact visual caption only when readable prose follows it."""
 
     compact = compact_inline(value)
+    known_numbers = {
+        number
+        for table in tables
+        if (number := _reader_table_title_number(table.title))
+    }
+    numbered_prefix = re.match(
+        rf"^table\s+(?P<number>\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?)\s*[.:]?\s*",
+        compact,
+        flags=re.I,
+    )
+    if numbered_prefix is not None:
+        number = normalize_table_number_dashes(numbered_prefix.group("number"))
+        remainder = compact[numbered_prefix.end() :].lstrip(" :-")
+        if number in known_numbers:
+            # Broken reading order sometimes appends a Figure caption directly
+            # after a Table caption.  The Table card owns everything before the
+            # next explicit Figure marker; the Figure crop then proves the rest.
+            figure_start = re.search(
+                r"(?i)\bfigure\s+\d+(?:[.-]\d+)+\s*[.:]?",
+                remainder,
+            )
+            if figure_start is not None:
+                return remainder[figure_start.start() :]
     for title in sorted(
         (compact_inline(table.title) for table in tables if compact_inline(table.title)),
         key=len,
@@ -10974,7 +11035,7 @@ def _reader_is_numbered_table_caption_fragment(
     """Recognize `9 10 Table 32-7.` only with a same-page visual identity."""
 
     match = re.fullmatch(
-        rf"(?:\d{{1,3}}\s+){{1,6}}table\s+"
+        rf"(?:\d{{1,3}}\s+){{0,6}}table\s+"
         rf"(?P<number>\d+(?:\s*{TABLE_NUMBER_DASH_CLASS}\s*\d+)?)\s*[.:]?",
         compact_inline(value),
         flags=re.I,
