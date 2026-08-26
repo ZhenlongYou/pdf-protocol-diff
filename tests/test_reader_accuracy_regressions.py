@@ -214,6 +214,108 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual(change.replaced_snippets, cleaned.replaced_snippets)
 
+    def test_coordinate_owned_figure_label_wall_is_removed_without_caption_prefix(self) -> None:
+        """Diagram labels are not prose merely because OCR lost the Figure caption."""
+
+        old_labels = (
+            "Host A Host B retimer function Fiber patchcord TP1 TP1a TP2 TP3 "
+            "Optical transmitter Optical receiver"
+        )
+        new_labels = (
+            "TP0 Channel Loss TP1a TP2 TP3 TP4a TP4 TP5 Host Tx Driver TIA "
+            "O E Host Rx"
+        )
+        old_section = Section(
+            "old-channel", "29.3.1 Channel", "Channel", 2,
+            ("29.3.1 Channel",), ("29.3.1",), 1, 1, old_labels,
+        )
+        new_section = Section(
+            "new-channel", "30.3.1 Channel", "Channel", 2,
+            ("30.3.1 Channel",), ("30.3.1",), 1, 1, new_labels,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.4,
+            replaced_snippets=[SnippetPair(old_labels, new_labels)],
+        )
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                figure_visual_sides=(True, True),
+                figure_visual_texts=((old_labels,), (new_labels,)),
+            )
+        )
+
+    def test_coordinate_figure_cleanup_keeps_neighboring_requirement(self) -> None:
+        """A one-sided diagram label must not hide unrelated normative prose."""
+
+        labels = (
+            "Host output TP1a reference Rx and measurement points Package Host "
+            "trace connector Oscilloscope Reference Equalizer Host ASIC CTLE FFE"
+        )
+        requirement = (
+            "The waveform at TP1a is observed through a reference receiver "
+            "with a bandwidth of 42 GHz."
+        )
+        old_section = Section(
+            "old-method", "29.4.1 Test", "Test", 2,
+            ("29.4.1 Test",), ("29.4.1",), 1, 1, requirement,
+        )
+        new_section = Section(
+            "new-method", "30.4.1 Test", "Test", 2,
+            ("30.4.1 Test",), ("30.4.1",), 1, 1, labels,
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.5,
+            removed_snippets=[requirement],
+            added_snippets=[labels],
+        )
+
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(False, True),
+            figure_visual_texts=((), (labels,)),
+        )
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([requirement], cleaned.removed_snippets)
+        self.assertEqual([], cleaned.added_snippets)
+
+    def test_coordinate_figure_prefix_is_stripped_from_following_prose(self) -> None:
+        """Mixed OCR blocks keep the prose suffix after coordinate-proven labels."""
+
+        labels = "module PCB host PCB AC Coupling Cap Module bare die"
+        prose = (
+            "The third recommended channel contains one connector and an AC "
+            "coupling capacitor."
+        )
+        section = Section(
+            "appendix", "16.D Channel", "Channel", 2,
+            ("16.D Channel",), (), 1, 1, f"{labels} {prose}",
+        )
+        change = SectionChange(
+            "added",
+            None,
+            section,
+            0.0,
+            added_snippets=[f"{labels} {prose}"],
+        )
+
+        cleaned = _reader_section_change(
+            change,
+            figure_visual_sides=(False, True),
+            figure_visual_texts=((), (labels,)),
+        )
+
+        self.assertIsNotNone(cleaned)
+        self.assertEqual([prose], cleaned.added_snippets)
+
     def test_renumbered_same_title_section_matches_without_figure_diagram_text(self) -> None:
         """Conflicting diagram labels must not split otherwise corresponding prose sections."""
 

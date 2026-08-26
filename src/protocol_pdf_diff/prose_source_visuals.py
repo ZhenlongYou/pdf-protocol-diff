@@ -86,6 +86,7 @@ class _FigureEvidence:
     caption: str
     visual: ProseSourceVisual
     document_order: int
+    source_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -276,6 +277,8 @@ def _build_visual_groups(
                 new_figure_visuals=((pair.new.visual,) if pair.new else ()),
                 old_figure_captions=((pair.old.caption,) if pair.old else ()),
                 new_figure_captions=((pair.new.caption,) if pair.new else ()),
+                old_figure_texts=((pair.old.source_text,) if pair.old else ()),
+                new_figure_texts=((pair.new.source_text,) if pair.new else ()),
                 figure_match_basis=pair.match_basis,
                 figure_similarity=pair.similarity,
             )
@@ -585,6 +588,8 @@ def _is_formula_row_member(
     # 分式的分子、分母常由 PDF 文字层拆成短变量行；编号邻域是必要门禁。
     has_formula_atom = bool(re.search(r"[A-Za-z]", compact))
     has_math_mark = bool(re.search(r"[=≤≥<>±×÷*/^()\-−–]", compact))
+    has_digit = bool(re.search(r"\d", compact))
+    atom_count = len(compact.split())
     horizontally_related = not (
         block.bbox[2] < anchor.bbox[0] - 220.0
         or block.bbox[0] > anchor.bbox[2] + 24.0
@@ -592,7 +597,7 @@ def _is_formula_row_member(
     return bool(
         horizontally_related
         and has_formula_atom
-        and (has_math_mark or len(compact) <= 32)
+        and (has_math_mark or atom_count == 1 or has_digit)
         and len(compact) <= 180
     )
 
@@ -916,6 +921,7 @@ def _collect_figure_evidence(
                 continue
             seen_regions.add(region_key)
             caption = _clean_figure_caption(caption_block.text)
+            source_text = _figure_crop_source_text(ordered_blocks, crop_bbox)
             visual = ProseSourceVisual(
                 page_number=page_number,
                 crop_bbox=crop_bbox,
@@ -939,12 +945,46 @@ def _collect_figure_evidence(
                 _FigureEvidence(
                     owner_section_id=owner_section_id,
                     caption=caption,
+                    source_text=source_text,
                     visual=visual,
                     document_order=page_number * 10000
                     + round(caption_block.bbox[1] * 10),
                 )
             )
     return tuple(sorted(evidence, key=lambda item: item.document_order))
+
+
+def _figure_crop_source_text(
+    blocks: tuple[DocumentBlock, ...],
+    crop_bbox: tuple[float, float, float, float],
+) -> str:
+    """Return internal text whose glyph centers lie inside one Figure crop."""
+
+    words: list[str] = []
+    for block in blocks:
+        if block.kind is DocumentBlockKind.TABLE:
+            continue
+        if block.word_boxes:
+            words.extend(
+                word
+                for word, x0, top, x1, bottom in block.word_boxes
+                if _bbox_center_inside((x0, top, x1, bottom), crop_bbox)
+            )
+            continue
+        if _bbox_center_inside(block.bbox, crop_bbox):
+            words.append(block.text)
+    return " ".join(" ".join(words).split())
+
+
+def _bbox_center_inside(
+    inner: tuple[float, float, float, float],
+    outer: tuple[float, float, float, float],
+) -> bool:
+    """Use glyph centers so crop-edge overlap cannot claim neighboring prose."""
+
+    center_x = (inner[0] + inner[2]) / 2.0
+    center_y = (inner[1] + inner[3]) / 2.0
+    return outer[0] <= center_x <= outer[2] and outer[1] <= center_y <= outer[3]
 
 
 def _is_caption_led_figure(value: str) -> bool:
@@ -1460,7 +1500,7 @@ def _assign_snippets_to_pages(
         # full-snippet coverage, so the screenshot does not begin mid-sentence.
         best_tokens = page_tokens[page_number]
         for adjacent_score, adjacent_page in scored:
-            if abs(adjacent_page - page_number) != 1 or score < 0.60:
+            if abs(adjacent_page - page_number) != 1:
                 continue
             adjacent_tokens = page_tokens[adjacent_page]
             unique_contribution = (
@@ -1470,7 +1510,7 @@ def _assign_snippets_to_pages(
                 snippet_tokens & (best_tokens | adjacent_tokens)
             ) / len(snippet_tokens)
             if (
-                adjacent_score >= 0.30
+                adjacent_score >= 0.20
                 and len(unique_contribution) >= 3
                 and union_coverage - score >= 0.12
             ):

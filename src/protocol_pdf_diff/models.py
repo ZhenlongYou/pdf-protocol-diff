@@ -503,6 +503,8 @@ class ProseSourceVisualGroup:
     new_figure_visuals: tuple[ProseSourceVisual, ...] = ()
     old_figure_captions: tuple[str, ...] = ()
     new_figure_captions: tuple[str, ...] = ()
+    old_figure_texts: tuple[str, ...] = field(default=(), repr=False)
+    new_figure_texts: tuple[str, ...] = field(default=(), repr=False)
     figure_match_basis: str = ""
     figure_similarity: float | None = None
     old_omitted_page_count: int = 0

@@ -17,7 +17,11 @@ from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 
-from .figure_filters import filter_figure_visual_snippets, is_figure_visual_pair
+from .figure_filters import (
+    filter_figure_visual_snippets,
+    is_figure_visual_pair,
+    strip_coordinate_owned_figure_fragment,
+)
 from .models import (
     DiffOptions,
     DiffResult,
@@ -337,6 +341,17 @@ def write_reports(
         for group in result.prose_source_visuals
         if group.new_figure_visuals and group.new_section_id is not None
     }
+    old_figure_texts_by_owner: dict[str, list[str]] = {}
+    new_figure_texts_by_owner: dict[str, list[str]] = {}
+    for group in result.prose_source_visuals:
+        if group.old_section_id and group.old_figure_texts:
+            old_figure_texts_by_owner.setdefault(group.old_section_id, []).extend(
+                group.old_figure_texts
+            )
+        if group.new_section_id and group.new_figure_texts:
+            new_figure_texts_by_owner.setdefault(group.new_section_id, []).extend(
+                group.new_figure_texts
+            )
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
         if change.role == "document_metadata":
@@ -352,6 +367,20 @@ def write_reports(
                 bool(
                     change.new_section
                     and change.new_section.section_id in new_figure_owner_ids
+                ),
+            ),
+            figure_visual_texts=(
+                tuple(
+                    old_figure_texts_by_owner.get(
+                        change.old_section.section_id if change.old_section else "",
+                        (),
+                    )
+                ),
+                tuple(
+                    new_figure_texts_by_owner.get(
+                        change.new_section.section_id if change.new_section else "",
+                        (),
+                    )
                 ),
             ),
         )
@@ -9385,6 +9414,7 @@ def _reader_section_change(
     ) = (),
     *,
     figure_visual_sides: tuple[bool, bool] = (False, False),
+    figure_visual_texts: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
@@ -9407,6 +9437,8 @@ def _reader_section_change(
         change,
         old_visual_available=figure_visual_sides[0],
         new_visual_available=figure_visual_sides[1],
+        old_visual_texts=figure_visual_texts[0],
+        new_visual_texts=figure_visual_texts[1],
     )
     if change is None:
         return None
@@ -9438,47 +9470,107 @@ def _reader_change_without_figure_visual_fragments(
     *,
     old_visual_available: bool,
     new_visual_available: bool,
+    old_visual_texts: tuple[str, ...] = (),
+    new_visual_texts: tuple[str, ...] = (),
 ) -> SectionChange | None:
     """Hide Figure text only when the same side has coordinate-backed raw pixels."""
 
-    removed = (
-        filter_figure_visual_snippets(change.removed_snippets)
-        if old_visual_available
-        else list(change.removed_snippets)
-    )
-    added = (
-        filter_figure_visual_snippets(change.added_snippets)
-        if new_visual_available
-        else list(change.added_snippets)
-    )
-    replaced = [
-        pair
-        for pair in change.replaced_snippets
-        if not (
-            old_visual_available
-            and new_visual_available
-            and is_figure_visual_pair(pair.old, pair.new)
+    def clean_value(
+        value: str,
+        *,
+        visual_available: bool,
+        visual_texts: tuple[str, ...],
+    ) -> str:
+        if not visual_available:
+            return value
+        return strip_coordinate_owned_figure_fragment(value, visual_texts)
+
+    def clean_side_values(
+        values: list[str],
+        *,
+        visual_available: bool,
+        visual_texts: tuple[str, ...],
+    ) -> list[str]:
+        cleaned = [
+            candidate
+            for value in values
+            if (
+                candidate := clean_value(
+                    value,
+                    visual_available=visual_available,
+                    visual_texts=visual_texts,
+                )
+            )
+        ]
+        if visual_available:
+            return filter_figure_visual_snippets(cleaned)
+        return cleaned
+
+    def clean_lists(
+        removed_values: list[str],
+        added_values: list[str],
+        replaced_values: list[SnippetPair],
+    ) -> tuple[list[str], list[str], list[SnippetPair]]:
+        cleaned_removed = clean_side_values(
+            removed_values,
+            visual_available=old_visual_available,
+            visual_texts=old_visual_texts,
         )
-    ]
-    audit_removed = (
-        filter_figure_visual_snippets(_audit_removed_snippets(change))
-        if old_visual_available
-        else list(_audit_removed_snippets(change))
-    )
-    audit_added = (
-        filter_figure_visual_snippets(_audit_added_snippets(change))
-        if new_visual_available
-        else list(_audit_added_snippets(change))
-    )
-    audit_replaced = [
-        pair
-        for pair in _audit_replaced_snippets(change)
-        if not (
-            old_visual_available
-            and new_visual_available
-            and is_figure_visual_pair(pair.old, pair.new)
+        cleaned_added = clean_side_values(
+            added_values,
+            visual_available=new_visual_available,
+            visual_texts=new_visual_texts,
         )
-    ]
+        cleaned_replaced: list[SnippetPair] = []
+        for pair in replaced_values:
+            old_value = clean_value(
+                pair.old,
+                visual_available=old_visual_available,
+                visual_texts=old_visual_texts,
+            )
+            new_value = clean_value(
+                pair.new,
+                visual_available=new_visual_available,
+                visual_texts=new_visual_texts,
+            )
+            if (
+                old_visual_available
+                and new_visual_available
+                and old_value
+                and new_value
+                and is_figure_visual_pair(old_value, new_value)
+            ):
+                continue
+            if old_visual_available and old_value:
+                old_value = next(
+                    iter(filter_figure_visual_snippets((old_value,))),
+                    "",
+                )
+            if new_visual_available and new_value:
+                new_value = next(
+                    iter(filter_figure_visual_snippets((new_value,))),
+                    "",
+                )
+            if not old_value and not new_value:
+                continue
+            if old_value and new_value:
+                cleaned_replaced.append(SnippetPair(old_value, new_value))
+            elif old_value:
+                cleaned_removed.append(old_value)
+            else:
+                cleaned_added.append(new_value)
+        return cleaned_removed, cleaned_added, cleaned_replaced
+
+    removed, added, replaced = clean_lists(
+        list(change.removed_snippets),
+        list(change.added_snippets),
+        list(change.replaced_snippets),
+    )
+    audit_removed, audit_added, audit_replaced = clean_lists(
+        list(_audit_removed_snippets(change)),
+        list(_audit_added_snippets(change)),
+        list(_audit_replaced_snippets(change)),
+    )
     omitted = change.omitted_snippet_count
     if all(
         audit is not None

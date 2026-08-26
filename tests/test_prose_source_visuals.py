@@ -627,6 +627,41 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         self.assertGreaterEqual(boxes[0][3], 606.0)
         self.assertLess(boxes[0][3], 621.0)
 
+    def test_short_sentence_above_equation_is_not_claimed_as_formula_script(self) -> None:
+        """A terse prose continuation must remain visible above a displayed equation."""
+
+        prose = DocumentBlock(
+            12,
+            (72.0, 180.0, 132.0, 192.0),
+            DocumentBlockKind.TEXT,
+            "CEI signal.",
+            0,
+            "test",
+        )
+        equation = DocumentBlock(
+            12,
+            (245.0, 220.0, 535.0, 234.0),
+            DocumentBlockKind.TEXT,
+            "EECQ = 20log10(VMA/(6QtR)) (29-3)",
+            1,
+            "test",
+        )
+        script = DocumentBlock(
+            12,
+            (320.0, 225.0, 410.0, 236.0),
+            DocumentBlockKind.TEXT,
+            "10 eecq t",
+            2,
+            "test",
+        )
+        page = SimpleNamespace(blocks=(prose, equation, script))
+
+        formula_bbox = _formula_block_bboxes_by_page({12: page})[12][0]
+
+        self.assertGreater(formula_bbox[1], prose.bbox[3])
+        self.assertLessEqual(formula_bbox[1], equation.bbox[1])
+        self.assertGreaterEqual(formula_bbox[3], script.bbox[3])
+
     def test_numbered_section_headings_bound_prose_crops(self) -> None:
         """A following section heading belongs to its own card, never the prior one."""
 
@@ -1004,6 +1039,42 @@ class ProseSourceVisualReportTests(unittest.TestCase):
         assigned = _assign_snippets_to_pages(section, (section.body,))
 
         self.assertEqual({10, 11}, set(assigned))
+
+    def test_balanced_cross_page_sentence_keeps_both_physical_pages(self) -> None:
+        """A sentence split near its midpoint must not be cropped after page one."""
+
+        sentence = (
+            "Crosstalk sources use a QPRBS13 CEI test pattern as defined in "
+            "Appendix 16 C 3 1 or a QPRBS31 CEI test pattern as defined in "
+            "Appendix 16 C 3 2 or a valid CEI signal."
+        )
+        section = Section(
+            "balanced-cross-page",
+            "29.3.12 EECQ",
+            "EECQ",
+            1,
+            ("29.3.12 EECQ",),
+            ("29.3.12",),
+            12,
+            13,
+            sentence,
+            page_bodies=(
+                (
+                    12,
+                    "Crosstalk sources use a QPRBS13 CEI test pattern as defined "
+                    "in Appendix",
+                ),
+                (
+                    13,
+                    "16 C 3 1 or a QPRBS31 CEI test pattern as defined in "
+                    "Appendix 16 C 3 2 or a valid CEI signal.",
+                ),
+            ),
+        )
+
+        assigned = _assign_snippets_to_pages(section, (sentence,))
+
+        self.assertEqual({12, 13}, set(assigned))
 
     def test_crop_stops_before_blocker_with_glyph_safety_gap(self) -> None:
         """A crop ending above a formula must not include the next row's glyph tops."""
