@@ -10160,12 +10160,13 @@ def _reader_evidenced_fragment_flags(
             # Structured rows insert `=` and move values into another field,
             # so literal counting can understate a short row fragment.  The
             # exact token multiset supplies the remaining occurrence budget.
+            available = _reader_table_text_index(bound_text).token_counts
             demand = Counter(
                 token.casefold()
                 for token in _reader_table_body_tokens(snippets[index])
                 if token != "—"
+                and available[token.casefold()] > 0
             )
-            available = _reader_table_text_index(bound_text).token_counts
             token_capacity = min(
                 (available[token] // count for token, count in demand.items()),
                 default=0,
@@ -10236,8 +10237,8 @@ def _reader_filter_evidenced_table_fragments(
             continue
         visible = _reader_strip_evidenced_table_suffix(
             snippet,
-            bound_texts[index]
-            or _reader_nearby_table_fallback_text(section, table_text),
+            _reader_nearby_table_fallback_text(section, table_text)
+            or bound_texts[index],
         )
         if visible:
             kept.append(visible)
@@ -10276,13 +10277,13 @@ def _reader_filter_evidenced_table_pairs(
         if not (old_covered and new_covered):
             old_visible = _reader_strip_evidenced_table_suffix(
                 pair.old,
-                old_bound_texts[index]
-                or _reader_nearby_table_fallback_text(old_section, old_table_text),
+                _reader_nearby_table_fallback_text(old_section, old_table_text)
+                or old_bound_texts[index],
             )
             new_visible = _reader_strip_evidenced_table_suffix(
                 pair.new,
-                new_bound_texts[index]
-                or _reader_nearby_table_fallback_text(new_section, new_table_text),
+                _reader_nearby_table_fallback_text(new_section, new_table_text)
+                or new_bound_texts[index],
             )
             if old_visible and new_visible:
                 kept.append(SnippetPair(old_visible, new_visible))

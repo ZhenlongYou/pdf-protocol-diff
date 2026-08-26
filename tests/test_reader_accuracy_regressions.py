@@ -3257,6 +3257,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                             new_voltage_row,
                             "- 15 mV",
                             "Peak to Peak AC Common Mode Voltage See Note 1,",
+                            "Peak to Peak AC Common Mode Voltage See Note 1,",
                         )
                     ),
                 ),
@@ -3269,6 +3270,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             0.9,
             added_snippets=[
                 "- 15 mV",
+                "Peak to Peak AC Common Mode Voltage See Note 1,",
                 "Peak to Peak AC Common Mode Voltage See Note 1,",
             ],
             removed_snippets=["See Section", "Mismatch 29.3.8"],
@@ -3300,7 +3302,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             row_texts=(
                 "Parameter Min. Max. Unit Conditions Test Point",
                 "Differential Voltage, pk-pk 300 700 mV Host can request voltage level within this range.",
-                "Peak to Peak AC Common Mode Voltage Min=- Max=15 Unit=mV See Note 1",
+                "Peak to Peak AC Common Mode Voltage Low Frequency Min=- Max=15 Unit=mV See Note1, Section 1",
+                "Peak to Peak AC Common Mode Voltage Full Band Min=- Max=60 Unit=mV See Note1, Section 1",
             ),
         )
         evidence = TableChange("review", (old_table,), (new_table,), 0.8, True, ())
