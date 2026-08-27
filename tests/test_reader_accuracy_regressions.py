@@ -465,6 +465,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 paths[key].read_text(encoding="utf-8")
                 for key in ("html", "markdown", "text")
             ]
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
 
         self.assertEqual(
             prose,
@@ -477,6 +478,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             self.assertNotIn(prose, report)  # 相同正文不能伪装成修改卡片。
             self.assertNotIn("Oscilloscope", report)
             self.assertNotIn("esnopseR", report)
+        self.assertIn("Oscilloscope", payload["changes"][0]["replaced_snippets"][0]["new"])
+        self.assertEqual([], payload["changes"][0]["display_replaced_snippets"])
+        self.assertEqual("", payload["changes"][0]["summary"])
+        self.assertEqual(0, payload["changes"][0]["display_omitted_snippet_count"])
 
     def test_two_figure_crops_cannot_union_delete_one_sentence(self) -> None:
         """Separate crops cannot combine token budgets to claim real prose."""
@@ -1169,6 +1174,52 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 "The low frequency response is measured.",
             )
         )
+
+    def test_json_display_projection_matches_reader_safe_cosmetic_filtering(self) -> None:
+        """JSON display fields and summary must describe the same facts as HTML/MD/TXT."""
+
+        old_section = Section(
+            "old-filter", "1 Filter", "Filter", 1,
+            ("1 Filter",), ("1",), 1, 1, "Old filter requirements.",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-filter",
+            heading="2 Filter",
+            heading_path=("2 Filter",),
+            number_path=("2",),
+            body="New filter requirements.",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.8,
+            replaced_snippets=[
+                SnippetPair("The limit is 30 GHz.", "The limit is 60 GHz."),
+                SnippetPair("The low-frequency response is measured.", "The low- frequency response is measured."),
+                SnippetPair("See Section 13.3.6.", "See Section 13.3.6"),
+            ],
+        )
+        result = DiffResult(
+            Path("old.pdf"), Path("new.pdf"),
+            [old_section], [new_section], [change], [],
+            old_total_pages=1, new_total_pages=1,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(result, temp_dir, DiffOptions())
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+
+        serialized = payload["changes"][0]
+        self.assertEqual(3, len(serialized["replaced_snippets"]))
+        self.assertEqual(
+            [{"old": "The limit is 30 GHz.", "new": "The limit is 60 GHz."}],
+            serialized["display_replaced_snippets"],
+        )
+        self.assertIn("1 处替换", serialized["summary"])
+        self.assertNotIn("3 处替换", serialized["summary"])
+        self.assertEqual(0, serialized["display_omitted_snippet_count"])
 
     def test_matching_generic_table_headers_ignore_one_wrapped_subscript(self) -> None:
         """A header glyph split after its unit cannot become a table row edit."""

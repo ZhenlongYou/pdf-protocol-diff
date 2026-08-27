@@ -38,11 +38,13 @@
 - 高度相关文档的章节匹配新增文档级单调锚点救援：`Data Patterns` 这类同标题、短引用正文可合并为修改，`AC Common Mode Noise` 这类带共同外部 Clause 定位的改名章节也可正确配对；双侧显式页窗仍优先服从用户锚点，不被文档级规则覆盖。
 - 读者层会丢弃清洗后旧文等于新文的伪替换；软换行造成的 `low- frequency`、句末标点、表格下标被拆成 `z (mm) p` 等版面噪声不再发布为技术变化。共享的通用表头只在全部单元格等价且存在坐标抽取折行证据时去重，原始截图仍完整保留。
 - 面向读者的 HTML、Markdown、TXT 将可证明的私用字体字形规范化成 Unicode 下标和符号；JSON/CSV 继续保留原始抽取值供审计，避免以显示修复覆盖证据。
+- JSON 同时提供完整 raw/audit 字段与和 HTML、Markdown、TXT 一致的 `display_*` 投影；显示摘要不再计入已过滤的软断词、标点、Table/Figure OCR 残片。历史 `omitted_snippet_count` 保持原始审计语义，新增 `display_omitted_snippet_count` 明示读者层省略数。
 
 ## 当前状态或阻塞
 
 - 没有实现阻塞。相关回归已覆盖截图优先、逐词浅色坐标、Table/Figure/Formula 互斥、全文 Figure 配对、父子章节合并、显示公式关闭、页边行号、换行标题和完整段落截图。
 - 当前代码完整测试为 1198 项通过、1909 个子用例通过，耗时 513.73 秒；`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
+- JSON 显示投影追加后再次运行完整套件：1198 项和 1909 个子用例通过，唯一失败暴露了 `omitted_snippet_count` 的历史 raw 契约；改为保留原字段并新增显示计数后，相关 4 项回归、编译检查和 GUI 冒烟全部通过。
 - 初次独立审核发现的 Figure/Table 标签残片、`Data Patterns` 拆成新增/删除、Table 30-11 `Zp` 表头假差异、软断词及句点误报均已增加回归并修复。提交后必须重新生成真实 OIF 成品，使 `provenance.build_commit` 绑定确切提交，再让三个独立 agent 复审同一份最终报告和全部联系表。
 - 真实 OIF 比对必须继续保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
 - 最终验收证据不在仓库中伪造固定数字；以 `/Users/mac/Desktop/test/pdf_protocol_diff_oif_final_verified/` 下最终报告、静态摘要、联系表和独立 agent 审核为准。

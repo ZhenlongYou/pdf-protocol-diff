@@ -423,6 +423,10 @@ def write_reports(
             start=1,
         )
     }
+    reader_changes_by_identity = {
+        _section_change_reader_identity(change): change
+        for change in reader_changes
+    }
     reader_table_card_ids = {
         _table_change_reader_identity(change): f"T{index}"
         for index, change in enumerate(reader_table_changes, start=1)
@@ -430,7 +434,7 @@ def write_reports(
     reader_result = replace(
         result,
         changes=reader_changes,
-    )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 继续保存原始比较事实。
+    )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 的 raw 字段继续保存原始比较事实。
     markdown = _render_markdown(reader_result, options, reader_table_changes)
     html = _render_html(
         reader_result,
@@ -452,7 +456,20 @@ def write_reports(
         "new_selected_pages": _selected_page_payload(result, "new"),
         "changes": [
             {
-                **_change_to_dict(change),
+                **_change_to_dict(
+                    change,
+                    display_change=reader_changes_by_identity.get(
+                        _section_change_reader_identity(change)
+                    )
+                    or replace(
+                        change,
+                        added_snippets=[],
+                        removed_snippets=[],
+                        replaced_snippets=[],
+                        review_replaced_snippets=[],
+                        omitted_snippet_count=0,
+                    ),
+                ),
                 "reader_card_id": reader_change_card_ids.get(
                     _section_change_reader_identity(change)
                 ),
@@ -12973,12 +12990,17 @@ def _selected_page_payload(result: DiffResult, side: str) -> dict[str, object]:
     }
 
 
-def _change_to_dict(change: SectionChange) -> dict[str, object]:
-    """Serialize one user-facing section change for machine-readable reports."""
+def _change_to_dict(
+    change: SectionChange,
+    *,
+    display_change: SectionChange | None = None,
+) -> dict[str, object]:
+    """Serialize raw audit facts plus one reader-safe display projection."""
 
     audit_added = _audit_added_snippets(change)
     audit_removed = _audit_removed_snippets(change)
     audit_replaced = _audit_replaced_snippets(change)
+    visible = display_change or change
     return {
         "change_type": change.change_type,
         "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
@@ -13005,19 +13027,20 @@ def _change_to_dict(change: SectionChange) -> dict[str, object]:
             change.match_basis,
             change.match_basis,
         ),
-        "summary": _change_summary(change),
-        "change_nature": _change_natures(change),
+        "summary": _change_summary(visible),
+        "change_nature": _change_natures(visible),
         "added_snippets": list(audit_added),
         "removed_snippets": list(audit_removed),
         "replaced_snippets": [
             {"old": pair.old, "new": pair.new} for pair in audit_replaced
         ],
-        "display_added_snippets": list(change.added_snippets),
-        "display_removed_snippets": list(change.removed_snippets),
+        "display_added_snippets": list(visible.added_snippets),
+        "display_removed_snippets": list(visible.removed_snippets),
         "display_replaced_snippets": [
-            {"old": pair.old, "new": pair.new} for pair in change.replaced_snippets
+            {"old": pair.old, "new": pair.new} for pair in visible.replaced_snippets
         ],
         "omitted_snippet_count": change.omitted_snippet_count,
+        "display_omitted_snippet_count": visible.omitted_snippet_count,
         "snippet_audit_complete": True,
     }
 
