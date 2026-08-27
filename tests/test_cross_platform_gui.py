@@ -5,6 +5,8 @@ from __future__ import annotations
 import os  # DISPLAY 判断让 Linux 无桌面环境时明确跳过真实 Tk 窗口测试。
 import subprocess  # 通过真实 main.py 子进程验证 PyCharm/命令行 GUI smoke 入口。
 import sys  # 当前平台用于判断 macOS 与 Windows 是否能直接创建桌面窗口。
+import threading
+import tempfile
 import tkinter as tk  # 真实 Tk 根窗口用于验证普通 tk.Entry 也收到统一字体。
 import tkinter.font as tkfont  # 把控件字体描述解析为实际 family，避免比较平台相关字符串格式。
 import unittest  # 沿用项目现有标准库测试框架，避免为 GUI 样式测试增加运行依赖。
@@ -24,9 +26,11 @@ from protocol_pdf_diff.desktop_gui import (  # 导入真实应用和纯选择逻
     ProtocolDiffDesktopApp,
     configure_windows_dpi_awareness,
     create_tk_root,
+    page_range_values,
     responsive_window_size,
     select_ui_font,
 )
+from protocol_pdf_diff.progress import ProgressEvent
 
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -91,6 +95,10 @@ class CrossPlatformGuiTests(unittest.TestCase):
         self.assertEqual(
             (720, 500), small_screen
         )  # 屏幕小于设计下限时以实际屏幕尺寸为硬上限。
+
+    def test_all_pages_mode_ignores_but_preserves_range_values(self) -> None:
+        self.assertEqual((None, None), page_range_values("all", "16", "18", "旧协议"))
+        self.assertEqual((16, 18), page_range_values("range", "16", "18", "旧协议"))
 
     def test_windows_dpi_awareness_is_set_before_tk_and_other_platforms_are_noop(
         self,
@@ -303,13 +311,21 @@ class CrossPlatformGuiTests(unittest.TestCase):
                 app.content_scrollbar.winfo_exists()
             )  # 用户必须看得见可发现的垂直滚动控件。
             root.deiconify()  # 映射真实窗口后，Tk 才会派发与用户滚轮一致的窗口事件。
+            root.geometry("1120x720+0+0")
+            root.update()
+            app._update_content_scrollregion()
+            self.assertEqual(
+                "", app.content_scrollbar.winfo_manager()
+            )  # 默认尺寸内容适配时不应常驻一条无作用的滚动条。
             root.geometry(
                 "760x520+0+0"
             )  # 压缩到响应式下限，确保完整表单高度超过当前视口。
             root.update()  # 让 Canvas 写入最终 scrollregion，并接收后续鼠标滚轮事件。
-            page_entry = next(
-                iter(app.page_entry_widgets.values())
-            )  # 从真实子控件派发事件，覆盖鼠标位于输入框上时的冒泡路径。
+            app._update_content_scrollregion()
+            self.assertEqual(
+                "grid", app.content_scrollbar.winfo_manager()
+            )  # 窄屏堆叠发生真实溢出时必须重新显示滚动条。
+            event_target = app.old_document_card  # 默认隐藏的页码框不能接收用户滚轮；从当前可见文档卡验证事件冒泡。
             app.content_canvas.yview_moveto(
                 0.0
             )  # 每组方向检查从顶部开始，避免前一事件污染边界条件。
@@ -317,14 +333,14 @@ class CrossPlatformGuiTests(unittest.TestCase):
             before_mousewheel = (
                 app.content_canvas.yview()
             )  # 记录 Windows/macOS 滚轮前的可见区比例。
-            page_entry.event_generate(
+            event_target.event_generate(
                 "<MouseWheel>", delta=-120
             )  # 模拟 Windows/macOS 向下滚动一格。
             root.update()  # 处理滚轮回调并刷新 Canvas 视口。
             after_mousewheel_down = (
                 app.content_canvas.yview()
             )  # 读取向下滚动后的可见区比例。
-            page_entry.event_generate(
+            event_target.event_generate(
                 "<MouseWheel>", delta=120
             )  # 正 delta 必须把内容向上移回，不能只验证一个方向。
             root.update()
@@ -337,12 +353,12 @@ class CrossPlatformGuiTests(unittest.TestCase):
             before_linux_wheel = (
                 app.content_canvas.yview()
             )  # 记录 Button-5 派发前的可见区比例。
-            page_entry.event_generate("<Button-5>")  # Linux Button-5 表示内容向下移动。
+            event_target.event_generate("<Button-5>")  # Linux Button-5 表示内容向下移动。
             root.update()
             after_button_5 = (
                 app.content_canvas.yview()
             )  # 读取 Linux 向下滚动后的可见区比例。
-            page_entry.event_generate("<Button-4>")  # Linux Button-4 表示内容向上移动。
+            event_target.event_generate("<Button-4>")  # Linux Button-4 表示内容向上移动。
             root.update()
             after_button_4 = (
                 app.content_canvas.yview()
@@ -362,6 +378,223 @@ class CrossPlatformGuiTests(unittest.TestCase):
             )  # Linux Button-4 必须向上，并且事件从子 Entry 也能到达根窗口绑定。
         finally:
             root.destroy()  # 释放真实窗口，避免影响其它 Tk 测试的默认根状态。
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk workbench test needs a desktop session",
+    )
+    def test_application_exposes_dual_document_cards_and_collapsed_advanced_settings(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            root.update_idletasks()
+
+            self.assertEqual((1120, 720), app.design_window_size)
+            self.assertEqual("all", app.old_page_mode_var.get())
+            self.assertEqual("all", app.new_page_mode_var.get())
+            self.assertFalse(app.auto_open_var.get())
+            self.assertFalse(app.advanced_expanded)
+            self.assertEqual("", app.advanced_body.master.winfo_manager())
+            self.assertEqual("", app.old_range_frame.winfo_manager())
+            self.assertEqual("", app.new_range_frame.winfo_manager())
+
+            app.old_start_var.set("16")
+            app.old_end_var.set("18")
+            app.old_page_mode_var.set("range")
+            app._sync_page_mode("old")
+            root.update_idletasks()
+            self.assertEqual("grid", app.old_range_frame.winfo_manager())
+            app.old_page_mode_var.set("all")
+            app._sync_page_mode("old")
+            self.assertEqual("16", app.old_start_var.get())
+            self.assertEqual("18", app.old_end_var.get())
+
+            app._apply_responsive_layout(1120)
+            self.assertEqual("side-by-side", app.document_layout_mode)
+            app._apply_responsive_layout(760)
+            self.assertEqual("stacked", app.document_layout_mode)
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk state test needs a desktop session",
+    )
+    def test_running_state_locks_and_restores_all_inputs(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            root.update_idletasks()
+            app._set_running(True)
+            self.assertTrue(app.is_running)
+            self.assertIsNotNone(app._elapsed_after_id)
+            first_timer_id = app._elapsed_after_id
+            self.assertTrue(all(str(widget.cget("state")) == "disabled" for widget in app.input_widgets))
+            app._set_running(False)
+            self.assertFalse(app.is_running)
+            self.assertIsNone(app._elapsed_after_id)
+            self.assertNotIn(first_timer_id, root.tk.call("after", "info"))
+            self.assertTrue(all(str(widget.cget("state")) != "disabled" for widget in app.input_widgets))
+
+            app._set_running(True)
+            second_timer_id = app._elapsed_after_id
+            self.assertNotEqual(first_timer_id, second_timer_id)
+            root.after_cancel(second_timer_id)
+            app._elapsed_after_id = None
+            app._tick_elapsed()
+            rescheduled_timer_id = app._elapsed_after_id
+            self.assertIsNotNone(rescheduled_timer_id)
+            app._set_running(False)
+            pending_timers = root.tk.call("after", "info")
+            self.assertNotIn(second_timer_id, pending_timers)
+            self.assertNotIn(rescheduled_timer_id, pending_timers)
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk worker failure test needs a desktop session",
+    )
+    def test_thread_start_failure_restores_inputs_and_shows_inline_error(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            app._set_running(True)
+            with (
+                mock.patch.object(threading.Thread, "start", side_effect=RuntimeError("no thread")),
+                mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showerror"),
+            ):
+                app._start_worker(mock.Mock())
+            self.assertFalse(app.is_running)
+            self.assertIn("no thread", app.summary_var.get())
+            self.assertTrue(all(str(widget.cget("state")) != "disabled" for widget in app.input_widgets))
+        finally:
+            root.destroy()
+
+    def test_open_html_failure_is_non_destructive_and_user_visible(self) -> None:
+        app = object.__new__(ProtocolDiffDesktopApp)
+        app._last_outputs = {"html": Path("/tmp/report.html")}
+        with (
+            mock.patch("protocol_pdf_diff.desktop_gui.webbrowser.open", return_value=False),
+            mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning,
+        ):
+            app.open_html_report()
+        warning.assert_called_once()
+
+        with (
+            mock.patch(
+                "protocol_pdf_diff.desktop_gui.webbrowser.open",
+                side_effect=OSError("browser unavailable"),
+            ),
+            mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning,
+        ):
+            app.open_html_report()
+        warning.assert_called_once()
+
+    def test_open_report_directory_failure_is_user_visible(self) -> None:
+        app = object.__new__(ProtocolDiffDesktopApp)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app._last_outputs = {"report_dir": Path(temp_dir)}
+            with (
+                mock.patch("protocol_pdf_diff.desktop_gui.open_path", return_value=False),
+                mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning,
+            ):
+                app.open_report_directory()
+            warning.assert_called_once()
+
+            with (
+                mock.patch(
+                    "protocol_pdf_diff.desktop_gui.open_path",
+                    side_effect=OSError("file manager unavailable"),
+                ),
+                mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning,
+            ):
+                app.open_report_directory()
+            warning.assert_called_once()
+
+    def test_close_request_is_blocked_while_report_is_running(self) -> None:
+        app = object.__new__(ProtocolDiffDesktopApp)
+        app.root = mock.Mock()
+        app.is_running = True
+        with mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning:
+            app._on_close_requested()
+        warning.assert_called_once()
+        app.root.destroy.assert_not_called()
+
+        app.is_running = False
+        app._on_close_requested()
+        app.root.destroy.assert_called_once_with()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk validation test needs a desktop session",
+    )
+    def test_empty_output_directory_is_rejected_instead_of_using_cwd(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                old_pdf = Path(temp_dir) / "old.pdf"
+                new_pdf = Path(temp_dir) / "new.pdf"
+                old_pdf.touch()
+                new_pdf.touch()
+                app.old_pdf_var.set(str(old_pdf))
+                app.new_pdf_var.set(str(new_pdf))
+                app.output_dir_var.set("   ")
+                with self.assertRaisesRegex(ValueError, "输出目录不能为空"):
+                    app.collect_config()
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk progress test needs a desktop session",
+    )
+    def test_progress_uses_page_counts_only_for_extraction_and_failure_keeps_inputs(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            app.old_pdf_var.set("kept-old.pdf")
+            app._set_running(True)
+            app._handle_progress(
+                ProgressEvent(
+                    stage="read_old",
+                    side="old",
+                    completed_pages=2,
+                    total_pages=3,
+                )
+            )
+            self.assertEqual("grid", app.progress.winfo_manager())
+            self.assertEqual(2.0, float(app.progress.cget("value")))
+            self.assertIn("第 2/3 页", app.status_var.get())
+
+            app._handle_progress(ProgressEvent(stage="match_diff"))
+            self.assertEqual("", app.progress.winfo_manager())
+            self.assertNotIn("%", app.status_var.get())
+            self.assertNotIn("页", app.status_var.get())
+
+            app._set_running(False)
+            with mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showerror"):
+                app._handle_error(RuntimeError("明确错误"))
+            self.assertEqual("kept-old.pdf", app.old_pdf_var.get())
+            self.assertIn("明确错误", app.summary_var.get())
+            self.assertIn("失败", app.status_var.get())
+
+            long_message = "首行错误\n" + "x" * 300
+            with mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showerror") as error_dialog:
+                app._handle_error(RuntimeError(long_message))
+            inline_summary = app.summary_var.get()
+            self.assertNotIn("\n", inline_summary)
+            self.assertLessEqual(len(inline_summary), 180)
+            self.assertIn("首行错误", inline_summary)
+            self.assertIn(long_message, error_dialog.call_args.args[1])
+        finally:
+            root.destroy()
 
 
 if __name__ == "__main__":

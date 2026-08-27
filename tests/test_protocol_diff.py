@@ -87,6 +87,7 @@ from protocol_pdf_diff.pdf_extract import (
     _table_screenshot_image,  # 表格截图不得带入半截表题或上一个内容块。
     extract_pdf_text,
 )
+from protocol_pdf_diff.quality import ReliabilityState
 from protocol_pdf_diff.reporting import (
     _inline_diff_html,
     _paired_table_visuals,
@@ -1788,6 +1789,83 @@ class ProtocolDiffTests(unittest.TestCase):
         summary_text = app.summary_var.set.call_args.args[0]
         self.assertIn("章节修改 0", summary_text)
         self.assertIn("表格变化 1", summary_text)
+
+    def test_desktop_summary_uses_the_same_reader_counts_as_the_report(self) -> None:
+        """Filtered reader cards, not raw audit facts, define the visible summary."""
+
+        raw_change = mock.Mock(change_type="modified")
+        result = mock.Mock(
+            changes=[raw_change] * 36,
+            assessment=mock.Mock(state=ReliabilityState.DEGRADED),
+        )
+        markdown = """# 协议 PDF 差异报告
+
+## 汇总
+
+| 类型 | 数量 |
+|---|---:|
+| 核心技术变化 | 15 |
+| 章节修改 / 新增 / 删除 | 14 / 1 / 0 |
+| 视觉漏检核对项 | 0 |
+| 变化表格 | 2 |
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            markdown_path = Path(temp_dir) / "protocol_diff_report.md"
+            markdown_path.write_text(markdown, encoding="utf-8")
+            app = object.__new__(ProtocolDiffDesktopApp)
+            app.summary_var = mock.Mock()
+            app.report_path_var = mock.Mock()
+            app.status_var = mock.Mock()
+            app.open_html_button = mock.Mock()
+            app.open_dir_button = mock.Mock()
+            app._handle_success(
+                DesktopRunSuccess(
+                    result=result,
+                    outputs={
+                        "html": Path(temp_dir) / "protocol_diff_report.html",
+                        "markdown": markdown_path,
+                    },
+                )
+            )
+
+        summary_text = app.summary_var.set.call_args.args[0]
+        self.assertIn("正文章节差异 15", summary_text)
+        self.assertIn("章节修改 14，章节新增 1，章节删除 0", summary_text)
+        self.assertIn("表格变化 2", summary_text)
+        self.assertIn("视觉差异项 0", summary_text)
+        self.assertIn("视觉校对需人工复核", summary_text)
+        self.assertNotIn("正文章节差异 36", summary_text)
+
+    def test_desktop_summary_does_not_fall_back_to_raw_counts_when_report_is_malformed(self) -> None:
+        """An unreadable reader summary must fail closed instead of contradicting HTML."""
+
+        raw_change = mock.Mock(change_type="modified")
+        result = mock.Mock(
+            changes=[raw_change] * 36,
+            assessment=mock.Mock(state=ReliabilityState.DEGRADED),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            markdown_path = Path(temp_dir) / "protocol_diff_report.md"
+            markdown_path.write_text("not a report summary", encoding="utf-8")
+            app = object.__new__(ProtocolDiffDesktopApp)
+            app.summary_var = mock.Mock()
+            app.report_path_var = mock.Mock()
+            app.status_var = mock.Mock()
+            app.open_html_button = mock.Mock()
+            app.open_dir_button = mock.Mock()
+            app._handle_success(
+                DesktopRunSuccess(
+                    result=result,
+                    outputs={
+                        "html": Path(temp_dir) / "protocol_diff_report.html",
+                        "markdown": markdown_path,
+                    },
+                )
+            )
+
+        summary_text = app.summary_var.set.call_args.args[0]
+        self.assertIn("正文和表格计数请查看报告", summary_text)
+        self.assertNotIn("36", summary_text)
 
     def test_extraction_requires_pdfplumber_without_pypdf_fallback(self) -> None:
         """Missing pdfplumber should fail clearly instead of using pypdf silently."""
@@ -5849,6 +5927,10 @@ class ProtocolDiffTests(unittest.TestCase):
                 app.min_similarity_var.set("0.8")  # 调整章节匹配阈值，验证高级参数仍能读取。
                 app.max_snippets_var.set("12")  # 调整片段数量，验证数字输入仍能读取。
                 app.include_unchanged_var.set(True)  # 打开未变化章节选项。
+                app.old_page_mode_var.set("range")
+                app.new_page_mode_var.set("range")
+                app._sync_page_mode("old")
+                app._sync_page_mode("new")
                 widget_texts = collect_widget_texts(root)  # 收集当前窗口所有可见控件文案。
 
                 page_values = {  # 这些值模拟用户逐个点击页码框并键盘输入。
@@ -5890,10 +5972,9 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIsNone(config.options.ocr_language)  # 图形界面不应暴露只在扫描页才生效的语言代码。
         self.assertTrue(config.options.include_unchanged_sections)
         self.assertEqual(str(default_output_dir()), str(Path.home() / "Documents" / "ProtocolPdfDiffReports"))  # 默认输出目录不能落到 app 包内部。
-        self.assertIn("旧协议起始页", widget_texts)  # 旧 PDF 起始页输入标签必须存在。
-        self.assertIn("旧协议终止页", widget_texts)  # 旧 PDF 终止页输入标签必须存在。
-        self.assertIn("新协议起始页", widget_texts)  # 新 PDF 起始页输入标签必须存在。
-        self.assertIn("新协议终止页", widget_texts)  # 新 PDF 终止页输入标签必须存在。
+        self.assertIn("旧版 PDF", widget_texts)
+        self.assertIn("新版 PDF", widget_texts)
+        self.assertIn("指定范围", widget_texts)
         self.assertIn("开始比较", widget_texts)  # 主运行按钮必须存在且文案保持简洁。
         self.assertNotIn("填入 Demo 文件", widget_texts)  # 用户界面不保留示例输入入口。
         self.assertNotIn("OCR 语言", widget_texts)
@@ -5911,7 +5992,7 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertEqual("grid", layout_manager, f"{label} 应该已加入布局")  # 防止控件存在但不可见。
             self.assertEqual(expected_page_values[label], typed_value, f"{label} 应该能接收键盘输入")  # 防止无法输入页码的回归。
         for button_text, button_command in browse_button_facts:
-            self.assertEqual("选择", button_text)  # 三个浏览按钮都应显示相同入口文案。
+            self.assertIn(button_text, {"选择", "选择 PDF"})
             self.assertTrue(button_command)  # 浏览按钮必须绑定文件/目录选择回调。
 
     def test_demo_pdfs_produce_modified_and_added_sections(self) -> None:
@@ -16745,7 +16826,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("视觉漏检核对", report_html)
         self.assertIn("图形变化未被文字、表格或公式差异覆盖", report_html)
         self.assertEqual(1, len(report_json["visual_review_items"]))
-        self.assertIn("视觉待核对 1", desktop_summary)
+        self.assertIn("视觉差异项 1", desktop_summary)
 
     def test_visual_watchdog_aligns_exact_text_pages_after_an_inserted_page(self) -> None:
         """A page insertion must not make the visual watchdog compare unrelated pages."""

@@ -9,13 +9,13 @@ already exercise.
 
 from __future__ import annotations
 
-import json
 import os
 import queue
 import math  # GUI 在启动后台任务前拒绝 NaN、Inf 和超出比例区间的阈值。
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from collections.abc import Callable  # 为可注入的 Win32 DPI setter 提供明确调用契约，便于跨平台测试。
 from dataclasses import dataclass
@@ -28,6 +28,7 @@ from tkinter import ttk
 from .compare import run_diff
 from .models import DiffOptions, DiffResult
 from .pdf_extract import MissingDependencyError, PdfReadError
+from .progress import ProgressEvent, notify_progress
 from .quality import ReliabilityState
 from .reporting import write_reports
 
@@ -49,6 +50,7 @@ UI_THEME = {
     "muted": "#A8AFBD",
     "accent": "#7D9EEC",
     "accent_active": "#6685D2",
+    "focus_ring": "#C5D2FF",
     "accent_soft": "#28324A",
     "accent_ink": "#111827",
     "browse_button": "#3D5078",
@@ -209,6 +211,27 @@ def parse_optional_page(value: str, label: str) -> int | None:
     return page
 
 
+def page_range_values(
+    mode: str,
+    start_value: str,
+    end_value: str,
+    label: str,
+) -> tuple[int | None, int | None]:
+    """Resolve a document page mode without discarding hidden range values."""
+
+    if mode == "all":
+        return None, None
+    if mode != "range":
+        raise ValueError(f"{label}页码模式无效。")
+    start = parse_optional_page(start_value, f"{label}起始页")
+    end = parse_optional_page(end_value, f"{label}终止页")
+    if start is None or end is None:
+        raise ValueError(f"{label}指定范围时必须填写起始页和终止页。")
+    if start > end:
+        raise ValueError(f"{label}起始页不能大于终止页。")
+    return start, end
+
+
 def parse_positive_float(value: str, label: str) -> float:
     """Parse a positive float from a compact tuning field."""
 
@@ -233,32 +256,56 @@ def parse_positive_int(value: str, label: str) -> int:
     return number
 
 
-def _reported_table_change_count(outputs: dict[str, Path]) -> int | None:
-    """Read the already-written report model so the GUI summary covers tables."""
+@dataclass(frozen=True)
+class ReaderReportSummary:
+    """Counts already filtered into the human-facing report."""
 
-    json_path = outputs.get("json")
-    if json_path is None:
+    body_changes: int
+    modified: int
+    added: int
+    deleted: int
+    table_changes: int
+    visual_items: int
+
+
+def _reported_reader_summary(outputs: dict[str, Path]) -> ReaderReportSummary | None:
+    """Read the Markdown summary so desktop and report never show different totals."""
+
+    markdown_path = outputs.get("markdown")
+    if markdown_path is None:
         return None
     try:
-        payload = json.loads(json_path.read_text(encoding="utf-8"))
-        table_changes = payload.get("table_changes")
-    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        lines = markdown_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
         return None
-    return len(table_changes) if isinstance(table_changes, list) else None
-
-
-def _reported_visual_review_count(outputs: dict[str, Path]) -> int | None:
-    """Read the page-level watchdog count shown in the non-technical summary."""
-
-    json_path = outputs.get("json")
-    if json_path is None:
-        return None
+    values: dict[str, str] = {}
+    in_summary = False
+    for line in lines:
+        if line.strip() == "## 汇总":
+            in_summary = True
+            continue
+        if in_summary and line.startswith("## "):
+            break
+        if not in_summary:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 2:
+            values[cells[0]] = cells[1]
     try:
-        payload = json.loads(json_path.read_text(encoding="utf-8"))
-        visual_items = payload.get("visual_review_items")
-    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        modified, added, deleted = (
+            int(value.strip())
+            for value in values["章节修改 / 新增 / 删除"].split("/")
+        )
+        return ReaderReportSummary(
+            body_changes=int(values["核心技术变化"]),
+            modified=modified,
+            added=added,
+            deleted=deleted,
+            table_changes=int(values["变化表格"]),
+            visual_items=int(values["视觉漏检核对项"]),
+        )
+    except (KeyError, ValueError):
         return None
-    return len(visual_items) if isinstance(visual_items, list) else None
 
 
 class ProtocolDiffDesktopApp:
@@ -267,14 +314,15 @@ class ProtocolDiffDesktopApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("协议 PDF 差异对比工具")
+        self.design_window_size = (1120, 720)
         self.initial_window_size = responsive_window_size(
             self.root.winfo_screenwidth(),
             self.root.winfo_screenheight(),
-            target_width=980,
-            target_height=700,
+            target_width=self.design_window_size[0],
+            target_height=self.design_window_size[1],
             floor_width=760,
             floor_height=520,
-        )  # 保留 macOS 既有 980×700 观感，Windows 高 DPI 逻辑屏较小时自动收进屏幕。
+        )
         self.root.geometry(
             f"{self.initial_window_size[0]}x{self.initial_window_size[1]}"
         )  # 显式初始尺寸消除不同 Tk 平台按请求尺寸推导出的启动差异。
@@ -292,10 +340,13 @@ class ProtocolDiffDesktopApp:
         self.old_end_var = tk.StringVar()
         self.new_start_var = tk.StringVar()
         self.new_end_var = tk.StringVar()
+        self.old_page_mode_var = tk.StringVar(value="all")
+        self.new_page_mode_var = tk.StringVar(value="all")
         self.min_similarity_var = tk.StringVar(value="0.72")
         self.max_snippets_var = tk.StringVar(value="20")
         self.include_unchanged_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="请选择旧版和新版 PDF，设置范围后开始比较。")
+        self.auto_open_var = tk.BooleanVar(value=False)
+        self.status_var = tk.StringVar(value="空闲 · 请选择旧版和新版 PDF。")
         self.summary_var = tk.StringVar(value="尚未生成报告")
         self.report_path_var = tk.StringVar(value="")
 
@@ -303,9 +354,18 @@ class ProtocolDiffDesktopApp:
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.page_entry_widgets: dict[str, tk.Entry] = {}  # 保存四个原生页码输入框，供 smoke test 检查真实输入能力。
         self.file_browse_buttons: list[ttk.Button] = []  # 保存三个“选择”按钮，供打包后自测确认按钮存在。
+        self.input_widgets: list[tk.Widget] = []
+        self._input_states: dict[tk.Widget, str] = {}
+        self.advanced_expanded = False
+        self.document_layout_mode = "side-by-side"
+        self.is_running = False
+        self._run_started_at: float | None = None
+        self._current_progress_event: ProgressEvent | None = None
+        self._elapsed_after_id: str | None = None
 
         self._configure_style()
         self._build_layout()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
     def _configure_style(self) -> None:
         """Apply a precise, high-contrast visual system without moving the layout."""
@@ -403,9 +463,11 @@ class ProtocolDiffDesktopApp:
                 ("pressed", UI_THEME["browse_button_active"]),
             ],
             bordercolor=[
-                ("focus", UI_THEME["accent"]),
+                ("focus", UI_THEME["focus_ring"]),
                 ("active", UI_THEME["browse_button_border"]),
             ],
+            lightcolor=[("focus", UI_THEME["focus_ring"])],
+            darkcolor=[("focus", UI_THEME["focus_ring"])],
         )
         style.configure(
             "Primary.TButton",
@@ -426,6 +488,9 @@ class ProtocolDiffDesktopApp:
                 ("disabled", UI_THEME["disabled_accent"]),
             ],
             foreground=[("disabled", UI_THEME["disabled_accent_ink"])],
+            bordercolor=[("focus", UI_THEME["focus_ring"])],
+            lightcolor=[("focus", UI_THEME["focus_ring"])],
+            darkcolor=[("focus", UI_THEME["focus_ring"])],
         )
         style.configure(
             "TCheckbutton",
@@ -436,8 +501,35 @@ class ProtocolDiffDesktopApp:
         )
         style.map(
             "TCheckbutton",
-            foreground=[("disabled", UI_THEME["disabled_ink"])],
+            foreground=[("focus", UI_THEME["focus_ring"]), ("disabled", UI_THEME["disabled_ink"])],
+            background=[("focus", UI_THEME["accent_soft"])],
             indicatorcolor=[("selected", UI_THEME["accent"]), ("active", UI_THEME["accent_soft"])],
+        )
+        style.configure(
+            "TRadiobutton",
+            background=UI_THEME["surface_raised"],
+            foreground=UI_THEME["secondary_ink"],
+            indicatorcolor=UI_THEME["input"],
+            indicatormargin=(0, 0, 5, 0),
+        )
+        style.map(
+            "TRadiobutton",
+            foreground=[("focus", UI_THEME["focus_ring"]), ("disabled", UI_THEME["disabled_ink"])],
+            background=[("focus", UI_THEME["accent_soft"])],
+            indicatorcolor=[("selected", UI_THEME["accent"]), ("active", UI_THEME["accent_soft"])],
+        )
+        style.configure("Footer.TFrame", background=UI_THEME["surface"])
+        style.configure(
+            "FooterStatus.TLabel",
+            background=UI_THEME["surface"],
+            foreground=UI_THEME["muted"],
+            font=(self.ui_font, 11),
+        )
+        style.configure(
+            "FooterSummary.TLabel",
+            background=UI_THEME["surface"],
+            foreground=UI_THEME["ink"],
+            font=(self.ui_font, 12, "bold"),
         )
         style.configure(
             "Horizontal.TProgressbar",
@@ -447,12 +539,12 @@ class ProtocolDiffDesktopApp:
         )
         style.configure(
             "Dark.Vertical.TScrollbar",
-            background=UI_THEME["surface_raised"],
+            background=UI_THEME["border"],
             troughcolor=UI_THEME["canvas"],
             bordercolor=UI_THEME["section_border"],
-            lightcolor=UI_THEME["surface_raised"],
-            darkcolor=UI_THEME["surface_raised"],
-            arrowcolor=UI_THEME["muted"],
+            lightcolor=UI_THEME["border"],
+            darkcolor=UI_THEME["border"],
+            arrowcolor=UI_THEME["ink"],
             relief="flat",
         )  # 滚动条使用同一深色主题，避免 Windows 原生亮色轨道破坏整体层级。
         style.map(
@@ -460,58 +552,42 @@ class ProtocolDiffDesktopApp:
             background=[("pressed", UI_THEME["accent_active"]), ("active", UI_THEME["button_hover"])],
             arrowcolor=[("pressed", UI_THEME["ink"]), ("active", UI_THEME["secondary_ink"])],
         )  # 悬停和按下状态保留足够反馈，但不抢过主按钮。
-        style.configure(
-            "ResultSummary.TLabel",
-            background=UI_THEME["surface_raised"],
-            foreground=UI_THEME["ink"],
-            font=(self.ui_font, 12, "bold"),
-        )
-        style.configure(
-            "ResultPath.TLabel",
-            background=UI_THEME["surface_raised"],
-            foreground=UI_THEME["muted"],
-            font=(self.ui_font, 11),
-        )
 
     def _build_layout(self) -> None:
-        """Create the complete form and result controls."""
+        """Create a scrollable workbench with a fixed action/status footer."""
 
         shell = ttk.Frame(self.root)
-        shell.grid(row=0, column=0, sticky="nsew")  # 外壳只负责 Canvas 和滚动条，不改变原有卡片顺序。
+        shell.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        shell.columnconfigure(0, weight=1)  # 内容视口吸收窗口宽度变化。
-        shell.rowconfigure(0, weight=1)  # 内容视口吸收窗口高度变化。
+        shell.columnconfigure(0, weight=1)
+        shell.rowconfigure(0, weight=1)
         self.content_canvas = tk.Canvas(
             shell,
             background=UI_THEME["canvas"],
             highlightthickness=0,
             borderwidth=0,
             yscrollincrement=24,
-        )  # Canvas 提供矮屏滚动能力，同时保持原有深色画布。
-        self.content_canvas.grid(row=0, column=0, sticky="nsew")  # 视口填满除滚动条外的窗口区域。
+        )
+        self.content_canvas.grid(row=0, column=0, sticky="nsew")
         self.content_scrollbar = ttk.Scrollbar(
             shell,
             orient="vertical",
             command=self.content_canvas.yview,
             style="Dark.Vertical.TScrollbar",
-        )  # 可见滚动条让缩放后的 Windows 用户能发现剩余内容。
-        self.content_scrollbar.grid(row=0, column=1, sticky="ns")  # 滚动条固定在内容区右侧。
-        self.content_canvas.configure(
-            yscrollcommand=self.content_scrollbar.set
-        )  # Canvas 与滚动条双向同步当前位置和滑块比例。
+        )
+        self.content_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.content_canvas.configure(yscrollcommand=self.content_scrollbar.set)
         container = ttk.Frame(self.content_canvas, padding=20)
-        self.content_container = container  # 保存内容容器，窗口变化时重新计算请求高度。
+        self.content_container = container
         self.content_window = self.content_canvas.create_window(
-            (0, 0),
-            window=container,
-            anchor="nw",
-        )  # 把原有完整表单嵌入可滚动视口，不拆散功能分区。
-        container.bind("<Configure>", self._update_content_scrollregion)  # 卡片尺寸变化后刷新滚动范围。
-        self.content_canvas.bind("<Configure>", self._fit_content_to_viewport)  # 窗口缩放时同步内容宽度和文字换行。
-        self.root.bind("<MouseWheel>", self._on_content_mousewheel, add="+")  # Windows/macOS 滚轮和触控板驱动内容区。
-        self.root.bind("<Button-4>", self._on_content_mousewheel, add="+")  # Linux/X11 向上滚轮使用 Button-4。
-        self.root.bind("<Button-5>", self._on_content_mousewheel, add="+")  # Linux/X11 向下滚轮使用 Button-5。
+            (0, 0), window=container, anchor="nw"
+        )
+        container.bind("<Configure>", self._update_content_scrollregion)
+        self.content_canvas.bind("<Configure>", self._fit_content_to_viewport)
+        self.root.bind("<MouseWheel>", self._on_content_mousewheel, add="+")
+        self.root.bind("<Button-4>", self._on_content_mousewheel, add="+")
+        self.root.bind("<Button-5>", self._on_content_mousewheel, add="+")
         container.columnconfigure(0, weight=1)
 
         ttk.Label(container, text="协议 PDF 差异对比工具", style="Title.TLabel").grid(
@@ -519,99 +595,230 @@ class ProtocolDiffDesktopApp:
         )
         self.subtitle_label = ttk.Label(
             container,
-            text="选择两份协议 PDF，设置可选页码范围，生成 HTML / TXT / CSV / JSON 差异报告。",
+            text="并排设置旧版与新版文档；报告识别、配对和差异标记保持原有逻辑。",
             style="Status.TLabel",
-        )  # 保存副标题引用，窗口变窄时动态调整换行宽度。
-        self.subtitle_label.grid(row=1, column=0, sticky="w", pady=(6, 18))  # 副标题位置和原界面保持一致。
-
-        files_frame = self._create_elevated_section(container, row=2, text="PDF 文件", pady=(0, 14))
-        files_frame.columnconfigure(1, weight=1)
-        self._add_file_row(files_frame, 0, "旧协议", self.old_pdf_var, self._browse_old_pdf)
-        self._add_file_row(files_frame, 1, "新协议", self.new_pdf_var, self._browse_new_pdf)
-        self._add_file_row(files_frame, 2, "输出目录", self.output_dir_var, self._browse_output_dir)
-
-        ranges_frame = self._create_elevated_section(container, row=3, text="页码范围", pady=(0, 14))
-        # 只让输入框所在列吸收剩余宽度，标签列保持内容宽度，避免文字和输入框被拉开。
-        ranges_frame.columnconfigure(0, weight=0)
-        ranges_frame.columnconfigure(1, weight=1)
-        ranges_frame.columnconfigure(2, weight=0)
-        ranges_frame.columnconfigure(3, weight=1)
-        self._add_page_fields(
-            ranges_frame,
-            0,
-            "旧协议起始页",
-            self.old_start_var,
-            "旧协议终止页",
-            self.old_end_var,
         )
-        self._add_page_fields(
-            ranges_frame,
-            1,
-            "新协议起始页",
-            self.new_start_var,
-            "新协议终止页",
-            self.new_end_var,
-        )
+        self.subtitle_label.grid(row=1, column=0, sticky="w", pady=(6, 18))
 
-        # 把主操作区前移到匹配设置之前，让用户首屏就能看到开始按钮。
-        action_frame = self._create_elevated_section(container, row=4, text="开始生成报告", pady=(0, 14))
-        action_frame.columnconfigure(4, weight=1)  # 右侧留出弹性空间，避免按钮挤压。
-        self.run_button = ttk.Button(
-            action_frame,  # 按钮放在“开始生成报告”区域内。
-            text="开始比较",  # 按钮只保留核心动作，避免重复说明“生成报告”。
-            style="Primary.TButton",  # 使用主按钮样式突出最常用操作。
-            command=self.run_comparison,  # 点击后进入输入校验和后台比较流程。
+        self.document_cards_host = ttk.Frame(container)
+        self.document_cards_host.grid(row=2, column=0, sticky="ew")
+        self.old_document_card = self._create_document_card(
+            self.document_cards_host,
+            side="old",
+            title="旧版 PDF",
+            path_var=self.old_pdf_var,
+            browse_command=self._browse_old_pdf,
+            mode_var=self.old_page_mode_var,
+            start_var=self.old_start_var,
+            end_var=self.old_end_var,
         )
-        self.run_button.grid(row=0, column=0, sticky="w", padx=10, pady=12)  # 固定在操作区最左侧。
-        self.open_html_button = ttk.Button(
-            action_frame,  # 报告按钮也放在同一操作区。
-            text="打开 HTML 报告",  # 运行成功后直接打开最直观的 HTML 报告。
-            command=self.open_html_report,  # 点击后用默认浏览器打开最近一次 HTML。
-            state="disabled",  # 未生成报告前禁用，避免用户打开空路径。
+        self.new_document_card = self._create_document_card(
+            self.document_cards_host,
+            side="new",
+            title="新版 PDF",
+            path_var=self.new_pdf_var,
+            browse_command=self._browse_new_pdf,
+            mode_var=self.new_page_mode_var,
+            start_var=self.new_start_var,
+            end_var=self.new_end_var,
         )
-        self.open_html_button.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=12)
-        self.open_dir_button = ttk.Button(
-            action_frame,  # 输出目录按钮放在报告按钮后面。
-            text="打开输出目录",  # 方便用户查看 TXT/CSV/JSON 等其它文件。
-            command=self.open_report_directory,  # 点击后打开最近一次报告目录。
-            state="disabled",  # 未生成报告前禁用，避免打开无效目录。
-        )
-        self.open_dir_button.grid(row=0, column=2, sticky="w", pady=12)
+        self._apply_responsive_layout(self.design_window_size[0])
 
-        settings_frame = self._create_elevated_section(container, row=5, text="匹配设置", pady=(0, 14))
-        for column in range(8):
-            settings_frame.columnconfigure(column, weight=1)
-        self._add_setting_entry(settings_frame, 0, 0, "章节匹配阈值", self.min_similarity_var)
-        self._add_setting_entry(settings_frame, 0, 2, "每章展示片段数", self.max_snippets_var)
-        ttk.Checkbutton(
-            settings_frame,
-            text="列出未变化章节",
-            variable=self.include_unchanged_var,
-        ).grid(row=0, column=4, columnspan=4, sticky="w", padx=8, pady=10)
-
-        self.progress = ttk.Progressbar(container, mode="indeterminate")
-        self.progress.grid(row=6, column=0, sticky="ew")
-        ttk.Label(container, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=7, column=0, sticky="w", pady=(10, 4)
+        self.advanced_toggle = ttk.Button(
+            container,
+            text="高级设置  ▸",
+            command=self._toggle_advanced,
         )
+        self.advanced_toggle.grid(row=3, column=0, sticky="w", pady=(14, 8))
+        self.input_widgets.append(self.advanced_toggle)
+        self.advanced_body = self._create_elevated_section(
+            container, row=4, text="高级设置", pady=(0, 14)
+        )
+        self.advanced_body.master.grid_remove()
+        self._build_advanced_settings(self.advanced_body)
 
-        result_frame = self._create_elevated_section(container, row=8, text="结果", pady=(10, 0))
-        container.rowconfigure(8, weight=1)
-        result_frame.columnconfigure(0, weight=1)
+        footer = ttk.Frame(shell, style="Footer.TFrame", padding=(20, 12))
+        footer.grid(row=1, column=0, columnspan=2, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(1, weight=0)
         self.result_summary_label = ttk.Label(
-            result_frame,
+            footer,
             textvariable=self.summary_var,
-            style="ResultSummary.TLabel",
-            wraplength=820,
-        )  # 结果摘要跟随视口宽度换行，避免 Windows 字体较宽时被截断。
-        self.result_summary_label.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))  # 保持原摘要留白。
+            style="FooterSummary.TLabel",
+            wraplength=760,
+        )
+        self.result_summary_label.grid(row=0, column=0, sticky="w")
         self.result_path_label = ttk.Label(
-            result_frame,
+            footer,
             textvariable=self.report_path_var,
-            style="ResultPath.TLabel",
-            wraplength=820,
-        )  # 长输出路径同样使用动态换行宽度。
-        self.result_path_label.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 12))  # 保持原路径留白。
+            style="FooterStatus.TLabel",
+            wraplength=760,
+        )
+        self.result_path_label.grid(row=1, column=0, sticky="w", pady=(3, 0))
+        self.status_label = ttk.Label(
+            footer, textvariable=self.status_var, style="FooterStatus.TLabel"
+        )
+        self.status_label.grid(row=2, column=0, sticky="w", pady=(7, 0))
+        self.progress = ttk.Progressbar(footer, mode="determinate", maximum=1)
+        self.progress.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        self.progress.grid_remove()
+
+        actions = ttk.Frame(footer, style="Footer.TFrame")
+        actions.grid(row=0, column=1, rowspan=4, sticky="e", padx=(18, 0))
+        self.run_button = ttk.Button(
+            actions,
+            text="开始比较",
+            style="Primary.TButton",
+            command=self.run_comparison,
+        )
+        self.run_button.grid(row=0, column=0, sticky="ew")
+        self.input_widgets.append(self.run_button)
+        self.open_html_button = ttk.Button(
+            actions, text="打开 HTML 报告", command=self.open_html_report
+        )
+        self.open_html_button.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.open_html_button.grid_remove()
+        self.open_dir_button = ttk.Button(
+            actions, text="打开输出目录", command=self.open_report_directory
+        )
+        self.open_dir_button.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.open_dir_button.grid_remove()
+
+    def _create_document_card(
+        self,
+        parent: ttk.Frame,
+        *,
+        side: str,
+        title: str,
+        path_var: tk.StringVar,
+        browse_command: object,
+        mode_var: tk.StringVar,
+        start_var: tk.StringVar,
+        end_var: tk.StringVar,
+    ) -> tk.Frame:
+        """Build one self-contained PDF selector and page-range card."""
+
+        card = tk.Frame(
+            parent,
+            background=UI_THEME["surface_raised"],
+            highlightthickness=1,
+            highlightbackground=UI_THEME["section_border"],
+        )
+        card.columnconfigure(0, weight=1)
+        body = ttk.Frame(card, style="SectionBody.TFrame", padding=14)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+        ttk.Label(body, text=title, style="SectionTitle.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 10)
+        )
+        path_row = ttk.Frame(body, style="SectionBody.TFrame")
+        path_row.grid(row=1, column=0, sticky="ew")
+        path_row.columnconfigure(0, weight=1)
+        path_entry = ttk.Entry(path_row, textvariable=path_var)
+        path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        browse_button = ttk.Button(
+            path_row, text="选择 PDF", style="Browse.TButton", command=browse_command
+        )
+        browse_button.grid(row=0, column=1)
+        self.file_browse_buttons.append(browse_button)
+        self.input_widgets.extend((path_entry, browse_button))
+
+        mode_row = ttk.Frame(body, style="SectionBody.TFrame")
+        mode_row.grid(row=2, column=0, sticky="w", pady=(12, 0))
+        all_button = ttk.Radiobutton(
+            mode_row,
+            text="全部页面",
+            variable=mode_var,
+            value="all",
+            command=lambda selected=side: self._sync_page_mode(selected),
+        )
+        all_button.grid(row=0, column=0, sticky="w", padx=(0, 18))
+        range_button = ttk.Radiobutton(
+            mode_row,
+            text="指定范围",
+            variable=mode_var,
+            value="range",
+            command=lambda selected=side: self._sync_page_mode(selected),
+        )
+        range_button.grid(row=0, column=1, sticky="w")
+        self.input_widgets.extend((all_button, range_button))
+
+        range_frame = ttk.Frame(body, style="SectionBody.TFrame")
+        range_frame.grid(row=3, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(range_frame, text="起始页").grid(row=0, column=0, sticky="w")
+        start_entry = self._create_page_entry(range_frame, start_var)
+        start_entry.grid(row=0, column=1, padx=(7, 14), ipady=3)
+        ttk.Label(range_frame, text="终止页").grid(row=0, column=2, sticky="w")
+        end_entry = self._create_page_entry(range_frame, end_var)
+        end_entry.grid(row=0, column=3, padx=(7, 0), ipady=3)
+        prefix = "旧协议" if side == "old" else "新协议"
+        self.page_entry_widgets[f"{prefix}起始页"] = start_entry
+        self.page_entry_widgets[f"{prefix}终止页"] = end_entry
+        self.input_widgets.extend((start_entry, end_entry))
+        setattr(self, f"{side}_range_frame", range_frame)
+        range_frame.grid_remove()
+        return card
+
+    def _build_advanced_settings(self, parent: ttk.Frame) -> None:
+        """Populate the advanced panel while keeping it collapsed by default."""
+
+        parent.columnconfigure(1, weight=1)
+        self._add_file_row(parent, 0, "输出目录", self.output_dir_var, self._browse_output_dir)
+        settings_row = ttk.Frame(parent, style="SectionBody.TFrame")
+        settings_row.grid(row=1, column=0, columnspan=3, sticky="ew", padx=2)
+        self._add_setting_entry(settings_row, 0, 0, "章节匹配阈值", self.min_similarity_var)
+        self._add_setting_entry(settings_row, 0, 2, "每章片段数", self.max_snippets_var)
+        unchanged = ttk.Checkbutton(
+            settings_row, text="列出未变化章节", variable=self.include_unchanged_var
+        )
+        unchanged.grid(row=0, column=4, sticky="w", padx=(10, 6), pady=10)
+        auto_open = ttk.Checkbutton(
+            settings_row, text="完成后自动打开报告", variable=self.auto_open_var
+        )
+        auto_open.grid(row=0, column=5, sticky="w", padx=(10, 0), pady=10)
+        self.input_widgets.extend((unchanged, auto_open))
+
+    def _toggle_advanced(self) -> None:
+        """Expand or collapse optional settings without changing their values."""
+
+        self.advanced_expanded = not self.advanced_expanded
+        card = self.advanced_body.master
+        if self.advanced_expanded:
+            card.grid()
+            self.advanced_toggle.configure(text="高级设置  ▾")
+        else:
+            card.grid_remove()
+            self.advanced_toggle.configure(text="高级设置  ▸")
+        self._update_content_scrollregion()
+
+    def _sync_page_mode(self, side: str) -> None:
+        """Show range entries only when that document uses an explicit range."""
+
+        mode_var = self.old_page_mode_var if side == "old" else self.new_page_mode_var
+        frame = self.old_range_frame if side == "old" else self.new_range_frame
+        if mode_var.get() == "range":
+            frame.grid()
+        else:
+            frame.grid_remove()
+        self._update_content_scrollregion()
+
+    def _apply_responsive_layout(self, width: int) -> None:
+        """Place document cards side by side, or stack them below 900px."""
+
+        mode = "stacked" if width < 900 else "side-by-side"
+        self.old_document_card.grid_forget()
+        self.new_document_card.grid_forget()
+        if mode == "side-by-side":
+            self.document_cards_host.columnconfigure(0, weight=1)
+            self.document_cards_host.columnconfigure(1, weight=1)
+            self.old_document_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+            self.new_document_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        else:
+            self.document_cards_host.columnconfigure(0, weight=1)
+            self.document_cards_host.columnconfigure(1, weight=0)
+            self.old_document_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+            self.new_document_card.grid(row=1, column=0, sticky="ew")
+        self.document_layout_mode = mode
 
     def _update_content_scrollregion(self, _event: tk.Event | None = None) -> None:
         """Refresh the scrollable area after any child changes its requested size."""
@@ -619,19 +826,25 @@ class ProtocolDiffDesktopApp:
         bounds = self.content_canvas.bbox("all")  # 读取当前所有 Canvas 子项的实际边界。
         if bounds is not None:
             self.content_canvas.configure(scrollregion=bounds)  # 只有存在内容时才写入合法滚动范围。
+            content_height = max(0, bounds[3] - bounds[1])
+            viewport_height = self.content_canvas.winfo_height()
+            if viewport_height > 1 and content_height <= viewport_height:
+                self.content_canvas.yview_moveto(0.0)
+                self.content_scrollbar.grid_remove()
+            else:
+                self.content_scrollbar.grid()
 
     def _fit_content_to_viewport(self, event: tk.Event) -> None:
         """Stretch content to the viewport and update text wrapping responsively."""
 
-        requested_height = self.content_container.winfo_reqheight()  # 完整表单请求高度决定是否需要垂直滚动。
+        self._apply_responsive_layout(event.width)
         self.content_canvas.itemconfigure(
             self.content_window,
             width=event.width,
-            height=max(event.height, requested_height),
-        )  # 宽度始终贴合视口，高度至少容纳全部卡片。
+        )  # 宽度贴合视口；内容保留自然高度，窄屏重排后 Canvas 才能获得真实滚动范围。
         wrap_width = max(320, event.width - 40)  # 扣除容器左右 padding，保留小屏可读的最小换行宽度。
         self.subtitle_label.configure(wraplength=wrap_width)  # 副标题不再依赖平台默认文本宽度。
-        result_wrap_width = max(280, wrap_width - 24)  # 结果卡片内部再扣除左右留白。
+        result_wrap_width = max(260, min(760, event.width - 330))
         self.result_summary_label.configure(wraplength=result_wrap_width)  # 摘要随窗口宽度重新排版。
         self.result_path_label.configure(wraplength=result_wrap_width)  # 长路径随窗口宽度重新排版。
         self._update_content_scrollregion()  # 宽度变化可能改变文字高度，需要立即刷新滚动范围。
@@ -670,7 +883,7 @@ class ProtocolDiffDesktopApp:
             highlightthickness=1,
             highlightbackground=UI_THEME["section_border"],
         )
-        card.grid(row=row, column=0, sticky="nsew" if row == 8 else "ew", pady=pady)
+        card.grid(row=row, column=0, sticky="ew", pady=pady)
         card.columnconfigure(0, weight=1)
         card.rowconfigure(1, weight=1)
         ttk.Label(card, text=text, style="SectionTitle.TLabel").grid(
@@ -705,34 +918,7 @@ class ProtocolDiffDesktopApp:
             row=row, column=2, sticky="e", padx=(0, 10), pady=8  # 按钮固定在每行右侧。
         )
         self.file_browse_buttons.append(browse_button)  # 记录按钮，避免未来打包时漏掉选择控件。
-
-    def _add_page_fields(
-        self,
-        parent: ttk.Frame,
-        row: int,
-        start_label: str,
-        start_var: tk.StringVar,
-        end_label: str,
-        end_var: tk.StringVar,
-    ) -> None:
-        """Add start/end page fields for one side of the comparison."""
-
-        ttk.Label(parent, text=start_label).grid(
-            row=row, column=0, sticky="w", padx=(10, 6), pady=8
-        )
-        start_entry = self._create_page_entry(parent, start_var)  # 起始页输入框，留空表示默认起点。
-        start_entry.grid(
-            row=row, column=1, sticky="w", padx=(0, 18), pady=8, ipady=4  # 加高输入框，点击区域更明确。
-        )
-        ttk.Label(parent, text=end_label).grid(
-            row=row, column=2, sticky="w", padx=(10, 6), pady=8
-        )
-        end_entry = self._create_page_entry(parent, end_var)  # 终止页输入框，留空表示默认终点。
-        end_entry.grid(
-            row=row, column=3, sticky="w", padx=(0, 18), pady=8, ipady=4  # 与起始页输入框保持同样宽度。
-        )
-        self.page_entry_widgets[start_label] = start_entry  # 记录起始页控件，供回归测试直接验证可输入。
-        self.page_entry_widgets[end_label] = end_entry  # 记录终止页控件，供回归测试直接验证可输入。
+        self.input_widgets.extend((path_entry, browse_button))
 
     def _create_page_entry(self, parent: ttk.Frame, variable: tk.StringVar) -> tk.Entry:
         """Create a native page-number entry with a visible edit affordance."""
@@ -769,9 +955,11 @@ class ProtocolDiffDesktopApp:
         """Add one compact advanced setting field."""
 
         ttk.Label(parent, text=label).grid(row=row, column=column, sticky="w", padx=10, pady=10)
-        ttk.Entry(parent, textvariable=variable, width=8).grid(
+        entry = ttk.Entry(parent, textvariable=variable, width=8)
+        entry.grid(
             row=row, column=column + 1, sticky="w", padx=(0, 8), pady=10
         )
+        self.input_widgets.append(entry)
 
     def _browse_old_pdf(self) -> None:
         self._browse_pdf(self.old_pdf_var, "选择旧协议 PDF")
@@ -801,13 +989,27 @@ class ProtocolDiffDesktopApp:
 
         old_pdf = Path(self.old_pdf_var.get()).expanduser()
         new_pdf = Path(self.new_pdf_var.get()).expanduser()
-        output_dir = Path(self.output_dir_var.get()).expanduser()
+        output_dir_text = self.output_dir_var.get().strip()
         if not old_pdf.exists():
             raise FileNotFoundError(f"旧协议 PDF 路径无效: {old_pdf}")
         if not new_pdf.exists():
             raise FileNotFoundError(f"新协议 PDF 路径无效: {new_pdf}")
-        if not output_dir:
+        if not output_dir_text:
             raise ValueError("输出目录不能为空。")
+        output_dir = Path(output_dir_text).expanduser().resolve()
+
+        old_start, old_end = page_range_values(
+            self.old_page_mode_var.get(),
+            self.old_start_var.get(),
+            self.old_end_var.get(),
+            "旧协议",
+        )
+        new_start, new_end = page_range_values(
+            self.new_page_mode_var.get(),
+            self.new_start_var.get(),
+            self.new_end_var.get(),
+            "新协议",
+        )
 
         options = DiffOptions(
             min_section_match_similarity=parse_positive_float(
@@ -817,10 +1019,10 @@ class ProtocolDiffDesktopApp:
                 self.max_snippets_var.get(), "每章展示片段数"
             ),
             include_unchanged_sections=self.include_unchanged_var.get(),
-            old_start_page=parse_optional_page(self.old_start_var.get(), "旧协议起始页"),
-            old_end_page=parse_optional_page(self.old_end_var.get(), "旧协议终止页"),
-            new_start_page=parse_optional_page(self.new_start_var.get(), "新协议起始页"),
-            new_end_page=parse_optional_page(self.new_end_var.get(), "新协议终止页"),
+            old_start_page=old_start,
+            old_end_page=old_end,
+            new_start_page=new_start,
+            new_end_page=new_end,
             # GUI 保持默认解析策略；CLI/API 仍支持显式 Tesseract 语言代码。
             ocr_language=None,
         )
@@ -837,7 +1039,7 @@ class ProtocolDiffDesktopApp:
             return
 
         self._set_running(True)
-        self.status_var.set("正在抽取 PDF 文本并比较章节...")
+        self._handle_progress(ProgressEvent(stage="read_old", side="old"))
         # 先让按钮禁用、进度条和忙碌光标刷新出来，再启动耗时任务，减少“点击后卡住”的感觉。
         self.root.after(40, self._start_worker, config)
 
@@ -845,14 +1047,26 @@ class ProtocolDiffDesktopApp:
         """Start the background comparison after the UI has repainted."""
 
         worker = threading.Thread(target=self._run_worker, args=(config,), daemon=True)
-        worker.start()
+        try:
+            worker.start()
+        except RuntimeError as exc:
+            self._set_running(False)
+            self._handle_error(RuntimeError(f"无法启动后台任务: {exc}"))
+            return
         self.root.after(250, self._poll_result_queue)
 
     def _run_worker(self, config: DesktopRunConfig) -> None:
         """Background worker that keeps the Tk event loop responsive."""
 
         try:
-            result = run_diff(config.old_pdf, config.new_pdf, config.options)
+            observer = lambda event: self._result_queue.put(("progress", event))
+            result = run_diff(
+                config.old_pdf,
+                config.new_pdf,
+                config.options,
+                progress_observer=observer,
+            )
+            notify_progress(observer, ProgressEvent(stage="report"))
             outputs = write_reports(result, config.output_dir, config.options)
         except (FileNotFoundError, MissingDependencyError, PdfReadError, ValueError) as exc:
             self._result_queue.put(("error", exc))
@@ -864,25 +1078,70 @@ class ProtocolDiffDesktopApp:
     def _poll_result_queue(self) -> None:
         """Handle background completion on the Tk main thread."""
 
-        try:
-            status, payload = self._result_queue.get_nowait()
-        except queue.Empty:
+        terminal: tuple[str, object] | None = None
+        while True:
+            try:
+                status, payload = self._result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if status == "progress" and isinstance(payload, ProgressEvent):
+                self._handle_progress(payload)
+            else:
+                terminal = (status, payload)
+        if terminal is None:
             self.root.after(250, self._poll_result_queue)
             return
 
         self._set_running(False)
+        status, payload = terminal
         if status == "success" and isinstance(payload, DesktopRunSuccess):
             self._handle_success(payload)
         else:
             self._handle_error(payload)
 
+    def _elapsed_seconds(self) -> int:
+        if self._run_started_at is None:
+            return 0
+        return max(0, int(time.monotonic() - self._run_started_at))
+
+    def _handle_progress(self, event: ProgressEvent) -> None:
+        """Render only real extraction page counts; later stages show no percentage."""
+
+        self._current_progress_event = event
+        stage_names = {
+            "read_old": "读取旧版",
+            "read_new": "读取新版",
+            "match_diff": "匹配差异",
+            "visual_evidence": "生成视觉证据",
+            "report": "生成报告",
+        }
+        stage_name = stage_names.get(event.stage, event.stage)
+        elapsed = self._elapsed_seconds()
+        if event.completed_pages is not None and event.total_pages is not None:
+            total = max(1, event.total_pages)
+            self.progress.configure(maximum=total, value=min(event.completed_pages, total))
+            self.progress.grid()
+            self.status_var.set(
+                f"运行 · {stage_name} · 第 {event.completed_pages}/{event.total_pages} 页 · 已用 {elapsed} 秒"
+            )
+        else:
+            self.progress.grid_remove()
+            self.status_var.set(f"运行 · {stage_name} · 已用 {elapsed} 秒")
+
+    def _tick_elapsed(self) -> None:
+        """Refresh elapsed time while preserving the latest real stage/page event."""
+
+        self._elapsed_after_id = None
+        if not self.is_running:
+            return
+        if self._current_progress_event is not None:
+            self._handle_progress(self._current_progress_event)
+        self._elapsed_after_id = self.root.after(1000, self._tick_elapsed)
+
     def _handle_success(self, payload: DesktopRunSuccess) -> None:
         """Update result controls after a successful comparison."""
 
         self._last_outputs = payload.outputs
-        counts: dict[str, int] = {}
-        for change in payload.result.changes:
-            counts[change.change_type] = counts.get(change.change_type, 0) + 1
         assessment = payload.result.assessment
         if assessment is None:
             assessment_note = "无法判断（缺少可靠性评估）"
@@ -896,23 +1155,25 @@ class ProtocolDiffDesktopApp:
         else:
             assessment_note = "无法判断"
             status_text = "报告已生成，但当前文档无法可靠识别。"
-        table_change_count = _reported_table_change_count(payload.outputs)
-        table_note = (
-            f"，表格变化 {table_change_count}"
-            if table_change_count is not None
-            else "；表格变化请查看报告"
-        )
-        visual_review_count = _reported_visual_review_count(payload.outputs)
-        visual_note = (
-            f"，视觉待核对 {visual_review_count}"
-            if visual_review_count is not None
-            else "；视觉待核对项请查看报告"
-        )
+        reader_summary = _reported_reader_summary(payload.outputs)
+        if reader_summary is not None:
+            body_note = (
+                f"正文章节差异 {reader_summary.body_changes}（"
+                f"章节修改 {reader_summary.modified}，"
+                f"章节新增 {reader_summary.added}，"
+                f"章节删除 {reader_summary.deleted}）"
+            )
+            table_note = f"，表格变化 {reader_summary.table_changes}"
+            visual_note = f"，视觉差异项 {reader_summary.visual_items}"
+        else:
+            body_note = "正文和表格计数请查看报告"
+            table_note = ""
+            visual_note = "；视觉差异项请查看报告"
+        if assessment is not None and assessment.state is not ReliabilityState.RELIABLE:
+            visual_note += "；视觉校对需人工复核（见报告）"
         self.summary_var.set(
             f"{assessment_note}："
-            f"章节修改 {counts.get('modified', 0)}，"
-            f"章节新增 {counts.get('added', 0)}，"
-            f"章节删除 {counts.get('deleted', 0)}"
+            f"{body_note}"
             f"{table_note}"
             f"{visual_note}"
         )
@@ -921,55 +1182,122 @@ class ProtocolDiffDesktopApp:
         self.status_var.set(status_text)
         self.open_html_button.configure(state="normal")
         self.open_dir_button.configure(state="normal")
+        self.open_html_button.grid()
+        self.open_dir_button.grid()
+        if getattr(self, "auto_open_var", None) is not None and self.auto_open_var.get():
+            self.open_html_report()
 
     def _handle_error(self, payload: object) -> None:
         """Show a user-readable error from the background worker."""
 
         message = str(payload)
-        self.summary_var.set("本次比较未生成报告。")
+        first_line = next(
+            (line.strip() for line in message.splitlines() if line.strip()),
+            "未知错误",
+        )
+        inline_message = " ".join(first_line.split())
+        if len(inline_message) > 150:
+            inline_message = f"{inline_message[:149]}…"
+        self.summary_var.set(f"本次比较未生成报告：{inline_message}")
         self.report_path_var.set("")
-        self.status_var.set("运行失败。")
+        self.status_var.set("失败 · 请检查提示后重新运行。")
+        self.open_html_button.grid_remove()
+        self.open_dir_button.grid_remove()
         messagebox.showerror("运行失败", message)
 
     def _set_running(self, running: bool) -> None:
-        """Toggle button and progress states while a comparison is active."""
+        """Lock all mutable controls while keeping the fixed footer visible."""
 
         if running:
-            self.run_button.configure(state="disabled")
+            if self._elapsed_after_id is not None:
+                self.root.after_cancel(self._elapsed_after_id)
+                self._elapsed_after_id = None
+            self.is_running = True
+            self._run_started_at = time.monotonic()
+            self._current_progress_event = None
+            self._input_states = {
+                widget: str(widget.cget("state")) for widget in self.input_widgets
+            }
+            for widget in self.input_widgets:
+                widget.configure(state="disabled")
             self.open_html_button.configure(state="disabled")
             self.open_dir_button.configure(state="disabled")
+            self.open_html_button.grid_remove()
+            self.open_dir_button.grid_remove()
             self.root.configure(cursor="watch")
-            self.progress.start(24)
+            self._elapsed_after_id = self.root.after(1000, self._tick_elapsed)
         else:
-            self.run_button.configure(state="normal")
+            self.is_running = False
+            if self._elapsed_after_id is not None:
+                self.root.after_cancel(self._elapsed_after_id)
+                self._elapsed_after_id = None
+            for widget in self.input_widgets:
+                widget.configure(state=self._input_states.get(widget, "normal"))
             self.root.configure(cursor="")
-            self.progress.stop()
+            self.progress.grid_remove()
+            self._current_progress_event = None
+            self._run_started_at = None
 
     def open_html_report(self) -> None:
         """Open the latest HTML report in the user's default browser."""
 
         if not self._last_outputs:
             return
-        webbrowser.open(self._last_outputs["html"].as_uri())
+        html_path = self._last_outputs["html"].expanduser().resolve()
+        try:
+            opened = webbrowser.open(html_path.as_uri())
+        except (OSError, webbrowser.Error, ValueError) as exc:
+            messagebox.showwarning("无法打开报告", f"报告已生成，但无法自动打开：{exc}")
+            return
+        if not opened:
+            messagebox.showwarning(
+                "无法打开报告",
+                f"报告已生成，但系统没有接受打开请求。\n请手动打开：{html_path}",
+            )
 
     def open_report_directory(self) -> None:
         """Open the latest report directory in the platform file manager."""
 
         if not self._last_outputs:
             return
-        open_path(self._last_outputs["report_dir"])
+        report_dir = self._last_outputs["report_dir"].expanduser().resolve()
+        if not report_dir.is_dir():
+            messagebox.showwarning("无法打开目录", f"输出目录不存在：{report_dir}")
+            return
+        try:
+            opened = open_path(report_dir)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            messagebox.showwarning("无法打开目录", f"无法调用系统文件管理器：{exc}")
+            return
+        if not opened:
+            messagebox.showwarning(
+                "无法打开目录",
+                f"系统没有接受打开请求。\n请手动打开：{report_dir}",
+            )
+
+    def _on_close_requested(self) -> None:
+        """Prevent closing while the report writer can still be committing files."""
+
+        if self.is_running:
+            messagebox.showwarning(
+                "比较仍在运行",
+                "为保证报告文件完整，请等待本次比较完成后再关闭窗口。",
+            )
+            return
+        self.root.destroy()
 
 
-def open_path(path: Path) -> None:
+def open_path(path: Path) -> bool:
     """Open a file or directory with the current operating system shell."""
 
     resolved = str(path.resolve())
     if sys.platform == "darwin":
-        subprocess.run(["open", resolved], check=False)
+        return subprocess.run(["open", resolved], check=False).returncode == 0
     elif os.name == "nt":
         os.startfile(resolved)  # type: ignore[attr-defined]
+        return True
     else:
-        subprocess.run(["xdg-open", resolved], check=False)
+        return subprocess.run(["xdg-open", resolved], check=False).returncode == 0
 
 
 def run_smoke_test() -> None:
@@ -989,15 +1317,17 @@ def run_smoke_test() -> None:
     assert app.run_button.cget("command")  # 确认主按钮绑定了回调，而不是只有静态文字。
     widget_texts = collect_widget_texts(root)  # 收集所有可见控件文案，检查关键输入是否存在。
     required_labels = {
-        "旧协议起始页",  # 旧 PDF 范围起点输入框必须可见。
-        "旧协议终止页",  # 旧 PDF 范围终点输入框必须可见。
-        "新协议起始页",  # 新 PDF 范围起点输入框必须可见。
-        "新协议终止页",  # 新 PDF 范围终点输入框必须可见。
-        "开始比较",  # 主运行按钮必须可见。
+        "旧版 PDF",
+        "新版 PDF",
+        "全部页面",
+        "指定范围",
+        "开始比较",
     }
     missing_labels = sorted(required_labels - widget_texts)  # 找出缺失控件，方便构建失败时定位。
     assert not missing_labels, f"桌面界面缺少关键控件: {', '.join(missing_labels)}"  # 缺控件时直接失败。
     assert len(app.file_browse_buttons) == 3  # 旧 PDF、新 PDF、输出目录都必须有选择按钮。
+    assert app.document_layout_mode in {"side-by-side", "stacked"}
+    assert not app.advanced_expanded
     assert app.ui_font in set(tkfont.families(root))  # 实际字体必须存在，不能让 Windows 悄悄回退不存在的 PingFang。
     assert app.initial_window_size[0] <= root.winfo_screenwidth()  # 初始窗口不能超出 DPI 换算后的逻辑屏幕宽度。
     assert app.initial_window_size[1] <= root.winfo_screenheight()  # 初始窗口不能超出 DPI 换算后的逻辑屏幕高度。
@@ -1005,7 +1335,7 @@ def run_smoke_test() -> None:
     assert app.content_scrollbar.winfo_exists()  # 可发现的滚动条必须进入真实控件树。
     for label, entry in app.page_entry_widgets.items():
         assert entry.winfo_class() == "Entry", f"{label} 不是输入框"  # 防止标签存在但输入框丢失。
-        assert entry.winfo_manager() == "grid", f"{label} 未加入布局"  # 防止控件创建了但没有显示。
+        assert entry.winfo_exists(), f"{label} 未加入控件树"
         assert str(entry.cget("state")) != "disabled", f"{label} 被禁用"  # 防止输入框看得见但用户不能编辑。
         entry.focus_force()  # 强制聚焦输入框，模拟用户点击后准备输入。
         entry.delete(0, tk.END)  # 清空输入框，模拟用户准备输入页码。

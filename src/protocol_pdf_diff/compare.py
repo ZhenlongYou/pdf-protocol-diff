@@ -37,6 +37,7 @@ from .pdf_extract import (
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
+from .progress import ProgressEvent, ProgressObserver, notify_progress
 from .prose_source_visuals import build_prose_source_visuals
 from .quality import (
     PairAssessment,
@@ -123,28 +124,44 @@ _DISPLAYED_FORMULA_RELATION_RE = re.compile(
 _DISPLAYED_FORMULA_ARITHMETIC_RE = re.compile(r"[+*/^√∑∫]")
 
 
-def run_diff(old_pdf: str | Path, new_pdf: str | Path, options: DiffOptions) -> DiffResult:
+def run_diff(
+    old_pdf: str | Path,
+    new_pdf: str | Path,
+    options: DiffOptions,
+    *,
+    progress_observer: ProgressObserver | None = None,
+) -> DiffResult:
     """Run the complete extraction, sectioning, and comparison pipeline."""
 
     options = replace(
         options,
         ocr_language=normalize_ocr_language(options.ocr_language),
     )
+    notify_progress(progress_observer, ProgressEvent(stage="read_old", side="old"))
     old_extraction = extract_pdf_text(
         old_pdf,
         start_page=options.old_start_page,
         end_page=options.old_end_page,
         ocr_language=options.ocr_language,
         layout_backend=options.layout_backend,
+        progress_observer=progress_observer,
+        progress_stage="read_old",
+        progress_side="old",
     )
+    notify_progress(progress_observer, ProgressEvent(stage="read_new", side="new"))
     new_extraction = extract_pdf_text(
         new_pdf,
         start_page=options.new_start_page,
         end_page=options.new_end_page,
         ocr_language=options.ocr_language,
         layout_backend=options.layout_backend,
+        progress_observer=progress_observer,
+        progress_stage="read_new",
+        progress_side="new",
     )
+    notify_progress(progress_observer, ProgressEvent(stage="match_diff"))
     result = compare_extractions(old_extraction, new_extraction, options)
+    notify_progress(progress_observer, ProgressEvent(stage="visual_evidence"))
     if options.visual_watchdog:
         visual_review_items, visual_warnings, visual_audit = detect_visual_review_items(
             old_extraction,

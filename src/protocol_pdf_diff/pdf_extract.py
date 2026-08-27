@@ -46,6 +46,7 @@ from .page_ocr import (
     classify_page_parser_route,
     normalize_ocr_language,
 )
+from .progress import ProgressEvent, ProgressObserver, notify_progress
 from .table_codec import (
     decode_table_cell,
     encode_table_field,
@@ -140,6 +141,9 @@ def extract_pdf_text(
     end_page: int | None = None,
     ocr_language: str | None = None,
     layout_backend: str = "native",
+    progress_observer: ProgressObserver | None = None,
+    progress_stage: str = "read_pdf",
+    progress_side: str | None = None,
 ) -> ExtractionResult:
     """Extract selectable text from a one-based inclusive PDF page range.
 
@@ -176,6 +180,9 @@ def extract_pdf_text(
             start_page,
             end_page,
             normalized_ocr_language,
+            progress_observer=progress_observer,
+            progress_stage=progress_stage,
+            progress_side=progress_side,
         )
         # 默认 native 在返回前不导入版面模块；普通 PDF 连正则/枚举初始化也不新增。
         if layout_backend is None or (
@@ -199,6 +206,10 @@ def _extract_pdf_text_with_pdfplumber(
     start_page: int | None,
     end_page: int | None,
     ocr_language: str | None = None,
+    *,
+    progress_observer: ProgressObserver | None = None,
+    progress_stage: str = "read_pdf",
+    progress_side: str | None = None,
 ) -> ExtractionResult:
     """Extract layout-aware text and structured table rows with pdfplumber."""
 
@@ -238,6 +249,7 @@ def _extract_pdf_text_with_pdfplumber(
             (index, pdf.pages[index - 1])
             for index in range(selected_start, selected_end + 1)
         ]  # 先固定页窗并保留用户可见的 1-based 页码，供坐标证据复用。
+        selected_page_count = len(selected_pages)
         coordinate_pages = {
             index: _filtered_layout_page(
                 page,
@@ -279,7 +291,16 @@ def _extract_pdf_text_with_pdfplumber(
             )
             for index, page in selected_pages
         }  # 已证明页的比较文本已干净，不得再让章节器盲剔合法的 `1 Introduction`。
-        for index, page in selected_pages:
+        notify_progress(
+            progress_observer,
+            ProgressEvent(
+                stage=progress_stage,
+                side=progress_side,
+                completed_pages=0,
+                total_pages=selected_page_count,
+            ),
+        )  # 全页坐标预扫描期间只显示阶段与耗时；真正进入逐页抽取后才显示 0/N，避免假性卡死。
+        for completed_page_count, (index, page) in enumerate(selected_pages, start=1):
             visual_noise_bboxes = tuple(
                 [
                     *gutter_boxes_by_page.get(index, ()),
@@ -338,6 +359,15 @@ def _extract_pdf_text_with_pdfplumber(
                     vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
+            notify_progress(
+                progress_observer,
+                ProgressEvent(
+                    stage=progress_stage,
+                    side=progress_side,
+                    completed_pages=completed_page_count,
+                    total_pages=selected_page_count,
+                ),
+            )
     finally:
         pdf.close()  # 明确关闭 pdfplumber 打开的文件资源。
         source_snapshot.close()  # 解析器始终读取这份快照；摘要与实际解析字节严格绑定。
