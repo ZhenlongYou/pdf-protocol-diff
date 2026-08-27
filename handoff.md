@@ -2,11 +2,13 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-reader-segmentation-20260826`
+- task_id: `pdf-diff-reader-segmentation-integration-20260828`
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`codex/pdf-diff-reader-segmentation-20260826`
 - 持久项目分支：`project/pdf-protocol-diff`
-- 目标：正文以原 PDF 左右截图为主，并对真实变化词做浅色坐标标注；Table 不在正文证据中重复；Figure 只显示原图；Formula 只隔离不自动比较；所有截图都服从互斥的页面区域归属，禁止页边行号、半截段落和相邻区域泄漏。
+- recorded_commit: `d1a06906b02fc24b830053d1a6d0e6190218c50a`
+- status: ready
+- 目标：以显式 legacy-audit 将已完成并验证的读者报告基线合法集成到 `main`，随后开始桌面 UI 重构；本次不改变报告、抽取、配对或差异标记逻辑。
 
 ## 已经完成
 
@@ -42,6 +44,8 @@
 
 ## 当前状态或阻塞
 
+- 原 claim 因缺少后来新增的受保护持久分支快照，且临时 `codex/*` 分支不能执行 v1 policy adoption，已由原 owner 携带恢复后的 lease 以 blocked 结束；基线提交和远端持久项目分支均完整保留。
+- 当前从独立 linked worktree 执行显式 legacy-audit；远端临时分支已在确认与 `project/pdf-protocol-diff` 同为 `d1a06906…` 后删除，持久项目分支保持可恢复。
 - 没有实现阻塞。相关回归已覆盖截图优先、逐词浅色坐标、Table/Figure/Formula 互斥、全文 Figure 配对、父子章节合并、显示公式关闭、页边行号、换行标题和完整段落截图。
 - 当前代码完整测试为 1198 项通过、1909 个子用例通过，耗时 513.73 秒；`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
 - JSON 显示投影追加后再次运行完整套件：1198 项和 1909 个子用例通过，唯一失败暴露了 `omitted_snippet_count` 的历史 raw 契约；改为保留原字段并新增显示计数后，相关 4 项回归、编译检查和 GUI 冒烟全部通过。
