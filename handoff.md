@@ -6,7 +6,7 @@
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `590245d59e86d54a2cabda009313cb78a8d72533`
+- recorded_commit: `880f5b5717482d1570bc77c870c5ee232a3f34f8`
 - status: ready
 - 目标：只重构桌面 UI 并增加只读进度观察器；冻结 HTML 报告、PDF 识别、配对及差异标记语义。
 
@@ -18,7 +18,7 @@
 - 运行状态锁定全部输入，并按“读取旧版→读取新版→匹配差异→生成视觉证据→生成报告”显示真实阶段和耗时；PDF 仅在完成全页坐标预扫描后显示实际页数进度，后续阶段不伪造百分比。
 - `run_diff` 和 PDF 抽取入口增加可选只读进度观察器。回调缺省保持兼容，回调异常 fail-open；真实 demo 在冻结生成时间后证明六类报告与无观察器路径逐字节一致。
 - 成功底栏从已生成 Markdown 汇总读取读者层计数，确保与 HTML 的过滤/聚合口径一致；OIF 风险状态会明确显示“视觉校对需人工复核”，不再用 raw audit 数字或“0 项”暗示无风险。
-- 运行中关闭窗口会被阻止，避免 daemon 线程在逐文件写报告时被终止；浏览器和文件管理器打开失败均保留成功状态并给出可操作提示；长异常只在对话框完整显示，固定底栏显示有界首行。
+- 运行中关闭窗口会被阻止，避免 daemon 线程在逐文件写报告时被终止；macOS 的窗口关闭、应用菜单、Dock 和 Command-Q 均绑定同一保护回调。浏览器和文件管理器打开失败均保留成功状态并给出可操作提示；长异常只在对话框完整显示，固定底栏显示有界首行。
 - 已增加页码模式、高级设置、自动打开、阶段顺序、预扫描时序、实际页数、运行控件锁定、timer 取消、成功/失败恢复、读者计数一致性和打开失败保护的回归测试。
 
 - 正文卡先显示旧/新 PDF 原文截图，只在真实变化词坐标上覆盖淡红/淡绿半透明底色；相同文字、纯 Table/Figure/Section 定位编号和页边行号不着色。结构化 OCR/文字差异默认折叠。
@@ -53,7 +53,7 @@
 
 ## 当前状态或阻塞
 
-- UI 代码提交为 `590245d59e86d54a2cabda009313cb78a8d72533`。项目 `.venv` 完整套件 1217/1217 通过（493.482 秒），定向 GUI/进度/读者计数 29 项通过，编译检查、`git diff --check`、`python3 main.py --gui-smoke-test`、源码与 `.venv` 的 `gui_app.py` 启动均通过。
+- UI 主体代码提交为 `590245d59e86d54a2cabda009313cb78a8d72533`，macOS 退出保护修复提交为 `880f5b5717482d1570bc77c870c5ee232a3f34f8`。项目 `.venv` 完整套件 1218/1218 通过（506.504 秒），定向 GUI/进度/读者计数测试通过，编译检查、`git diff --check`、`python3 main.py --gui-smoke-test`、源码与 `.venv` 的 `gui_app.py` 启动均通过。
 - exact-commit 真实 PCIe/OIF 报告重生、Playwright Chromium 视觉复核和多 agent 最终测试报告审核属于仓外验收证据；产物统一保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/`。
 - 本轮按用户计划不修改 `reporting.py` 的报告结构、颜色或抽取/配对算法。独立视觉审核发现 MR 冻结基线仍可能把跨页运行页眉列为读者变化；该问题不属于本次 UI scope，最终验收会作为既有报告语义风险单独记录，不能宣称已由 UI 修复。
 - macOS 在后续验收阶段被锁定，因此最新桌面窗口的运行/成功/错误截图若不能在交付前补拍，将明确记为 `INCONCLUSIVE`；真实 Tk 启动、GUI smoke、状态机自动化测试和 HTML 报告视觉验收仍分别执行，不能用自动化结果冒充该截图已验收。
@@ -62,7 +62,7 @@
 
 ## 下一步计划
 
-- 若继续本次交付，先用 `590245d…` 重生 PCIe 指定页窗和 OIF LR/MR/VSR 报告，再用隔离 Playwright Chromium 检查正文、Table、Figure 实际卡片；最后完成 commit-bound review、推送持久项目分支和 `main`、运行原子 delivery gate。
+- 若继续本次交付，先用最终 handoff 提交重生 PCIe 指定页窗和 OIF LR/MR/VSR 报告，再用隔离 Playwright Chromium复核正文、Table、Figure 实际卡片；最后完成 commit-bound review、推送持久项目分支和 `main`、运行原子 delivery gate。
 - 若继续提高复杂版面识别率，优先引入带类型的页面区域图，并用 split/merge-aware 匹配处理一个旧块对应多个新块；不要继续向字符串启发式叠加协议专用词表。
 - 视觉 late-interaction 检索只能作为低置信度候选召回，不能直接成为规范差异结论。
 - 每次改动后必须用真实 OIF 输入生成完整 HTML，检查全部 Table、Figure、prose 联系表，再运行完整测试；单元测试通过不能代替报告视觉验收。
