@@ -15,6 +15,7 @@ from protocol_pdf_diff import pdf_extract as pdf_extract_module
 from protocol_pdf_diff import reporting as reporting_module
 from protocol_pdf_diff.compare import (
     _covered_table_visual_row_keys,
+    _document_relation_anchor_pairs,
     _last_table_caption_line,
     _mapped_parent_unique_child_rescue_pairs,
     _match_sections,
@@ -43,6 +44,7 @@ from protocol_pdf_diff.models import (
     TableVisual,
 )
 from protocol_pdf_diff.pdf_extract import _table_lines_from_rows_with_coverage
+from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
 from protocol_pdf_diff.reporting import (
     _build_table_changes,
     _generic_boundary_merge_patterns_for_entries,
@@ -251,6 +253,91 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             )
         )
 
+    def test_coordinate_visual_cleanup_never_trims_a_complete_normative_sentence(self) -> None:
+        """Table/Figure word overlap cannot consume a sentence subject or numbered step."""
+
+        cases = (
+            (
+                "Hosts and modules shall meet the applicable specifications defined in Table 30-1.",
+                "Hosts and modules Parameter Min Max Conditions",
+            ),
+            (
+                "Amplitude and Transition Times for counter-propagating lanes are defined in Table 30-3.",
+                "Amplitude and Transition Times Parameter Min Max Conditions",
+            ),
+            (
+                "Recommended gDC and gDC2 setting vs channel IL are shown in Table 30-8.",
+                "Recommended gDC and gDC2 setting vs channel IL Parameter Min Max",
+            ),
+            (
+                "1. An optical stressed receiver conformance test signal with the specified "
+                "pattern (typically SSPRQ) is applied to the optical input of the module.",
+                "1 An optical stressed receiver conformance test signal specified pattern "
+                "SSPRQ Parameter Min Max",
+            ),
+            (
+                "2. Capture the output waveform with a clock recovered from the signal.",
+                "2 Capture output waveform clock recovered signal Parameter Min Max",
+            ),
+            (
+                "The ability of the host input to tolerate the parameters specified in "
+                "Table 30-4 is tested using a stressed input test.",
+                "The ability of the host input Parameter Min Max",
+            ),
+            (
+                "Add sinusoidal jitter as defined in IEEE P802.3dj Table 176D-12.",
+                "Add sinusoidal jitter as defined in IEEE P802.3dj Table 176D-12",
+            ),
+        )
+
+        for sentence, coordinate_text in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(
+                    sentence,
+                    strip_coordinate_owned_visual_fragment(
+                        sentence,
+                        (coordinate_text,),
+                        allow_interleaved_prefix=False,
+                    ),
+                )
+
+    def test_coordinate_figure_label_prefix_is_removed_before_complete_prose(self) -> None:
+        """An uppercase diagram prefix must not hide the real sentence boundary."""
+
+        prose = "All co-propagating lanes are active as crosstalk sources."
+        for labels in (
+            "Host output TP1a reference receiver and measurement points",
+            "Time Undershoot VMA 1",
+        ):
+            with self.subTest(labels=labels):
+                self.assertEqual(
+                    prose,
+                    strip_coordinate_owned_visual_fragment(
+                        f"{labels} {prose}",
+                        (labels,),
+                    ),
+                )
+
+    def test_coordinate_figure_cleanup_preserves_complete_sentence_openers(self) -> None:
+        """A matching Figure phrase later in prose cannot erase the sentence subject."""
+
+        sentences = (
+            "The signal at TP1a may appear as a closed eye.",
+            "The tap weights of the 15-tap FFE are constrained per Table 30-7.",
+            "Recommended gDC and gDC2 setting vs channel IL are shown in Table 30-8.",
+            "The time position of the pair of histograms in Figure 29-5 is defined.",
+            "The module output EECQ is measured using the reference receiver.",
+            "The test method for measuring module output electrical EECQ is illustrated.",
+            "The differential voltage specified in Table 30-1 is somewhat smaller.",
+        )
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                source = " ".join(sentence.split()[1:7])
+                self.assertEqual(
+                    sentence,
+                    strip_coordinate_owned_visual_fragment(sentence, (source,)),
+                )
+
     def test_coordinate_figure_cleanup_keeps_neighboring_requirement(self) -> None:
         """A one-sided diagram label must not hide unrelated normative prose."""
 
@@ -379,8 +466,15 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 for key in ("html", "markdown", "text")
             ]
 
+        self.assertEqual(
+            prose,
+            strip_coordinate_owned_visual_fragment(
+                f"{labels} {prose}",
+                (source_text,),
+            ),
+        )
         for report in reports:
-            self.assertIn(prose, report)
+            self.assertNotIn(prose, report)  # 相同正文不能伪装成修改卡片。
             self.assertNotIn("Oscilloscope", report)
             self.assertNotIn("esnopseR", report)
 
@@ -885,6 +979,250 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual("unique_title_body_fallback", matches[0][3])
         child_match = next(match for match in matches if match[:2] == (1, 1))
         self.assertEqual("structural_mapped_parent_unique_child", child_match[3])
+
+    def test_unique_related_titles_and_paragraph_skeletons_rescue_polluted_hierarchy(self) -> None:
+        """Whole-document comparison pairs strong peers without explicit page bounds."""
+
+        def section(
+            section_id: str,
+            heading: str,
+            title: str,
+            body: str,
+            page: int,
+        ) -> Section:
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=5,
+                heading_path=("Appendix 16.D.", heading),
+                number_path=("Appendix 16", heading.split()[0]),
+                start_page=page,
+                end_page=page,
+                body=body,
+            )
+
+        method_facts_old = (
+            "All co-propagating lanes are active as crosstalk sources using a QPRBS13-CEI pattern.\n"
+            "Amplitude and Transition Times are defined in Table 29-6.\n"
+            "The test method is illustrated in Figure 29-9 and described in Section 29.3.12.\n"
+            "The host channel emulation is defined in IEEE Std 802.3ck-2022 Clause 162.11.7.1.1.\n"
+        )
+        method_facts_new = (
+            "All co-propagating lanes are active as crosstalk sources using a QPRBS31-CEI pattern.\n"
+            "Amplitude and Transition Times are defined in Table 30-6.\n"
+            "The test method is illustrated in Figure 30-9 and described in Section 30.4.1.1.1.\n"
+            "The host channel emulation is defined in IEEE Std 802.3ck-2022 Clause 162.11.7.1.1.\n"
+        )
+        channel_facts_old = (
+            "The first recommended channel contains one connector and an AC coupling capacitor.\n"
+            "The second recommended channel contains two connectors and no package trace.\n"
+            "The third recommended channel contains a module PCB trace and one host PCB trace.\n"
+        )
+        channel_facts_new = (
+            "The first recommended channel contains one connector and an AC coupling capacitor.\n"
+            "The second recommended channel contains two connectors and no package trace.\n"
+            "The third recommended channel contains a module PCB trace and two host PCB traces.\n"
+        )
+        old_sections = [
+            section(
+                "old-method",
+                "29.4.1.2.1 Module output test method",
+                "Module output test method",
+                method_facts_old + ("legacy raster labels " * 40),
+                17,
+            ),
+            section(
+                "old-channels",
+                "16.D Recommended Electrical Channels",
+                "Recommended Electrical Channels",
+                channel_facts_old + ("legacy channel artwork " * 40),
+                25,
+            ),
+        ]
+        new_sections = [
+            section(
+                "new-method",
+                "30.4.1.2.1 Module output test method",
+                "Module output test method",
+                method_facts_new + ("revised receiver diagram " * 40),
+                19,
+            ),
+            section(
+                "new-channels",
+                "16.D Recommended Electrical Channel",
+                "Recommended Electrical Channel",
+                channel_facts_new + ("new channel schematic " * 40),
+                28,
+            ),
+        ]
+
+        matches = _match_sections(old_sections, new_sections, DiffOptions())
+
+        paired = {(old_index, new_index): basis for old_index, new_index, _score, basis in matches}
+        self.assertEqual("document_relation_anchor", paired[(0, 0)])
+        self.assertEqual("document_relation_anchor", paired[(1, 1)])
+
+    def test_document_relation_anchor_rejects_ambiguous_repeated_titles(self) -> None:
+        """A repeated method title cannot be paired by paragraph overlap alone."""
+
+        body = (
+            "The receiver shall apply the declared calibration sequence.\n"
+            "The waveform shall be measured at the declared test point.\n"
+            + ("layout labels without unique ownership " * 40)
+        )
+
+        def section(section_id: str, number: str) -> Section:
+            heading = f"{number} Test method"
+            return Section(
+                section_id,
+                heading,
+                "Test method",
+                3,
+                (heading,),
+                (number,),
+                1,
+                1,
+                body,
+            )
+
+        pairs = _document_relation_anchor_pairs(
+            [section("old-a", "1.1"), section("old-b", "1.2")],
+            [section("new", "2.1")],
+            [],
+            set(),
+            set(),
+        )
+
+        self.assertEqual([], pairs)
+
+    def test_unique_exact_technical_title_pairs_a_rewritten_definition(self) -> None:
+        """A unique same-named clause remains comparable after its body becomes a reference."""
+
+        old = Section(
+            "old-ceeq",
+            "29.3.13 Electrical Eye Closure PAM4 (Ceeq)",
+            "Electrical Eye Closure PAM4 (Ceeq)",
+            3,
+            ("Appendix 16.D.", "29.3.13 Electrical Eye Closure PAM4 (Ceeq)"),
+            ("Appendix 16", "29.3.13"),
+            12,
+            13,
+            "Ceeq is a coefficient which accounts for reference equalizer noise enhancement. "
+            "Within the context of EECQ, Ceeq is derived from the FFE tap weights.",
+        )
+        new = Section(
+            "new-ceeq",
+            "30.3.14 Electrical Eye Closure PAM4 (Ceeq)",
+            "Electrical Eye Closure PAM4 (Ceeq)",
+            3,
+            ("30 CEI-224G-LINEAR-PAM4", "30.3.14 Electrical Eye Closure PAM4 (Ceeq)"),
+            ("30", "30.3.14"),
+            15,
+            15,
+            "See Section 29.3.12 for the definition of Ceeq, with the exception that the "
+            "specified reference equalizer is replaced by the new host and module methods.",
+        )
+
+        matches = _match_sections([old], [new], DiffOptions())
+
+        self.assertEqual((0, 0), matches[0][:2])
+        self.assertEqual("document_relation_anchor", matches[0][3])
+
+    def test_unique_exact_title_pairs_equivalent_internal_references(self) -> None:
+        """An optional ``Appendix`` label cannot split an otherwise identical clause."""
+
+        old = Section(
+            "old-patterns", "29.2.1 Data Patterns", "Data Patterns", 3,
+            ("29.2.1 Data Patterns",), ("29.2.1",), 3, 3,
+            "See Appendix 16.C.5",
+        )
+        new = Section(
+            "new-patterns", "30.2.1 Data Patterns", "Data Patterns", 3,
+            ("30.2.1 Data Patterns",), ("30.2.1",), 5, 5,
+            "See 16.C.5.",
+        )
+
+        matches = _match_sections([old], [new], DiffOptions())
+
+        self.assertEqual((0, 0), matches[0][:2])
+        self.assertEqual("document_relation_anchor", matches[0][3])
+
+    def test_reader_suppresses_only_soft_hyphen_spacing_and_terminal_period(self) -> None:
+        """PDF line-wrap spacing and a terminal period are not technical edits."""
+
+        self.assertTrue(
+            reporting_module._reader_values_match_after_locator_renumbering(
+                "The low-frequency response is measured.",
+                "The low- frequency response is measured.",
+            )
+        )
+        self.assertTrue(
+            reporting_module._reader_values_match_after_locator_renumbering(
+                "See Section 13.3.6.",
+                "See Section 13.3.6",
+            )
+        )
+        self.assertFalse(
+            reporting_module._reader_values_match_after_locator_renumbering(
+                "The low-frequency response is measured.",
+                "The low frequency response is measured.",
+            )
+        )
+
+    def test_matching_generic_table_headers_ignore_one_wrapped_subscript(self) -> None:
+        """A header glyph split after its unit cannot become a table row edit."""
+
+        old_table = TableVisual(
+            1,
+            1,
+            "Table 29-11. Emulated Host Channels",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            [
+                "表格行: T1 | Column 1=Host Channel Type | "
+                "Column 2=Channel Insertion Loss (dB) | Column 3=z (mm)\\np",
+                "表格行: T1 | Column 1=near-end | Column 2=0 | Column 3=0",
+            ],
+            "grid",
+        )
+        new_table = replace(
+            old_table,
+            title="Table 30-11. Emulated Host Channels",
+            row_texts=[
+                "表格行: T2 | Column 1=Host Channel Type | "
+                "Column 2=Channel Insertion Loss (dB) | Column 3=Zp (mm)",
+                "表格行: T2 | Column 1=near-end | Column 2=0 | Column 3=0",
+            ],
+        )
+
+        self.assertEqual(
+            [],
+            reporting_module._table_row_changes((old_table,), (new_table,)),
+        )
+
+    def test_unique_external_clause_anchor_pairs_a_short_renamed_section(self) -> None:
+        """A short title edit is comparable when the same external clause proves identity."""
+
+        old = Section(
+            "old-noise", "29.3.7 AC Common Mode Noise", "AC Common Mode Noise", 3,
+            ("29.3.7 AC Common Mode Noise",), ("29.3.7",), 12, 12,
+            "AC common mode noise is defined in IEEE Std 802.3ck-2022 subclause 120G.5.1.",
+        )
+        new = Section(
+            "new-noise", "30.3.8 Common Mode Noise", "Common Mode Noise", 3,
+            ("30.3.8 Common Mode Noise",), ("30.3.8",), 15, 15,
+            "Common mode noise shall use IEEE Std 802.3ck-2022 subclause 120G.5.1.",
+        )
+
+        pairs = _document_relation_anchor_pairs([old], [new], [], set(), set())
+
+        self.assertEqual([(0, 0)], pairs)
+        reader_label = reporting_module._MATCH_BASIS_LABELS[
+            "document_relation_anchor"
+        ]
+        self.assertIn("结构/引用锚点", reader_label)
+        self.assertNotIn("高段落骨架", reader_label)
 
     def test_duplicate_parent_path_cannot_redirect_a_unique_child_rescue(self) -> None:
         """Repeated extracted paths must fail closed instead of overwriting parent identity."""

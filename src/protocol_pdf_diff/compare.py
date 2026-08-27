@@ -2286,6 +2286,42 @@ def _match_sections(
             )
         )
 
+    explicit_two_sided_window = all(
+        value is not None
+        for value in (
+            options.old_start_page,
+            options.old_end_page,
+            options.new_start_page,
+            options.new_end_page,
+        )
+    )
+    document_relation_pairs = (
+        []
+        if explicit_two_sided_window
+        else _document_relation_anchor_pairs(
+            old_sections,
+            new_sections,
+            matches,
+            matched_old,
+            matched_new,
+            options.min_section_match_similarity,
+        )
+    )
+    for old_index, new_index in document_relation_pairs:
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                "document_relation_anchor",
+            )
+        )  # 双侧唯一标题和高段落骨架覆盖可越过错误父层级；仍保留真实全文分数。
+
     for old_index, new_index in _user_page_window_anchor_pairs(
         old_sections,
         new_sections,
@@ -2465,6 +2501,137 @@ def _user_page_window_anchor_pairs(
     )
     if any(value is None for value in page_bounds):
         return []  # 只有两侧完整页窗都由用户明确给出时才获得这项配对授权。
+    return _monotonic_related_section_pairs(
+        old_sections,
+        new_sections,
+        matches,
+        matched_old,
+        matched_new,
+        require_unique_related_title=False,
+        allow_single_unproven_fallback=True,
+    )
+
+
+def _document_relation_anchor_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matches: list[tuple[int | None, int | None, float, str]],
+    matched_old: set[int],
+    matched_new: set[int],
+    minimum_similarity: float = 0.72,
+) -> list[tuple[int, int]]:
+    """Rescue strong monotonic peers when extraction polluted their hierarchy.
+
+    Supplying two documents already establishes that they are comparison
+    candidates, but it does not authorize arbitrary pairings.  This pass only
+    accepts either an exact title that occurs once per document, or mutually
+    unique near-titles with at least two matching paragraph skeletons and 50%
+    coverage of the shorter clause.  The weaker one-pair fallback remains
+    exclusive to an explicit two-sided page window.
+    """
+
+    return _monotonic_related_section_pairs(
+        old_sections,
+        new_sections,
+        matches,
+        matched_old,
+        matched_new,
+        require_unique_related_title=True,
+        allow_single_unproven_fallback=False,
+        minimum_similarity=minimum_similarity,
+    )
+
+
+_DOCUMENT_RELATION_LOCATOR_RE = re.compile(
+    r"(?i)\b(?:section|table|figure|equation|appendix|annex|clause|subclause)\s*"
+    r"(?:\(?[A-Za-z]?\d+[A-Za-z0-9.()_-]*|[A-Z][A-Za-z0-9.()_-]+)"
+)
+_DOCUMENT_RELATION_EXTERNAL_LOCATOR_RE = re.compile(
+    r"(?i)\bIEEE\s+(?:Std\s+|P)?(?P<standard>\d+(?:\.\d+)*[A-Za-z-]*)"
+    r"(?:-\d{4})?(?:\s*\[\d+\])?\s+(?:clause|subclause)\s+"
+    r"(?P<clause>[A-Za-z0-9.()_-]+)"
+)
+_DOCUMENT_RELATION_INTERNAL_LOCATOR_RE = re.compile(
+    r"(?i)\b(?:see|defined\s+in|described\s+in|specified\s+in)\s+"
+    r"(?:(?:appendix|annex|section|clause|subclause)\s+)?"
+    r"(?P<locator>[A-Za-z]?\d+(?:\.[A-Za-z0-9]+)+)"
+)
+
+
+def _has_document_relation_locator(body: str) -> bool:
+    """Return whether a clause contains an explicit structure locator."""
+
+    return bool(_DOCUMENT_RELATION_LOCATOR_RE.search(body))
+
+
+def _has_shared_title_body_anchor(old_section: Section, new_section: Section) -> bool:
+    """Require one descriptive title term to recur in both rewritten bodies."""
+
+    title_terms = {
+        term.casefold()
+        for term in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", old_section.title)
+        if term.casefold() not in _SECTION_IDENTITY_TITLE_STOP_WORDS
+    }
+    if not title_terms:
+        return False
+    old_body = old_section.body.casefold()
+    new_body = new_section.body.casefold()
+    return any(
+        re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", old_body)
+        and re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", new_body)
+        for term in title_terms
+    )
+
+
+def _has_one_sided_title_body_anchor(old_section: Section, new_section: Section) -> bool:
+    """Require a descriptive title term in at least one body for locator rescue."""
+
+    title_terms = {
+        term.casefold()
+        for term in re.findall(r"[A-Za-z][A-Za-z0-9_]{3,}", old_section.title)
+        if term.casefold() not in _SECTION_IDENTITY_TITLE_STOP_WORDS
+    }
+    bodies = f"{old_section.body}\n{new_section.body}".casefold()
+    return bool(
+        title_terms
+        and any(
+            re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", bodies)
+            for term in title_terms
+        )
+    )
+
+
+def _document_relation_external_locator_keys(body: str) -> frozenset[str]:
+    """Return stable external standard+clause anchors, ignoring edition syntax."""
+
+    return frozenset(
+        f"{match.group('standard').casefold()}:{match.group('clause').casefold()}"
+        for match in _DOCUMENT_RELATION_EXTERNAL_LOCATOR_RE.finditer(body)
+    )
+
+
+def _document_relation_internal_locator_keys(body: str) -> frozenset[str]:
+    """Return explicit internal references while ignoring an optional kind word."""
+
+    return frozenset(
+        match.group("locator").casefold()
+        for match in _DOCUMENT_RELATION_INTERNAL_LOCATOR_RE.finditer(body)
+    )
+
+
+def _monotonic_related_section_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matches: list[tuple[int | None, int | None, float, str]],
+    matched_old: set[int],
+    matched_new: set[int],
+    *,
+    require_unique_related_title: bool,
+    allow_single_unproven_fallback: bool,
+    minimum_similarity: float = 0.72,
+) -> list[tuple[int, int]]:
+    """Return evidence-backed unmatched pairs without crossing existing matches."""
+
     has_technical_match = any(
         old_index is not None
         and new_index is not None
@@ -2495,7 +2662,7 @@ def _user_page_window_anchor_pairs(
     old_candidates = eligible_sections(old_sections, matched_old)
     new_candidates = eligible_sections(new_sections, matched_new)
     if not old_candidates or not new_candidates:
-        return []  # 抽取为空时仍保持不可比较，用户页窗不能制造缺失的正文证据。
+        return []  # 抽取为空时仍保持不可比较，文档关系不能制造缺失的正文证据。
     existing_pairs = tuple(
         (old_index, new_index)
         for old_index, new_index, _score, _basis in matches
@@ -2512,6 +2679,32 @@ def _user_page_window_anchor_pairs(
         tuple[tuple[int, float, float, float, int, int, int], int, int]
     ] = []
     evidence_scores: dict[tuple[int, int], float] = {}
+    old_exact_title_counts = Counter(
+        _review_unit_key(section.title)
+        for section in old_sections
+        if section.role == "technical"
+        if _review_unit_key(section.title)
+    )
+    new_exact_title_counts = Counter(
+        _review_unit_key(section.title)
+        for section in new_sections
+        if section.role == "technical"
+        if _review_unit_key(section.title)
+    )
+    old_related_title_counts = {
+        old_index: sum(
+            _review_similarity(old_section.title, new_section.title) >= 0.92
+            for _new_index, new_section, _new_units in new_candidates
+        )
+        for old_index, old_section, _old_units in old_candidates
+    }
+    new_related_title_counts = {
+        new_index: sum(
+            _review_similarity(old_section.title, new_section.title) >= 0.92
+            for _old_index, old_section, _old_units in old_candidates
+        )
+        for new_index, new_section, _new_units in new_candidates
+    }  # 标题互相唯一只需预计算一次，避免在正文候选笛卡尔积中重复扫描。
     for old_index, old_section, old_units in old_candidates:
         for new_index, new_section, new_units in new_candidates:
             if not preserves_existing_order(old_index, new_index):
@@ -2524,6 +2717,10 @@ def _user_page_window_anchor_pairs(
                 old_title_key
                 and old_title_key == _review_unit_key(new_section.title)
             )
+            title_similarity = _review_similarity(
+                old_section.title,
+                new_section.title,
+            )
             rank = (
                 matched_count,
                 overlap_ratio,
@@ -2534,12 +2731,94 @@ def _user_page_window_anchor_pairs(
                 -old_index,
             )
             ranked_candidates.append((rank, old_index, new_index))
-            if matched_count and (
-                titles_match
-                or (matched_count >= 2 and overlap_ratio >= 0.20)
-            ):
+            if require_unique_related_title:
+                unique_exact_title = bool(
+                    titles_match
+                    and old_exact_title_counts[old_title_key] == 1
+                    and new_exact_title_counts[old_title_key] == 1
+                )
+                old_external_locators = _document_relation_external_locator_keys(
+                    old_section.body
+                )
+                new_external_locators = _document_relation_external_locator_keys(
+                    new_section.body
+                )
+                shared_external_locator = bool(
+                    old_external_locators & new_external_locators
+                )
+                shared_internal_locator = bool(
+                    _document_relation_internal_locator_keys(old_section.body)
+                    & _document_relation_internal_locator_keys(new_section.body)
+                )
+                locator_pair_is_unique = bool(
+                    shared_external_locator
+                    and title_similarity >= 0.70
+                    and sum(
+                        bool(
+                            old_external_locators
+                            & _document_relation_external_locator_keys(candidate.body)
+                        )
+                        and _review_similarity(old_section.title, candidate.title) >= 0.70
+                        for _candidate_index, candidate, _candidate_units in new_candidates
+                    ) == 1
+                    and sum(
+                        bool(
+                            _document_relation_external_locator_keys(candidate.body)
+                            & new_external_locators
+                        )
+                        and _review_similarity(candidate.title, new_section.title) >= 0.70
+                        for _candidate_index, candidate, _candidate_units in old_candidates
+                    ) == 1
+                )
+                evidence_proven = bool(
+                    (
+                        locator_pair_is_unique
+                        and title_similarity >= max(0.70, minimum_similarity - 0.20)
+                    )
+                    or (
+                        unique_exact_title
+                        and shared_internal_locator
+                        and max(
+                            len(compact_inline(old_section.body)),
+                            len(compact_inline(new_section.body)),
+                        ) <= 160
+                    )
+                    or (
+                        rank[3] >= max(0.85, minimum_similarity)
+                        and (
+                            (
+                                unique_exact_title
+                                and (
+                                    _has_shared_title_body_anchor(old_section, new_section)
+                                    or (
+                                        _has_one_sided_title_body_anchor(old_section, new_section)
+                                        and _has_document_relation_locator(old_section.body)
+                                        and _has_document_relation_locator(new_section.body)
+                                    )
+                                )
+                            )
+                            or (
+                                not titles_match
+                                and title_similarity >= 0.92
+                                and old_related_title_counts[old_index] == 1
+                                and new_related_title_counts[new_index] == 1
+                                and matched_count >= 2
+                                and overlap_ratio >= 0.50
+                            )
+                        )
+                    )
+                )
+            else:
+                evidence_proven = bool(
+                    matched_count
+                    and (
+                        titles_match
+                        or (matched_count >= 2 and overlap_ratio >= 0.20)
+                    )
+                )
+            if evidence_proven:
                 evidence_scores[(old_index, new_index)] = (
-                    (100.0 if titles_match else 0.0)
+                    title_similarity * 100.0
                     + matched_count * 10.0
                     + overlap_ratio * 3.0
                     + rank[2]
@@ -2560,7 +2839,11 @@ def _user_page_window_anchor_pairs(
             )
         ]
 
-    if has_technical_match or not ranked_candidates:
+    if (
+        not allow_single_unproven_fallback
+        or has_technical_match
+        or not ranked_candidates
+    ):
         return []  # 已有关系后的不相干尾章仍保持新增/删除，不借用户页窗任意强配。
     _rank, old_index, new_index = max(ranked_candidates)
     return [(old_index, new_index)]

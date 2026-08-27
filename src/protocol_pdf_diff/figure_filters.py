@@ -19,14 +19,15 @@ from .text_utils import compact_inline
 
 _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|be|being|been|"
-    r"shows?|illustrates?|depicts?|describes?|defines?|specifies?|contains?|"
-    r"lists?|measure(?:s|d)?|require(?:s|d)?|use(?:s|d)?|meet(?:s)?|"
+    r"show(?:s|n|ed|ing)?|illustrates?|depicts?|describes?|"
+    r"defin(?:e|es|ed|ing)|specifies?|contains?|"
+    r"lists?|measure(?:s|d)?|capture(?:s|d|ing)?|require(?:s|d)?|use(?:s|d)?|meet(?:s)?|"
     r"provide(?:s|d)?|preserve(?:s|d)?|apply|applies|applied)\b"
     r"|应|必须|不得|要求|规定|显示|说明|描述|定义"
 )
 _PROSE_SENTENCE_OPENER_RE = re.compile(
     r"(?i)^(?:a|an|all|any|each|either|every|it|neither|one|the|these|"
-    r"this|those|we)$"
+    r"this|those|we|recommended)$"
 )
 def filter_figure_visual_snippets(values: list[str] | tuple[str, ...]) -> list[str]:
     """Remove Figure labels plus adjacent caption/diagram fragments.
@@ -156,9 +157,48 @@ def _strip_one_coordinate_figure_prefix(
     source = _figure_text_tokens(source_text)
     if not observed or not source:
         return value
+    source_canonical = _figure_text_canonical(source_text)
+    first_token = observed[0][0]
+    if (
+        _coordinate_value_starts_with_prose(value)
+        and (
+            bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(first_token))
+            or bool(re.fullmatch(r"\d+[.)]?", first_token))
+        )
+    ):
+        return value  # 明确句首或编号步骤优先；后文与 Figure 重词不能裁掉真实主语。
+    # A Figure label wall can be followed by a complete sentence.  Prove and
+    # remove that coordinate-owned prefix before applying the whole-value
+    # sentence guard; otherwise the later verb in the sentence protects the
+    # labels too (for example ``Time Undershoot VMA 1 All ... are ...``).
+    prose_start = _coordinate_mixed_prose_start(value, observed)
+    if allow_interleaved_prefix and prose_start is not None:
+        # A bare numeric Figure label immediately before ``All ...`` can look
+        # like a numbered prose item.  Consume it only when the same crop owns
+        # that number; punctuation-bearing ``2. Capture ...`` remains prose.
+        numeric_label = re.match(r"(\d+)\s+(?=[A-Z])", value[prose_start:])
+        if numeric_label is not None:
+            candidate_start = prose_start + numeric_label.end()
+            candidate_prefix = value[:candidate_start]
+            candidate_canonical = _figure_text_canonical(candidate_prefix)
+            candidate_coverage = sum(
+                (Counter(candidate_canonical) & Counter(source_canonical)).values()
+            ) / max(len(candidate_canonical), 1)
+            if candidate_coverage >= 0.94:
+                prose_start = candidate_start
+        prefix = value[:prose_start]
+        prefix_canonical = _figure_text_canonical(prefix)
+        prefix_coverage = sum(
+            (Counter(prefix_canonical) & Counter(source_canonical)).values()
+        ) / max(len(prefix_canonical), 1)
+        if (
+            len(prefix_canonical) >= 8
+            and prefix_coverage >= 0.94
+            and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+        ):
+            return value[prose_start:]
     if _coordinate_value_starts_with_prose(value):
         return value
-    source_canonical = _figure_text_canonical(source_text)
     observed_canonical = _figure_text_canonical(value)
     if (
         len(observed_canonical) >= 8
@@ -194,23 +234,6 @@ def _strip_one_coordinate_figure_prefix(
         and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
     ):
         return ""
-
-    prose_start = _coordinate_mixed_prose_start(value, observed)
-    if allow_interleaved_prefix and prose_start is not None:
-        prefix = value[:prose_start]
-        prefix_canonical = _figure_text_canonical(prefix)
-        prefix_coverage = sum(
-            (
-                Counter(prefix_canonical)
-                & Counter(source_canonical)
-            ).values()
-        ) / max(len(prefix_canonical), 1)
-        if (
-            len(prefix_canonical) >= 8
-            and prefix_coverage >= 0.94
-            and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
-        ):
-            return value[prose_start:]
 
     source_counts = Counter(token for token, _start, _end in source)
     observed_counts = Counter(token for token, _start, _end in observed)
@@ -372,7 +395,17 @@ def _coordinate_tokens_start_prose(
 ) -> bool:
     """Recognize a generic sentence start without protocol-specific labels."""
 
+    at_value_start = token_index == 0
     token, start, _end = tokens[token_index]
+    if (
+        re.fullmatch(r"\d+[.)]?", token)
+        and token_index + 1 < len(tokens)
+    ):
+        token_index += 1
+        token, start, _end = tokens[token_index]
+        # Numbered procedure steps are prose only when the marker is followed
+        # by an ordinary capitalized sentence.  A numeric axis or table value
+        # therefore cannot obtain this protection by itself.
     first_character = value[start : start + 1]
     if not first_character or not (
         first_character.isupper()
@@ -380,7 +413,7 @@ def _coordinate_tokens_start_prose(
     ):
         return False
     short_end = tokens[min(len(tokens), token_index + 3) - 1][2]
-    long_end = tokens[min(len(tokens), token_index + 12) - 1][2]
+    long_end = tokens[min(len(tokens), token_index + 24) - 1][2]
     has_immediate_verb = bool(
         _PROSE_OR_REQUIREMENT_VERB_RE.search(value[start:short_end])
     )
@@ -388,7 +421,13 @@ def _coordinate_tokens_start_prose(
         _PROSE_OR_REQUIREMENT_VERB_RE.search(value[start:long_end])
     )
     return has_immediate_verb or (
-        bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(token))
+        (
+            bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(token))
+            or (
+                at_value_start
+                and bool(re.search(r"[.!?。！？]\s*$", value))
+            )
+        )
         and has_nearby_verb
     )
 

@@ -89,6 +89,63 @@ class BodyVisualSubscriptTests(unittest.TestCase):
         self.assertEqual("values fp1 , fp2 , fz , fLF apply.", repaired)
         self.assertEqual(_visible_characters(raw), _visible_characters(repaired))
 
+    def test_coordinate_proven_eecq_metric_subscripts_rejoin_inline(self) -> None:
+        """EECQ metric names keep their visibly lowered suffixes in prose."""
+
+        words = [
+            _word("VMA", 10.0, 36.0, 100.0, 112.0),
+            _word("is", 58.0, 67.0, 100.0, 112.0),
+            _word("used", 71.0, 94.0, 100.0, 112.0),
+            _word("in", 98.0, 107.0, 100.0, 112.0),
+            _word("place", 111.0, 136.0, 100.0, 112.0),
+            _word("of", 140.0, 150.0, 100.0, 112.0),
+            _word("OMA", 154.0, 181.0, 100.0, 112.0),
+            _word(".", 205.0, 208.0, 100.0, 112.0),
+            _word("VMA", 212.0, 238.0, 100.0, 112.0),
+            _word("reference.", 261.0, 310.0, 100.0, 112.0),
+            _word("eecq", 35.9, 56.0, 104.8, 114.4),
+            _word("outer", 180.9, 203.0, 104.8, 114.4),
+            _word("eecq", 237.9, 259.0, 104.8, 114.4),
+        ]
+        raw = "VMA is used in place of OMA . VMA reference.\neecq outer eecq"
+
+        repaired = _repair_body_visual_subscript_order(raw, words)
+
+        self.assertEqual(
+            "VMAeecq is used in place of OMAouter . VMAeecq reference.",
+            repaired,
+        )
+        self.assertEqual(_visible_characters(raw), _visible_characters(repaired))
+
+    def test_coordinate_proven_sigma_and_ceeq_subscripts_rejoin_inline(self) -> None:
+        """Legacy Symbol sigma and Ceeq keep their coordinate-proven suffixes."""
+
+        words = [
+            _word("\uf073", 10.0, 18.0, 100.0, 112.0),
+            _word("is", 28.0, 37.0, 100.0, 112.0),
+            _word("added", 41.0, 72.0, 100.0, 112.0),
+            _word("and", 76.0, 93.0, 100.0, 112.0),
+            _word("C", 97.0, 106.0, 100.0, 112.0),
+            _word("matches", 124.0, 162.0, 100.0, 112.0),
+            _word("C", 166.0, 175.0, 100.0, 112.0),
+            _word("and", 190.0, 207.0, 100.0, 112.0),
+            _word("C", 211.0, 220.0, 100.0, 112.0),
+            _word(".", 260.0, 263.0, 100.0, 112.0),
+            _word("G", 17.9, 26.0, 104.8, 114.4),
+            _word("eeq", 105.9, 122.0, 104.8, 114.4),
+            _word("eq", 174.9, 188.0, 104.8, 114.4),
+            _word("eeq_db", 219.9, 258.0, 104.8, 114.4),
+        ]
+        raw = "\uf073 is added and C matches C and C .\nG eeq eq eeq_db"
+
+        repaired = _repair_body_visual_subscript_order(raw, words)
+
+        self.assertEqual(
+            "\uf073G is added and Ceeq matches Ceq and Ceeq_db .",
+            repaired,
+        )
+        self.assertEqual(_visible_characters(raw), _visible_characters(repaired))
+
     def test_coordinate_proven_return_loss_suffix_rejoins(self) -> None:
         """The lowered `cd` belongs to RL; ordinary adjacent text stays separate."""
 

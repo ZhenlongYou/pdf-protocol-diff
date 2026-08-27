@@ -88,6 +88,7 @@ _MATCH_BASIS_LABELS = {
     "structural_mapped_parent_body": "已配对父章节改号+子章节正文相似度",
     "structural_mapped_parent_boundary": "已配对父章节改号+边界兄弟章节+直属子章节",
     "structural_mapped_parent_unique_child": "强证据父章节配对+双侧唯一同题直属子章节",
+    "document_relation_anchor": "双侧唯一相关标题+结构/引用锚点+文档顺序",
     "user_page_window_anchor": "用户指定双侧页窗强关联",
     "unmatched": "未配对",
 }
@@ -101,6 +102,7 @@ _STRUCTURAL_MATCH_BASES = frozenset(
         "structural_mapped_parent_body",
         "structural_mapped_parent_boundary",
         "structural_mapped_parent_unique_child",
+        "document_relation_anchor",
     }
 )
 _USER_ANCHORED_MATCH_BASES = frozenset({"user_page_window_anchor"})
@@ -146,7 +148,8 @@ _READER_LAYOUT_HEADER_RE = re.compile(
 _READER_PROSE_VERB_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|be|being|been|verify|document|"
     r"obtain|provide|preserve|require|requires|required|specify|specifies|specified|"
-    r"measure|measures|measured|use|uses|used|meet|meets|include|includes|included)\b"
+    r"measure|measures|measured|capture|captures|captured|use|uses|used|meet|meets|"
+    r"include|includes|included)\b"
     r"|应|必须|不得|可|要求|规定|需|验证|记录|确认"
 )
 _READER_NORMATIVE_VERB_RE = re.compile(
@@ -4116,6 +4119,7 @@ def _table_row_changes(
 
     old_rows = _table_group_rows(old_tables)
     new_rows = _table_group_rows(new_tables)
+    old_rows, new_rows = _remove_one_sided_leading_schema_rows(old_rows, new_rows)
     overwide_changes, old_rows, new_rows = _partition_overwide_generic_rows(
         old_rows,
         new_rows,
@@ -4160,6 +4164,7 @@ def _table_row_changes(
         old_rows,
         new_rows,
     )
+    old_rows, new_rows = _remove_matching_generic_header_rows(old_rows, new_rows)
     old_rows, new_rows = _remove_cross_schema_header_rows(old_rows, new_rows)
     old_narrative_rows = [
         row for row in old_rows if _table_narrative_row_text(row)
@@ -4249,6 +4254,54 @@ def _table_row_changes(
             changes.append(_make_table_row_change("", new_row, "新表新增行"))
     changes.extend(narrative_changes)
     return changes
+
+
+def _remove_one_sided_leading_schema_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[str], list[str]]:
+    """Remove proven multi-line headers from a wholly added/deleted table.
+
+    A standalone table has no peer schema from which to infer header rows. We
+    accept only a leading descriptive row, an optional all-unit row, and at
+    least one following numeric data row. The screenshot retains the headers.
+    """
+
+    if bool(old_rows) == bool(new_rows):
+        return old_rows, new_rows
+    rows = list(old_rows or new_rows)
+    if len(rows) < 2:
+        return old_rows, new_rows
+
+    def entries(row: str) -> list[tuple[int, str, str, str]]:
+        return _table_row_field_entries(row)
+
+    def numeric_data(row: str) -> bool:
+        values = [value for _column, _label, _normalized, value in entries(row)]
+        return bool(
+            len(values) >= 2
+            and re.search(r"\d", values[0])
+            and sum(bool(re.search(r"\d", value)) for value in values) >= 2
+        )
+
+    first_entries = entries(rows[0])
+    if not first_entries or not _generic_boundary_entries_look_like_header(first_entries):
+        return old_rows, new_rows
+    remove_count = 1
+    if len(rows) >= 3:
+        second_values = [
+            compact_inline(value)
+            for _column, _label, _normalized, value in entries(rows[1])
+        ]
+        if (
+            len(second_values) >= 3
+            and all(re.fullmatch(r"\([^()]{1,20}\)", value) for value in second_values)
+        ):
+            remove_count = 2
+    if remove_count >= len(rows) or not numeric_data(rows[remove_count]):
+        return old_rows, new_rows
+    cleaned = rows[remove_count:]
+    return (cleaned, []) if old_rows else ([], cleaned)
 
 
 def _is_overwide_generic_table_row(row: str) -> bool:
@@ -7609,6 +7662,51 @@ def _remove_cross_schema_header_rows(
     )
 
 
+def _remove_matching_generic_header_rows(
+    old_rows: list[str],
+    new_rows: list[str],
+) -> tuple[list[str], list[str]]:
+    """Remove one shared leading schema despite a wrapped subscript glyph.
+
+    Both first rows must be header-shaped, use the same generic columns, and
+    match cell by cell after one bounded ``Z (unit)\np`` -> ``Zp (unit)``
+    repair. The source screenshots retain the original schema for review.
+    """
+
+    if not old_rows or not new_rows:
+        return old_rows, new_rows
+    old_entries = _table_row_field_entries(old_rows[0])
+    new_entries = _table_row_field_entries(new_rows[0])
+    if not (
+        old_entries
+        and len(old_entries) == len(new_entries)
+        and _generic_boundary_entries_look_like_header(old_entries)
+        and _generic_boundary_entries_look_like_header(new_entries)
+        and all(
+            re.fullmatch(r"column\s+\d+", old_entry[2], flags=re.I)
+            and old_entry[2] == new_entry[2]
+            for old_entry, new_entry in zip(old_entries, new_entries, strict=True)
+        )
+    ):
+        return old_rows, new_rows
+
+    def header_value_key(value: str) -> str:
+        wrapped = re.fullmatch(
+            r"\s*([A-Za-z])\s*(\([^()\n]{1,20}\))\s*(?:↵|\\n)?\s*([a-z])\s*",
+            value,
+        )
+        if wrapped is not None:
+            value = f"{wrapped.group(1).upper()}{wrapped.group(3)} {wrapped.group(2)}"
+        return compact_inline(value).casefold()
+
+    if all(
+        header_value_key(old_entry[3]) == header_value_key(new_entry[3])
+        for old_entry, new_entry in zip(old_entries, new_entries, strict=True)
+    ):
+        return old_rows[1:], new_rows[1:]
+    return old_rows, new_rows
+
+
 def _table_groups_mix_generic_and_explicit_schema(
     old_rows: list[str],
     new_rows: list[str],
@@ -8447,6 +8545,11 @@ def _reader_snippet_collapse_kind(
     compact = compact_inline(value)
     if not compact:
         return None
+    if (
+        re.match(r"^\d+[.)]\s+[A-Z]", compact)
+        and _READER_PROSE_VERB_RE.search(" ".join(compact.split()[:24]))
+    ):
+        return None  # 完整编号操作步骤优先于尾部公式/带宽记号，不能折叠成公式墙。
     if re.fullmatch(r"[A-Za-zα-ωΑ-Ω]", compact):
         return "layout"  # 孤立单字母是公式/图轴残片，不当作一条可读删除段。
     if _reader_short_formula_fragment(compact):
@@ -9095,7 +9198,9 @@ def _reader_values_match_after_locator_renumbering(
         return False
     old_neutralized = _reader_neutralize_locator_numbers(old_value)
     new_neutralized = _reader_neutralize_locator_numbers(new_value)
-    if old_neutralized == new_neutralized:
+    if _reader_cosmetic_text_key(old_neutralized) == _reader_cosmetic_text_key(
+        new_neutralized
+    ):
         return True
     # ``specified in Table 2`` → ``specified in Section 3 and Tables 10/11``
     # 仍是出处集合变化，但只中和该谓语紧邻支配的引用 span，不改写句中其它事实。
@@ -9105,7 +9210,21 @@ def _reader_values_match_after_locator_renumbering(
     new_sources_neutralized = _reader_neutralize_scoped_citation_source_types(
         new_neutralized
     )
-    return old_sources_neutralized == new_sources_neutralized
+    return _reader_cosmetic_text_key(
+        old_sources_neutralized
+    ) == _reader_cosmetic_text_key(new_sources_neutralized)
+
+
+def _reader_cosmetic_text_key(value: str) -> str:
+    """Normalize only proven PDF soft-wrap and terminal sentence artifacts."""
+
+    compact = compact_inline(value)
+    compact = re.sub(
+        r"(?<=[A-Za-z])-\s+(?=[a-z])",
+        "-",
+        compact,
+    )  # ``low-\nfrequency`` keeps its visible hyphen; only the extractor gap disappears.
+    return re.sub(r"(?<!\d)[.!?。！？]+$", "", compact)
 
 
 def _reader_neutralize_scoped_citation_source_types(value: str) -> str:
@@ -9438,6 +9557,12 @@ def _reader_section_change(
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
+    # The full heading fact is the strongest proof of a pure locator renumber.
+    # Remove it before coordinate-owned Figure/Table cleanup can trim only the
+    # numbered prefix and leave a misleading bare ``章节标题`` fragment.
+    change = _reader_change_without_proven_heading_renumber(change)
+    if change is None:
+        return None
     if _reader_change_is_coordinate_proven_table_body_duplicate(change, table_evidence):
         return None
     change = _reader_change_without_coordinate_table_fragments(change, table_evidence)
@@ -9465,8 +9590,7 @@ def _reader_section_change(
     )
     if change is None:
         return None
-    # 已配对同题条款的结构编号只用于定位；读者层移除该片段，原始审计事实保持不变。
-    change = _reader_change_without_proven_heading_renumber(change)
+    change = _reader_change_without_unreadable_singletons(change)
     if change is None:
         return None
     # 同题条款已由章节器配对后，正文中以该条款号为完整前缀的裸子条款号也是定位引用。
@@ -9486,6 +9610,39 @@ def _reader_section_change(
     if _reader_change_is_layout_reorder_only(change):
         return replace(change, change_type="review")
     return change
+
+
+def _reader_change_without_unreadable_singletons(
+    change: SectionChange,
+) -> SectionChange | None:
+    """Hide context-free one-character formula/axis debris in reader views.
+
+    Paired ``A`` → ``B`` edits remain visible because they may be meaningful.
+    Only one-sided orphan fragments are omitted; the raw JSON/CSV change facts
+    are produced from the original comparison result and remain auditable.
+    """
+
+    def keep(value: str) -> bool:
+        compact = compact_inline(value)
+        return not (
+            len(compact) == 1
+            and _reader_snippet_collapse_kind(compact) == "layout"
+        )
+
+    cleaned = replace(
+        change,
+        removed_snippets=[value for value in change.removed_snippets if keep(value)],
+        added_snippets=[value for value in change.added_snippets if keep(value)],
+    )
+    if (
+        not cleaned.removed_snippets
+        and not cleaned.added_snippets
+        and not cleaned.replaced_snippets
+        and not cleaned.review_replaced_snippets
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
 
 
 def _reader_change_without_figure_visual_fragments(
@@ -9691,6 +9848,8 @@ def _reader_change_without_coordinate_owned_fragments(
     def clean_value(value: str, source_texts: tuple[str, ...]) -> str:
         if not source_texts:
             return value
+        if compact_inline(value).startswith("章节标题:"):
+            return value  # 标题差异是结构事实，Figure/Table 重词不能裁掉其任一侧。
         return strip_coordinate_owned_visual_fragment(
             value,
             source_texts,
@@ -9717,7 +9876,8 @@ def _reader_change_without_coordinate_owned_fragments(
             old_value = clean_value(pair.old, old_source_texts)
             new_value = clean_value(pair.new, new_source_texts)
             if old_value and new_value:
-                replaced.append(SnippetPair(old_value, new_value))
+                if compact_inline(old_value) != compact_inline(new_value):
+                    replaced.append(SnippetPair(old_value, new_value))
             elif old_value:
                 removed.append(old_value)
             elif new_value:

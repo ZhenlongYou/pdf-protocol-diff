@@ -41,14 +41,18 @@ _KNOWN_ADOBE_SYMBOL_PUA = str.maketrans(
 )  # OIF PDFs use legacy Adobe Symbol code positions for formula punctuation/operators, omega, alpha/gamma/sigma/tau, <=, and fraction slash.
 _KNOWN_ENGINEERING_SYMBOL_LETTER_SUFFIXES = {
     "A": frozenset({"fe", "ne", "v"}),
-    "C": frozenset({"p"}),
+    "C": frozenset({"eeq", "eeq_db", "eq", "p"}),
     "N": frozenset({"b", "ts"}),
     "R": frozenset({"d"}),
     "RL": frozenset({"cd"}),
+    "OMA": frozenset({"outer"}),
+    "VMA": frozenset({"eecq"}),
     "Z": frozenset({"c", "p"}),
     "f": frozenset({"b", "LF", "p1", "p2", "z", "z1"}),
     "g": frozenset({"DC", "DC2"}),
     "z": frozenset({"c", "p"}),
+    "σ": frozenset({"G"}),
+    "\uf073": frozenset({"G"}),
 }
 _MEASUREMENT_CONTEXT_WORDS = frozenset(
     {

@@ -8750,6 +8750,124 @@ class ProtocolDiffTests(unittest.TestCase):
             payload["changes"][0]["replaced_snippets"][0]["new"],
         )
 
+    def test_reader_heading_renumber_is_removed_before_visual_prefix_cleanup(self) -> None:
+        """Figure text overlapping a heading cannot leave a bare heading label."""
+
+        old_section = Section(
+            "old-heading", "29.4.1 Test method", "Test method", 3,
+            ("29 Test", "29.4 Methods", "29.4.1 Test method"),
+            ("29", "29.4", "29.4.1"), 1, 1, "Body",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-heading",
+            heading="30.4.1 Test method",
+            heading_path=("30 Test", "30.4 Methods", "30.4.1 Test method"),
+            number_path=("30", "30.4", "30.4.1"),
+        )
+        change = SectionChange(
+            "modified", old_section, new_section, 0.99,
+            replaced_snippets=[
+                SnippetPair(
+                    "章节标题: 29.4.1 Test method",
+                    "章节标题: 30.4.1 Test method",
+                )
+            ],
+        )
+
+        self.assertIsNone(
+            reporting_module._reader_section_change(
+                change,
+                figure_visual_sides=(True, True),
+                figure_visual_texts=(("29.4.1 Test method",), ("30.4.1 Test method",)),
+            )
+        )
+
+        renamed = replace(
+            change,
+            new_section=replace(new_section, title="Test methods"),
+            replaced_snippets=[
+                SnippetPair(
+                    "章节标题: 29.4.1 Test method",
+                    "章节标题: 30.4.1 Test methods",
+                )
+            ],
+        )
+        visible = reporting_module._reader_section_change(
+            renamed,
+            figure_visual_sides=(True, True),
+            figure_visual_texts=(("29.4.1 Test method",), ("30.4.1 Test methods",)),
+        )
+        self.assertEqual(
+            [
+                SnippetPair(
+                    "章节标题: 29.4.1 Test method",
+                    "章节标题: 30.4.1 Test methods",
+                )
+            ],
+            visible.replaced_snippets,
+        )
+
+    def test_reader_omits_one_sided_formula_glyph_but_keeps_paired_letter_edit(self) -> None:
+        """Formula comparison is disabled; raw one-glyph debris is not reader content."""
+
+        section = Section(
+            "formula", "1 Formula", "Formula", 1,
+            ("1 Formula",), ("1",), 1, 1, "t",
+        )
+        one_sided = SectionChange(
+            "modified", section, section, 0.9, removed_snippets=["t"],
+        )
+        paired = replace(
+            one_sided,
+            removed_snippets=[],
+            replaced_snippets=[SnippetPair("A", "B")],
+        )
+
+        self.assertIsNone(reporting_module._reader_section_change(one_sided))
+        self.assertEqual(
+            [SnippetPair("A", "B")],
+            reporting_module._reader_section_change(paired).replaced_snippets,
+        )
+
+    def test_numbered_capture_step_is_not_folded_as_a_formula(self) -> None:
+        """A clock-recovery denominator does not turn a complete step into math debris."""
+
+        step = (
+            "2) Capture the differential signal at TP4 with a scope triggered with a "
+            "clock from a reference clock recovery unit with a 3 dB tracking "
+            "bandwidth of fb /2650 Hz."
+        )
+
+        self.assertIsNone(_reader_snippet_collapse_kind(step))
+
+    def test_one_sided_multiline_table_headers_are_not_reported_as_data_rows(self) -> None:
+        """An added table reports its three records, not its two schema rows."""
+
+        header = (
+            "表格行: T1 | Column 1=Host Loss | Column 2=VMA | Column 3=EECQ (max.) "
+            "| Column 4=Ceeq (min/max) | Column 5=Random Jitter (max.)"
+        )
+        units = (
+            "表格行: T1 | Column 1=(dB) | Column 2=(mV) | Column 3=(dB) "
+            "| Column 4=(%) | Column 5=(mUIRMS)"
+        )
+        data = [
+            f"表格行: T1 | Column 1={loss} | Column 2= | Column 3=3 | "
+            "Column 4=+/- 0.5 | Column 5=10"
+            for loss in (8, 15, 22)
+        ]
+        table = TableVisual(
+            1, 1, "Table 1 Stressors", (0, 0, 100, 100), "",
+            [header, units, *data], "grid", row_alignment_reliable=True,
+        )
+
+        changes = reporting_module._table_row_changes((), (table,))
+
+        self.assertEqual(3, len(changes))
+        self.assertTrue(all(change.change_type == "新表新增行" for change in changes))
+        self.assertNotIn("Host Loss", "\n".join(change.new_value for change in changes))
+
     def test_reader_heading_renumber_never_hides_technical_value_or_term_changes(self) -> None:
         """编号中性只作用于标题定位，UI 数值和技术术语仍严格比较。"""
 
