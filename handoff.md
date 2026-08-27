@@ -2,15 +2,24 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-reader-segmentation-integration-v2-20260828`
+- task_id: `pdf-protocol-diff-desktop-ui-20260828`
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
-- 工作分支：`codex/pdf-diff-reader-segmentation-20260826`
+- 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `e8f7b198e2ab107e354a38efb21f746b0aa4ce75`
+- recorded_commit: `590245d59e86d54a2cabda009313cb78a8d72533`
 - status: ready
-- 目标：以显式 legacy-audit 将已完成并验证的读者报告基线合法集成到 `main`，随后开始桌面 UI 重构；本次不改变报告、抽取、配对或差异标记逻辑。
+- 目标：只重构桌面 UI 并增加只读进度观察器；冻结 HTML 报告、PDF 识别、配对及差异标记语义。
 
 ## 已经完成
+
+- 桌面入口改为 1120×720 深色双文档工作台：旧版/新版 PDF 并排，窄于 900px 自动纵向排列；底部操作与状态区固定，主体仅在真实溢出时显示滚动条。
+- 每张文档卡提供“全部页面/指定范围”。范围输入只在指定模式显示；切回全部页面保留填写值但运行时明确忽略。默认仍为全部页面、阈值 0.72、每章 20 个片段。
+- 输出目录、阈值、片段数、未变化章节及自动打开报告收进默认折叠的高级设置；自动打开默认关闭。
+- 运行状态锁定全部输入，并按“读取旧版→读取新版→匹配差异→生成视觉证据→生成报告”显示真实阶段和耗时；PDF 仅在完成全页坐标预扫描后显示实际页数进度，后续阶段不伪造百分比。
+- `run_diff` 和 PDF 抽取入口增加可选只读进度观察器。回调缺省保持兼容，回调异常 fail-open；真实 demo 在冻结生成时间后证明六类报告与无观察器路径逐字节一致。
+- 成功底栏从已生成 Markdown 汇总读取读者层计数，确保与 HTML 的过滤/聚合口径一致；OIF 风险状态会明确显示“视觉校对需人工复核”，不再用 raw audit 数字或“0 项”暗示无风险。
+- 运行中关闭窗口会被阻止，避免 daemon 线程在逐文件写报告时被终止；浏览器和文件管理器打开失败均保留成功状态并给出可操作提示；长异常只在对话框完整显示，固定底栏显示有界首行。
+- 已增加页码模式、高级设置、自动打开、阶段顺序、预扫描时序、实际页数、运行控件锁定、timer 取消、成功/失败恢复、读者计数一致性和打开失败保护的回归测试。
 
 - 正文卡先显示旧/新 PDF 原文截图，只在真实变化词坐标上覆盖淡红/淡绿半透明底色；相同文字、纯 Table/Figure/Section 定位编号和页边行号不着色。结构化 OCR/文字差异默认折叠。
 - 已识别 Table 的页面由 Table 卡独占视觉证据，正文截图不再重复；Table 截图只保留 3 pt 边框安全距离，表题由结构化卡片显示，避免半截表题进入图片。
@@ -44,18 +53,16 @@
 
 ## 当前状态或阻塞
 
-- 原 claim 因缺少后来新增的受保护持久分支快照，且临时 `codex/*` 分支不能执行 v1 policy adoption，已由原 owner 携带恢复后的 lease 以 blocked 结束；基线提交和远端持久项目分支均完整保留。
-- 当前从独立 linked worktree 执行显式 legacy-audit；远端临时分支已在确认与 `project/pdf-protocol-diff` 同为 `d1a06906…` 后删除，持久项目分支保持可恢复。
-- 第一处 linked worktree 曾误放在父 RinysProject 根仓内，影响另一个 CDR 任务的 clean 状态；该 audit claim 已取消，测试只中断本任务自己的进程，随后通过 `git worktree move` 将完整候选迁到父根仓之外的 `/Users/mac/PycharmProjects/pdf-protocol-diff-worktrees/pdf-diff-reader-segmentation-integration`，再以本任务重新认领。
-- 没有实现阻塞。相关回归已覆盖截图优先、逐词浅色坐标、Table/Figure/Formula 互斥、全文 Figure 配对、父子章节合并、显示公式关闭、页边行号、换行标题和完整段落截图。
-- 最终候选使用项目 `.venv` 与外部 worktree `PYTHONPATH=src` 完整重跑 1199 项，全部通过，耗时 496.746 秒；读者报告基线的持久验收日志另含 1909 个子用例通过。一次性交接字符串测试经独立审核后已删除，旧/新 handoff 的有效性改由交付门禁在两个提交快照上运行同一条只读检查来证明。`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
-- JSON 显示投影追加后再次运行完整套件：1198 项和 1909 个子用例通过，唯一失败暴露了 `omitted_snippet_count` 的历史 raw 契约；改为保留原字段并新增显示计数后，相关 4 项回归、编译检查和 GUI 冒烟全部通过。
-- 初次独立审核发现的 Figure/Table 标签残片、`Data Patterns` 拆成新增/删除、Table 30-11 `Zp` 表头假差异、软断词及句点误报均已增加回归并修复。提交后必须重新生成真实 OIF 成品，使 `provenance.build_commit` 绑定确切提交，再让三个独立 agent 复审同一份最终报告和全部联系表。
-- 真实 OIF 比对必须继续保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
-- 最终验收证据不在仓库中伪造固定数字；以 `/Users/mac/Desktop/test/pdf_protocol_diff_oif_final_verified/` 下最终报告、静态摘要、联系表和独立 agent 审核为准。
+- UI 代码提交为 `590245d59e86d54a2cabda009313cb78a8d72533`。项目 `.venv` 完整套件 1217/1217 通过（493.482 秒），定向 GUI/进度/读者计数 29 项通过，编译检查、`git diff --check`、`python3 main.py --gui-smoke-test`、源码与 `.venv` 的 `gui_app.py` 启动均通过。
+- exact-commit 真实 PCIe/OIF 报告重生、Playwright Chromium 视觉复核和多 agent 最终测试报告审核属于仓外验收证据；产物统一保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/`。
+- 本轮按用户计划不修改 `reporting.py` 的报告结构、颜色或抽取/配对算法。独立视觉审核发现 MR 冻结基线仍可能把跨页运行页眉列为读者变化；该问题不属于本次 UI scope，最终验收会作为既有报告语义风险单独记录，不能宣称已由 UI 修复。
+- macOS 在后续验收阶段被锁定，因此最新桌面窗口的运行/成功/错误截图若不能在交付前补拍，将明确记为 `INCONCLUSIVE`；真实 Tk 启动、GUI smoke、状态机自动化测试和 HTML 报告视觉验收仍分别执行，不能用自动化结果冒充该截图已验收。
+- 当前没有代码实现阻塞。真实 OIF 比对仍必须保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
+- 最终验收证据不在仓库中写死；以 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/` 下 exact-commit 报告、截图、验证清单和独立 agent 审核为准。
 
 ## 下一步计划
 
+- 若继续本次交付，先用 `590245d…` 重生 PCIe 指定页窗和 OIF LR/MR/VSR 报告，再用隔离 Playwright Chromium 检查正文、Table、Figure 实际卡片；最后完成 commit-bound review、推送持久项目分支和 `main`、运行原子 delivery gate。
 - 若继续提高复杂版面识别率，优先引入带类型的页面区域图，并用 split/merge-aware 匹配处理一个旧块对应多个新块；不要继续向字符串启发式叠加协议专用词表。
 - 视觉 late-interaction 检索只能作为低置信度候选召回，不能直接成为规范差异结论。
 - 每次改动后必须用真实 OIF 输入生成完整 HTML，检查全部 Table、Figure、prose 联系表，再运行完整测试；单元测试通过不能代替报告视觉验收。
