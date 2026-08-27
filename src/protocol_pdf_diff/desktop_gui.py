@@ -365,7 +365,17 @@ class ProtocolDiffDesktopApp:
 
         self._configure_style()
         self._build_layout()
+        self._install_platform_close_handlers()
+
+    def _install_platform_close_handlers(self) -> None:
+        """Route every platform quit affordance through the report-write guard."""
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+        if sys.platform == "darwin":
+            # Tk only routes the application menu, Dock and Command-Q quit event
+            # through Python when this Tcl command exists.  Without it macOS may
+            # terminate the process directly while the daemon worker writes files.
+            self.root.tk.createcommand("::tk::mac::Quit", self._on_close_requested)
 
     def _configure_style(self) -> None:
         """Apply a precise, high-contrast visual system without moving the layout."""

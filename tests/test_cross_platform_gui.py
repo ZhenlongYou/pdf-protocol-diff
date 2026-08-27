@@ -528,6 +528,28 @@ class CrossPlatformGuiTests(unittest.TestCase):
         app._on_close_requested()
         app.root.destroy.assert_called_once_with()
 
+    def test_macos_quit_uses_the_same_guarded_close_handler(self) -> None:
+        """Command-Q 与 Dock 退出不能绕过正在写报告时的关闭保护。"""
+
+        app = object.__new__(ProtocolDiffDesktopApp)
+        app.root = mock.Mock()
+        app.is_running = True
+
+        with mock.patch("protocol_pdf_diff.desktop_gui.sys.platform", "darwin"):
+            app._install_platform_close_handlers()
+
+        app.root.protocol.assert_called_once_with(
+            "WM_DELETE_WINDOW", app._on_close_requested
+        )
+        app.root.tk.createcommand.assert_called_once_with(
+            "::tk::mac::Quit", app._on_close_requested
+        )
+        mac_quit_handler = app.root.tk.createcommand.call_args.args[1]
+        with mock.patch("protocol_pdf_diff.desktop_gui.messagebox.showwarning") as warning:
+            mac_quit_handler()
+        warning.assert_called_once()
+        app.root.destroy.assert_not_called()
+
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
         "Tk validation test needs a desktop session",
