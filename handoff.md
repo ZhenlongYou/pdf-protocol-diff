@@ -2,11 +2,11 @@
 
 ## 当前任务
 
-- task_id: `pdf-diff-reader-segmentation-integration-20260828`
+- task_id: `pdf-diff-reader-segmentation-integration-v2-20260828`
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`codex/pdf-diff-reader-segmentation-20260826`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `d1a06906b02fc24b830053d1a6d0e6190218c50a`
+- recorded_commit: `e8f7b198e2ab107e354a38efb21f746b0aa4ce75`
 - status: ready
 - 目标：以显式 legacy-audit 将已完成并验证的读者报告基线合法集成到 `main`，随后开始桌面 UI 重构；本次不改变报告、抽取、配对或差异标记逻辑。
 
@@ -46,8 +46,9 @@
 
 - 原 claim 因缺少后来新增的受保护持久分支快照，且临时 `codex/*` 分支不能执行 v1 policy adoption，已由原 owner 携带恢复后的 lease 以 blocked 结束；基线提交和远端持久项目分支均完整保留。
 - 当前从独立 linked worktree 执行显式 legacy-audit；远端临时分支已在确认与 `project/pdf-protocol-diff` 同为 `d1a06906…` 后删除，持久项目分支保持可恢复。
+- 第一处 linked worktree 曾误放在父 RinysProject 根仓内，影响另一个 CDR 任务的 clean 状态；该 audit claim 已取消，测试只中断本任务自己的进程，随后通过 `git worktree move` 将完整候选迁到父根仓之外的 `/Users/mac/PycharmProjects/pdf-protocol-diff-worktrees/pdf-diff-reader-segmentation-integration`，再以本任务重新认领。
 - 没有实现阻塞。相关回归已覆盖截图优先、逐词浅色坐标、Table/Figure/Formula 互斥、全文 Figure 配对、父子章节合并、显示公式关闭、页边行号、换行标题和完整段落截图。
-- 当前代码完整测试为 1198 项通过、1909 个子用例通过，耗时 513.73 秒；`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
+- 最终持久验收日志记录为 1199 项通过、1909 个子用例通过；早期 handoff 曾保守记录 1198 项。`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
 - JSON 显示投影追加后再次运行完整套件：1198 项和 1909 个子用例通过，唯一失败暴露了 `omitted_snippet_count` 的历史 raw 契约；改为保留原字段并新增显示计数后，相关 4 项回归、编译检查和 GUI 冒烟全部通过。
 - 初次独立审核发现的 Figure/Table 标签残片、`Data Patterns` 拆成新增/删除、Table 30-11 `Zp` 表头假差异、软断词及句点误报均已增加回归并修复。提交后必须重新生成真实 OIF 成品，使 `provenance.build_commit` 绑定确切提交，再让三个独立 agent 复审同一份最终报告和全部联系表。
 - 真实 OIF 比对必须继续保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
