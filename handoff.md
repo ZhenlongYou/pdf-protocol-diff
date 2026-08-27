@@ -48,7 +48,7 @@
 - 当前从独立 linked worktree 执行显式 legacy-audit；远端临时分支已在确认与 `project/pdf-protocol-diff` 同为 `d1a06906…` 后删除，持久项目分支保持可恢复。
 - 第一处 linked worktree 曾误放在父 RinysProject 根仓内，影响另一个 CDR 任务的 clean 状态；该 audit claim 已取消，测试只中断本任务自己的进程，随后通过 `git worktree move` 将完整候选迁到父根仓之外的 `/Users/mac/PycharmProjects/pdf-protocol-diff-worktrees/pdf-diff-reader-segmentation-integration`，再以本任务重新认领。
 - 没有实现阻塞。相关回归已覆盖截图优先、逐词浅色坐标、Table/Figure/Formula 互斥、全文 Figure 配对、父子章节合并、显示公式关闭、页边行号、换行标题和完整段落截图。
-- 最终持久验收日志记录为 1199 项通过、1909 个子用例通过；早期 handoff 曾保守记录 1198 项。`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
+- 当前候选使用项目 `.venv` 与外部 worktree `PYTHONPATH=src` 完整重跑为 1200 项通过，耗时 500.561 秒；其中新增 1 项只锁定 legacy-audit handoff 契约，读者报告基线的持久验收日志仍为 1199 项通过、1909 个子用例通过。`git diff --check`、Python 编译检查和 GUI 真实入口冒烟均通过。慢项来自真实 OIF/协议 PDF 的重复抽取、跨页表格与截图回归；后续若优化测试时间，应缓存同一 PDF 的抽取快照，不能缩减真实语料门禁。
 - JSON 显示投影追加后再次运行完整套件：1198 项和 1909 个子用例通过，唯一失败暴露了 `omitted_snippet_count` 的历史 raw 契约；改为保留原字段并新增显示计数后，相关 4 项回归、编译检查和 GUI 冒烟全部通过。
 - 初次独立审核发现的 Figure/Table 标签残片、`Data Patterns` 拆成新增/删除、Table 30-11 `Zp` 表头假差异、软断词及句点误报均已增加回归并修复。提交后必须重新生成真实 OIF 成品，使 `provenance.build_commit` 绑定确切提交，再让三个独立 agent 复审同一份最终报告和全部联系表。
 - 真实 OIF 比对必须继续保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
