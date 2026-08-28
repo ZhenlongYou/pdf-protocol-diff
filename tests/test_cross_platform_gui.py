@@ -24,6 +24,7 @@ from build_desktop import (
 )
 from protocol_pdf_diff.desktop_gui import (  # 导入真实应用和纯选择逻辑，覆盖配置到控件的完整路径。
     ProtocolDiffDesktopApp,
+    UI_THEME,
     configure_windows_dpi_awareness,
     create_tk_root,
     page_range_values,
@@ -390,10 +391,40 @@ class CrossPlatformGuiTests(unittest.TestCase):
             app = ProtocolDiffDesktopApp(root)
             root.update_idletasks()
 
-            self.assertEqual((1120, 420), app.design_window_size)
-            self.assertIn("阈值 0.72", app.advanced_summary_var.get())
-            self.assertIn("每章 20", app.advanced_summary_var.get())
-            self.assertIn("自动打开：关", app.advanced_summary_var.get())
+            self.assertEqual((1180, 560), app.design_window_size)
+            self.assertEqual("#171824", UI_THEME["canvas"])
+            self.assertEqual("#8AD8F7", UI_THEME["accent"])
+            self.assertEqual("#7868E6", UI_THEME["old_document_accent"])
+            self.assertEqual("#EF72B8", UI_THEME["new_document_accent"])
+            self.assertEqual("协议 PDF 对比", app.header_title_label.cget("text"))
+            self.assertTrue(app.brand_mark.find_all())
+            self.assertTrue(app.old_document_icon.find_all())
+            self.assertTrue(app.new_document_icon.find_all())
+            self.assertGreaterEqual(int(app.old_document_icon.cget("width")), 80)
+            self.assertGreaterEqual(int(app.old_document_icon.cget("height")), 96)
+            self.assertEqual(3, len(app.settings_chips))
+            static_copy: list[str] = []
+            pending = [app.content_container]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                if "text" in widget.keys():
+                    static_copy.append(str(widget.cget("text")))
+            joined_copy = "\n".join(static_copy)
+            self.assertEqual(1, static_copy.count("协议 PDF 对比"))
+            for forbidden_copy in (
+                "PROTOCOL DIFF STUDIO",
+                "本地处理",
+                "选择两个协议版本和页面范围",
+                "基准版本与目标版本将按给定页面窗口建立强关联比较",
+                "运行前快速复核",
+                "可随时修改",
+                "BASELINE",
+                "REVISION",
+            ):
+                self.assertNotIn(forbidden_copy, joined_copy)
+            self.assertEqual("0.72", app.profile_value_vars["threshold"].get())
+            self.assertEqual("20", app.profile_value_vars["snippets"].get())
             self.assertEqual("all", app.old_page_mode_var.get())
             self.assertEqual("all", app.new_page_mode_var.get())
             self.assertFalse(app.auto_open_var.get())
@@ -413,34 +444,45 @@ class CrossPlatformGuiTests(unittest.TestCase):
             self.assertEqual("16", app.old_start_var.get())
             self.assertEqual("18", app.old_end_var.get())
 
-            app._apply_responsive_layout(1120)
+            app._apply_responsive_layout(1180)
             self.assertEqual("side-by-side", app.document_layout_mode)
             self.assertEqual(1, int(app.swap_button.grid_info()["column"]))
             app._apply_responsive_layout(760)
             self.assertEqual("stacked", app.document_layout_mode)
             self.assertEqual(1, int(app.swap_button.grid_info()["row"]))
             self.assertEqual(2, int(app.new_document_card.grid_info()["row"]))
+            self.assertEqual(2, int(app.advanced_bar.grid_info()["row"]))
 
             app._fit_content_to_viewport(mock.Mock(width=760))
-            summary_wrap = int(app.advanced_summary_label.cget("wraplength"))
-            self.assertGreaterEqual(summary_wrap, 260)
-            self.assertLessEqual(summary_wrap, 560)
             root.deiconify()
             root.geometry("760x520+0+0")
             root.update()
-            summary_right = (
-                app.advanced_summary_label.winfo_rootx()
-                + app.advanced_summary_label.winfo_width()
+            self.assertGreaterEqual(app.advanced_toggle.winfo_height(), 32)
+            self.assertEqual(1, int(app.advanced_toggle.grid_info()["row"]))
+
+            app.output_dir_var.set(
+                "/tmp/this-is-a-valid-but-extremely-long-output-directory-name-that-must-not-hide-actions"
             )
-            toggle_left = app.advanced_toggle.winfo_rootx()
-            self.assertLessEqual(summary_right, toggle_left)
+            root.update()
+            compact_output = app.profile_value_vars["output"].get()
+            self.assertIn("…", compact_output)
+            self.assertLessEqual(len(compact_output), 24)
+            self.assertLessEqual(
+                app.advanced_bar.winfo_reqwidth(),
+                app.content_canvas.winfo_width(),
+            )
+            self.assertLessEqual(
+                app.advanced_toggle.winfo_rootx()
+                + app.advanced_toggle.winfo_width(),
+                app.advanced_bar.winfo_rootx() + app.advanced_bar.winfo_width(),
+            )
 
             app.min_similarity_var.set("0.80")
             app.max_snippets_var.set("12")
             app.auto_open_var.set(True)
-            self.assertIn("阈值 0.80", app.advanced_summary_var.get())
-            self.assertIn("每章 12", app.advanced_summary_var.get())
-            self.assertIn("自动打开：开", app.advanced_summary_var.get())
+            self.assertEqual("0.80", app.profile_value_vars["threshold"].get())
+            self.assertEqual("12", app.profile_value_vars["snippets"].get())
+            self.assertTrue(app.auto_open_var.get())
         finally:
             root.destroy()
 
