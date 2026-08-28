@@ -14,12 +14,25 @@ public static class NativeWindowCapture {
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
     public static bool GetCompleteWindowRect(IntPtr hWnd, out RECT rect) {
         bool success = GetWindowRect(hWnd, out rect);
         return success && rect.Right > rect.Left && rect.Bottom > rect.Top;
+    }
+    public static bool IsOwnedWindow(IntPtr hWnd, uint expectedProcessId) {
+        if (!IsWindow(hWnd)) {
+            return false;
+        }
+        uint actualProcessId;
+        return GetWindowThreadProcessId(hWnd, out actualProcessId) != 0 &&
+            actualProcessId == expectedProcessId;
     }
 }
 "@
@@ -48,6 +61,10 @@ try {
     if ($process.HasExited) { throw "GUI exited before its window became visible." }
     if ($process.MainWindowHandle -eq 0) { throw "Timed out waiting for the WebView2 window." }
     if (-not (Test-Path $ProbePath)) { throw "Timed out waiting for the WebView2 renderer probe." }
+    $windowHandle = $process.MainWindowHandle
+    if (-not [NativeWindowCapture]::IsOwnedWindow($windowHandle, [uint32]$process.Id)) {
+        throw "The application window is no longer owned by the launched GUI process."
+    }
     $probe = Get-Content -LiteralPath $ProbePath -Raw | ConvertFrom-Json
     if (-not $probe.webview2) { throw "Renderer probe did not confirm Edge WebView2." }
     if (-not $probe.overflowFree) { throw "Renderer probe found horizontal overflow." }
@@ -55,7 +72,7 @@ try {
     if (-not $probe.backdrop -or $probe.backdrop -eq "none") { throw "Renderer probe did not confirm backdrop blur." }
 
     $rect = New-Object NativeWindowCapture+RECT
-    if (-not [NativeWindowCapture]::GetCompleteWindowRect($process.MainWindowHandle, [ref]$rect)) {
+    if (-not [NativeWindowCapture]::GetCompleteWindowRect($windowHandle, [ref]$rect)) {
         throw "Could not read the application window bounds."
     }
     $width = $rect.Right - $rect.Left
@@ -69,8 +86,11 @@ try {
         try {
             $deviceContext = $graphics.GetHdc()
             $PW_RENDERFULLCONTENT = 2
+            if (-not [NativeWindowCapture]::IsOwnedWindow($windowHandle, [uint32]$process.Id)) {
+                throw "The application window changed before evidence capture."
+            }
             if (-not [NativeWindowCapture]::PrintWindow(
-                $process.MainWindowHandle,
+                $windowHandle,
                 $deviceContext,
                 $PW_RENDERFULLCONTENT
             )) {
@@ -89,8 +109,16 @@ try {
     if (-not $process.HasExited) {
         [void]$process.CloseMainWindow()
         if (-not $process.WaitForExit(10000)) {
-            Stop-Process -Id $process.Id -Force
             $forcedStop = $true
+            $treeKill = Start-Process -FilePath "taskkill.exe" `
+                -ArgumentList @("/PID", "$($process.Id)", "/T", "/F") `
+                -PassThru -Wait -NoNewWindow
+            if ($treeKill.ExitCode -ne 0) {
+                throw "Could not terminate the task-owned GUI process tree."
+            }
+            if (-not $process.WaitForExit(10000)) {
+                throw "The task-owned GUI process did not exit after termination."
+            }
         }
     }
 }
