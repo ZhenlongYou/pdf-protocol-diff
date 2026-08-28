@@ -311,19 +311,19 @@ python3 gui_app.py
 
 GUI 与命令行复用同一套比较逻辑，生成的报告格式也完全一致。
 
-桌面界面使用跨平台字体探测：Windows 优先采用 `Microsoft YaHei UI` / `Segoe UI`，
-macOS 优先采用 `PingFang SC`，其它系统使用已安装的 CJK 无衬线字体或 Tk 默认字体。
-普通 Tk 控件和 ttk 控件共用同一字体；窗口在高 DPI 或较矮屏幕上会自动缩小，并通过
-深色滚动条保证全部输入和操作仍可到达。可用真实入口执行非交互 GUI 自检：
+桌面界面由一份随程序打包的 HTML/CSS 驱动：macOS 使用系统 WKWebView，Windows 强制
+使用 Edge WebView2。两端共享同一布局、颜色、玻璃卡片、状态动画和响应式规则；不会在
+Windows 上退回旧版 IE/MSHTML。窄于 900px 时双文档卡自动纵向排列，底部状态和操作保持
+可见。可用真实入口执行非交互 GUI 自检：
 
 ```bash
 python3 main.py --gui-smoke-test
 python3 gui_app.py --smoke-test
 ```
 
-Windows 源码启动会在创建首个 Tk 窗口前请求 Per-Monitor V2；PyInstaller EXE 还会嵌入
-`windows_dpi.manifest`，让 100%、125% 和 150% 缩放使用明确的 DPI awareness，而不是
-交给系统做模糊位图缩放。
+`main.py` 检查共享界面资源；`gui_app.py` 还会真实启动系统 WebView、读取计算后的背景和
+动画样式再退出。Windows 自检同时确认实际内核是 WebView2。PyInstaller EXE 继续嵌入
+`windows_dpi.manifest`，让 100%、125% 和 150% 缩放使用明确的 DPI awareness。
 
 ## 打包成无 Python 桌面程序
 
@@ -362,12 +362,15 @@ python -m pip install -r requirements-build.txt
 python build_desktop.py --clean --onefile
 ```
 
-生成后的 app/exe 已包含 Python、Tkinter、pdfplumber、表格截图依赖和本项目代码，普通用户不需要
-单独安装 Python。macOS 未签名 app 第一次打开时可能需要在 Finder 中右键选择
+生成后的 app/exe 已包含 Python、pywebview、共享界面、pdfplumber、表格截图依赖和本项目代码，
+普通用户不需要单独安装 Python。Windows 11 以及大多数已更新的 Windows 10 已带 WebView2；
+若运行时缺失，程序会明确提示安装 Microsoft Edge WebView2 Evergreen Runtime，不会改用另一套
+渲染器。macOS 未签名 app 第一次打开时可能需要在 Finder 中右键选择
 “打开”；Windows 未签名 exe 可能会触发 SmartScreen，需要按公司内部软件分发流程处理。
 
-如果没有 Windows 开发机，可以在 GitHub Actions 里手动触发
-`Build ProtocolPdfDiff Windows exe` 工作流。该工作流会用 GitHub 的
-Windows runner 运行 PyInstaller，并上传名为 `ProtocolPdfDiff-windows-exe`
-的 artifact；下载后里面就是 `ProtocolPdfDiff.exe`。这适合在 Mac 上发起构建、
-但仍然需要 Windows 原生 `.exe` 产物的场景。
+如果没有 Windows 开发机，可以在 GitHub Actions 里触发 `Build desktop apps`
+工作流。它会在 Windows runner 上生成 onedir EXE、真实启动 Edge WebView2、保存
+renderer probe 与 Windows 原生窗口截图，并上传 `ProtocolPdfDiff-windows-latest`
+artifact。下载后包含 `dist/ProtocolPdfDiff/ProtocolPdfDiff.exe` 及其依赖和相应验收证据。
+本地 `build_windows.bat` 仍生成便于分发的单文件 EXE；两种打包方式使用完全相同的
+HTML/CSS 和 WebView2 后端。

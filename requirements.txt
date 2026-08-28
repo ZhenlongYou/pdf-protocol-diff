@@ -4,3 +4,4 @@ pypdfium2>=5.11.0
 Pillow>=12.0.0
 opencv-python-headless>=5.0.0
 pytesseract>=0.3.13
+pywebview==6.2.1

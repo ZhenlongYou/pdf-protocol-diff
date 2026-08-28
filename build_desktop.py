@@ -2,9 +2,10 @@
 
 PyInstaller cannot cross-compile between macOS and Windows. Run this script on
 the target operating system: on macOS it creates ``dist/ProtocolPdfDiff.app``;
-on Windows it creates ``dist/ProtocolPdfDiff.exe``. The app bundles Python,
-Tkinter, pdfplumber, table screenshot dependencies, and the project source so
-end users do not need Python.
+on Windows the default is ``dist/ProtocolPdfDiff/ProtocolPdfDiff.exe`` and
+``--onefile`` creates ``dist/ProtocolPdfDiff.exe``. The app bundles Python,
+the shared HTML/CSS shell, pywebview, PDF dependencies, and the project source
+so end users do not need Python. Windows uses Edge WebView2 exclusively.
 """
 
 from __future__ import annotations
@@ -30,7 +31,8 @@ if __name__ == "__main__":  # 只有直接执行打包脚本时才替换解释�
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 保留原始打包参数并切到 .venv。
 
 APP_NAME = "ProtocolPdfDiff"
-WINDOWS_DPI_MANIFEST = PROJECT_ROOT / "windows_dpi.manifest"  # Windows EXE 在创建 Tk 窗口前声明 Per-Monitor V2。
+WINDOWS_DPI_MANIFEST = PROJECT_ROOT / "windows_dpi.manifest"  # Windows EXE 在创建任何窗口前声明 Per-Monitor V2。
+WEB_UI_DIR = PROJECT_ROOT / "src" / "protocol_pdf_diff" / "webui"
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,11 +72,13 @@ def build_command(
         APP_NAME,
         "--paths",
         str(PROJECT_ROOT / "src"),
+        "--add-data",
+        f"{WEB_UI_DIR}:protocol_pdf_diff/webui",
     ]  # 基础参数在所有目标系统保持一致，确保入口和依赖解析不漂移。
     if not args.console:
         command.append("--windowed")  # 默认交付桌面应用，不额外显示终端窗口。
     if args.onefile:
-        command.append("--onefile")  # Windows 分发继续使用单文件 EXE。
+        command.append("--onefile")  # 可选单文件分发；原生 CI 视觉门禁使用无父子启动器的 onedir。
     if target_platform == "darwin":
         command.extend(
             [
@@ -131,25 +135,29 @@ def main() -> int:
     command = build_command(args)  # 使用可测试的单一命令生成器，避免 Windows/macOS 构建参数分叉漂移。
     PyInstaller.__main__.run(command)
 
-    artifact = expected_artifact(args.onefile)
+    artifact = expected_artifact(args.onefile, args.console)
     print(f"Build complete for {platform.system()}: {artifact}")
     smoke_test_artifact(artifact, args.onefile)
     return 0
 
 
-def expected_artifact(onefile: bool) -> Path:
+def expected_artifact(onefile: bool, console: bool = False) -> Path:
     """Return the primary artifact path produced on the current platform."""
 
-    if sys.platform == "darwin" and not onefile:
+    if sys.platform == "darwin" and not onefile and not console:
         return PROJECT_ROOT / "dist" / f"{APP_NAME}.app"
+    if sys.platform == "darwin" and not onefile:
+        return PROJECT_ROOT / "dist" / APP_NAME / APP_NAME
     suffix = ".exe" if sys.platform.startswith("win") else ""
+    if sys.platform.startswith("win") and not onefile:
+        return PROJECT_ROOT / "dist" / APP_NAME / f"{APP_NAME}{suffix}"
     return PROJECT_ROOT / "dist" / f"{APP_NAME}{suffix}"
 
 
 def _missing_runtime_modules() -> list[str]:
     """Return required runtime modules that are missing before packaging."""
 
-    required = ["pdfplumber", "pypdfium2", "PIL", "cv2", "pytesseract"]  # 表格截图和识别能力依赖这些模块。
+    required = ["pdfplumber", "pypdfium2", "PIL", "cv2", "pytesseract", "webview"]  # 识别能力与统一桌面壳都必须完整。
     missing: list[str] = []  # 收集缺失模块，构建入口一次性提示。
     for module_name in required:
         try:
@@ -174,12 +182,12 @@ def smoke_test_artifact(artifact: Path, onefile: bool) -> None:
             # 如果 bundle 内没有可执行文件，说明打包产物不完整，必须立刻失败。
             raise FileNotFoundError(f"Expected app executable was not created: {executable}")
         # 直接调用 bundle 内可执行文件，验证 GUI 关键控件在冻结环境里也存在。
-        subprocess.run([str(executable), "--smoke-test"], check=True)
+        subprocess.run([str(executable), "--smoke-test"], check=True, timeout=45)
         # macOS bundle 已经完成专门检查，不再走普通文件路径。
         return
     if not artifact.exists():
         raise FileNotFoundError(f"Expected build artifact was not created: {artifact}")
-    subprocess.run([str(artifact), "--smoke-test"], check=True)
+    subprocess.run([str(artifact), "--smoke-test"], check=True, timeout=45)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline' 'unsafe-eval'">
+  <title>Protocol Comparison Tool</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f7f5ff;
+      --soft: #aaa6bc;
+      --line: rgba(231, 228, 255, .16);
+      --glass: rgba(255, 255, 255, .060);
+      --glass-strong: rgba(255, 255, 255, .090);
+      --violet: #8273ff;
+      --pink: #ef75bd;
+      --cyan: #8bdef8;
+      --bg: #17182b;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      background: #11121f;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .app {
+      height: 100%; padding: 28px 30px 24px; display: grid;
+      grid-template-rows: 64px minmax(0, 1fr) 58px; gap: 18px;
+      position: relative; overflow: hidden;
+      background:
+        radial-gradient(620px 360px at 31% 5%, rgba(133, 102, 216, .30), transparent 70%),
+        radial-gradient(520px 340px at 83% 72%, rgba(61, 89, 178, .16), transparent 70%),
+        linear-gradient(135deg, #18192d 0%, #20213a 54%, #111322 100%);
+    }
+    .app::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, .014) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .014) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .34), transparent 70%);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .34), transparent 70%);
+    }
+    .head, .stage, .foot { position: relative; z-index: 1; }
+    .head { display: flex; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .mark { position: relative; width: 36px; height: 38px; flex: 0 0 auto; }
+    .mark i { position: absolute; width: 24px; height: 29px; border-radius: 7px; transform: rotate(-4deg); }
+    .mark i:first-child { left: 2px; top: 2px; background: linear-gradient(150deg, #9a86ff, #6f62e7); }
+    .mark i:last-child { right: 1px; bottom: 1px; background: linear-gradient(150deg, #ff94cf, #e660ae); transform: rotate(4deg); }
+    h1 { margin: 0; font-size: 26px; line-height: 1.15; letter-spacing: -.02em; }
+    .stage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 78px; min-height: 0; }
+    .card {
+      min-width: 0; padding: 25px 26px 22px; display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 18px;
+      border: 1px solid var(--line); border-radius: 28px;
+      background: linear-gradient(145deg, var(--glass-strong), rgba(255, 255, 255, .035));
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 24px 80px rgba(3, 4, 16, .16);
+    }
+    .card h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    .drop {
+      min-height: 0; border: 1px dashed rgba(225, 221, 255, .24); border-radius: 22px;
+      background: rgba(17, 18, 36, .36); position: relative; overflow: hidden;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px;
+      cursor: pointer; outline: none;
+    }
+    .drop::before {
+      content: ""; position: absolute; width: 260px; height: 180px; border-radius: 50%;
+      filter: blur(55px); opacity: .23;
+    }
+    .old .drop::before { background: var(--violet); }
+    .new .drop::before { background: var(--pink); }
+    .drop:hover, .drop:focus-visible { border-color: rgba(139, 222, 248, .72); background: rgba(25, 27, 52, .56); }
+    .file-glyph {
+      width: 82px; height: 102px; border-radius: 22px; position: relative;
+      box-shadow: 0 18px 35px rgba(0, 0, 0, .25);
+    }
+    .old .file-glyph { background: linear-gradient(145deg, #9a89ff, #6759dc); }
+    .new .file-glyph { background: linear-gradient(145deg, #ff96d1, #d958a6); }
+    .file-glyph::before {
+      content: ""; position: absolute; top: 0; right: 0; width: 25px; height: 25px;
+      background: rgba(255, 255, 255, .72); clip-path: polygon(0 0, 100% 100%, 0 100%); border-radius: 0 18px 0 0;
+    }
+    .file-glyph::after {
+      content: ""; position: absolute; left: 24px; top: 46px; width: 34px; height: 21px;
+      border-top: 3px solid white; border-bottom: 3px solid white; opacity: .9;
+    }
+    .drop strong { font-size: 15px; position: relative; max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drop small { color: #9f9bb1; font-size: 11px; position: relative; }
+    .page-controls { display: flex; align-items: center; gap: 8px; }
+    .chip, .page-chip {
+      border: 1px solid rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .055);
+      color: #d1cede; border-radius: 16px; padding: 8px 13px; font-size: 11px;
+      white-space: nowrap;
+    }
+    button.chip, .page-chip { cursor: pointer; }
+    .page-chip.active { border-color: rgba(139, 222, 248, .68); background: rgba(74, 123, 153, .26); color: var(--ink); }
+    .range { display: none; align-items: center; gap: 8px; }
+    .range.visible { display: flex; }
+    .range label { color: var(--soft); font-size: 11px; }
+    .range input, .advanced input[type="text"] {
+      height: 32px; width: 72px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .14);
+      background: rgba(12, 13, 27, .66); color: var(--ink); outline: none; padding: 0 10px;
+    }
+    .range input:focus, .advanced input:focus { border-color: var(--cyan); }
+    .foot { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .settings, .actions { display: flex; align-items: center; gap: 8px; }
+    .settings .chip { cursor: default; }
+    #advanced-toggle { cursor: pointer; }
+    .run-state { display: none; align-items: center; gap: 10px; margin-right: 8px; }
+    .app.running .run-state { display: flex; }
+    .run-state span { color: #d5d2e2; font-size: 12px; white-space: nowrap; }
+    .run-track { width: 170px; height: 5px; border-radius: 5px; background: rgba(255, 255, 255, .10); overflow: hidden; }
+    .run-track i {
+      display: block; width: 42%; height: 100%; border-radius: inherit;
+      background: linear-gradient(90deg, transparent, #8ddff9 40%, #a084ff 75%, transparent);
+      animation: run-slide 1.25s ease-in-out infinite;
+    }
+    @keyframes run-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(250%); } }
+    .primary {
+      height: 46px; min-width: 126px; padding: 0 24px; border: 0; border-radius: 15px;
+      background: linear-gradient(110deg, #8edff8, #9c83ff); color: #15182a; font-weight: 700;
+      box-shadow: 0 14px 35px rgba(115, 189, 246, .24); cursor: pointer;
+    }
+    .primary:disabled { opacity: .70; box-shadow: none; cursor: default; }
+    .result-actions { display: none; gap: 8px; }
+    .app.success .result-actions { display: flex; }
+    .status {
+      position: absolute; left: 30px; bottom: 8px; z-index: 2; color: var(--soft); font-size: 11px;
+      max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .advanced {
+      display: none; position: absolute; inset: 88px 30px 78px; z-index: 5; padding: 22px;
+      border: 1px solid var(--line); border-radius: 24px; background: rgba(24, 25, 45, .96);
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+    }
+    .advanced.visible { display: block; }
+    .advanced-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+    .advanced h3 { margin: 0; font-size: 17px; }
+    .advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 22px; }
+    .field { display: grid; gap: 7px; }
+    .field.full { grid-column: 1 / -1; }
+    .field span, .check span { color: var(--soft); font-size: 11px; }
+    .field input[type="text"] { width: 100%; }
+    .path-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .check { display: flex; align-items: center; gap: 8px; }
+    .close { border: 0; background: transparent; color: var(--soft); cursor: pointer; font-size: 20px; }
+    @media (max-width: 899px) {
+      html, body { overflow: hidden; }
+      .app { padding: 20px 20px 18px; grid-template-rows: 54px minmax(0, 1fr) 58px; gap: 12px; }
+      .stage { grid-template-columns: 1fr; gap: 14px; overflow-y: auto; padding-right: 4px; }
+      .card { min-height: 410px; }
+      .status { left: 20px; }
+      .run-track { width: 110px; }
+      .settings .chip:nth-child(-n+2) { display: none; }
+      .advanced { inset: 68px 20px 72px; overflow-y: auto; }
+      .advanced-grid { grid-template-columns: 1fr; }
+      .field.full { grid-column: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .run-track i { animation: none; transform: translateX(70%); }
+    }
+  </style>
+</head>
+<body>
+  <main id="app" class="app">
+    <header class="head">
+      <div class="brand"><div class="mark"><i></i><i></i></div><h1>Protocol Comparison Tool</h1></div>
+    </header>
+    <section class="stage">
+      <article class="card old" data-side="old">
+        <h2>旧版 PDF</h2>
+        <button class="drop" type="button" data-choose="old">
+          <span class="file-glyph"></span><strong id="old-name">选择旧版 PDF</strong><small>点击选择文件</small>
+        </button>
+        <div class="page-controls">
+          <button class="page-chip active" type="button" data-mode="old:all">全部页面</button>
+          <button class="page-chip" type="button" data-mode="old:range">选择页面</button>
+        </div>
+        <div id="old-range" class="range">
+          <label for="old-start">起始页</label><input id="old-start" inputmode="numeric">
+          <label for="old-end">终止页</label><input id="old-end" inputmode="numeric">
+        </div>
+      </article>
+      <article class="card new" data-side="new">
+        <h2>新版 PDF</h2>
+        <button class="drop" type="button" data-choose="new">
+          <span class="file-glyph"></span><strong id="new-name">选择新版 PDF</strong><small>点击选择文件</small>
+        </button>
+        <div class="page-controls">
+          <button class="page-chip active" type="button" data-mode="new:all">全部页面</button>
+          <button class="page-chip" type="button" data-mode="new:range">选择页面</button>
+        </div>
+        <div id="new-range" class="range">
+          <label for="new-start">起始页</label><input id="new-start" inputmode="numeric">
+          <label for="new-end">终止页</label><input id="new-end" inputmode="numeric">
+        </div>
+      </article>
+    </section>
+    <footer class="foot">
+      <div class="settings">
+        <span id="threshold-chip" class="chip">阈值 0.72</span>
+        <span id="snippets-chip" class="chip">每章 20</span>
+        <button id="advanced-toggle" class="chip" type="button">高级设置 ›</button>
+      </div>
+      <div class="actions">
+        <div class="run-state" role="status"><span id="running-label">正在比较</span><div class="run-track"><i></i></div></div>
+        <div class="result-actions"><button id="open-report" class="chip" type="button">打开 HTML 报告</button><button id="open-dir" class="chip" type="button">打开输出目录</button></div>
+        <button id="start" class="primary" type="button">开始比较</button>
+      </div>
+    </footer>
+    <div id="status" class="status" aria-live="polite"></div>
+    <section id="advanced" class="advanced" role="dialog" aria-modal="true" aria-label="高级设置">
+      <div class="advanced-head"><h3>高级设置</h3><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
+      <div class="advanced-grid">
+        <label class="field full"><span>输出目录</span><span class="path-row"><input id="output-dir" type="text"><button id="choose-output" class="chip" type="button">选择</button></span></label>
+        <label class="field"><span>章节匹配阈值</span><input id="min-similarity" type="text" value="0.72"></label>
+        <label class="field"><span>每章片段数</span><input id="max-snippets" type="text" value="20"></label>
+        <label class="check"><input id="include-unchanged" type="checkbox"><span>列出未变化章节</span></label>
+        <label class="check"><input id="auto-open" type="checkbox"><span>完成后自动打开报告</span></label>
+      </div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const state = { old_pdf: "", new_pdf: "", old_mode: "all", new_mode: "all", running: false };
+      const app = document.querySelector("#app");
+      const status = document.querySelector("#status");
+      const start = document.querySelector("#start");
+      const runningLabel = document.querySelector("#running-label");
+      const stageNames = { read_old: "读取旧版", read_new: "读取新版", match_diff: "匹配差异", visual_evidence: "生成视觉证据", report: "生成报告" };
+      let timer = null;
+      let startedAt = 0;
+      let focusBeforeDialog = null;
+
+      function setMode(side, mode) {
+        state[`${side}_mode`] = mode;
+        document.querySelectorAll(`[data-mode^="${side}:"]`).forEach(button => button.classList.toggle("active", button.dataset.mode.endsWith(`:${mode}`)));
+        document.querySelector(`#${side}-range`).classList.toggle("visible", mode === "range");
+      }
+      function setRunning(running) {
+        state.running = running; app.classList.toggle("running", running);
+        start.disabled = running; start.textContent = running ? "比较中" : "开始比较";
+        document.querySelectorAll("button, input").forEach(control => { if (control !== start) control.disabled = running; });
+        clearInterval(timer); timer = null;
+        if (running) {
+          startedAt = Date.now();
+          const updateElapsed = () => { const seconds = Math.floor((Date.now() - startedAt) / 1000); runningLabel.textContent = `正在比较 ${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; };
+          updateElapsed(); timer = setInterval(updateElapsed, 1000);
+        }
+      }
+      function config() {
+        return {
+          old_pdf: state.old_pdf, new_pdf: state.new_pdf,
+          old_mode: state.old_mode, new_mode: state.new_mode,
+          old_start: document.querySelector("#old-start").value, old_end: document.querySelector("#old-end").value,
+          new_start: document.querySelector("#new-start").value, new_end: document.querySelector("#new-end").value,
+          output_dir: document.querySelector("#output-dir").value,
+          min_similarity: document.querySelector("#min-similarity").value,
+          max_snippets: document.querySelector("#max-snippets").value,
+          include_unchanged: document.querySelector("#include-unchanged").checked,
+          auto_open: document.querySelector("#auto-open").checked,
+        };
+      }
+      async function choosePdf(side) {
+        try {
+          const response = await window.pywebview.api.choose_pdf(side);
+          if (!response.ok) { status.textContent = response.error || "无法选择 PDF。"; return; }
+          if (response.cancelled) return;
+          state[`${side}_pdf`] = response.path;
+          document.querySelector(`#${side}-name`).textContent = response.name;
+        } catch (_error) { status.textContent = "无法打开文件选择窗口。"; }
+      }
+      window.protocolDiff = {
+        receive(payload) {
+          if (payload.type === "running") { setRunning(true); status.textContent = "正在比较"; app.classList.remove("success"); }
+          if (payload.type === "progress") {
+            const stage = stageNames[payload.stage] || payload.stage;
+            status.textContent = payload.completed_pages != null ? `${stage} · 第 ${payload.completed_pages}/${payload.total_pages} 页` : stage;
+          }
+          if (payload.type === "success") {
+            setRunning(false); app.classList.add("success");
+            const counts = payload.counts;
+            const summary = counts ? `${payload.reliability} · 正文 ${counts.body} · Table ${counts.table} · 视觉 ${counts.visual}` : `${payload.reliability} · 统计请查看报告`;
+            status.textContent = payload.notice || summary;
+          }
+          if (payload.type === "error") { setRunning(false); app.classList.remove("success"); status.textContent = payload.message; }
+          if (payload.type === "notice") { status.textContent = payload.message; }
+        }
+      };
+      document.querySelectorAll("[data-choose]").forEach(button => button.addEventListener("click", () => choosePdf(button.dataset.choose)));
+      document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { const [side, mode] = button.dataset.mode.split(":"); setMode(side, mode); }));
+      function setAdvanced(open) {
+        const dialog = document.querySelector("#advanced");
+        document.querySelectorAll(".head, .stage, .foot, #status").forEach(region => { region.inert = open; });
+        dialog.classList.toggle("visible", open);
+        if (open) { focusBeforeDialog = document.activeElement; document.querySelector("#advanced-close").focus(); }
+        else if (focusBeforeDialog) focusBeforeDialog.focus();
+      }
+      document.querySelector("#advanced-toggle").addEventListener("click", () => setAdvanced(true));
+      document.querySelector("#advanced-close").addEventListener("click", () => setAdvanced(false));
+      document.addEventListener("keydown", event => {
+        const dialog = document.querySelector("#advanced");
+        if (!dialog.classList.contains("visible")) return;
+        if (event.key === "Escape") { setAdvanced(false); return; }
+        if (event.key !== "Tab") return;
+        const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled])")];
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+      document.querySelector("#choose-output").addEventListener("click", async () => {
+        try {
+          const response = await window.pywebview.api.choose_output_dir();
+          if (!response.ok) { status.textContent = response.error || "无法选择输出目录。"; return; }
+          if (!response.cancelled) document.querySelector("#output-dir").value = response.path;
+        } catch (_error) { status.textContent = "无法打开目录选择窗口。"; }
+      });
+      document.querySelector("#min-similarity").addEventListener("input", event => document.querySelector("#threshold-chip").textContent = `阈值 ${event.target.value}`);
+      document.querySelector("#max-snippets").addEventListener("input", event => document.querySelector("#snippets-chip").textContent = `每章 ${event.target.value}`);
+      document.querySelector("#start").addEventListener("click", async () => {
+        if (state.running) return;
+        setRunning(true); status.textContent = "正在比较";
+        try {
+          const response = await window.pywebview.api.run_comparison(config());
+          if (!response.ok) { setRunning(false); app.classList.remove("success"); status.textContent = response.error; }
+        } catch (_error) {
+          setRunning(false); app.classList.remove("success"); status.textContent = "无法启动比较，请重新运行。";
+        }
+      });
+      async function openResult(method) {
+        try {
+          const response = await window.pywebview.api[method]();
+          if (!response.ok) status.textContent = response.error || "无法打开，请检查文件是否仍然存在。";
+        } catch (_error) { status.textContent = "无法打开，请检查文件是否仍然存在。"; }
+      }
+      document.querySelector("#open-report").addEventListener("click", () => openResult("open_html_report"));
+      document.querySelector("#open-dir").addEventListener("click", () => openResult("open_output_dir"));
+      window.addEventListener("pywebviewready", async () => {
+        try {
+          const defaults = await window.pywebview.api.get_defaults();
+          document.querySelector("#output-dir").value = defaults.output_dir;
+          document.querySelector("#min-similarity").value = defaults.min_similarity;
+          document.querySelector("#max-snippets").value = defaults.max_snippets;
+        } catch (_error) { status.textContent = "无法读取默认设置。"; }
+      });
+    })();
+  </script>
+</body>
+</html>

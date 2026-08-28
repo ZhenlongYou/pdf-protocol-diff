@@ -177,7 +177,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gui-smoke-test",
         action="store_true",
-        help="构造真实桌面界面并检查跨平台字体、布局和关键控件后退出",
+        help="检查共享 WebView 界面资源、跨平台后端和关键控件后退出",
     )  # 与 TestRecord 的生产自检入口对齐，Windows CI 不需要模拟用户点击。
     return parser.parse_args()
 
@@ -212,9 +212,9 @@ def main() -> int:
 
     args = parse_args()
     if args.gui_smoke_test:
-        from protocol_pdf_diff.desktop_gui import run_smoke_test  # 延迟导入确保先完成项目 .venv 切换。
+        from protocol_pdf_diff.webview_gui import run_smoke_test  # 延迟导入确保先完成项目 .venv 切换。
 
-        run_smoke_test()  # 真实创建字体、Canvas、滚动条和输入控件，不用无界面的假对象替代。
+        run_smoke_test()  # 门禁检查冻结资源与现代 WebView API；真实窗口由 gui_app.py 自检覆盖。
         print("GUI smoke test passed")  # 稳定标记供 Windows CI、PyCharm 和交付门禁判断成功。
         return 0  # 自检不需要 PDF 输入，也不得继续进入耗时比较流程。
     try:

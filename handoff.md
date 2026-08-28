@@ -1,5 +1,21 @@
 # PDF Protocol Diff Handoff
 
+## 2026-08-29 WebView 统一桌面界面
+
+- task_id: `pdf-protocol-diff-glass-studio-ui-20260829`
+- base: `e5a97167cbff047bd286e01383e7f64b7935153f`
+- branch: `project/pdf-protocol-diff`
+- status: code-ready; Windows exact-commit native evidence pending GitHub Actions
+- 生产入口 `gui_app.py` 已从 Tk 改为一份共享 HTML/CSS 的 pywebview 壳：macOS 使用 WKWebView，Windows 强制 `edgechromium`（Edge WebView2），禁止 MSHTML 回退。`desktop_gui.py` 仅保留迁移兼容，不被生产入口引用。
+- 界面实现位于 `src/protocol_pdf_diff/webui/index.html`，采用用户确认的深靛紫玻璃工作台、紫/粉双 PDF 卡、精简文案、无交换按钮、页面范围切换、折叠高级设置和真实运行阶段状态条；760×520 改为卡片区纵向滚动，固定操作区不横向溢出。
+- `ProtocolDiffJsApi` 仅暴露六个必要方法。后台比较线程非 daemon；写报告期间阻止关闭。文件/目录选择、任务启动、默认设置和打开结果的 Promise/系统失败都显示明确错误并恢复界面。高级设置使用 `aria-modal`、背景 `inert`、Tab 焦点循环、Escape 和焦点恢复；reduced-motion 停止状态动画。
+- 成功状态只读取人类报告的 Markdown 汇总；汇总缺失、损坏或含负数时 fail closed，不回退到原始引擎计数。PDF 抽取、匹配、报告和标色算法未修改。PCIe 3.0 物理页 16–18 对 PCIe 4.0 物理页 33–35 的新 Web API 报告与既有基线在文档、页窗、章节、正文/Table/Formula 变化、warning 和 assessment 上逐项相同。
+- macOS 最终冻结包 `dist/ProtocolPdfDiff.app` 已真实启动并通过 renderer probe；冷启动 smoke 为 0.69 秒。源码与包内 `index.html` SHA-256 均为 `1ecf600ca3602578fab798a2c0dc2ff86dd0d1ab80c029bfb216da4161e809f8`。
+- 最终稳定快照完整套件 `1237/1237` 通过（502.289 秒）；WebView/跨平台定向 `37/37`、编译、两种 GUI smoke 和 `git diff --check` 通过。三路独立复审的代码质量、安全/视觉、Windows 工作流代码门禁均 PASS，P0/P1/P2=0。
+- Windows Actions 使用 onedir 产物做原生门禁，避免 onefile 启动器父子 PID 歧义；同一 GUI 进程在 DOM loaded 后验证 WebView2、双列、backdrop、动画和 overflow，再用同目录临时文件加 `os.replace` 原子发布 probe，截图脚本等到 probe 后才拍并要求进程干净退出。本地 `build_windows.bat` 仍可生成同一 HTML/WebView2 的 onefile 分发包。
+- 有效本地视觉证据：`/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/macos-frozen-window.png`、`chromium-edge-wide.png`、`chromium-edge-advanced.png`、`chromium-edge-narrow-idle.png`、`chromium-edge-narrow-scrolled.png`。旧的无真实桥接 running/narrow 截图和私密全屏图已可恢复地移入废纸篓，不得作为证据引用。
+- 提交并推送后必须等待 `Build desktop apps` 的 Windows job，下载 `windows-renderer-probe.json` 与 `windows-webview2.png` 逐张人工检查；在此之前 Windows 最终视觉结论只能记为 `PENDING/INCONCLUSIVE`。
+
 ## 当前任务
 
 - task_id: `pdf-protocol-diff-premium-ui-20260828`

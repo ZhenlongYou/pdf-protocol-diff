@@ -1654,8 +1654,8 @@ class ProtocolDiffTests(unittest.TestCase):
         build_source = (PROJECT_ROOT / "build_desktop.py").read_text(encoding="utf-8")  # 读取打包入口源码检查解释器顺序。
         self.assertLess(
             gui_source.index("reexec_into_project_venv("),
-            gui_source.index("from protocol_pdf_diff.desktop_gui"),
-        )  # GUI 必须先切 .venv，再导入 Tkinter 相关模块。
+            gui_source.index("from protocol_pdf_diff.webview_gui"),
+        )  # GUI 必须先切 .venv，再导入 WebView 和 PDF 相关模块。
         self.assertLess(
             main_source.index("reexec_into_project_venv("),
             main_source.index("from protocol_pdf_diff.compare"),
@@ -5974,7 +5974,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(str(default_output_dir()), str(Path.home() / "Documents" / "ProtocolPdfDiffReports"))  # 默认输出目录不能落到 app 包内部。
         self.assertIn("旧版 PDF", widget_texts)
         self.assertIn("新版 PDF", widget_texts)
-        self.assertIn("指定范围", widget_texts)
+        self.assertIn("选择页面", widget_texts)
         self.assertIn("开始比较", widget_texts)  # 主运行按钮必须存在且文案保持简洁。
         self.assertNotIn("填入 Demo 文件", widget_texts)  # 用户界面不保留示例输入入口。
         self.assertNotIn("OCR 语言", widget_texts)

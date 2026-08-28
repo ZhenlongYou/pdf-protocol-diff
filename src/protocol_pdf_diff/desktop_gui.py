@@ -1,17 +1,13 @@
-"""Tkinter desktop interface for the protocol PDF diff workflow.
+"""Legacy Tkinter compatibility interface for the protocol PDF diff workflow.
 
-The command-line entry point remains useful for automation, but most reviewers
-need a small desktop tool: choose two PDFs, optionally type page ranges, run the
-comparison, then open the HTML report. This module keeps that GUI thin and
-delegates all PDF and diff behavior to the same core pipeline that the tests
-already exercise.
+The supported macOS and Windows entry point is :mod:`webview_gui`. This module
+remains import-compatible for downstream callers and old tests, but production
+launchers never fall back to it because that would change the approved visuals.
 """
 
 from __future__ import annotations
 
-import os
 import queue
-import math  # GUI 在启动后台任务前拒绝 NaN、Inf 和超出比例区间的阈值。
 import subprocess
 import sys
 import threading
@@ -26,37 +22,56 @@ import tkinter.font as tkfont  # 读取当前 Tcl/Tk 实际可用字体，避免
 from tkinter import ttk
 
 from .compare import run_diff
+from .desktop_visuals import (
+    DropZone,
+    GlassPanel,
+    PillRadio,
+    RoundedButton,
+    draw_rounded_rectangle,
+)
 from .models import DiffOptions, DiffResult
 from .pdf_extract import MissingDependencyError, PdfReadError
 from .progress import ProgressEvent, notify_progress
 from .quality import ReliabilityState
 from .reporting import write_reports
+from .ui_shared import (
+    default_output_dir,
+    open_path,
+    page_range_values,
+    parse_optional_page,
+    parse_positive_float,
+    parse_positive_int,
+    reported_reader_summary as _reported_reader_summary,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-# B 方案：深靛紫画布承载分层工作区，冷青只服务于主操作和焦点，
-# 紫色/粉色分别标识旧版与新版，避免装饰色干扰任务状态。
+# 用户确认的 A 方案：深靛紫画布、玻璃感大卡片、紫粉双文档与冷青主操作。
 UI_THEME = {
-    "canvas": "#171824",
-    "surface": "#1D1D31",
-    "surface_raised": "#292942",
-    "surface_soft": "#23233A",
-    "section_border": "#484664",
-    "input": "#191927",
-    "border": "#605D7C",
-    "border_strong": "#777391",
-    "ink": "#F6F4FB",
-    "secondary_ink": "#D9D5E8",
-    "muted": "#AAA5BF",
-    "accent": "#8AD8F7",
-    "accent_active": "#6FC2E5",
+    "canvas": "#18192D",
+    "surface": "#1C1D33",
+    "surface_raised": "#2A2B47",
+    "surface_soft": "#20213A",
+    "drop_surface": "#1C1D35",
+    "section_border": "#514F70",
+    "drop_border": "#686582",
+    "input": "#191A2D",
+    "border": "#615E7E",
+    "border_strong": "#777392",
+    "ink": "#F7F5FF",
+    "secondary_ink": "#D8D5E6",
+    "muted": "#A8A4BC",
+    "accent": "#8BDEF8",
+    "accent_active": "#78CBE9",
     "focus_ring": "#C9EEFF",
     "accent_soft": "#263E52",
     "accent_ink": "#13212B",
-    "old_document_accent": "#7868E6",
-    "new_document_accent": "#EF72B8",
+    "old_document_accent": "#8273FF",
+    "old_document_fold": "#C8C1FF",
+    "new_document_accent": "#EF75BD",
+    "new_document_fold": "#FFD0E9",
     "browse_button": "#403F66",
     "browse_button_hover": "#4A4975",
     "browse_button_active": "#363554",
@@ -170,13 +185,6 @@ def create_tk_root() -> tk.Tk:
     return tk.Tk()  # 所有生产与 smoke-test 入口共用此工厂，避免某条路径遗漏调用时机。
 
 
-def default_output_dir() -> Path:
-    """Return a user-writable report folder outside the packaged app bundle."""
-
-    # 把默认报告目录放在用户文档目录，避免打包后的 app 尝试写入只读 bundle。
-    return Path.home() / "Documents" / "ProtocolPdfDiffReports"
-
-
 def compact_display_name(value: str, *, limit: int = 24) -> str:
     """Keep a filename recognizable without letting it push actions off-screen."""
 
@@ -204,144 +212,27 @@ class DesktopRunSuccess:
     outputs: dict[str, Path]
 
 
-def parse_optional_page(value: str, label: str) -> int | None:
-    """Parse an optional one-based page field from the GUI.
-
-    Empty fields mean "use the default range edge." Non-empty values must be
-    positive integers because the PDF extraction layer reports pages using the
-    same one-based numbering that users see in a PDF reader.
-    """
-
-    stripped = value.strip()
-    if not stripped:
-        return None
-    try:
-        page = int(stripped)
-    except ValueError as exc:
-        raise ValueError(f"{label} 必须是正整数。") from exc
-    if page < 1:
-        raise ValueError(f"{label} 必须大于等于 1。")
-    return page
-
-
-def page_range_values(
-    mode: str,
-    start_value: str,
-    end_value: str,
-    label: str,
-) -> tuple[int | None, int | None]:
-    """Resolve a document page mode without discarding hidden range values."""
-
-    if mode == "all":
-        return None, None
-    if mode != "range":
-        raise ValueError(f"{label}页码模式无效。")
-    start = parse_optional_page(start_value, f"{label}起始页")
-    end = parse_optional_page(end_value, f"{label}终止页")
-    if start is None or end is None:
-        raise ValueError(f"{label}指定范围时必须填写起始页和终止页。")
-    if start > end:
-        raise ValueError(f"{label}起始页不能大于终止页。")
-    return start, end
-
-
-def parse_positive_float(value: str, label: str) -> float:
-    """Parse a positive float from a compact tuning field."""
-
-    try:
-        number = float(value.strip())
-    except ValueError as exc:
-        raise ValueError(f"{label} 必须是数字。") from exc
-    if not math.isfinite(number) or not 0.0 < number <= 1.0:  # 匹配阈值是有限比例，不能接受 NaN、Inf 或大于 1。
-        raise ValueError(f"{label} 必须大于 0；允许区间为 0 到 1（含 1），且必须是有限数字。")  # 同时保留既有提示关键词并明确上限与 NaN/Inf 限制。
-    return number
-
-
-def parse_positive_int(value: str, label: str) -> int:
-    """Parse a positive integer from a compact tuning field."""
-
-    try:
-        number = int(value.strip())
-    except ValueError as exc:
-        raise ValueError(f"{label} 必须是整数。") from exc
-    if number < 0:
-        raise ValueError(f"{label} 不能小于 0。")
-    return number
-
-
-@dataclass(frozen=True)
-class ReaderReportSummary:
-    """Counts already filtered into the human-facing report."""
-
-    body_changes: int
-    modified: int
-    added: int
-    deleted: int
-    table_changes: int
-    visual_items: int
-
-
-def _reported_reader_summary(outputs: dict[str, Path]) -> ReaderReportSummary | None:
-    """Read the Markdown summary so desktop and report never show different totals."""
-
-    markdown_path = outputs.get("markdown")
-    if markdown_path is None:
-        return None
-    try:
-        lines = markdown_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return None
-    values: dict[str, str] = {}
-    in_summary = False
-    for line in lines:
-        if line.strip() == "## 汇总":
-            in_summary = True
-            continue
-        if in_summary and line.startswith("## "):
-            break
-        if not in_summary:
-            continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) == 2:
-            values[cells[0]] = cells[1]
-    try:
-        modified, added, deleted = (
-            int(value.strip())
-            for value in values["章节修改 / 新增 / 删除"].split("/")
-        )
-        return ReaderReportSummary(
-            body_changes=int(values["核心技术变化"]),
-            modified=modified,
-            added=added,
-            deleted=deleted,
-            table_changes=int(values["变化表格"]),
-            visual_items=int(values["视觉漏检核对项"]),
-        )
-    except (KeyError, ValueError):
-        return None
-
-
 class ProtocolDiffDesktopApp:
     """Desktop GUI coordinator for selecting PDFs and launching comparisons."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("协议 PDF 差异对比工具")
-        self.design_window_size = (1180, 560)
+        self.root.title("Protocol Comparison Tool")
+        self.design_window_size = (1180, 720)
         self.initial_window_size = responsive_window_size(
             self.root.winfo_screenwidth(),
             self.root.winfo_screenheight(),
             target_width=self.design_window_size[0],
             target_height=self.design_window_size[1],
             floor_width=760,
-            floor_height=440,
+            floor_height=520,
         )
         self.root.geometry(
             f"{self.initial_window_size[0]}x{self.initial_window_size[1]}"
         )  # 显式初始尺寸消除不同 Tk 平台按请求尺寸推导出的启动差异。
         self.minimum_window_size = (
             min(760, self.initial_window_size[0]),
-            min(440, self.initial_window_size[1]),
+            min(520, self.initial_window_size[1]),
         )  # 小屏允许降到真实可用尺寸，内部滚动区负责保证全部操作仍可到达。
         self.root.minsize(*self.minimum_window_size)  # 最小尺寸与当前逻辑屏幕绑定，不再固定逼出屏幕边界。
         self.ui_font = preferred_ui_font(self.root)  # 当前系统真实字体只解析一次，所有 Tk/ttk 控件共用同一结果。
@@ -359,7 +250,7 @@ class ProtocolDiffDesktopApp:
         self.max_snippets_var = tk.StringVar(value="20")
         self.include_unchanged_var = tk.BooleanVar(value=False)
         self.auto_open_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="请选择旧版和新版 PDF。")
+        self.status_var = tk.StringVar(value="")
         self.summary_var = tk.StringVar(value="")
         self.report_path_var = tk.StringVar(value="")
         self.profile_value_vars = {
@@ -378,7 +269,7 @@ class ProtocolDiffDesktopApp:
         self._last_outputs: dict[str, Path] | None = None
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.page_entry_widgets: dict[str, tk.Entry] = {}  # 保存四个原生页码输入框，供 smoke test 检查真实输入能力。
-        self.file_browse_buttons: list[ttk.Button] = []  # 保存三个“选择”按钮，供打包后自测确认按钮存在。
+        self.file_browse_buttons: list[tk.Widget] = []  # 两个大选择区和输出目录按钮共用打包自检契约。
         self.input_widgets: list[tk.Widget] = []
         self._input_states: dict[tk.Widget, str] = {}
         self.advanced_expanded = False
@@ -387,6 +278,7 @@ class ProtocolDiffDesktopApp:
         self._run_started_at: float | None = None
         self._current_progress_event: ProgressEvent | None = None
         self._elapsed_after_id: str | None = None
+        self._activity_after_id: str | None = None
 
         self._configure_style()
         self._build_layout()
@@ -444,7 +336,7 @@ class ProtocolDiffDesktopApp:
             "SectionTitle.TLabel",
             background=UI_THEME["surface_raised"],
             foreground=UI_THEME["ink"],
-            font=(self.ui_font, 12, "bold"),
+            font=(self.ui_font, 19, "bold"),
         )
         style.configure(
             "ProfileKey.TLabel",
@@ -569,6 +461,26 @@ class ProtocolDiffDesktopApp:
             background=[("focus", UI_THEME["accent_soft"])],
             indicatorcolor=[("selected", UI_THEME["accent"]), ("active", UI_THEME["accent_soft"])],
         )
+        style.configure(
+            "Chip.TRadiobutton",
+            background=UI_THEME["surface_raised"],
+            foreground=UI_THEME["secondary_ink"],
+            indicatorcolor=UI_THEME["surface_raised"],
+            indicatormargin=(0, 0, 0, 0),
+            bordercolor=UI_THEME["border"],
+            lightcolor=UI_THEME["border"],
+            darkcolor=UI_THEME["border"],
+            relief="flat",
+            padding=(12, 7),
+            font=(self.ui_font, 11),
+        )
+        style.map(
+            "Chip.TRadiobutton",
+            background=[("selected", UI_THEME["accent_soft"]), ("active", UI_THEME["button_hover"])],
+            foreground=[("selected", UI_THEME["ink"]), ("disabled", UI_THEME["disabled_ink"])],
+            bordercolor=[("selected", UI_THEME["accent"]), ("focus", UI_THEME["focus_ring"])],
+            indicatorcolor=[("selected", UI_THEME["accent_soft"])],
+        )
         style.configure("Footer.TFrame", background=UI_THEME["surface"])
         style.configure(
             "FooterStatus.TLabel",
@@ -589,6 +501,15 @@ class ProtocolDiffDesktopApp:
             bordercolor=UI_THEME["accent_soft"],
         )
         style.configure(
+            "Activity.Horizontal.TProgressbar",
+            background=UI_THEME["accent"],
+            troughcolor="#303149",
+            bordercolor="#303149",
+            lightcolor=UI_THEME["accent"],
+            darkcolor=UI_THEME["accent"],
+            thickness=5,
+        )
+        style.configure(
             "Dark.Vertical.TScrollbar",
             background=UI_THEME["border"],
             troughcolor=UI_THEME["canvas"],
@@ -605,7 +526,7 @@ class ProtocolDiffDesktopApp:
         )  # 悬停和按下状态保留足够反馈，但不抢过主按钮。
 
     def _build_layout(self) -> None:
-        """Create a scrollable workbench with a fixed action/status footer."""
+        """Create the approved glass-studio workbench with a fixed action rail."""
 
         shell = ttk.Frame(self.root)
         shell.grid(row=0, column=0, sticky="nsew")
@@ -629,7 +550,7 @@ class ProtocolDiffDesktopApp:
         )
         self.content_scrollbar.grid(row=0, column=1, sticky="ns")
         self.content_canvas.configure(yscrollcommand=self.content_scrollbar.set)
-        container = ttk.Frame(self.content_canvas, padding=20)
+        container = ttk.Frame(self.content_canvas, padding=(30, 24, 30, 18))
         self.content_container = container
         self.content_window = self.content_canvas.create_window(
             (0, 0), window=container, anchor="nw"
@@ -642,40 +563,38 @@ class ProtocolDiffDesktopApp:
         container.columnconfigure(0, weight=1)
 
         header = ttk.Frame(container)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 20))
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
         header.columnconfigure(1, weight=1)
         self.brand_mark = tk.Canvas(
             header,
-            width=42,
-            height=42,
+            width=38,
+            height=40,
             background=UI_THEME["canvas"],
             highlightthickness=0,
             borderwidth=0,
         )
-        self.brand_mark.grid(row=0, column=0, sticky="w", padx=(0, 12))
-        self.brand_mark.create_rectangle(
-            3, 6, 28, 34, fill=UI_THEME["old_document_accent"], outline=""
+        self.brand_mark.grid(row=0, column=0, sticky="w", padx=(0, 13))
+        draw_rounded_rectangle(
+            self.brand_mark, 2, 2, 27, 33, radius=7,
+            fill=UI_THEME["old_document_accent"],
         )
-        self.brand_mark.create_rectangle(
-            14, 11, 39, 39, fill=UI_THEME["new_document_accent"], outline=""
+        draw_rounded_rectangle(
+            self.brand_mark, 12, 7, 37, 38, radius=7,
+            fill=UI_THEME["new_document_accent"],
         )
-        self.brand_mark.create_line(20, 20, 32, 20, fill=UI_THEME["ink"], width=2)
-        self.brand_mark.create_line(20, 27, 30, 27, fill=UI_THEME["ink"], width=2)
+        self.brand_mark.create_line(18, 20, 31, 20, fill=UI_THEME["ink"], width=2)
+        self.brand_mark.create_line(18, 27, 29, 27, fill=UI_THEME["ink"], width=2)
         self.header_title_label = ttk.Label(
-            header, text="协议 PDF 对比", style="Title.TLabel"
+            header, text="Protocol Comparison Tool", style="Title.TLabel"
         )
         self.header_title_label.grid(row=0, column=1, sticky="w")
 
         self.workspace_host = ttk.Frame(container)
         self.workspace_host.grid(row=1, column=0, sticky="ew")
-        self.document_stage = tk.Frame(
-            self.workspace_host,
-            background=UI_THEME["surface_soft"],
-            highlightthickness=0,
-        )
+        self.document_stage = tk.Frame(self.workspace_host, background=UI_THEME["canvas"])
         self.document_stage.columnconfigure(0, weight=1)
         self.document_cards_host = ttk.Frame(
-            self.document_stage, style="Workspace.TFrame", padding=0
+            self.document_stage, padding=0
         )
         self.document_cards_host.grid(row=0, column=0, sticky="ew")
         self.old_document_card = self._create_document_card(
@@ -688,12 +607,6 @@ class ProtocolDiffDesktopApp:
             start_var=self.old_start_var,
             end_var=self.old_end_var,
         )
-        self.swap_button = ttk.Button(
-            self.document_cards_host,
-            text="交换旧/新",
-            command=self._swap_documents,
-        )
-        self.input_widgets.append(self.swap_button)
         self.new_document_card = self._create_document_card(
             self.document_cards_host,
             side="new",
@@ -706,15 +619,14 @@ class ProtocolDiffDesktopApp:
         )
         self.advanced_bar = tk.Frame(
             container,
-            background=UI_THEME["surface_raised"],
-            highlightthickness=1,
-            highlightbackground=UI_THEME["section_border"],
+            background=UI_THEME["canvas"],
+            highlightthickness=0,
         )
-        self.advanced_bar.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        self.advanced_bar.grid(row=2, column=0, sticky="ew", pady=(16, 0))
         self.advanced_bar.columnconfigure(3, weight=1)
         self.settings_chips: list[ttk.Frame] = []
         for column, (key, label) in enumerate(
-            (("output", "输出"), ("threshold", "阈值"), ("snippets", "每章"))
+            (("threshold", "阈值"), ("snippets", "每章"))
         ):
             chip = ttk.Frame(
                 self.advanced_bar, style="SectionBody.TFrame", padding=(12, 8)
@@ -729,12 +641,23 @@ class ProtocolDiffDesktopApp:
                 style="ProfileValue.TLabel",
             ).grid(row=0, column=1, sticky="w")
             self.settings_chips.append(chip)
-        self.advanced_toggle = ttk.Button(
+        self.advanced_toggle = RoundedButton(
             self.advanced_bar,
-            text="高级设置  ▸",
+            text="高级设置  ›",
             command=self._toggle_advanced,
+            font_family=self.ui_font,
+            background=UI_THEME["canvas"],
+            fill=UI_THEME["surface_raised"],
+            foreground=UI_THEME["secondary_ink"],
+            border=UI_THEME["border"],
+            active_fill=UI_THEME["button_hover"],
+            disabled_fill=UI_THEME["disabled_surface"],
+            width=112,
+            height=38,
+            radius=18,
+            bold=False,
         )
-        self.advanced_toggle.grid(row=0, column=4, sticky="e", padx=10, pady=8)
+        self.advanced_toggle.grid(row=0, column=2, sticky="w", padx=(4, 0), pady=8)
         self.input_widgets.append(self.advanced_toggle)
         self._apply_responsive_layout(self.design_window_size[0])
 
@@ -744,7 +667,7 @@ class ProtocolDiffDesktopApp:
         self.advanced_body.master.grid_remove()
         self._build_advanced_settings(self.advanced_body)
 
-        footer = ttk.Frame(shell, style="Footer.TFrame", padding=(20, 12))
+        footer = ttk.Frame(shell, style="Footer.TFrame", padding=(30, 12, 30, 16))
         footer.grid(row=1, column=0, columnspan=2, sticky="ew")
         footer.columnconfigure(0, weight=1)
         footer.columnconfigure(1, weight=0)
@@ -765,30 +688,53 @@ class ProtocolDiffDesktopApp:
         self.status_label = ttk.Label(
             footer, textvariable=self.status_var, style="FooterStatus.TLabel"
         )
-        self.status_label.grid(row=2, column=0, sticky="w", pady=(7, 0))
+        self.status_label.grid(row=2, column=0, sticky="w", pady=(5, 0))
         self.progress = ttk.Progressbar(footer, mode="determinate", maximum=1)
         self.progress.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         self.progress.grid_remove()
 
         actions = ttk.Frame(footer, style="Footer.TFrame")
         actions.grid(row=0, column=1, rowspan=4, sticky="e", padx=(18, 0))
-        self.run_button = ttk.Button(
+        self.running_label = ttk.Label(
+            actions, text="正在比较", style="FooterStatus.TLabel"
+        )
+        self.running_label.grid(row=0, column=0, sticky="e", padx=(0, 10))
+        self.running_label.grid_remove()
+        self.activity_progress = ttk.Progressbar(
+            actions,
+            mode="indeterminate",
+            maximum=100,
+            length=170,
+            style="Activity.Horizontal.TProgressbar",
+        )
+        self.activity_progress.grid(row=0, column=1, sticky="e", padx=(0, 16))
+        self.activity_progress.grid_remove()
+        self.run_button = RoundedButton(
             actions,
             text="开始比较",
-            style="Primary.TButton",
             command=self.run_comparison,
+            font_family=self.ui_font,
+            background=UI_THEME["surface"],
+            fill=UI_THEME["accent"],
+            foreground=UI_THEME["accent_ink"],
+            active_fill=UI_THEME["accent_active"],
+            disabled_fill=UI_THEME["disabled_accent"],
+            disabled_foreground=UI_THEME["disabled_accent_ink"],
+            width=126,
+            height=46,
+            radius=15,
         )
-        self.run_button.grid(row=0, column=0, sticky="ew")
+        self.run_button.grid(row=0, column=2, sticky="ew")
         self.input_widgets.append(self.run_button)
         self.open_html_button = ttk.Button(
             actions, text="打开 HTML 报告", command=self.open_html_report
         )
-        self.open_html_button.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.open_html_button.grid(row=1, column=2, sticky="ew", pady=(8, 0))
         self.open_html_button.grid_remove()
         self.open_dir_button = ttk.Button(
             actions, text="打开输出目录", command=self.open_report_directory
         )
-        self.open_dir_button.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.open_dir_button.grid(row=2, column=2, sticky="ew", pady=(8, 0))
         self.open_dir_button.grid_remove()
 
     def _create_document_card(
@@ -802,80 +748,97 @@ class ProtocolDiffDesktopApp:
         mode_var: tk.StringVar,
         start_var: tk.StringVar,
         end_var: tk.StringVar,
-    ) -> tk.Frame:
-        """Build one self-contained PDF selector and page-range card."""
+    ) -> GlassPanel:
+        """Build one rounded PDF selector and page-range card."""
 
-        card = tk.Frame(
+        card = GlassPanel(
             parent,
-            background=UI_THEME["surface_raised"],
-            highlightthickness=1,
-            highlightbackground=UI_THEME["section_border"],
+            background=UI_THEME["canvas"],
+            surface=UI_THEME["surface_raised"],
+            border=UI_THEME["section_border"],
+            radius=28,
+            height=430,
         )
-        card.columnconfigure(0, weight=1)
+        body = card.content
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(1, weight=1)
         accent = (
             UI_THEME["old_document_accent"]
             if side == "old"
             else UI_THEME["new_document_accent"]
         )
-        accent_bar = tk.Frame(card, background=accent, height=4)
-        accent_bar.grid(row=0, column=0, sticky="ew")
-        accent_bar.grid_propagate(False)
-        body = ttk.Frame(card, style="SectionBody.TFrame", padding=16)
-        body.grid(row=1, column=0, sticky="nsew")
-        body.columnconfigure(0, weight=1)
+        fold = (
+            UI_THEME["old_document_fold"]
+            if side == "old"
+            else UI_THEME["new_document_fold"]
+        )
         ttk.Label(body, text=title, style="SectionTitle.TLabel").grid(
-            row=0, column=0, sticky="w"
+            row=0, column=0, sticky="w", padx=16, pady=(13, 12)
         )
-        icon = tk.Canvas(
+        drop_zone = DropZone(
             body,
-            width=92,
-            height=104,
             background=UI_THEME["surface_raised"],
-            highlightthickness=0,
-            borderwidth=0,
+            surface=UI_THEME["drop_surface"],
+            border=UI_THEME["drop_border"],
+            accent=accent,
+            accent_fold=fold,
+            title=f"选择{title}",
+            font_family=self.ui_font,
+            command=browse_command,
+            height=278,
         )
-        icon.grid(row=1, column=0, pady=(8, 12))
-        icon.create_rectangle(12, 13, 66, 91, fill=UI_THEME["surface_soft"], outline="")
-        icon.create_rectangle(25, 5, 80, 88, fill=accent, outline="")
-        icon.create_polygon(63, 5, 80, 22, 63, 22, fill=UI_THEME["focus_ring"], outline="")
-        icon.create_line(38, 39, 68, 39, fill=UI_THEME["ink"], width=3)
-        icon.create_line(38, 51, 66, 51, fill=UI_THEME["ink"], width=3)
-        icon.create_line(38, 63, 61, 63, fill=UI_THEME["ink"], width=3)
-        setattr(self, f"{side}_document_icon", icon)
-        path_row = ttk.Frame(body, style="SectionBody.TFrame")
-        path_row.grid(row=2, column=0, sticky="ew")
-        path_row.columnconfigure(0, weight=1)
-        path_entry = ttk.Entry(path_row, textvariable=path_var)
-        path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        browse_button = ttk.Button(
-            path_row, text="选择 PDF", style="Browse.TButton", command=browse_command
+        drop_zone.grid(row=1, column=0, sticky="nsew", padx=16)
+        setattr(self, f"{side}_document_icon", drop_zone)
+        setattr(self, f"{side}_drop_zone", drop_zone)
+        self.file_browse_buttons.append(drop_zone)
+        self.input_widgets.append(drop_zone)
+        path_var.trace_add(
+            "write",
+            lambda *_args, zone=drop_zone, variable=path_var: zone.set_display_name(
+                compact_display_name(Path(variable.get()).name, limit=42)
+                if variable.get().strip()
+                else ""
+            ),
         )
-        browse_button.grid(row=0, column=1)
-        self.file_browse_buttons.append(browse_button)
-        self.input_widgets.extend((path_entry, browse_button))
 
         mode_row = ttk.Frame(body, style="SectionBody.TFrame")
-        mode_row.grid(row=3, column=0, sticky="w", pady=(12, 0))
-        all_button = ttk.Radiobutton(
+        mode_row.grid(row=2, column=0, sticky="w", padx=16, pady=(13, 8))
+        all_button = PillRadio(
             mode_row,
             text="全部页面",
             variable=mode_var,
             value="all",
             command=lambda selected=side: self._sync_page_mode(selected),
+            font_family=self.ui_font,
+            background=UI_THEME["surface_raised"],
+            fill=UI_THEME["surface_raised"],
+            selected_fill=UI_THEME["accent_soft"],
+            border=UI_THEME["border"],
+            foreground=UI_THEME["secondary_ink"],
+            selected_border=UI_THEME["accent"],
         )
-        all_button.grid(row=0, column=0, sticky="w", padx=(0, 18))
-        range_button = ttk.Radiobutton(
+        all_button.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        range_button = PillRadio(
             mode_row,
-            text="指定范围",
+            text="选择页面",
             variable=mode_var,
             value="range",
             command=lambda selected=side: self._sync_page_mode(selected),
+            font_family=self.ui_font,
+            background=UI_THEME["surface_raised"],
+            fill=UI_THEME["surface_raised"],
+            selected_fill=UI_THEME["accent_soft"],
+            border=UI_THEME["border"],
+            foreground=UI_THEME["secondary_ink"],
+            selected_border=UI_THEME["accent"],
         )
         range_button.grid(row=0, column=1, sticky="w")
+        setattr(self, f"{side}_all_pages_button", all_button)
+        setattr(self, f"{side}_range_pages_button", range_button)
         self.input_widgets.extend((all_button, range_button))
 
         range_frame = ttk.Frame(body, style="SectionBody.TFrame")
-        range_frame.grid(row=4, column=0, sticky="w", pady=(10, 0))
+        range_frame.grid(row=3, column=0, sticky="w", padx=16, pady=(0, 8))
         ttk.Label(range_frame, text="起始页").grid(row=0, column=0, sticky="w")
         start_entry = self._create_page_entry(range_frame, start_var)
         start_entry.grid(row=0, column=1, padx=(7, 14), ipady=3)
@@ -919,7 +882,7 @@ class ProtocolDiffDesktopApp:
             self.advanced_toggle.configure(text="收起  ▾")
         else:
             card.grid_remove()
-            self.advanced_toggle.configure(text="高级设置  ▸")
+            self.advanced_toggle.configure(text="高级设置  ›")
         self._update_content_scrollregion()
 
     def _refresh_advanced_summary(self, *_trace_args: object) -> None:
@@ -942,46 +905,6 @@ class ProtocolDiffDesktopApp:
             frame.grid_remove()
         self._update_content_scrollregion()
 
-    def _swap_documents(self) -> None:
-        """Swap both document selections and their complete page-window state."""
-
-        old_state = (
-            self.old_pdf_var.get(),
-            self.old_page_mode_var.get(),
-            self.old_start_var.get(),
-            self.old_end_var.get(),
-        )
-        new_state = (
-            self.new_pdf_var.get(),
-            self.new_page_mode_var.get(),
-            self.new_start_var.get(),
-            self.new_end_var.get(),
-        )
-        for variable, value in zip(
-            (
-                self.old_pdf_var,
-                self.old_page_mode_var,
-                self.old_start_var,
-                self.old_end_var,
-            ),
-            new_state,
-            strict=True,
-        ):
-            variable.set(value)
-        for variable, value in zip(
-            (
-                self.new_pdf_var,
-                self.new_page_mode_var,
-                self.new_start_var,
-                self.new_end_var,
-            ),
-            old_state,
-            strict=True,
-        ):
-            variable.set(value)
-        self._sync_page_mode("old")
-        self._sync_page_mode("new")
-
     def _apply_responsive_layout(self, width: int) -> None:
         """Keep the two documents dominant, stacking only on narrow windows."""
 
@@ -991,21 +914,18 @@ class ProtocolDiffDesktopApp:
         mode = "stacked" if width < 900 else "side-by-side"
         self.old_document_card.grid_forget()
         self.new_document_card.grid_forget()
-        self.swap_button.grid_forget()
         if mode == "side-by-side":
             self.document_cards_host.columnconfigure(0, weight=1)
-            self.document_cards_host.columnconfigure(1, weight=0)
-            self.document_cards_host.columnconfigure(2, weight=1)
-            self.old_document_card.grid(row=0, column=0, sticky="nsew")
-            self.swap_button.grid(row=0, column=1, sticky="ew", padx=10)
-            self.new_document_card.grid(row=0, column=2, sticky="nsew")
+            self.document_cards_host.columnconfigure(1, weight=1)
+            self.document_cards_host.columnconfigure(2, weight=0)
+            self.old_document_card.grid(row=0, column=0, sticky="nsew", padx=(0, 38))
+            self.new_document_card.grid(row=0, column=1, sticky="nsew", padx=(38, 0))
         else:
             self.document_cards_host.columnconfigure(0, weight=1)
             self.document_cards_host.columnconfigure(1, weight=0)
             self.document_cards_host.columnconfigure(2, weight=0)
-            self.old_document_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-            self.swap_button.grid(row=1, column=0, pady=(0, 10))
-            self.new_document_card.grid(row=2, column=0, sticky="ew")
+            self.old_document_card.grid(row=0, column=0, sticky="ew", pady=(0, 14))
+            self.new_document_card.grid(row=1, column=0, sticky="ew")
 
         for chip in self.settings_chips:
             chip.grid_forget()
@@ -1017,17 +937,7 @@ class ProtocolDiffDesktopApp:
                 sticky="w",
                 padx=(0 if column == 0 else 4, 4),
             )
-        if mode == "side-by-side":
-            self.advanced_toggle.grid(row=0, column=4, sticky="e", padx=10, pady=8)
-        else:
-            self.advanced_toggle.grid(
-                row=1,
-                column=0,
-                columnspan=4,
-                sticky="e",
-                padx=10,
-                pady=(0, 8),
-            )
+        self.advanced_toggle.grid(row=0, column=2, sticky="w", padx=(4, 0), pady=8)
         self.document_layout_mode = mode
 
     def _update_content_scrollregion(self, _event: tk.Event | None = None) -> None:
@@ -1428,6 +1338,10 @@ class ProtocolDiffDesktopApp:
             }
             for widget in self.input_widgets:
                 widget.configure(state="disabled")
+            self.run_button.configure(text="比较中")
+            self.running_label.grid()
+            self.activity_progress.grid()
+            self.activity_progress.start(12)
             self.open_html_button.configure(state="disabled")
             self.open_dir_button.configure(state="disabled")
             self.open_html_button.grid_remove()
@@ -1441,6 +1355,10 @@ class ProtocolDiffDesktopApp:
                 self._elapsed_after_id = None
             for widget in self.input_widgets:
                 widget.configure(state=self._input_states.get(widget, "normal"))
+            self.run_button.configure(text="开始比较")
+            self.activity_progress.stop()
+            self.activity_progress.grid_remove()
+            self.running_label.grid_remove()
             self.root.configure(cursor="")
             self.progress.grid_remove()
             self._current_progress_event = None
@@ -1495,19 +1413,6 @@ class ProtocolDiffDesktopApp:
         self.root.destroy()
 
 
-def open_path(path: Path) -> bool:
-    """Open a file or directory with the current operating system shell."""
-
-    resolved = str(path.resolve())
-    if sys.platform == "darwin":
-        return subprocess.run(["open", resolved], check=False).returncode == 0
-    elif os.name == "nt":
-        os.startfile(resolved)  # type: ignore[attr-defined]
-        return True
-    else:
-        return subprocess.run(["xdg-open", resolved], check=False).returncode == 0
-
-
 def run_smoke_test() -> None:
     """Instantiate the GUI without entering the main loop.
 
@@ -1518,7 +1423,7 @@ def run_smoke_test() -> None:
 
     root = create_tk_root()  # 冻结 EXE 自检也必须复现真实启动前的 DPI 配置顺序。
     app = ProtocolDiffDesktopApp(root)
-    assert root.title() == "协议 PDF 差异对比工具"
+    assert root.title() == "Protocol Comparison Tool"
     assert app.output_dir_var.get()
     root.update_idletasks()  # 先让 Tk 完成布局，后续才能检查控件是否真正挂到 grid 上。
     assert app.run_button.cget("text") == "开始比较"  # 确认主按钮不是旧文案或旧界面。
@@ -1528,7 +1433,7 @@ def run_smoke_test() -> None:
         "旧版 PDF",
         "新版 PDF",
         "全部页面",
-        "指定范围",
+        "选择页面",
         "开始比较",
     }
     missing_labels = sorted(required_labels - widget_texts)  # 找出缺失控件，方便构建失败时定位。

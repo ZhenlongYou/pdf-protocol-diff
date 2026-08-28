@@ -391,18 +391,18 @@ class CrossPlatformGuiTests(unittest.TestCase):
             app = ProtocolDiffDesktopApp(root)
             root.update_idletasks()
 
-            self.assertEqual((1180, 560), app.design_window_size)
-            self.assertEqual("#171824", UI_THEME["canvas"])
-            self.assertEqual("#8AD8F7", UI_THEME["accent"])
-            self.assertEqual("#7868E6", UI_THEME["old_document_accent"])
-            self.assertEqual("#EF72B8", UI_THEME["new_document_accent"])
-            self.assertEqual("协议 PDF 对比", app.header_title_label.cget("text"))
+            self.assertEqual((1180, 720), app.design_window_size)
+            self.assertEqual("#18192D", UI_THEME["canvas"])
+            self.assertEqual("#8BDEF8", UI_THEME["accent"])
+            self.assertEqual("#8273FF", UI_THEME["old_document_accent"])
+            self.assertEqual("#EF75BD", UI_THEME["new_document_accent"])
+            self.assertEqual("Protocol Comparison Tool", app.header_title_label.cget("text"))
             self.assertTrue(app.brand_mark.find_all())
             self.assertTrue(app.old_document_icon.find_all())
             self.assertTrue(app.new_document_icon.find_all())
             self.assertGreaterEqual(int(app.old_document_icon.cget("width")), 80)
             self.assertGreaterEqual(int(app.old_document_icon.cget("height")), 96)
-            self.assertEqual(3, len(app.settings_chips))
+            self.assertEqual(2, len(app.settings_chips))
             static_copy: list[str] = []
             pending = [app.content_container]
             while pending:
@@ -411,7 +411,7 @@ class CrossPlatformGuiTests(unittest.TestCase):
                 if "text" in widget.keys():
                     static_copy.append(str(widget.cget("text")))
             joined_copy = "\n".join(static_copy)
-            self.assertEqual(1, static_copy.count("协议 PDF 对比"))
+            self.assertEqual(1, static_copy.count("Protocol Comparison Tool"))
             for forbidden_copy in (
                 "PROTOCOL DIFF STUDIO",
                 "本地处理",
@@ -446,11 +446,10 @@ class CrossPlatformGuiTests(unittest.TestCase):
 
             app._apply_responsive_layout(1180)
             self.assertEqual("side-by-side", app.document_layout_mode)
-            self.assertEqual(1, int(app.swap_button.grid_info()["column"]))
+            self.assertEqual(1, int(app.new_document_card.grid_info()["column"]))
             app._apply_responsive_layout(760)
             self.assertEqual("stacked", app.document_layout_mode)
-            self.assertEqual(1, int(app.swap_button.grid_info()["row"]))
-            self.assertEqual(2, int(app.new_document_card.grid_info()["row"]))
+            self.assertEqual(1, int(app.new_document_card.grid_info()["row"]))
             self.assertEqual(2, int(app.advanced_bar.grid_info()["row"]))
 
             app._fit_content_to_viewport(mock.Mock(width=760))
@@ -458,7 +457,7 @@ class CrossPlatformGuiTests(unittest.TestCase):
             root.geometry("760x520+0+0")
             root.update()
             self.assertGreaterEqual(app.advanced_toggle.winfo_height(), 32)
-            self.assertEqual(1, int(app.advanced_toggle.grid_info()["row"]))
+            self.assertEqual(0, int(app.advanced_toggle.grid_info()["row"]))
 
             app.output_dir_var.set(
                 "/tmp/this-is-a-valid-but-extremely-long-output-directory-name-that-must-not-hide-actions"
@@ -488,10 +487,10 @@ class CrossPlatformGuiTests(unittest.TestCase):
 
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
-        "Tk premium UI contract needs a desktop session",
+        "Tk glass UI contract needs a desktop session",
     )
     def test_premium_startup_contract_rejects_redundant_persistent_copy(self) -> None:
-        """The chosen B visual direction must not regress into an explanatory form."""
+        """The chosen A visual direction must not regress into an explanatory form."""
 
         root = tk.Tk()
         root.withdraw()
@@ -506,9 +505,9 @@ class CrossPlatformGuiTests(unittest.TestCase):
                 if "text" in widget.keys():
                     static_copy.append(str(widget.cget("text")))
 
-            self.assertEqual("#171824", UI_THEME["canvas"])
-            self.assertEqual("#8AD8F7", UI_THEME["accent"])
-            self.assertEqual(1, static_copy.count("协议 PDF 对比"))
+            self.assertEqual("#18192D", UI_THEME["canvas"])
+            self.assertEqual("#8BDEF8", UI_THEME["accent"])
+            self.assertEqual(1, static_copy.count("Protocol Comparison Tool"))
             self.assertFalse(
                 {
                     "PROTOCOL DIFF STUDIO",
@@ -519,6 +518,61 @@ class CrossPlatformGuiTests(unittest.TestCase):
                     "REVISION",
                 }.intersection(static_copy)
             )
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk approved studio contract needs a desktop session",
+    )
+    def test_approved_glass_studio_contract_has_minimal_copy_and_running_cue(self) -> None:
+        """The production window must match the user-approved A prototype contract."""
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            root.update_idletasks()
+
+            self.assertEqual("Protocol Comparison Tool", app.header_title_label.cget("text"))
+            self.assertFalse(hasattr(app, "swap_button"))
+            self.assertGreaterEqual(app.design_window_size[0], 1120)
+            self.assertGreaterEqual(app.design_window_size[1], 700)
+            self.assertGreaterEqual(int(app.old_document_icon.cget("width")), 120)
+            self.assertGreaterEqual(int(app.old_document_icon.cget("height")), 136)
+            self.assertEqual("全部页面", app.old_all_pages_button.cget("text"))
+            self.assertEqual("选择页面", app.old_range_pages_button.cget("text"))
+            self.assertEqual("全部页面", app.new_all_pages_button.cget("text"))
+            self.assertEqual("选择页面", app.new_range_pages_button.cget("text"))
+
+            static_copy: list[str] = []
+            pending = [app.content_container]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                if "text" in widget.keys():
+                    static_copy.append(str(widget.cget("text")))
+            joined_copy = "\n".join(static_copy)
+            for forbidden_copy in (
+                "协议 PDF 对比",
+                "请选择旧版和新版 PDF",
+                "请选择两份 PDF",
+                "交换旧/新",
+                "尚未选择",
+                "旧版\n旧版 PDF",
+                "新版\n新版 PDF",
+            ):
+                self.assertNotIn(forbidden_copy, joined_copy)
+
+            app._set_running(True)
+            root.update_idletasks()
+            self.assertEqual("比较中", app.run_button.cget("text"))
+            self.assertEqual("正在比较", app.running_label.cget("text"))
+            self.assertEqual("indeterminate", str(app.activity_progress.cget("mode")))
+            self.assertEqual("grid", app.activity_progress.winfo_manager())
+            app._set_running(False)
+            self.assertEqual("开始比较", app.run_button.cget("text"))
+            self.assertEqual("", app.activity_progress.winfo_manager())
         finally:
             root.destroy()
 
@@ -555,52 +609,6 @@ class CrossPlatformGuiTests(unittest.TestCase):
             pending_timers = root.tk.call("after", "info")
             self.assertNotIn(second_timer_id, pending_timers)
             self.assertNotIn(rescheduled_timer_id, pending_timers)
-        finally:
-            root.destroy()
-
-    @unittest.skipUnless(
-        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
-        "Tk swap control test needs a desktop session",
-    )
-    def test_swap_control_exchanges_both_document_shelves_and_page_ranges(self) -> None:
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            app = ProtocolDiffDesktopApp(root)
-            app.old_pdf_var.set("/tmp/revision-old.pdf")
-            app.new_pdf_var.set("/tmp/revision-new.pdf")
-            app.old_page_mode_var.set("range")
-            app.old_start_var.set("16")
-            app.old_end_var.set("18")
-            app.new_page_mode_var.set("all")
-            app.new_start_var.set("33")
-            app.new_end_var.set("35")
-            app._sync_page_mode("old")
-
-            root.deiconify()
-            root.update()
-            self.assertEqual(
-                app.swap_button,
-                app.page_entry_widgets["旧协议终止页"].tk_focusNext(),
-            )
-
-            app._set_running(True)
-            app.swap_button.invoke()
-            self.assertEqual("/tmp/revision-old.pdf", app.old_pdf_var.get())
-            self.assertEqual("/tmp/revision-new.pdf", app.new_pdf_var.get())
-            self.assertEqual("disabled", str(app.swap_button.cget("state")))
-
-            app._set_running(False)
-            app.swap_button.invoke()
-
-            self.assertEqual("/tmp/revision-new.pdf", app.old_pdf_var.get())
-            self.assertEqual("/tmp/revision-old.pdf", app.new_pdf_var.get())
-            self.assertEqual("all", app.old_page_mode_var.get())
-            self.assertEqual(("33", "35"), (app.old_start_var.get(), app.old_end_var.get()))
-            self.assertEqual("range", app.new_page_mode_var.get())
-            self.assertEqual(("16", "18"), (app.new_start_var.get(), app.new_end_var.get()))
-            self.assertEqual("", app.old_range_frame.winfo_manager())
-            self.assertEqual("grid", app.new_range_frame.winfo_manager())
         finally:
             root.destroy()
 

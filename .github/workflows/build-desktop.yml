@@ -2,6 +2,29 @@ name: Build desktop apps
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main, project/pdf-protocol-diff]
+    paths:
+      - "gui_app.py"
+      - "main.py"
+      - "build_desktop.py"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - "src/protocol_pdf_diff/**"
+      - "tests/**"
+      - "scripts/capture_windows_ui.ps1"
+      - ".github/workflows/build-desktop.yml"
+  pull_request:
+    paths:
+      - "gui_app.py"
+      - "main.py"
+      - "build_desktop.py"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - "src/protocol_pdf_diff/**"
+      - "tests/**"
+      - "scripts/capture_windows_ui.ps1"
+      - ".github/workflows/build-desktop.yml"
 
 jobs:
   build:
@@ -29,11 +52,27 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests
 
-      - name: Build desktop artifact
+      - name: Build macOS desktop artifact
+        if: runner.os == 'macOS'
         run: python build_desktop.py --clean
+
+      - name: Build Windows desktop artifact and native renderer probe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $env:PROTOCOL_DIFF_RENDERER_PROBE_PATH = (Resolve-Path artifacts).Path + "\windows-renderer-probe.json"
+          python build_desktop.py --clean
+
+      - name: Capture Windows WebView2 UI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/capture_windows_ui.ps1 -Executable ./dist/ProtocolPdfDiff/ProtocolPdfDiff.exe -OutputPath ./artifacts/windows-webview2.png -ProbePath ./artifacts/windows-renderer-probe.json
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ProtocolPdfDiff-${{ matrix.os }}
-          path: dist/**
+          path: |
+            dist/**
+            artifacts/**
