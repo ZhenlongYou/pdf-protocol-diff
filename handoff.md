@@ -5,7 +5,9 @@
 - task_id: `pdf-protocol-diff-glass-studio-ui-20260829`
 - base: `e5a97167cbff047bd286e01383e7f64b7935153f`
 - branch: `project/pdf-protocol-diff`
-- status: delivered; Windows exact startup visual PASS; broader native state-chain gate remains manual review
+- recorded_commit: `396add22c6bb1e6665a6d47aea76a99ee92c80ec`
+- status: ready
+- delivery_note: Windows exact startup visual PASS; broader native state-chain gate remains manual review
 - 生产入口 `gui_app.py` 已从 Tk 改为一份共享 HTML/CSS 的 pywebview 壳：macOS 使用 WKWebView，Windows 强制 `edgechromium`（Edge WebView2），禁止 MSHTML 回退。`desktop_gui.py` 仅保留迁移兼容，不被生产入口引用。
 - 界面实现位于 `src/protocol_pdf_diff/webui/index.html`，采用用户确认的深靛紫玻璃工作台、紫/粉双 PDF 卡、精简文案、无交换按钮、页面范围切换、折叠高级设置和真实运行阶段状态条；760×520 改为卡片区纵向滚动，固定操作区不横向溢出。
 - `ProtocolDiffJsApi` 仅暴露六个必要方法。后台比较线程非 daemon；写报告期间阻止关闭。文件/目录选择、任务启动、默认设置和打开结果的 Promise/系统失败都显示明确错误并恢复界面。高级设置使用 `aria-modal`、背景 `inert`、Tab 焦点循环、Escape 和焦点恢复；reduced-motion 停止状态动画。
