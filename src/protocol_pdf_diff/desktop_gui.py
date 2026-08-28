@@ -637,6 +637,7 @@ class ProtocolDiffDesktopApp:
             text="交换旧/新",
             command=self._swap_documents,
         )
+        self.input_widgets.append(self.swap_button)
         self.new_document_card = self._create_document_card(
             self.document_cards_host,
             side="new",
