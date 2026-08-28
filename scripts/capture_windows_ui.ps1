@@ -17,18 +17,9 @@ public static class NativeWindowCapture {
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT rect, int size);
-    public static bool GetVisibleWindowRect(IntPtr hWnd, out RECT rect) {
-        const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
-        bool success = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf(typeof(RECT))) == 0;
-        if (!success) {
-            success = GetWindowRect(hWnd, out rect);
-        }
-        if (!success) {
-            return false;
-        }
-        return rect.Right > rect.Left && rect.Bottom > rect.Top;
+    public static bool GetCompleteWindowRect(IntPtr hWnd, out RECT rect) {
+        bool success = GetWindowRect(hWnd, out rect);
+        return success && rect.Right > rect.Left && rect.Bottom > rect.Top;
     }
 }
 "@
@@ -64,7 +55,7 @@ try {
     if (-not $probe.backdrop -or $probe.backdrop -eq "none") { throw "Renderer probe did not confirm backdrop blur." }
 
     $rect = New-Object NativeWindowCapture+RECT
-    if (-not [NativeWindowCapture]::GetVisibleWindowRect($process.MainWindowHandle, [ref]$rect)) {
+    if (-not [NativeWindowCapture]::GetCompleteWindowRect($process.MainWindowHandle, [ref]$rect)) {
         throw "Could not read the application window bounds."
     }
     $width = $rect.Right - $rect.Left

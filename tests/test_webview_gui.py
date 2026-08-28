@@ -349,10 +349,11 @@ class WebviewGuiTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("PROTOCOL_DIFF_RENDERER_PROBE_PATH", capture_script)
-        self.assertIn("DwmGetWindowAttribute", capture_script)
-        self.assertIn("GetVisibleWindowRect", capture_script)
+        self.assertIn("GetWindowRect", capture_script)
+        self.assertIn("GetCompleteWindowRect", capture_script)
         self.assertIn("PrintWindow", capture_script)
         self.assertIn("PW_RENDERFULLCONTENT", capture_script)
+        self.assertNotIn("DwmGetWindowAttribute", capture_script)
         self.assertNotIn("CopyFromScreen", capture_script)
         self.assertNotIn("SPI_GETWORKAREA", capture_script)
         self.assertIn("ConvertFrom-Json", capture_script)
