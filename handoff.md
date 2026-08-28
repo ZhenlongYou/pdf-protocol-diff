@@ -6,7 +6,7 @@
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `4887727f0a299fb3562ba4c16d8f41b72a1a96ba`
+- recorded_commit: `2baf4012a1d9c08cebb2ee03c9822961343efba1`
 - status: ready
 - 目标：在不改变报告、PDF 识别、配对和差异标记语义的前提下，降低桌面启动界面的无效留白并提高任务密度。
 
@@ -56,7 +56,7 @@
 
 ## 当前状态或阻塞
 
-- 最新 UI 密度代码提交为 `4887727f0a299fb3562ba4c16d8f41b72a1a96ba`。项目 `.venv` 完整套件 1219/1219 通过（508.536 秒），GUI 定向测试 19/19 通过；编译检查、`git diff --check`、系统 Python 与 `.venv` 的 `main.py --gui-smoke-test` 均通过。
+- 最新 UI 密度代码提交为 `2baf4012a1d9c08cebb2ee03c9822961343efba1`；其父提交 `4017ee0…` 保存了可重放的交换按钮未锁定 RED。项目 `.venv` 完整套件 1219/1219 通过（508.353 秒），GUI 定向测试 19/19 通过；编译检查、`git diff --check`、系统 Python 与 `.venv` 的 `main.py --gui-smoke-test` 均通过。
 - 提交绑定启动截图与测试有效性矩阵保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_ui_density_20260828/commit_bound/`；截图来自 macOS 真实 Python/Tk 窗口，没有使用系统 Chrome。
 - exact-commit 真实 PCIe/OIF 报告重生、Playwright Chromium 视觉复核和多 agent 最终测试报告审核属于仓外验收证据；产物统一保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/`。
 - 本轮按用户计划不修改 `reporting.py` 的报告结构、颜色或抽取/配对算法。独立视觉审核发现 MR 冻结基线仍可能把跨页运行页眉列为读者变化；该问题不属于本次 UI scope，最终验收会作为既有报告语义风险单独记录，不能宣称已由 UI 修复。
