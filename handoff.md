@@ -6,7 +6,7 @@
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `475225fce588c5c79f3ec088de987330e308d701`
+- recorded_commit: `e073e3be5f83e81932455c352c2549b05c0cc092`
 - status: ready
 - 目标：在完全冻结报告、PDF 识别、配对和差异标记语义的前提下，将桌面启动界面改为用户选定的 B 色调双文档工作台，并用自动化门禁禁止冗余持久文案回归。
 
@@ -20,10 +20,6 @@
 - 真实 GUI 公开路径已完成 PCIe 3.0 物理页 16–18 对 PCIe 4.0 物理页 33–35，报告位于 `/Users/mac/Desktop/test/pdf_protocol_diff_premium_ui_20260828/pcie_real_gui/protocol_diff_20260828_223313/`；报告引擎源码未改动。
 - 第一路独立视觉审核 PASS，P0/P1/P2 均为 0，确认冗余说明清零、宽屏无截断、窄屏可滚动且主操作始终可见。第二路代码审核曾复现长输出目录使窄屏按钮越界的 P2；现已中间省略目录名、让按钮独立换行并增加真实右边界断言，复审 PASS。重复的 `workspace_layout_mode` 状态也已删除。
 
-- 桌面入口改为 1120×420 深色双文档工作台：旧版/新版 PDF 并排，窄于 900px 自动纵向排列；底部操作与状态区固定，主体仅在真实溢出时显示滚动条。
-- 双文档卡之间增加“交换旧/新”，一次交换 PDF 路径、页面模式及保留的起止页；折叠高级设置改为单行摘要，实时显示输出目录、阈值、片段数和两个布尔开关。
-- 窄屏会把交换按钮居中并让高级摘要按可用宽度换行，不使用历史记录、提示卡或装饰性内容填补空白。
-- 独立审核发现并关闭了两处测试有效性缺口：交换按钮现在有专门的运行中禁用/不可触发断言，摘要同时约束可读换行宽度和与展开按钮的真实几何不重叠；Tab 顺序与视觉顺序统一为旧版→交换→新版。
 - 每张文档卡提供“全部页面/指定范围”。范围输入只在指定模式显示；切回全部页面保留填写值但运行时明确忽略。默认仍为全部页面、阈值 0.72、每章 20 个片段。
 - 输出目录、阈值、片段数、未变化章节及自动打开报告收进默认折叠的高级设置；自动打开默认关闭。
 - 运行状态锁定全部输入，并按“读取旧版→读取新版→匹配差异→生成视觉证据→生成报告”显示真实阶段和耗时；PDF 仅在完成全页坐标预扫描后显示实际页数进度，后续阶段不伪造百分比。
@@ -64,17 +60,16 @@
 
 ## 当前状态或阻塞
 
-- 最新 UI 密度代码提交为 `2baf4016c64451f94f452924606c638a4542cc12`；其父提交 `4017ee0…` 保存了可重放的交换按钮未锁定 RED。项目 `.venv` 完整套件 1219/1219 通过（508.353 秒），GUI 定向测试 19/19 通过；编译检查、`git diff --check`、系统 Python 与 `.venv` 的 `main.py --gui-smoke-test` 均通过。
-- 提交绑定启动截图与测试有效性矩阵保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_ui_density_20260828/commit_bound/`；截图来自 macOS 真实 Python/Tk 窗口，没有使用系统 Chrome。
-- exact-commit 真实 PCIe/OIF 报告重生、Playwright Chromium 视觉复核和多 agent 最终测试报告审核属于仓外验收证据；产物统一保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/`。
-- 本轮按用户计划不修改 `reporting.py` 的报告结构、颜色或抽取/配对算法。独立视觉审核发现 MR 冻结基线仍可能把跨页运行页眉列为读者变化；该问题不属于本次 UI scope，最终验收会作为既有报告语义风险单独记录，不能宣称已由 UI 修复。
-- macOS 在后续验收阶段被锁定，因此最新桌面窗口的运行/成功/错误截图若不能在交付前补拍，将明确记为 `INCONCLUSIVE`；真实 Tk 启动、GUI smoke、状态机自动化测试和 HTML 报告视觉验收仍分别执行，不能用自动化结果冒充该截图已验收。
-- 当前没有代码实现阻塞。真实 OIF 比对仍必须保持“需人工复核”；视觉哨兵存在未覆盖或歧义页时，不能宣称两份文档可靠一致。
-- 最终验收证据不在仓库中写死；以 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/` 下 exact-commit 报告、截图、验证清单和独立 agent 审核为准。
+- 本轮源码与回归选择器提交为 `e073e3be5f83e81932455c352c2549b05c0cc092`；最终 handoff 提交将在其后单独生成。
+- 项目 `.venv` 完整套件 1219/1219 通过（551.074 秒）；新增精确 premium UI 选择器后 GUI 定向 20/20 通过，两种 GUI smoke、编译检查和差异检查通过。
+- 仓外验收根目录唯一为 `/Users/mac/Desktop/test/pdf_protocol_diff_premium_ui_20260828/`；包含宽/窄屏真实 Tk 截图、测试有效性矩阵以及 PCIe 指定页窗的真实 GUI 报告。
+- `295a5f6f3919da2c89019ba6b8029cc087d9d3cb..e073e3be5f83e81932455c352c2549b05c0cc092` 仅修改桌面 GUI 和对应测试；`compare.py`、`pdf_extract.py`、`reporting.py` 和报告格式未改动。
+- 两路独立审核的视觉/代码结论已通过；此前报告绑定和旧交接段落冲突已精确修正，待最终 exact-commit 复审。
+- 当前无代码阻塞。真实 OIF 比对仍必须保持“需人工复核”；这是冻结报告语义，不属于本次 UI 改动。
 
 ## 下一步计划
 
-- 若继续本次交付，先用最终 handoff 提交重生 PCIe 指定页窗和 OIF LR/MR/VSR 报告，再用隔离 Playwright Chromium复核正文、Table、Figure 实际卡片；最后完成 commit-bound review、推送持久项目分支和 `main`、运行原子 delivery gate。
+- 本次交付只剩最终 exact-commit 两路复审、GitHub OID 复核与原子 delivery gate。
 - 若继续提高复杂版面识别率，优先引入带类型的页面区域图，并用 split/merge-aware 匹配处理一个旧块对应多个新块；不要继续向字符串启发式叠加协议专用词表。
 - 视觉 late-interaction 检索只能作为低置信度候选召回，不能直接成为规范差异结论。
 - 每次改动后必须用真实 OIF 输入生成完整 HTML，检查全部 Table、Figure、prose 联系表，再运行完整测试；单元测试通过不能代替报告视觉验收。
