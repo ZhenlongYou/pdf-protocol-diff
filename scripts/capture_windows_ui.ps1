@@ -15,7 +15,8 @@ public static class NativeWindowCapture {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SystemParametersInfo(int action, int parameter, out RECT rect, int update);
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT rect, int size);
     public static bool GetVisibleWindowRect(IntPtr hWnd, out RECT rect) {
@@ -26,14 +27,6 @@ public static class NativeWindowCapture {
         }
         if (!success) {
             return false;
-        }
-        const int SPI_GETWORKAREA = 48;
-        RECT workArea;
-        if (SystemParametersInfo(SPI_GETWORKAREA, 0, out workArea, 0)) {
-            rect.Left = Math.Max(rect.Left, workArea.Left);
-            rect.Top = Math.Max(rect.Top, workArea.Top);
-            rect.Right = Math.Min(rect.Right, workArea.Right);
-            rect.Bottom = Math.Min(rect.Bottom, workArea.Bottom);
         }
         return rect.Right > rect.Left && rect.Bottom > rect.Top;
     }
@@ -80,8 +73,21 @@ try {
 
     $bitmap = New-Object System.Drawing.Bitmap($width, $height)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $deviceContext = [IntPtr]::Zero
     try {
-        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        try {
+            $deviceContext = $graphics.GetHdc()
+            $PW_RENDERFULLCONTENT = 2
+            if (-not [NativeWindowCapture]::PrintWindow(
+                $process.MainWindowHandle,
+                $deviceContext,
+                $PW_RENDERFULLCONTENT
+            )) {
+                throw "Windows could not render the complete application window."
+            }
+        } finally {
+            if ($deviceContext -ne [IntPtr]::Zero) { $graphics.ReleaseHdc($deviceContext) }
+        }
         $bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
     } finally {
         $graphics.Dispose()

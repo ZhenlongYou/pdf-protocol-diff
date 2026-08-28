@@ -350,9 +350,11 @@ class WebviewGuiTests(unittest.TestCase):
         )
         self.assertIn("PROTOCOL_DIFF_RENDERER_PROBE_PATH", capture_script)
         self.assertIn("DwmGetWindowAttribute", capture_script)
-        self.assertIn("SystemParametersInfo", capture_script)
-        self.assertIn("SPI_GETWORKAREA", capture_script)
         self.assertIn("GetVisibleWindowRect", capture_script)
+        self.assertIn("PrintWindow", capture_script)
+        self.assertIn("PW_RENDERFULLCONTENT", capture_script)
+        self.assertNotIn("CopyFromScreen", capture_script)
+        self.assertNotIn("SPI_GETWORKAREA", capture_script)
         self.assertIn("ConvertFrom-Json", capture_script)
         self.assertIn("Timed out waiting for the WebView2 renderer probe", capture_script)
 
