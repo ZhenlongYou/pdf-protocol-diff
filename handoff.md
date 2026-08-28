@@ -5,20 +5,22 @@
 - task_id: `pdf-protocol-diff-glass-studio-ui-20260829`
 - base: `e5a97167cbff047bd286e01383e7f64b7935153f`
 - branch: `project/pdf-protocol-diff`
-- status: code-ready; Windows exact-commit native evidence pending GitHub Actions
+- status: delivered; Windows exact startup visual PASS; broader native state-chain gate remains manual review
 - 生产入口 `gui_app.py` 已从 Tk 改为一份共享 HTML/CSS 的 pywebview 壳：macOS 使用 WKWebView，Windows 强制 `edgechromium`（Edge WebView2），禁止 MSHTML 回退。`desktop_gui.py` 仅保留迁移兼容，不被生产入口引用。
 - 界面实现位于 `src/protocol_pdf_diff/webui/index.html`，采用用户确认的深靛紫玻璃工作台、紫/粉双 PDF 卡、精简文案、无交换按钮、页面范围切换、折叠高级设置和真实运行阶段状态条；760×520 改为卡片区纵向滚动，固定操作区不横向溢出。
 - `ProtocolDiffJsApi` 仅暴露六个必要方法。后台比较线程非 daemon；写报告期间阻止关闭。文件/目录选择、任务启动、默认设置和打开结果的 Promise/系统失败都显示明确错误并恢复界面。高级设置使用 `aria-modal`、背景 `inert`、Tab 焦点循环、Escape 和焦点恢复；reduced-motion 停止状态动画。
-- 成功状态只读取人类报告的 Markdown 汇总；汇总缺失、损坏或含负数时 fail closed，不回退到原始引擎计数。PDF 抽取、匹配、报告和标色算法未修改。PCIe 3.0 物理页 16–18 对 PCIe 4.0 物理页 33–35 的新 Web API 报告与既有基线在文档、页窗、章节、正文/Table/Formula 变化、warning 和 assessment 上逐项相同。
+- 成功状态只读取人类报告的 Markdown 汇总；汇总缺失、损坏或含负数时 fail closed，不回退到原始引擎计数。PDF 抽取、匹配、报告和标色算法未修改。PCIe 3.0 物理页 16–18 对 PCIe 4.0 物理页 33–35 已生成支持性报告；该报告为 degraded 且生成时 dirty state 未归档，只能作为非 exact 回归证据，不能据此给出无差异结论。
 - macOS 最终冻结包 `dist/ProtocolPdfDiff.app` 已真实启动并通过 renderer probe；冷启动 smoke 为 0.69 秒。源码与包内 `index.html` SHA-256 均为 `1ecf600ca3602578fab798a2c0dc2ff86dd0d1ab80c029bfb216da4161e809f8`。
 - 最终稳定快照完整套件 `1237/1237` 通过（502.289 秒）；WebView/跨平台定向 `37/37`、编译、两种 GUI smoke 和 `git diff --check` 通过。三路独立复审的代码质量、安全/视觉、Windows 工作流代码门禁均 PASS，P0/P1/P2=0。
 - Windows Actions 使用 onedir 产物做原生门禁，避免 onefile 启动器父子 PID 歧义；同一 GUI 进程在 DOM loaded 后验证 WebView2、双列、backdrop、动画和 overflow，再用同目录临时文件加 `os.replace` 原子发布 probe，截图脚本等到 probe 后才拍并要求进程干净退出。本地 `build_windows.bat` 仍可生成同一 HTML/WebView2 的 onefile 分发包。
 - 有效本地视觉证据：`/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/macos-frozen-window.png`、`chromium-edge-wide.png`、`chromium-edge-advanced.png`、`chromium-edge-narrow-idle.png`、`chromium-edge-narrow-scrolled.png`。旧的无真实桥接 running/narrow 截图和私密全屏图已可恢复地移入废纸篓，不得作为证据引用。
-- 提交并推送后必须等待 `Build desktop apps` 的 Windows job，下载 `windows-renderer-probe.json` 与 `windows-webview2.png` 逐张人工检查；在此之前 Windows 最终视觉结论只能记为 `PENDING/INCONCLUSIVE`。
+- 最终 exact 产品/证据提交为 `396add22c6bb1e6665a6d47aea76a99ee92c80ec`；GitHub Actions run `33203158047` 的 macOS/Windows 1237 项测试、打包、Windows WebView2 启动、原生截图和 artifact 上传全部成功。
+- Windows 正式原图为 `/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/github-run-33203158047/artifacts/windows-webview2.png`，1044×720，SHA-256 `ba90e213b246ff6681b605ce7950fbff6d004470002393af0969149ac4af79af`；probe SHA-256 `042c995f5ce66190595af41ed24e635d9383072e8c736a9f0857cb7edb0cb7b2`。主审与两名独立 reviewer 均确认标题栏、双卡、底栏和主按钮完整，无裁切、任务栏、桌面或黑屏；Windows 启动视觉正式 PASS。
+- 最新测试有效性报告位于 `/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/test-effectiveness.json`，独立审核记录位于同目录 `review-attestations.md`。总 verdict 诚实保持 `manual_review`：exact Windows idle startup 已 PASS；native running/success/error、冻结 GUI 驱动的完整 PCIe 流程、未来空白截图自动语义门禁和所有 WebView2 后代退出观测未形成完整证据。
 - 首次 exact-commit CI 在 macOS 的既有 Annex 表抽取用例暴露干净环境缺少 `pymupdf`；本地 `.venv` 已有该包所以未暴露。现将 `PyMuPDF>=1.24.0` 同步加入 requirements 与 pyproject，避免干净 Windows/macOS runner 因未声明测试/运行依赖失败。
 - 第二次 macOS clean CI 的 1237 项测试全部通过；冻结 smoke 在 runner 开启 `prefers-reduced-motion` 时按 CSS 正确停用动画，但旧探针误要求 `run-slide`。探针现同时记录 reduced-motion：正常设置要求 `run-slide`，减少动态效果设置要求 `none`，避免把无障碍合规行为误判为渲染失败。
-- 第三次 Windows clean CI 已完成 1237 项测试、冻结 WebView2 smoke、原生截图与 artifact 上传；人工查看发现旧截图脚本使用 `GetWindowRect` 时把 DWM 不可见边框下方的任务栏带入证据。脚本现优先使用 `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` 获取可见窗口矩形，只在 DWM 调用失败时回退，避免把桌面/任务栏误当成应用截图。
-- 第四次截图证明 DWM 扩展边界仍可能延伸进 GitHub runner 的覆盖式任务栏；最终截图矩形会再与 `SystemParametersInfo(SPI_GETWORKAREA)` 返回的工作区取交集，确保图片只含用户实际可见的应用窗口。
+- 早期 Windows 证据先后暴露任务栏混入和工作区裁剪右/下边缘的问题。最终脚本不再复制桌面像素，也不再使用 DWM/work-area 裁剪；它用 `GetWindowRect` 建立完整画布并以 `PrintWindow(PW_RENDERFULLCONTENT)` 离屏渲染同一窗口。
+- 截图前和 `PrintWindow` 紧邻前均用 `IsWindow + GetWindowThreadProcessId` 绑定启动进程；异常清理使用已持有的 `Process.Kill(true)` 而非 PID 字符串或宽泛进程匹配，避免 PID 复用误杀。正常关闭失败会令证据步骤失败。
 
 ## 当前任务
 
