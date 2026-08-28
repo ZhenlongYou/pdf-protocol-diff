@@ -15,6 +15,7 @@
 - Windows Actions 使用 onedir 产物做原生门禁，避免 onefile 启动器父子 PID 歧义；同一 GUI 进程在 DOM loaded 后验证 WebView2、双列、backdrop、动画和 overflow，再用同目录临时文件加 `os.replace` 原子发布 probe，截图脚本等到 probe 后才拍并要求进程干净退出。本地 `build_windows.bat` 仍可生成同一 HTML/WebView2 的 onefile 分发包。
 - 有效本地视觉证据：`/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/macos-frozen-window.png`、`chromium-edge-wide.png`、`chromium-edge-advanced.png`、`chromium-edge-narrow-idle.png`、`chromium-edge-narrow-scrolled.png`。旧的无真实桥接 running/narrow 截图和私密全屏图已可恢复地移入废纸篓，不得作为证据引用。
 - 提交并推送后必须等待 `Build desktop apps` 的 Windows job，下载 `windows-renderer-probe.json` 与 `windows-webview2.png` 逐张人工检查；在此之前 Windows 最终视觉结论只能记为 `PENDING/INCONCLUSIVE`。
+- 首次 exact-commit CI 在 macOS 的既有 Annex 表抽取用例暴露干净环境缺少 `pymupdf`；本地 `.venv` 已有该包所以未暴露。现将 `PyMuPDF>=1.24.0` 同步加入 requirements 与 pyproject，避免干净 Windows/macOS runner 因未声明测试/运行依赖失败。
 
 ## 当前任务
 
