@@ -2,15 +2,23 @@
 
 ## 当前任务
 
-- task_id: `pdf-protocol-diff-ui-density-20260828`
+- task_id: `pdf-protocol-diff-premium-ui-20260828`
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `2baf4016c64451f94f452924606c638a4542cc12`
+- recorded_commit: `475225fce588c5c79f3ec088de987330e308d701`
 - status: ready
-- 目标：在不改变报告、PDF 识别、配对和差异标记语义的前提下，降低桌面启动界面的无效留白并提高任务密度。
+- 目标：在完全冻结报告、PDF 识别、配对和差异标记语义的前提下，将桌面启动界面改为用户选定的 B 色调双文档工作台，并用自动化门禁禁止冗余持久文案回归。
 
 ## 已经完成
+
+- 用户选定的 B 方案已落地：深靛紫画布、紫/粉双文档识别、冷青单一主操作；高级感由对称、留白、字号和几何层级承担，未使用渐变、阴影或解释性填充。
+- 启动页仅保留一个标题、旧/新 PDF 双卡、交换、三个真实设置摘要、高级设置和固定主操作。已删除英文品牌行、能力副标题、永久徽章、重复总结和右侧说明面板。
+- 本轮问题根因已定位：最初仅调用了原型 skill，没有路由到本机 `ui-ux-pro-max` 的 UI Copy Minimalism Gate。现已把关键禁止文案和主视觉几何约束写入 `tests/test_cross_platform_gui.py`，后续不再依赖 skill 是否被当前对话正确暴露。
+- 宽屏保持双卡并排，窄于 900px 时真实纵向重排并滚动，固定底栏始终可见。正式视觉证据为 `/Users/mac/Desktop/test/pdf_protocol_diff_premium_ui_20260828/startup-b-tone-minimal-copy.jpeg` 和 `startup-760x520.jpeg`。
+- 完整项目虚拟环境套件 1219/1219 通过；GUI 定向 19/19、编译检查、差异检查、`main.py --gui-smoke-test` 和 `gui_app.py --smoke-test` 全部通过。
+- 真实 GUI 公开路径已完成 PCIe 3.0 物理页 16–18 对 PCIe 4.0 物理页 33–35，报告位于 `/Users/mac/Desktop/test/pdf_protocol_diff_premium_ui_20260828/pcie_real_gui/protocol_diff_20260828_223313/`；报告引擎源码未改动。
+- 第一路独立视觉审核 PASS，P0/P1/P2 均为 0，确认冗余说明清零、宽屏无截断、窄屏可滚动且主操作始终可见。第二路代码审核曾复现长输出目录使窄屏按钮越界的 P2；现已中间省略目录名、让按钮独立换行并增加真实右边界断言，复审 PASS。重复的 `workspace_layout_mode` 状态也已删除。
 
 - 桌面入口改为 1120×420 深色双文档工作台：旧版/新版 PDF 并排，窄于 900px 自动纵向排列；底部操作与状态区固定，主体仅在真实溢出时显示滚动条。
 - 双文档卡之间增加“交换旧/新”，一次交换 PDF 路径、页面模式及保留的起止页；折叠高级设置改为单行摘要，实时显示输出目录、阈值、片段数和两个布尔开关。
