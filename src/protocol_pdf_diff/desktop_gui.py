@@ -632,6 +632,12 @@ class ProtocolDiffDesktopApp:
             start_var=self.old_start_var,
             end_var=self.old_end_var,
         )
+        self.swap_button = ttk.Button(
+            self.document_cards_host,
+            text="交换旧/新",
+            command=self._swap_documents,
+        )
+        self.input_widgets.append(self.swap_button)
         self.new_document_card = self._create_document_card(
             self.document_cards_host,
             side="new",
@@ -642,12 +648,6 @@ class ProtocolDiffDesktopApp:
             start_var=self.new_start_var,
             end_var=self.new_end_var,
         )
-        self.swap_button = ttk.Button(
-            self.document_cards_host,
-            text="交换旧/新",
-            command=self._swap_documents,
-        )
-        self.input_widgets.append(self.swap_button)
         self._apply_responsive_layout(self.design_window_size[0])
 
         self.advanced_bar = tk.Frame(

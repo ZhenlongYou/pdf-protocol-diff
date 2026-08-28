@@ -422,7 +422,18 @@ class CrossPlatformGuiTests(unittest.TestCase):
             self.assertEqual(2, int(app.new_document_card.grid_info()["row"]))
 
             app._fit_content_to_viewport(mock.Mock(width=760))
-            self.assertLessEqual(int(app.advanced_summary_label.cget("wraplength")), 560)
+            summary_wrap = int(app.advanced_summary_label.cget("wraplength"))
+            self.assertGreaterEqual(summary_wrap, 260)
+            self.assertLessEqual(summary_wrap, 560)
+            root.deiconify()
+            root.geometry("760x520+0+0")
+            root.update()
+            summary_right = (
+                app.advanced_summary_label.winfo_rootx()
+                + app.advanced_summary_label.winfo_width()
+            )
+            toggle_left = app.advanced_toggle.winfo_rootx()
+            self.assertLessEqual(summary_right, toggle_left)
 
             app.min_similarity_var.set("0.80")
             app.max_snippets_var.set("12")
@@ -486,7 +497,22 @@ class CrossPlatformGuiTests(unittest.TestCase):
             app.new_page_mode_var.set("all")
             app.new_start_var.set("33")
             app.new_end_var.set("35")
+            app._sync_page_mode("old")
 
+            root.deiconify()
+            root.update()
+            self.assertEqual(
+                app.swap_button,
+                app.page_entry_widgets["旧协议终止页"].tk_focusNext(),
+            )
+
+            app._set_running(True)
+            app.swap_button.invoke()
+            self.assertEqual("/tmp/revision-old.pdf", app.old_pdf_var.get())
+            self.assertEqual("/tmp/revision-new.pdf", app.new_pdf_var.get())
+            self.assertEqual("disabled", str(app.swap_button.cget("state")))
+
+            app._set_running(False)
             app.swap_button.invoke()
 
             self.assertEqual("/tmp/revision-new.pdf", app.old_pdf_var.get())
