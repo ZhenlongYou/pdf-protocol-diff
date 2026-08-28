@@ -18,6 +18,7 @@
 - 首次 exact-commit CI 在 macOS 的既有 Annex 表抽取用例暴露干净环境缺少 `pymupdf`；本地 `.venv` 已有该包所以未暴露。现将 `PyMuPDF>=1.24.0` 同步加入 requirements 与 pyproject，避免干净 Windows/macOS runner 因未声明测试/运行依赖失败。
 - 第二次 macOS clean CI 的 1237 项测试全部通过；冻结 smoke 在 runner 开启 `prefers-reduced-motion` 时按 CSS 正确停用动画，但旧探针误要求 `run-slide`。探针现同时记录 reduced-motion：正常设置要求 `run-slide`，减少动态效果设置要求 `none`，避免把无障碍合规行为误判为渲染失败。
 - 第三次 Windows clean CI 已完成 1237 项测试、冻结 WebView2 smoke、原生截图与 artifact 上传；人工查看发现旧截图脚本使用 `GetWindowRect` 时把 DWM 不可见边框下方的任务栏带入证据。脚本现优先使用 `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` 获取可见窗口矩形，只在 DWM 调用失败时回退，避免把桌面/任务栏误当成应用截图。
+- 第四次截图证明 DWM 扩展边界仍可能延伸进 GitHub runner 的覆盖式任务栏；最终截图矩形会再与 `SystemParametersInfo(SPI_GETWORKAREA)` 返回的工作区取交集，确保图片只含用户实际可见的应用窗口。
 
 ## 当前任务
 
