@@ -110,11 +110,11 @@ try {
         [void]$process.CloseMainWindow()
         if (-not $process.WaitForExit(10000)) {
             $forcedStop = $true
-            $treeKill = Start-Process -FilePath "taskkill.exe" `
-                -ArgumentList @("/PID", "$($process.Id)", "/T", "/F") `
-                -PassThru -Wait -NoNewWindow
-            if ($treeKill.ExitCode -ne 0) {
-                throw "Could not terminate the task-owned GUI process tree."
+            try {
+                $process.Kill($true)
+            } catch [System.InvalidOperationException] {
+                $process.Refresh()
+                if (-not $process.HasExited) { throw }
             }
             if (-not $process.WaitForExit(10000)) {
                 throw "The task-owned GUI process did not exit after termination."
