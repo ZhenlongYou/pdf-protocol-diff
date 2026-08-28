@@ -6,7 +6,7 @@
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
 - 持久项目分支：`project/pdf-protocol-diff`
-- recorded_commit: `bcd38067a17cecde3247e80e88e7de4b27f94cec`
+- recorded_commit: `4887727f0a299fb3562ba4c16d8f41b72a1a96ba`
 - status: ready
 - 目标：在不改变报告、PDF 识别、配对和差异标记语义的前提下，降低桌面启动界面的无效留白并提高任务密度。
 
@@ -15,6 +15,7 @@
 - 桌面入口改为 1120×420 深色双文档工作台：旧版/新版 PDF 并排，窄于 900px 自动纵向排列；底部操作与状态区固定，主体仅在真实溢出时显示滚动条。
 - 双文档卡之间增加“交换旧/新”，一次交换 PDF 路径、页面模式及保留的起止页；折叠高级设置改为单行摘要，实时显示输出目录、阈值、片段数和两个布尔开关。
 - 窄屏会把交换按钮居中并让高级摘要按可用宽度换行，不使用历史记录、提示卡或装饰性内容填补空白。
+- 独立审核发现并关闭了两处测试有效性缺口：交换按钮现在有专门的运行中禁用/不可触发断言，摘要同时约束可读换行宽度和与展开按钮的真实几何不重叠；Tab 顺序与视觉顺序统一为旧版→交换→新版。
 - 每张文档卡提供“全部页面/指定范围”。范围输入只在指定模式显示；切回全部页面保留填写值但运行时明确忽略。默认仍为全部页面、阈值 0.72、每章 20 个片段。
 - 输出目录、阈值、片段数、未变化章节及自动打开报告收进默认折叠的高级设置；自动打开默认关闭。
 - 运行状态锁定全部输入，并按“读取旧版→读取新版→匹配差异→生成视觉证据→生成报告”显示真实阶段和耗时；PDF 仅在完成全页坐标预扫描后显示实际页数进度，后续阶段不伪造百分比。
@@ -55,7 +56,7 @@
 
 ## 当前状态或阻塞
 
-- 最新 UI 密度提交为 `bcd38067a17cecde3247e80e88e7de4b27f94cec`。项目 `.venv` 完整套件 1219/1219 通过（508.536 秒），GUI 定向测试 19/19 通过；编译检查、`git diff --check`、系统 Python 与 `.venv` 的 `main.py --gui-smoke-test` 均通过。
+- 最新 UI 密度代码提交为 `4887727f0a299fb3562ba4c16d8f41b72a1a96ba`。项目 `.venv` 完整套件 1219/1219 通过（508.536 秒），GUI 定向测试 19/19 通过；编译检查、`git diff --check`、系统 Python 与 `.venv` 的 `main.py --gui-smoke-test` 均通过。
 - 提交绑定启动截图与测试有效性矩阵保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_ui_density_20260828/commit_bound/`；截图来自 macOS 真实 Python/Tk 窗口，没有使用系统 Chrome。
 - exact-commit 真实 PCIe/OIF 报告重生、Playwright Chromium 视觉复核和多 agent 最终测试报告审核属于仓外验收证据；产物统一保存在 `/Users/mac/Desktop/test/pdf_protocol_diff_desktop_ui_20260828/final_exact/`。
 - 本轮按用户计划不修改 `reporting.py` 的报告结构、颜色或抽取/配对算法。独立视觉审核发现 MR 冻结基线仍可能把跨页运行页眉列为读者变化；该问题不属于本次 UI scope，最终验收会作为既有报告语义风险单独记录，不能宣称已由 UI 修复。
