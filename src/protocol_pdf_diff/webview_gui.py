@@ -61,6 +61,7 @@ RENDERER_PROBE_SCRIPT = """
     backdrop: cardStyle.backdropFilter || cardStyle.webkitBackdropFilter || '',
     background: appStyle.backgroundImage,
     animation: barStyle.animationName,
+    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
     overflowFree: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     webview2: Boolean(window.chrome && window.chrome.webview)
   };
@@ -108,7 +109,11 @@ def validate_renderer_probe(
         raise RuntimeError("桌面界面标题未正确加载。")
     if "gradient" not in str(probe.get("background", "")):
         raise RuntimeError("桌面背景样式未正确渲染。")
-    if probe.get("animation") != "run-slide":
+    animation = probe.get("animation")
+    if bool(probe.get("reducedMotion")):
+        if animation != "none":
+            raise RuntimeError("减少动态效果设置未被桌面界面遵循。")
+    elif animation != "run-slide":
         raise RuntimeError("运行状态动画未正确加载。")
     columns = str(probe.get("columns", "")).split()
     if len(columns) != 2:

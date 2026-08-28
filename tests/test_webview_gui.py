@@ -46,6 +46,7 @@ class WebviewGuiTests(unittest.TestCase):
             "title": "Protocol Comparison Tool",
             "background": "radial-gradient(rgb(0, 0, 0), rgba(0, 0, 0, 0))",
             "animation": "run-slide",
+            "reducedMotion": False,
             "columns": "520px 520px",
             "backdrop": "blur(18px)",
             "overflowFree": True,
@@ -60,6 +61,14 @@ class WebviewGuiTests(unittest.TestCase):
             validate_renderer_probe({**valid_probe, "backdrop": "none"}, "darwin")
         with self.assertRaisesRegex(RuntimeError, "横向溢出"):
             validate_renderer_probe({**valid_probe, "overflowFree": False}, "darwin")
+        validate_renderer_probe(
+            {**valid_probe, "animation": "none", "reducedMotion": True}, "darwin"
+        )
+        with self.assertRaisesRegex(RuntimeError, "减少动态效果"):
+            validate_renderer_probe(
+                {**valid_probe, "animation": "run-slide", "reducedMotion": True},
+                "darwin",
+            )
 
     def test_frozen_apps_package_the_same_web_ui_on_both_platforms(self) -> None:
         args = Namespace(clean=False, console=False, onefile=False)
@@ -352,6 +361,7 @@ class WebviewGuiTests(unittest.TestCase):
                 "title": "Protocol Comparison Tool",
                 "background": "radial-gradient(red, blue)",
                 "animation": "run-slide",
+                "reducedMotion": False,
                 "columns": "500px 500px",
                 "backdrop": "blur(18px)",
                 "overflowFree": True,

@@ -16,6 +16,7 @@
 - 有效本地视觉证据：`/Users/mac/Desktop/test/pdf_protocol_diff_webview_ui_20260829/macos-frozen-window.png`、`chromium-edge-wide.png`、`chromium-edge-advanced.png`、`chromium-edge-narrow-idle.png`、`chromium-edge-narrow-scrolled.png`。旧的无真实桥接 running/narrow 截图和私密全屏图已可恢复地移入废纸篓，不得作为证据引用。
 - 提交并推送后必须等待 `Build desktop apps` 的 Windows job，下载 `windows-renderer-probe.json` 与 `windows-webview2.png` 逐张人工检查；在此之前 Windows 最终视觉结论只能记为 `PENDING/INCONCLUSIVE`。
 - 首次 exact-commit CI 在 macOS 的既有 Annex 表抽取用例暴露干净环境缺少 `pymupdf`；本地 `.venv` 已有该包所以未暴露。现将 `PyMuPDF>=1.24.0` 同步加入 requirements 与 pyproject，避免干净 Windows/macOS runner 因未声明测试/运行依赖失败。
+- 第二次 macOS clean CI 的 1237 项测试全部通过；冻结 smoke 在 runner 开启 `prefers-reduced-motion` 时按 CSS 正确停用动画，但旧探针误要求 `run-slide`。探针现同时记录 reduced-motion：正常设置要求 `run-slide`，减少动态效果设置要求 `none`，避免把无障碍合规行为误判为渲染失败。
 
 ## 当前任务
 
