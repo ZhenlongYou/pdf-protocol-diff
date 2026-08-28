@@ -349,6 +349,8 @@ class WebviewGuiTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("PROTOCOL_DIFF_RENDERER_PROBE_PATH", capture_script)
+        self.assertIn("DwmGetWindowAttribute", capture_script)
+        self.assertIn("GetVisibleWindowRect", capture_script)
         self.assertIn("ConvertFrom-Json", capture_script)
         self.assertIn("Timed out waiting for the WebView2 renderer probe", capture_script)
 
