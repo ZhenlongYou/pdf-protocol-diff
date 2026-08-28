@@ -390,7 +390,10 @@ class CrossPlatformGuiTests(unittest.TestCase):
             app = ProtocolDiffDesktopApp(root)
             root.update_idletasks()
 
-            self.assertEqual((1120, 720), app.design_window_size)
+            self.assertEqual((1120, 420), app.design_window_size)
+            self.assertIn("阈值 0.72", app.advanced_summary_var.get())
+            self.assertIn("每章 20", app.advanced_summary_var.get())
+            self.assertIn("自动打开：关", app.advanced_summary_var.get())
             self.assertEqual("all", app.old_page_mode_var.get())
             self.assertEqual("all", app.new_page_mode_var.get())
             self.assertFalse(app.auto_open_var.get())
@@ -412,8 +415,21 @@ class CrossPlatformGuiTests(unittest.TestCase):
 
             app._apply_responsive_layout(1120)
             self.assertEqual("side-by-side", app.document_layout_mode)
+            self.assertEqual(1, int(app.swap_button.grid_info()["column"]))
             app._apply_responsive_layout(760)
             self.assertEqual("stacked", app.document_layout_mode)
+            self.assertEqual(1, int(app.swap_button.grid_info()["row"]))
+            self.assertEqual(2, int(app.new_document_card.grid_info()["row"]))
+
+            app._fit_content_to_viewport(mock.Mock(width=760))
+            self.assertLessEqual(int(app.advanced_summary_label.cget("wraplength")), 560)
+
+            app.min_similarity_var.set("0.80")
+            app.max_snippets_var.set("12")
+            app.auto_open_var.set(True)
+            self.assertIn("阈值 0.80", app.advanced_summary_var.get())
+            self.assertIn("每章 12", app.advanced_summary_var.get())
+            self.assertIn("自动打开：开", app.advanced_summary_var.get())
         finally:
             root.destroy()
 
@@ -450,6 +466,37 @@ class CrossPlatformGuiTests(unittest.TestCase):
             pending_timers = root.tk.call("after", "info")
             self.assertNotIn(second_timer_id, pending_timers)
             self.assertNotIn(rescheduled_timer_id, pending_timers)
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk swap control test needs a desktop session",
+    )
+    def test_swap_control_exchanges_both_document_shelves_and_page_ranges(self) -> None:
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            app.old_pdf_var.set("/tmp/revision-old.pdf")
+            app.new_pdf_var.set("/tmp/revision-new.pdf")
+            app.old_page_mode_var.set("range")
+            app.old_start_var.set("16")
+            app.old_end_var.set("18")
+            app.new_page_mode_var.set("all")
+            app.new_start_var.set("33")
+            app.new_end_var.set("35")
+
+            app.swap_button.invoke()
+
+            self.assertEqual("/tmp/revision-new.pdf", app.old_pdf_var.get())
+            self.assertEqual("/tmp/revision-old.pdf", app.new_pdf_var.get())
+            self.assertEqual("all", app.old_page_mode_var.get())
+            self.assertEqual(("33", "35"), (app.old_start_var.get(), app.old_end_var.get()))
+            self.assertEqual("range", app.new_page_mode_var.get())
+            self.assertEqual(("16", "18"), (app.new_start_var.get(), app.new_end_var.get()))
+            self.assertEqual("", app.old_range_frame.winfo_manager())
+            self.assertEqual("grid", app.new_range_frame.winfo_manager())
         finally:
             root.destroy()
 

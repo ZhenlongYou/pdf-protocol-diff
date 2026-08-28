@@ -314,7 +314,7 @@ class ProtocolDiffDesktopApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("协议 PDF 差异对比工具")
-        self.design_window_size = (1120, 720)
+        self.design_window_size = (1120, 420)
         self.initial_window_size = responsive_window_size(
             self.root.winfo_screenwidth(),
             self.root.winfo_screenheight(),
@@ -349,6 +349,16 @@ class ProtocolDiffDesktopApp:
         self.status_var = tk.StringVar(value="空闲 · 请选择旧版和新版 PDF。")
         self.summary_var = tk.StringVar(value="尚未生成报告")
         self.report_path_var = tk.StringVar(value="")
+        self.advanced_summary_var = tk.StringVar()
+        for observed_var in (
+            self.output_dir_var,
+            self.min_similarity_var,
+            self.max_snippets_var,
+            self.include_unchanged_var,
+            self.auto_open_var,
+        ):
+            observed_var.trace_add("write", self._refresh_advanced_summary)
+        self._refresh_advanced_summary()
 
         self._last_outputs: dict[str, Path] | None = None
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -632,14 +642,35 @@ class ProtocolDiffDesktopApp:
             start_var=self.new_start_var,
             end_var=self.new_end_var,
         )
+        self.swap_button = ttk.Button(
+            self.document_cards_host,
+            text="交换旧/新",
+            command=self._swap_documents,
+        )
+        self.input_widgets.append(self.swap_button)
         self._apply_responsive_layout(self.design_window_size[0])
 
-        self.advanced_toggle = ttk.Button(
+        self.advanced_bar = tk.Frame(
             container,
+            background=UI_THEME["surface_raised"],
+            highlightthickness=1,
+            highlightbackground=UI_THEME["section_border"],
+        )
+        self.advanced_bar.grid(row=3, column=0, sticky="ew", pady=(14, 8))
+        self.advanced_bar.columnconfigure(0, weight=1)
+        advanced_summary = ttk.Label(
+            self.advanced_bar,
+            textvariable=self.advanced_summary_var,
+            style="SectionTitle.TLabel",
+        )
+        advanced_summary.grid(row=0, column=0, sticky="w", padx=(12, 8), pady=8)
+        self.advanced_summary_label = advanced_summary
+        self.advanced_toggle = ttk.Button(
+            self.advanced_bar,
             text="高级设置  ▸",
             command=self._toggle_advanced,
         )
-        self.advanced_toggle.grid(row=3, column=0, sticky="w", pady=(14, 8))
+        self.advanced_toggle.grid(row=0, column=1, sticky="e", padx=8, pady=6)
         self.input_widgets.append(self.advanced_toggle)
         self.advanced_body = self._create_elevated_section(
             container, row=4, text="高级设置", pady=(0, 14)
@@ -801,6 +832,19 @@ class ProtocolDiffDesktopApp:
             self.advanced_toggle.configure(text="高级设置  ▸")
         self._update_content_scrollregion()
 
+    def _refresh_advanced_summary(self, *_trace_args: object) -> None:
+        """Keep the collapsed settings row informative instead of decorative."""
+
+        output_path = self.output_dir_var.get().strip()
+        output_name = Path(output_path).name if output_path else "未设置"
+        unchanged = "开" if self.include_unchanged_var.get() else "关"
+        auto_open = "开" if self.auto_open_var.get() else "关"
+        self.advanced_summary_var.set(
+            f"输出：{output_name}  ·  阈值 {self.min_similarity_var.get()}"
+            f"  ·  每章 {self.max_snippets_var.get()}"
+            f"  ·  未变化：{unchanged}  ·  自动打开：{auto_open}"
+        )
+
     def _sync_page_mode(self, side: str) -> None:
         """Show range entries only when that document uses an explicit range."""
 
@@ -812,22 +856,67 @@ class ProtocolDiffDesktopApp:
             frame.grid_remove()
         self._update_content_scrollregion()
 
+    def _swap_documents(self) -> None:
+        """Swap both document selections and their complete page-window state."""
+
+        old_state = (
+            self.old_pdf_var.get(),
+            self.old_page_mode_var.get(),
+            self.old_start_var.get(),
+            self.old_end_var.get(),
+        )
+        new_state = (
+            self.new_pdf_var.get(),
+            self.new_page_mode_var.get(),
+            self.new_start_var.get(),
+            self.new_end_var.get(),
+        )
+        for variable, value in zip(
+            (
+                self.old_pdf_var,
+                self.old_page_mode_var,
+                self.old_start_var,
+                self.old_end_var,
+            ),
+            new_state,
+            strict=True,
+        ):
+            variable.set(value)
+        for variable, value in zip(
+            (
+                self.new_pdf_var,
+                self.new_page_mode_var,
+                self.new_start_var,
+                self.new_end_var,
+            ),
+            old_state,
+            strict=True,
+        ):
+            variable.set(value)
+        self._sync_page_mode("old")
+        self._sync_page_mode("new")
+
     def _apply_responsive_layout(self, width: int) -> None:
         """Place document cards side by side, or stack them below 900px."""
 
         mode = "stacked" if width < 900 else "side-by-side"
         self.old_document_card.grid_forget()
         self.new_document_card.grid_forget()
+        self.swap_button.grid_forget()
         if mode == "side-by-side":
             self.document_cards_host.columnconfigure(0, weight=1)
-            self.document_cards_host.columnconfigure(1, weight=1)
-            self.old_document_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
-            self.new_document_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+            self.document_cards_host.columnconfigure(1, weight=0)
+            self.document_cards_host.columnconfigure(2, weight=1)
+            self.old_document_card.grid(row=0, column=0, sticky="nsew")
+            self.swap_button.grid(row=0, column=1, sticky="ew", padx=10)
+            self.new_document_card.grid(row=0, column=2, sticky="nsew")
         else:
             self.document_cards_host.columnconfigure(0, weight=1)
             self.document_cards_host.columnconfigure(1, weight=0)
+            self.document_cards_host.columnconfigure(2, weight=0)
             self.old_document_card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-            self.new_document_card.grid(row=1, column=0, sticky="ew")
+            self.swap_button.grid(row=1, column=0, pady=(0, 10))
+            self.new_document_card.grid(row=2, column=0, sticky="ew")
         self.document_layout_mode = mode
 
     def _update_content_scrollregion(self, _event: tk.Event | None = None) -> None:
@@ -854,6 +943,10 @@ class ProtocolDiffDesktopApp:
         )  # 宽度贴合视口；内容保留自然高度，窄屏重排后 Canvas 才能获得真实滚动范围。
         wrap_width = max(320, event.width - 40)  # 扣除容器左右 padding，保留小屏可读的最小换行宽度。
         self.subtitle_label.configure(wraplength=wrap_width)  # 副标题不再依赖平台默认文本宽度。
+        summary_wrap_width = max(260, event.width - 250)
+        self.advanced_summary_label.configure(
+            wraplength=summary_wrap_width
+        )  # 为右侧展开按钮预留空间，窄屏时摘要自然换行而不是被截断。
         result_wrap_width = max(260, min(760, event.width - 330))
         self.result_summary_label.configure(wraplength=result_wrap_width)  # 摘要随窗口宽度重新排版。
         self.result_path_label.configure(wraplength=result_wrap_width)  # 长路径随窗口宽度重新排版。
