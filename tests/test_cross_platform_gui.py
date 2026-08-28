@@ -488,6 +488,42 @@ class CrossPlatformGuiTests(unittest.TestCase):
 
     @unittest.skipUnless(
         sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
+        "Tk premium UI contract needs a desktop session",
+    )
+    def test_premium_startup_contract_rejects_redundant_persistent_copy(self) -> None:
+        """The chosen B visual direction must not regress into an explanatory form."""
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = ProtocolDiffDesktopApp(root)
+            root.update_idletasks()
+            static_copy: list[str] = []
+            pending = [app.content_container]
+            while pending:
+                widget = pending.pop()
+                pending.extend(widget.winfo_children())
+                if "text" in widget.keys():
+                    static_copy.append(str(widget.cget("text")))
+
+            self.assertEqual("#171824", UI_THEME["canvas"])
+            self.assertEqual("#8AD8F7", UI_THEME["accent"])
+            self.assertEqual(1, static_copy.count("协议 PDF 对比"))
+            self.assertFalse(
+                {
+                    "PROTOCOL DIFF STUDIO",
+                    "本地处理",
+                    "选择两个协议版本和页面范围",
+                    "运行前快速复核",
+                    "BASELINE",
+                    "REVISION",
+                }.intersection(static_copy)
+            )
+        finally:
+            root.destroy()
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" or os.name == "nt" or os.environ.get("DISPLAY"),
         "Tk state test needs a desktop session",
     )
     def test_running_state_locks_and_restores_all_inputs(self) -> None:
