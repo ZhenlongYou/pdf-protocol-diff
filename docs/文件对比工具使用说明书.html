@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <title>文件对比工具使用说明书</title>
+  <style>
+    :root {
+      --navy: #18273e;
+      --navy-2: #243b5d;
+      --blue: #2b69a8;
+      --blue-soft: #eaf3fc;
+      --ink: #172230;
+      --muted: #647184;
+      --line: #d8e0ea;
+      --paper: #ffffff;
+      --page: #f3f6f9;
+      --green: #16794c;
+      --green-bg: #e8f6ef;
+      --red: #b3261e;
+      --red-bg: #fdebea;
+      --amber: #8a5a00;
+      --amber-bg: #fff4d8;
+      --purple: #7157d9;
+      --pink: #cf4a96;
+      --shadow: 0 18px 50px rgba(24, 39, 62, .10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--page);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      line-height: 1.72;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+    code { padding: .12em .4em; border-radius: 5px; background: #edf1f5; }
+    kbd { padding: .1em .45em; border: 1px solid #c8d0da; border-bottom-width: 2px; border-radius: 5px; background: #fff; }
+    .hero {
+      color: #fff;
+      padding: 64px max(28px, calc((100vw - 1180px) / 2));
+      background:
+        radial-gradient(620px 300px at 78% 15%, rgba(129, 115, 255, .34), transparent 70%),
+        radial-gradient(440px 260px at 92% 88%, rgba(239, 117, 189, .24), transparent 70%),
+        linear-gradient(135deg, #172034, #243b5d);
+    }
+    .hero-inner { max-width: 940px; }
+    .eyebrow { color: #9edff4; font-size: 14px; font-weight: 700; letter-spacing: .12em; }
+    h1 { margin: 12px 0 10px; font-size: clamp(34px, 5vw, 58px); line-height: 1.15; letter-spacing: -.03em; }
+    .subtitle { max-width: 780px; margin: 0; color: #dbe6f5; font-size: 18px; }
+    .version { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+    .version span { padding: 6px 11px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; }
+    .layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+    .toc {
+      position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto;
+      padding: 28px 20px; border-right: 1px solid var(--line); background: rgba(255,255,255,.88); backdrop-filter: blur(10px);
+    }
+    .toc strong { display: block; margin: 0 10px 12px; color: var(--navy); font-size: 14px; }
+    .toc a { display: block; padding: 7px 10px; border-radius: 7px; color: #526174; font-size: 13px; }
+    .toc a:hover { color: var(--blue); background: var(--blue-soft); text-decoration: none; }
+    main { min-width: 0; padding: 46px 48px 90px; }
+    section { scroll-margin-top: 22px; }
+    h2 { margin: 54px 0 16px; color: var(--navy); font-size: 28px; line-height: 1.3; letter-spacing: -.02em; }
+    h2:first-child { margin-top: 0; }
+    h3 { margin: 30px 0 10px; color: var(--navy-2); font-size: 20px; }
+    h4 { margin: 22px 0 8px; color: var(--navy-2); font-size: 16px; }
+    p { margin: 9px 0; }
+    ul, ol { padding-left: 1.4em; }
+    li { margin: 6px 0; }
+    .lead { font-size: 17px; color: #425269; }
+    .callout { margin: 18px 0; padding: 15px 17px; border: 1px solid #c7dbef; border-left: 4px solid var(--blue); border-radius: 8px; background: #f6faff; }
+    .callout.warn { border-color: #edd89b; border-left-color: #c48700; background: #fffaf0; }
+    .callout.danger { border-color: #efc4c0; border-left-color: var(--red); background: #fff8f7; }
+    .callout strong { color: var(--navy); }
+    .steps { counter-reset: step; display: grid; gap: 12px; margin: 18px 0; }
+    .step { position: relative; padding: 15px 16px 15px 56px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+    .step::before { counter-increment: step; content: counter(step); position: absolute; left: 15px; top: 15px; width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--blue); font-weight: 700; }
+    .step strong { color: var(--navy); }
+    .ui-map {
+      margin: 22px 0; padding: 22px; border-radius: 20px; color: #f7f5ff;
+      background: linear-gradient(135deg, #18192d, #22243e); box-shadow: var(--shadow);
+    }
+    .ui-title { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-weight: 750; font-size: 19px; }
+    .ui-mark { width: 24px; height: 27px; border-radius: 7px; background: linear-gradient(145deg, #9a89ff, #ef75bd); transform: rotate(-3deg); }
+    .ui-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .ui-card { min-height: 220px; padding: 16px; border: 1px solid rgba(255,255,255,.14); border-radius: 18px; background: rgba(255,255,255,.06); }
+    .ui-card h4 { margin: 0 0 12px; color: #fff; }
+    .ui-drop { min-height: 105px; display: grid; place-items: center; border: 1px dashed rgba(255,255,255,.28); border-radius: 13px; background: rgba(0,0,0,.12); color: #d4d1df; text-align: center; }
+    .ui-controls, .ui-footer { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 12px; }
+    .ui-pill { padding: 5px 9px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; color: #d9d6e5; background: rgba(255,255,255,.06); font-size: 11px; }
+    .ui-pill.active { border-color: #8bdef8; background: rgba(70,128,160,.35); }
+    .ui-run { margin-left: auto; padding: 8px 15px; border-radius: 10px; color: #15182a; background: linear-gradient(110deg, #8edff8, #9c83ff); font-weight: 750; font-size: 12px; }
+    .num { display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; margin-right: 4px; border-radius: 50%; color: #172034; background: #9edff4; font-size: 11px; font-weight: 800; }
+    .control-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .control { padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .control h4 { margin: 0 0 6px; }
+    .control p { color: #526174; font-size: 14px; }
+    table { width: 100%; margin: 16px 0 24px; border-collapse: collapse; background: #fff; font-size: 14px; }
+    th, td { padding: 11px 12px; border: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { color: var(--navy); background: #edf2f7; }
+    tr:nth-child(even) td { background: #fbfcfd; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+    .tag.green { color: var(--green); background: var(--green-bg); }
+    .tag.red { color: var(--red); background: var(--red-bg); }
+    .tag.amber { color: var(--amber); background: var(--amber-bg); }
+    .tag.blue { color: var(--blue); background: var(--blue-soft); }
+    .diagram { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; margin: 18px 0; }
+    .diagram div { position: relative; padding: 14px 8px; border: 1px solid #cdd8e5; border-radius: 9px; background: #fff; color: var(--navy); text-align: center; font-size: 13px; font-weight: 700; }
+    .diagram div:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 50%; transform: translateY(-50%); color: #8ba0b8; z-index: 2; }
+    .report-map { margin: 18px 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; box-shadow: var(--shadow); }
+    .report-head { padding: 18px 20px; color: #fff; background: #1f3757; }
+    .report-body { display: grid; grid-template-columns: 210px 1fr; min-height: 360px; }
+    .report-nav { padding: 15px; border-right: 1px solid var(--line); color: #617083; font-size: 12px; }
+    .report-nav strong { display: block; margin: 0 0 8px; color: var(--navy); }
+    .report-nav span { display: block; margin: 5px 0; padding: 6px; border-radius: 6px; background: #f4f7fa; }
+    .report-main { padding: 16px; }
+    .banner { padding: 12px; border-radius: 8px; color: var(--green); background: var(--green-bg); font-weight: 700; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 10px 0; }
+    .metric { padding: 9px 5px; border: 1px solid var(--line); border-radius: 7px; text-align: center; font-size: 11px; }
+    .metric b { display: block; font-size: 18px; }
+    .report-card { margin-top: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcfe; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 7px; }
+    .pair div { padding: 8px; border-radius: 6px; font-size: 11px; }
+    .pair .old { background: var(--red-bg); }
+    .pair .new { background: var(--green-bg); }
+    .file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .file-card { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .file-card code { display: inline-block; margin-bottom: 6px; }
+    details.faq { margin: 9px 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+    details.faq summary { cursor: pointer; padding: 13px 15px; color: var(--navy); font-weight: 700; }
+    details.faq > div { padding: 0 15px 14px; color: #4d5e72; }
+    .source-list { font-size: 13px; color: #58677a; }
+    .source-list li { margin: 8px 0; }
+    .footer-note { margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    .print-button { position: fixed; right: 22px; bottom: 22px; z-index: 10; padding: 10px 15px; border: 0; border-radius: 999px; color: #fff; background: var(--navy-2); box-shadow: var(--shadow); cursor: pointer; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--line); columns: 2; }
+      .toc strong { column-span: all; }
+      main { padding: 34px 22px 70px; }
+      .ui-cards, .control-list, .file-grid { grid-template-columns: 1fr; }
+      .diagram { grid-template-columns: 1fr; }
+      .diagram div:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -17px; transform: translateX(50%); }
+      .report-body { grid-template-columns: 1fr; }
+      .report-nav { border-right: 0; border-bottom: 1px solid var(--line); }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media print {
+      body { background: #fff; }
+      .hero { padding: 36px 28px; }
+      .layout { display: block; max-width: none; }
+      .toc, .print-button { display: none; }
+      main { padding: 24px; }
+      h2 { break-after: avoid; }
+      table, .callout, .control, .file-card, .report-map { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero" id="top">
+    <div class="hero-inner">
+      <div class="eyebrow">PROTOCOL PDF DIFF · USER MANUAL</div>
+      <h1>文件对比工具使用说明书</h1>
+      <p class="subtitle">面向协议、规范和技术文档版本审阅，完整说明桌面界面中的每个区域、输入项和按钮，以及 HTML 报告的阅读方法、输出文件和使用边界。</p>
+      <div class="version">
+        <span>工具版本 1.4.0</span>
+        <span>文档对应源码 288f833</span>
+        <span>更新日期 2026-08-31</span>
+        <span>适用平台 macOS / Windows</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="目录">
+      <strong>目录</strong>
+      <a href="#overview">1. 工具用途与界面结构</a>
+      <a href="#quick-start">2. 三分钟快速上手</a>
+      <a href="#main-page">3. 主工作页详解</a>
+      <a href="#page-range">4. 页面范围怎么选</a>
+      <a href="#advanced">5. 高级设置详解</a>
+      <a href="#threshold">6. 章节匹配阈值</a>
+      <a href="#snippets">7. 每章片段数</a>
+      <a href="#run">8. 开始比较与运行状态</a>
+      <a href="#report">9. HTML 报告页详解</a>
+      <a href="#outputs">10. 六种输出文件</a>
+      <a href="#interpretation">11. 如何判断结果</a>
+      <a href="#limits">12. 支持范围与限制</a>
+      <a href="#errors">13. 输入错误与处理</a>
+      <a href="#faq">14. 常见问题</a>
+      <a href="#references">15. 版本依据</a>
+    </nav>
+
+    <main>
+      <section id="overview">
+        <h2>1. 工具用途与界面结构</h2>
+        <p class="lead">文件对比工具用于比较两份 PDF 的版本差异。它先识别章节和正文，再补充表格截图、Figure 原图和视觉漏检证据，最后生成适合人工审阅的 HTML 报告以及 CSV、JSON 等审计文件。</p>
+        <div class="callout">
+          <strong>关于“页签”：</strong>当前桌面版没有传统的多页签界面。软件由一个主工作页和一个“高级设置”弹窗组成；比较完成后，HTML 报告在系统浏览器中作为独立页面打开。主界面中的“旧版 PDF”和“新版 PDF”是两张输入卡片，不是页签。
+        </div>
+        <p>工具关注的是技术文档审阅：正文按逻辑章节匹配，不强制把旧版第 N 页和新版第 N 页直接配对。因此，即使新版插入内容导致后续页码整体移动，同一章节仍有机会正确对应。</p>
+        <p>自动结果用于定位和筛查，不能替代对源 PDF 的最终确认。尤其是公式、复杂多栏、扫描件和图形语义，需要结合报告给出的可信度与原文证据判断。</p>
+      </section>
+
+      <section id="quick-start">
+        <h2>2. 三分钟快速上手</h2>
+        <div class="steps">
+          <div class="step"><strong>选择旧版 PDF。</strong>点击左侧“选择旧版 PDF”区域，选中作为比较基准的旧文件。</div>
+          <div class="step"><strong>选择新版 PDF。</strong>点击右侧“选择新版 PDF”区域，选中要审阅的新文件。</div>
+          <div class="step"><strong>确认页面范围。</strong>通常保持“全部页面”；只审阅某段内容时，再分别为旧、新 PDF 选择起止页。</div>
+          <div class="step"><strong>按需调整高级设置。</strong>第一次使用建议保持阈值 <code>0.72</code>、每章片段数 <code>20</code>。</div>
+          <div class="step"><strong>点击“开始比较”。</strong>等待状态栏依次显示读取、匹配、生成视觉证据和生成报告。</div>
+          <div class="step"><strong>打开 HTML 报告。</strong>先看顶部“识别可信度”，再按左侧导航核对表格、正文和视觉复核项。</div>
+        </div>
+      </section>
+
+      <section id="main-page">
+        <h2>3. 主工作页详解</h2>
+        <div class="ui-map" role="img" aria-label="文件对比工具主界面示意图">
+          <div class="ui-title"><span class="ui-mark"></span>Protocol Comparison Tool</div>
+          <div class="ui-cards">
+            <div class="ui-card">
+              <h4><span class="num">1</span>旧版 PDF</h4>
+              <div class="ui-drop"><span><span class="num">2</span>选择旧版 PDF<br><small>点击选择文件</small></span></div>
+              <div class="ui-controls"><span class="ui-pill active"><span class="num">3</span>全部页面</span><span class="ui-pill"><span class="num">4</span>选择页面</span></div>
+            </div>
+            <div class="ui-card">
+              <h4><span class="num">5</span>新版 PDF</h4>
+              <div class="ui-drop"><span><span class="num">6</span>选择新版 PDF<br><small>点击选择文件</small></span></div>
+              <div class="ui-controls"><span class="ui-pill active"><span class="num">7</span>全部页面</span><span class="ui-pill"><span class="num">8</span>选择页面</span></div>
+            </div>
+          </div>
+          <div class="ui-footer">
+            <span class="ui-pill"><span class="num">9</span>阈值 0.72</span>
+            <span class="ui-pill"><span class="num">10</span>每章 20</span>
+            <span class="ui-pill"><span class="num">11</span>高级设置 ›</span>
+            <span class="ui-run"><span class="num">12</span>开始比较</span>
+          </div>
+        </div>
+
+        <div class="control-list">
+          <div class="control"><h4>1、5　旧版 / 新版 PDF 卡片</h4><p>分别承载基准版本和目标版本。旧、新方向会决定报告中“删除”和“新增”的含义，选反后报告方向也会相反。</p></div>
+          <div class="control"><h4>2、6　选择 PDF 区域</h4><p>点击后打开系统文件选择窗口，只允许选择 PDF。选定后，卡片中会显示文件名；再次点击可以替换当前选择。</p></div>
+          <div class="control"><h4>3、7　全部页面</h4><p>比较整份 PDF。适合正式版本审阅，也是最容易理解报告范围的默认选择。</p></div>
+          <div class="control"><h4>4、8　选择页面</h4><p>显示起始页和终止页输入框，只抽取所选范围。旧、新两侧的范围可以不同，以适应插页造成的页码漂移。</p></div>
+          <div class="control"><h4>9　阈值状态标签</h4><p>只显示当前章节匹配阈值，本身不可直接点击修改。要修改，请进入“高级设置”。</p></div>
+          <div class="control"><h4>10　每章状态标签</h4><p>显示每章最多在读者报告中展开的正文差异片段数。它不等于整份报告的差异总数。</p></div>
+          <div class="control"><h4>11　高级设置</h4><p>打开覆盖在主界面上的设置弹窗，可修改输出目录、阈值、每章片段数和两个复选项。</p></div>
+          <div class="control"><h4>12　开始比较</h4><p>校验输入后启动比较。运行时文字变为“比较中”，其他按钮和输入框暂时禁用，防止中途改变配置。</p></div>
+        </div>
+
+        <h3>比较完成后出现的两个按钮</h3>
+        <table>
+          <thead><tr><th>按钮</th><th>作用</th><th>什么时候可用</th></tr></thead>
+          <tbody>
+            <tr><td><strong>打开 HTML 报告</strong></td><td>用系统默认浏览器打开本次生成的 <code>protocol_diff_report.html</code>。</td><td>本次比较成功生成报告后出现。</td></tr>
+            <tr><td><strong>打开输出目录</strong></td><td>打开本次带时间戳的报告文件夹，可查看全部六种输出文件。</td><td>本次比较成功生成报告后出现。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>底部状态文字</h3>
+        <p>左下角会显示当前状态、错误提示或完成摘要。完成摘要通常包含可信度，以及正文、Table 和视觉核对项的读者报告数量。该摘要用于快速确认，不代替完整报告。</p>
+      </section>
+
+      <section id="page-range">
+        <h2>4. 页面范围怎么选</h2>
+        <table>
+          <thead><tr><th>选择方式</th><th>含义</th><th>适用场景</th></tr></thead>
+          <tbody>
+            <tr><td>全部页面</td><td>从第一页比较到最后一页。</td><td>正式版本审阅、第一次比较、需要完整结论时。</td></tr>
+            <tr><td>选择页面</td><td>起始页和终止页都包含在范围内，页码从 1 开始。</td><td>只审阅某个 Annex、章节或已知修改页段时。</td></tr>
+          </tbody>
+        </table>
+        <p>旧、新 PDF 的页窗相互独立。例如旧版目标内容在第 20–30 页，新版插入了两页后位于第 22–32 页，可以分别输入这两个范围。</p>
+        <div class="callout warn">
+          <strong>双侧页窗具有更强的“相关范围”含义。</strong>当旧、新两侧都完整填写页窗时，工具仍优先使用章节结构和正文证据，但也会把这两个范围视为用户明确声明的相关区域，帮助恢复因大幅改写而难以自动配对的章节。不要为了缩短时间而随意指定互不相关的两段页面。
+        </div>
+        <p>选择“选择页面”后，起始页和终止页必须全部填写，且都应为不小于 1 的整数；起始页不能大于终止页。</p>
+      </section>
+
+      <section id="advanced">
+        <h2>5. 高级设置详解</h2>
+        <p>点击主界面底部的“高级设置 ›”后，设置弹窗会覆盖主工作页。点击右上角 <strong>×</strong> 或按 <kbd>Esc</kbd> 可以关闭；关闭不会清空已经填写的值。</p>
+        <table>
+          <thead><tr><th>控件</th><th>默认值</th><th>作用</th><th>建议</th></tr></thead>
+          <tbody>
+            <tr><td>输出目录</td><td><code>~/Documents/ProtocolPdfDiffReports</code></td><td>指定所有带时间戳报告文件夹的上级目录。既可直接输入路径，也可点击右侧“选择”。</td><td>使用空间充足、符合文档保密要求的位置。</td></tr>
+            <tr><td>输出目录旁“选择”</td><td>—</td><td>打开系统目录选择窗口，不是选择具体文件。</td><td>不熟悉路径输入时使用。</td></tr>
+            <tr><td>章节匹配阈值</td><td><code>0.72</code></td><td>控制重命名或重编号章节进行模糊配对时所需的正文相似程度。</td><td>首次比较保持默认值。</td></tr>
+            <tr><td>每章片段数</td><td><code>20</code></td><td>限制每个章节在 HTML、Markdown、TXT 读者报告中展开的正文差异片段数。</td><td>日常审阅用 20；需要在 HTML 查看更多内容时调大。</td></tr>
+            <tr><td>列出未变化章节</td><td>关闭</td><td>开启后，报告也列出识别为未变化的章节。</td><td>一般关闭；核对章节覆盖范围时再开启。</td></tr>
+            <tr><td>完成后自动打开报告</td><td>关闭</td><td>比较成功后自动用默认浏览器打开 HTML 报告。</td><td>连续人工审阅时可开启。</td></tr>
+            <tr><td>右上角 ×</td><td>—</td><td>关闭高级设置弹窗并返回主工作页。</td><td>等同按 <kbd>Esc</kbd>。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="threshold">
+        <h2>6. 章节匹配阈值有什么用</h2>
+        <p><strong>章节匹配阈值不是“差异灵敏度”。</strong>它主要用于判断两个标题已改名、编号已变化的章节是否仍可能是同一个逻辑章节。正文中的数值、单位、否定词、标识符等细微变化不会因为把阈值调低就自动消失。</p>
+        <table>
+          <thead><tr><th>设置倾向</th><th>可能结果</th><th>典型现象</th></tr></thead>
+          <tbody>
+            <tr><td>较低</td><td>章节配对更积极。</td><td>可能减少“整章新增 + 整章删除”，但也增加把两个相似模板章节配错的风险。</td></tr>
+            <tr><td>默认 0.72</td><td>在当前工具中作为日常折中值。</td><td>适合大多数有稳定章节结构的协议 PDF。</td></tr>
+            <tr><td>较高</td><td>章节配对更谨慎。</td><td>可减少误配，但大幅改写或改名章节更容易被拆成新增和删除。</td></tr>
+          </tbody>
+        </table>
+        <p>可输入范围为大于 0 且不超过 1 的有限数字。若报告中大量本应对应的章节被拆成“新增/删除”，可以小幅降低后复跑；若两个明显无关章节被放在同一张修改卡中，可以小幅提高后复跑。</p>
+        <div class="callout">
+          <strong>不要只看相似度数字。</strong>同编号、父子章节关系、相邻章节和用户指定页窗等强结构证据，也可能成为配对依据。报告在相关卡片中会显示“配对依据”，供人工判断。
+        </div>
+      </section>
+
+      <section id="snippets">
+        <h2>7. 每章片段数有什么用</h2>
+        <p>“每章片段数”控制<strong>每个章节在读者报告里最多展开多少条正文差异候选</strong>。新增、删除和替换三类合计占用这个额度；它不是整份 HTML 的总上限，也不限制章节匹配和完整比较。</p>
+        <table>
+          <thead><tr><th>示例</th><th>HTML 中看到什么</th><th>完整数据在哪里</th></tr></thead>
+          <tbody>
+            <tr><td>某章共 12 条，设置 20</td><td>显示全部 12 条。</td><td>HTML、CSV、JSON 都有。</td></tr>
+            <tr><td>某章共 35 条，设置 20</td><td>展开优先级较高的 20 条，并提示“还有 15 处未展示”。</td><td><code>changes.csv</code> 和 <code>protocol_diff_data.json</code> 保留完整审计片段。</td></tr>
+            <tr><td>设置 0</td><td>正文差异片段不展开，只显示未展示数量和其他报告证据。</td><td>完整审计内容仍在 CSV/JSON。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout danger">
+          <strong>未展示内容不能在当前 HTML 中展开。</strong>HTML 只告诉你未展示了多少条，不提供“展开剩余 15 条”的按钮。若希望继续在 HTML 中阅读，需要把“每章片段数”调大并重新生成报告；也可以直接查看 <code>changes.csv</code> 或 JSON。
+        </div>
+        <p>该上限针对正文差异片段。表格卡、Figure 原图、视觉漏检核对项和各章节本身有独立的报告结构，不会简单地被这个数字截成整份报告只剩 20 项。</p>
+      </section>
+
+      <section id="run">
+        <h2>8. 开始比较与运行状态</h2>
+        <div class="diagram" aria-label="处理流程">
+          <div>读取旧版</div><div>读取新版</div><div>匹配差异</div><div>生成视觉证据</div><div>生成报告</div>
+        </div>
+        <p>点击“开始比较”后，软件先校验两个 PDF、输出目录、页面范围和高级参数。校验通过才会开始后台处理。状态栏会显示当前阶段；读取 PDF 时，如能取得总页数，还会显示“第 X/Y 页”。</p>
+        <p>运行期间，“开始比较”变为“比较中”，并显示已用时间。其他按钮和输入框会暂时禁用。当前桌面界面<strong>没有取消按钮</strong>；为避免报告写到一半，比较期间关闭窗口也会被阻止，并提示完成后再关闭。</p>
+        <p>成功后，状态栏显示可信度及主要数量，并出现“打开 HTML 报告”和“打开输出目录”。如果处理失败，错误原因会直接显示在底部状态区域，输入控件恢复可用。</p>
+      </section>
+
+      <section id="report">
+        <h2>9. HTML 报告页详解</h2>
+        <p>HTML 是日常审阅的主要入口。它是一个可离线打开的独立页面，布局由顶部标题、可信度横幅、左侧导航和右侧证据区组成。</p>
+        <div class="report-map" role="img" aria-label="HTML 报告布局示意图">
+          <div class="report-head"><strong>协议 PDF 差异报告</strong><br><small>生成时间 · 章节匹配阈值</small></div>
+          <div class="report-body">
+            <div class="report-nav">
+              <strong>左侧差异导航</strong>
+              <span>表格补充证据</span>
+              <span>技术正文变化与复核</span>
+              <span>视觉漏检核对</span>
+            </div>
+            <div class="report-main">
+              <div class="banner">识别可信度：可靠 / 需人工复核 / 无法判断</div>
+              <div class="metrics"><div class="metric"><b>3</b>核心技术变化</div><div class="metric"><b>1</b>正文字符复核</div><div class="metric"><b>2</b>变化表格</div><div class="metric"><b>0</b>视觉漏检</div></div>
+              <div class="report-card"><strong>章节修改卡 · 旧页 / 新页 / 相似度</strong><div class="pair"><div class="old">旧版原文区域<br>淡红差异标注</div><div class="new">新版原文区域<br>淡绿差异标注</div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <h3>9.1 顶部识别可信度</h3>
+        <table>
+          <thead><tr><th>状态</th><th>应如何理解</th></tr></thead>
+          <tbody>
+            <tr><td><span class="tag green">可靠</span></td><td>两份文档符合当前支持范围，并且要求的视觉漏检核对已完整执行。只有这一状态才允许在支持范围内使用“未检出差异”的结论；公式本体仍不在自动判等范围内。</td></tr>
+            <tr><td><span class="tag amber">需人工复核</span></td><td>报告仍保留已识别的正文、表格和视觉证据，但存在版面、OCR、抽取或配对风险。即使数量为 0，也不能据此确认两份文件一致。</td></tr>
+            <tr><td><span class="tag red">无法判断</span></td><td>至少一侧缺少足够的可比较文字或章节。常见于扫描件没有可用 OCR、页面不可读或抽取失败。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>9.2 汇总指标</h3>
+        <table>
+          <thead><tr><th>指标</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td>核心技术变化</td><td>读者报告中保留的技术正文新增、删除或修改章节数。</td></tr>
+            <tr><td>正文字符复核项</td><td>字符映射、结构顺延等不宜自动下结论、需要人工确认的正文项。</td></tr>
+            <tr><td>公式自动对比（已关闭）</td><td>始终为 0。公式区域只用于版面隔离，不输出公式增删、修改或相似度结论。</td></tr>
+            <tr><td>视觉漏检核对</td><td>文字层未解释、但源页面像素仍出现变化的人工复核页数。</td></tr>
+            <tr><td>变化表格</td><td>报告中有变化或需要复核的表格卡数量。</td></tr>
+            <tr><td>表格行变化</td><td>结构化表格中识别出的实质行级变化数量。</td></tr>
+            <tr><td>表格复核项</td><td>行归属、字体编码或结构证据不足，不能自动认证的表格项。</td></tr>
+          </tbody>
+        </table>
+
+        <h3>9.3 左侧导航“入口”</h3>
+        <p>左侧项目是页内跳转链接，不是筛选页签。点击后，浏览器会滚动到对应证据卡：</p>
+        <ul>
+          <li><strong>表格补充证据：</strong>以 T1、T2……编号，跳到变化表格卡。</li>
+          <li><strong>技术正文变化与复核：</strong>跳到具体章节卡，卡片标明修改、新增、删除或复核。</li>
+          <li><strong>视觉漏检核对：</strong>跳到 V1、V2……页面级视觉证据。</li>
+        </ul>
+
+        <h3>9.4 报告元信息</h3>
+        <p>报告会列出旧、新 PDF 路径、源文件页数、实际选择页、比较方式、报告范围和使用提示。先核对这些信息，可以避免把选错文件或选错页窗误认为算法问题。</p>
+
+        <h3>9.5 技术正文变化卡</h3>
+        <ul>
+          <li><strong>卡片标题：</strong>显示变化类型和章节位置。</li>
+          <li><strong>定位信息：</strong>显示旧版页、新版页及章节相似度。</li>
+          <li><strong>配对依据：</strong>在使用结构证据或用户页窗锚定时，说明为何把两章视为对应章节。</li>
+          <li><strong>差异摘要：</strong>概括替换、新增、删除和未展示数量。</li>
+          <li><strong>旧/新版原文区域：</strong>优先并排显示源 PDF 裁剪，旧版变化词淡红、新版变化词淡绿；相同文字不着色。</li>
+          <li><strong>“查看文字识别明细”：</strong>这是可点击的折叠项。展开后查看结构化文字片段；再次点击可收起。</li>
+          <li><strong>未展示提示：</strong>只显示剩余数量，不能在当前 HTML 中继续展开。</li>
+        </ul>
+
+        <h3>9.6 表格补充证据</h3>
+        <p>表格卡并排显示旧、新表格截图，并列出表题、页码、配对相似度和行级变化。表格行可能标记为修改、新增、删除或“需人工复核”。长单元格可能以折叠明细呈现，点击摘要可查看完整值。</p>
+
+        <h3>9.7 Figure 原图核对</h3>
+        <p>Figure 按图题和文档顺序配对，只并排展示旧、新原图，不对图内文字和技术含义自动标色或解释。单侧 Figure 或图题配对不确定时，应直接回到源 PDF 核对。</p>
+
+        <h3>9.8 视觉漏检核对</h3>
+        <p>当可抽取文字没有解释页面中的图片、印章或普通矢量图变化时，报告可能给出旧页、新页和差异掩膜。该卡的作用是阻止“文字相同就一定相同”的假结论；它不负责判断图形变化代表什么技术含义。</p>
+
+        <div class="callout">
+          <strong>HTML 报告当前没有：</strong>全文搜索框、筛选按钮、导出按钮、展开全部按钮，以及展开“未展示片段”的按钮。全文搜索可使用浏览器的 <kbd>⌘</kbd> + <kbd>F</kbd>（macOS）或 <kbd>Ctrl</kbd> + <kbd>F</kbd>（Windows）；导出和完整审计请使用同目录下的 CSV/JSON。
+        </div>
+      </section>
+
+      <section id="outputs">
+        <h2>10. 六种输出文件</h2>
+        <p>每次运行都会在输出目录下创建一个形如 <code>protocol_diff_YYYYMMDD_HHMMSS</code> 的新文件夹，不覆盖之前的报告。</p>
+        <div class="file-grid">
+          <div class="file-card"><code>protocol_diff_report.html</code><br><strong>主要阅读报告</strong><p>包含导航、可信度、原文截图、正文差异、表格证据和视觉复核项，适合浏览器阅读。</p></div>
+          <div class="file-card"><code>protocol_diff_report.md</code><br><strong>Markdown 报告</strong><p>适合放入文档系统、Wiki 或代码仓库，内容以文字证据为主。</p></div>
+          <div class="file-card"><code>protocol_diff_report.txt</code><br><strong>纯文本报告</strong><p>适合复制到邮件、聊天或不支持 Markdown 的系统。</p></div>
+          <div class="file-card"><code>changes.csv</code><br><strong>正文审计表</strong><p>每行对应一个章节变化，保存完整新增、删除和替换片段；可用 Excel 筛选。</p></div>
+          <div class="file-card"><code>table_changes.csv</code><br><strong>表格变化表</strong><p>保存表题、页码、配对分数、项目名、旧值、新值和行变化类型。</p></div>
+          <div class="file-card"><code>protocol_diff_data.json</code><br><strong>完整机器审计数据</strong><p>同时保存原始审计事实和读者显示投影，包括完整正文片段、表格、视觉项、章节、抽取状态和来源信息。</p></div>
+        </div>
+        <div class="callout warn">
+          <strong>保密提醒：</strong>报告可能包含源 PDF 路径、文字片段、表格内容和内嵌截图。保存、传输和共享报告时，应按原 PDF 的保密级别处理。
+        </div>
+      </section>
+
+      <section id="interpretation">
+        <h2>11. 如何判断结果</h2>
+        <ol>
+          <li><strong>先看可信度，后看数量。</strong>“需人工复核 / 0 项”不等于两份文件一致。</li>
+          <li><strong>确认输入和页窗。</strong>核对报告中的旧、新路径与选择页。</li>
+          <li><strong>先看表格和视觉证据。</strong>这些区域位于报告正文之前，通常更容易暴露数值或图形变化。</li>
+          <li><strong>按左侧导航逐章复核。</strong>旧版淡红代表被删除或替换的旧内容，新版淡绿代表新增或替换后的新内容。</li>
+          <li><strong>看到“未展示”时不要停止。</strong>根据任务需要调大片段数复跑，或转到 CSV/JSON 查看完整审计内容。</li>
+          <li><strong>最终回到源 PDF。</strong>页码和截图是定位工具；规范性结论仍应以源文件为准。</li>
+        </ol>
+
+        <h3>常见变化类型</h3>
+        <table>
+          <thead><tr><th>类型</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td><span class="tag blue">修改</span></td><td>旧、新章节已配对，正文中存在替换、新增或删除。</td></tr>
+            <tr><td><span class="tag green">新增</span></td><td>新版出现了未找到对应旧章节的内容。</td></tr>
+            <tr><td><span class="tag red">删除</span></td><td>旧版内容在新版中没有找到对应章节。</td></tr>
+            <tr><td><span class="tag amber">复核</span></td><td>存在字符映射、布局顺序或结构证据不充分的问题，工具不自动认定为实质技术修改。</td></tr>
+            <tr><td>未变化</td><td>只有开启“列出未变化章节”时才会列出；默认隐藏以缩短报告。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="limits">
+        <h2>12. 支持范围与限制</h2>
+        <h3>当前较适合的文档</h3>
+        <ul>
+          <li>具有可选择文字层的 PDF；</li>
+          <li>阅读顺序较稳定、章节编号或标题较清晰的协议与技术规范；</li>
+          <li>具有清晰表格边界，或至少能稳定抽取结构化行的表格；</li>
+          <li>需要按章节定位正文变化、按行核对表格变化的版本审阅任务。</li>
+        </ul>
+
+        <h3>必须谨慎的情况</h3>
+        <ul>
+          <li><strong>扫描件：</strong>只有检测到图像主导页面且系统安装 Tesseract 时才会尝试 OCR；OCR 成功的比较仍至少标为“需人工复核”。</li>
+          <li><strong>复杂多栏和表单：</strong>阅读顺序可能与视觉顺序不一致，工具会保守降级。</li>
+          <li><strong>公式：</strong>自动公式差分已关闭。分式、根号、上下标和式号只用于版面隔离。</li>
+          <li><strong>Figure：</strong>只并排提供原图，不解释图内标签和技术语义。</li>
+          <li><strong>无框或复杂跨页表格：</strong>可能退回普通正文，或显示“需人工复核”。</li>
+          <li><strong>页眉页脚和水印：</strong>只有坐标证据足够时才过滤；证据不足时宁可保留复核噪声，也不删除未知技术内容。</li>
+        </ul>
+      </section>
+
+      <section id="errors">
+        <h2>13. 输入错误与处理</h2>
+        <table>
+          <thead><tr><th>界面提示</th><th>原因</th><th>处理方法</th></tr></thead>
+          <tbody>
+            <tr><td>请选择有效的旧版 / 新版 PDF</td><td>尚未选择、路径失效或文件已移动。</td><td>重新点击对应 PDF 选择区域。</td></tr>
+            <tr><td>输出目录不能为空</td><td>高级设置中的输出目录被清空。</td><td>输入有效目录，或点击“选择”。</td></tr>
+            <tr><td>指定范围时必须填写起始页和终止页</td><td>选择了“选择页面”，但只填了一个页码。</td><td>两项都填写，或改回“全部页面”。</td></tr>
+            <tr><td>起始页不能大于终止页</td><td>页码顺序写反。</td><td>交换两个数字。</td></tr>
+            <tr><td>页码必须是正整数</td><td>输入了小数、文字、0 或负数。</td><td>填写从 1 开始的整数。</td></tr>
+            <tr><td>章节匹配阈值必须是数字 / 允许区间为 0 到 1</td><td>阈值格式或范围不正确。</td><td>填写大于 0 且不超过 1 的数字，例如 <code>0.72</code>。</td></tr>
+            <tr><td>每章片段数必须是整数 / 不能小于 0</td><td>输入了小数、文字或负数。</td><td>填写 0 或正整数。</td></tr>
+            <tr><td>比较正在运行，完成后再关闭窗口</td><td>运行期间尝试退出。</td><td>等待报告写入完成。</td></tr>
+            <tr><td>无法打开 HTML 报告</td><td>报告被移动、删除，或默认浏览器设置异常。</td><td>点击“打开输出目录”，手动双击 HTML；若文件不存在则重新运行。</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="faq">
+        <h2>14. 常见问题</h2>
+        <details class="faq"><summary>设置每章 20，整份 HTML 是否只能看到 20 条？</summary><div>不是。20 是每个章节的正文差异展开上限。不同章节各自计算，表格、Figure 和视觉核对项也有独立结构。</div></details>
+        <details class="faq"><summary>某章有 35 条差异，剩余 15 条能在 HTML 中展开吗？</summary><div>不能。HTML 只显示“还有 15 处未展示”。把每章片段数调大后重新生成，或查看 <code>changes.csv</code> / <code>protocol_diff_data.json</code>。</div></details>
+        <details class="faq"><summary>阈值调低会不会漏掉细小文字变化？</summary><div>章节匹配阈值主要决定两个章节是否配成一对，不是正文差异过滤阈值。技术数值、单位、否定词和标识符变化仍会参与比较。</div></details>
+        <details class="faq"><summary>为什么旧、新页面范围可以不一样？</summary><div>新版本插入或删除页面后，同一章节的物理页码会移动。两侧独立页窗可以让你准确指定各自的目标区域。</div></details>
+        <details class="faq"><summary>为什么报告显示 0 项，却仍写“需人工复核”？</summary><div>0 只表示当前支持的抽取层没有检出读者差异；如果扫描、版面、OCR、视觉覆盖或章节识别存在风险，就不能据此确认一致。</div></details>
+        <details class="faq"><summary>报告是否自动比较公式？</summary><div>不比较。公式自动差分已关闭，公式区域只用于避免正文或表格重复识别。复杂公式必须回到源 PDF 人工核对。</div></details>
+        <details class="faq"><summary>运行很慢怎么办？</summary><div>先确认是否选了整份长文档、是否包含大量扫描页或表格。只审阅明确章节时可选择合理页窗；不要为了提速把两侧指定成不相关范围。当前界面没有中途取消按钮。</div></details>
+        <details class="faq"><summary>怎样在 HTML 中查某个参数名？</summary><div>使用浏览器自带的页面查找：macOS 按 <kbd>⌘</kbd> + <kbd>F</kbd>，Windows 按 <kbd>Ctrl</kbd> + <kbd>F</kbd>。</div></details>
+      </section>
+
+      <section id="references">
+        <h2>15. 版本依据</h2>
+        <p>本说明书按以下本地权威源码快照编写。界面或算法升级后，按钮名称、默认值和报告结构可能变化，应以当前程序为准。</p>
+        <ul class="source-list">
+          <li><code>src/protocol_pdf_diff/webui/index.html:175–355</code>：主界面、全部按钮、高级设置、运行状态和交互行为。</li>
+          <li><code>src/protocol_pdf_diff/webview_gui.py</code>：文件选择、输入校验、后台运行、报告打开、完成摘要和关闭保护。</li>
+          <li><code>src/protocol_pdf_diff/ui_shared.py:14–64</code>：默认输出目录、页码、阈值和每章片段数的输入规则。</li>
+          <li><code>src/protocol_pdf_diff/compare.py:4180–4280, 6089–6127</code>：每章正文差异候选的合并计数、优先展示和未展示数量。</li>
+          <li><code>src/protocol_pdf_diff/reporting.py:308–575</code>：六种输出文件、读者报告与完整审计数据的边界。</li>
+          <li><code>src/protocol_pdf_diff/reporting.py:890–1678</code>：HTML 报告导航、汇总、正文、表格、Figure 和视觉复核区。</li>
+          <li><code>src/protocol_pdf_diff/reporting.py:12530–12580, 12993–13043</code>：CSV/JSON 中的完整片段与 HTML 显示投影。</li>
+          <li><code>pyproject.toml:6–7</code>：项目名称与版本 1.4.0。</li>
+          <li>对应 Git 提交：<code>288f833aeea5cc2091c2181fae90a4d87ec3a3c7</code>。</li>
+        </ul>
+      </section>
+
+      <p class="footer-note">文件对比工具使用说明书 · 版本 1.4.0 · 2026-08-31</p>
+    </main>
+  </div>
+
+  <button class="print-button" type="button" onclick="window.print()" aria-label="打印或另存为 PDF">打印 / 保存 PDF</button>
+</body>
+</html>
