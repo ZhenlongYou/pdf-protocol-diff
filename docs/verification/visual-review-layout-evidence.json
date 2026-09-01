@@ -117,8 +117,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "09ac1de8d5f06a0528a0eae38bda1972b14abff08729128a8f748e029778f730",
-          "size_bytes": 507284
+          "sha256": "81d77621d8fb67b7b96000540450ee4767478e29c2ceeeaaf0809272175b3372",
+          "size_bytes": 507881
         },
         {
           "id": "SRC-PKG-20",
@@ -159,8 +159,8 @@
         {
           "id": "SRC-VISUAL-PREVIEW",
           "path": "src/protocol_pdf_diff/visual_preview.py",
-          "sha256": "8df66c5b390dc68711e0751cfb74ca4f4cc1345946b2d3468f312831dd09b43c",
-          "size_bytes": 1366
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
         },
         {
           "id": "SRC-VISUAL-WATCHDOG",
@@ -177,8 +177,8 @@
         {
           "id": "SRC-REAL",
           "path": "docs/verification/visual_review_layout_real_path.py",
-          "sha256": "8a122e35ae3e9973c0f501e660903a0bc3a436e6e9149d6246f057acb9d66884",
-          "size_bytes": 2638
+          "sha256": "4292dc1bd2e5cb1c44234b6b63fd111bc087c3b3d4f3bbdfe6f52e55397c0789",
+          "size_bytes": 3292
         }
       ]
     },
@@ -257,49 +257,86 @@
               "IN-LAYOUT-KNOWN_FAILURE"
             ]
           }
+        },
+        {
+          "id": "REQ-VISUAL-REVIEW-DISCLOSURE-004",
+          "observable": "The pixel-level mask is collapsed by default, clearly labeled as technical review, and explained as non-semantic evidence.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-02 request to treat the mask as a technical intermediate rather than primary reader content"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "details:not-open; summary=technical review; limitation text present",
+            "unit": "HTML disclosure state",
+            "locator": "user-visible HTML report"
+          },
+          "oracle_ids": [
+            "ORACLE-LAYOUT-001"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-LAYOUT-NOMINAL"
+            ],
+            "boundary": [
+              "IN-LAYOUT-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-LAYOUT-INVALID"
+            ],
+            "adversarial": [
+              "IN-LAYOUT-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-LAYOUT-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-LAYOUT-KNOWN_FAILURE"
+            ]
+          }
         }
       ],
       "inputs": [
         {
           "id": "IN-LAYOUT-NOMINAL",
           "path": "docs/verification/fixtures/visual-layout-nominal.json",
-          "sha256": "9f7de7f4f4a7db9c62c720afa282bac2da465360c2860c33335900647ef3de6a",
-          "size_bytes": 173,
+          "sha256": "52c5e4e86e276c336ce856cbd6b1e24deabe1c60534a458e5b787999ddac3d4d",
+          "size_bytes": 199,
           "provenance": "frozen nominal visual-layout fixture"
         },
         {
           "id": "IN-LAYOUT-BOUNDARY",
           "path": "docs/verification/fixtures/visual-layout-boundary.json",
-          "sha256": "c1bfdb489bdbe04636fcdf86c723ac43beb6752e7d2e04fdb55d2fcbdc56e1b9",
-          "size_bytes": 172,
+          "sha256": "02f1d85f874a0b15f922ef09cc018d7c470ac7b625b857a88a0539551be12a39",
+          "size_bytes": 198,
           "provenance": "frozen boundary visual-layout fixture"
         },
         {
           "id": "IN-LAYOUT-INVALID",
           "path": "docs/verification/fixtures/visual-layout-invalid.json",
-          "sha256": "23653811f5bbfaaed1d24dc864760a80abe5d3f33c2931d464fa15310bef06b5",
-          "size_bytes": 162,
+          "sha256": "0597404985e83d05ff067e62cc486eb2eef5942eb4589d983e6eef5058657143",
+          "size_bytes": 188,
           "provenance": "frozen invalid visual-layout fixture"
         },
         {
           "id": "IN-LAYOUT-ADVERSARIAL",
           "path": "docs/verification/fixtures/visual-layout-adversarial.json",
-          "sha256": "bd35bce94b0a0792a3e890c72ac041b317cfbfc1ba07218661061aeb5215569b",
-          "size_bytes": 175,
+          "sha256": "e22114f3fb92e321b63e5f8958468581b1f70eb77bf55b290d525cea994973ed",
+          "size_bytes": 201,
           "provenance": "frozen adversarial visual-layout fixture"
         },
         {
           "id": "IN-LAYOUT-REALISTIC",
           "path": "docs/verification/fixtures/visual-layout-realistic.json",
-          "sha256": "81e3bb6ba9090bcbbc428fe33564f18a498c5d80c7266f650c09e504b17d0d7b",
-          "size_bytes": 177,
+          "sha256": "9f5bf475a3c5d97cfb0ee4ca913f3114c08f100ac67c1e222f3f9e9831dd4cb3",
+          "size_bytes": 203,
           "provenance": "frozen realistic visual-layout fixture"
         },
         {
           "id": "IN-LAYOUT-KNOWN_FAILURE",
           "path": "docs/verification/fixtures/visual-layout-known-failure.json",
-          "sha256": "e618b6be442ab509c59445960c0146b4ac1af246409381c65cbaf5454773a826",
-          "size_bytes": 175,
+          "sha256": "70a5150ec65cdff323b0a89925f3e44c2e7d2113501953396a56eebcaa6b621a",
+          "size_bytes": 201,
           "provenance": "frozen known-failure visual-layout fixture"
         }
       ],
@@ -307,16 +344,16 @@
         {
           "id": "PROBE-LAYOUT-001",
           "path": "docs/verification/visual_review_layout_probe.py",
-          "sha256": "4dfe56b10d95d29654b0c91d6d3b8080aa8f7174354e08e4704114c3bca2eb3a",
-          "size_bytes": 2621
+          "sha256": "4c7f3e678bef9413d8accc867682012df74010ade0bfbdc9ea799b719023181d",
+          "size_bytes": 3417
         }
       ],
       "oracles": [
         {
           "id": "ORACLE-LAYOUT-001",
           "path": "docs/verification/visual_review_layout_oracle.py",
-          "sha256": "8ceda659d68cc51f648e25092e67d1509946cfc13810d8e4f305991776683a57",
-          "size_bytes": 962,
+          "sha256": "1f6f6b2dcee687ff467c5a0774166d2d97d3c6c7d60a4e28de1d0536ebac8bf5",
+          "size_bytes": 1096,
           "kind": "closed_form",
           "independence_basis": "The oracle checks fixture geometry and intrinsic-width arithmetic without importing production code.",
           "production_source_ids": [
@@ -333,8 +370,8 @@
         {
           "id": "MUT-LAYOUT-LEGACY",
           "path": "docs/verification/mutants/visual_review_layout.py",
-          "sha256": "2b16fcf5e2d4275887fe1444842142640c33dc88a7755f5090db4ea7b5748aed",
-          "size_bytes": 1178,
+          "sha256": "f4e9e53d42f8c068a35c5cd054678bd527e389979a0d6c999a02e8e2b08b751b",
+          "size_bytes": 1584,
           "target_source_id": "SRC-VISUAL-PREVIEW"
         }
       ],
@@ -342,7 +379,7 @@
         {
           "id": "ART-LAYOUT-REAL",
           "path": "docs/verification/out/visual-review-layout-real-path.json",
-          "sha256": "2693bec26a85664e0657c31990ef569b639f36ace02e5129815616dfde0660bd",
+          "sha256": "79f6c9b374b8d73fdf2286836014a7825cc32e65ffee40aa22b2dcb19e2b18f9",
           "producer_run_id": "RUN-VISUAL-REVIEW-REAL",
           "required": true,
           "min_size_bytes": 1
@@ -540,11 +577,104 @@
           }
         },
         {
+          "id": "RUN-LAYOUT-DISCLOSURE-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LAYOUT-LEGACY"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "disclosure"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_MASK_NOT_COLLAPSED"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LAYOUT-DISCLOSURE-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "disclosure"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
           "id": "RUN-LAYOUT-ORACLE",
           "role": "oracle",
           "requirement_ids": [
             "REQ-VISUAL-REVIEW-SCALE-002",
-            "REQ-VISUAL-REVIEW-CROP-003"
+            "REQ-VISUAL-REVIEW-CROP-003",
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
           ],
           "source_variant": {
             "base": "source"
@@ -602,7 +732,8 @@
           "role": "real_path",
           "requirement_ids": [
             "REQ-VISUAL-REVIEW-SCALE-002",
-            "REQ-VISUAL-REVIEW-CROP-003"
+            "REQ-VISUAL-REVIEW-CROP-003",
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
           ],
           "source_variant": {
             "base": "source"
@@ -651,7 +782,8 @@
           "role": "suite",
           "requirement_ids": [
             "REQ-VISUAL-REVIEW-SCALE-002",
-            "REQ-VISUAL-REVIEW-CROP-003"
+            "REQ-VISUAL-REVIEW-CROP-003",
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
           ],
           "source_variant": {
             "base": "source"
@@ -725,6 +857,15 @@
           "failure_signature": "HORIZONTAL_CONTEXT_CROPPED",
           "red_run_id": "RUN-LAYOUT-CROP-RED",
           "green_run_id": "RUN-LAYOUT-CROP-GREEN"
+        },
+        {
+          "id": "PAIR-VISUAL-REVIEW-DISCLOSURE-004",
+          "requirement_id": "REQ-VISUAL-REVIEW-DISCLOSURE-004",
+          "defect_id": "DEF-VISUAL-REVIEW-DISCLOSURE-004",
+          "test_id": "VISUAL_REVIEW_LAYOUT_TEST",
+          "failure_signature": "VISUAL_MASK_NOT_COLLAPSED",
+          "red_run_id": "RUN-LAYOUT-DISCLOSURE-RED",
+          "green_run_id": "RUN-LAYOUT-DISCLOSURE-GREEN"
         }
       ],
       "isolation_contracts": [
@@ -732,7 +873,8 @@
           "id": "ISO-VISUAL-REVIEW-LAYOUT",
           "requirement_ids": [
             "REQ-VISUAL-REVIEW-SCALE-002",
-            "REQ-VISUAL-REVIEW-CROP-003"
+            "REQ-VISUAL-REVIEW-CROP-003",
+            "REQ-VISUAL-REVIEW-DISCLOSURE-004"
           ],
           "unit": "visual-layout fixture case",
           "selection_ids": [],
@@ -750,8 +892,8 @@
         {
           "id": "LEDGER-VISUAL-REVIEW-LAYOUT",
           "path": "docs/verification/visual-review-layout-escaped-defects.yaml",
-          "sha256": "3d8478814eeb5a8dc6cc137503c404cd23ac7a0b11829108683b73ca10e0722d",
-          "size_bytes": 1292
+          "sha256": "1bd55d10832361cefa1282876c6f312abad97fa3ca88379e216ca2e9c2b4c18e",
+          "size_bytes": 1879
         }
       ]
     },
@@ -759,13 +901,15 @@
       "requirement": {
         "requirement_ids": [
           "REQ-VISUAL-REVIEW-SCALE-002",
-          "REQ-VISUAL-REVIEW-CROP-003"
+          "REQ-VISUAL-REVIEW-CROP-003",
+          "REQ-VISUAL-REVIEW-DISCLOSURE-004"
         ]
       },
       "target_red": {
         "pair_ids": [
           "PAIR-VISUAL-REVIEW-SCALE-002",
-          "PAIR-VISUAL-REVIEW-CROP-003"
+          "PAIR-VISUAL-REVIEW-CROP-003",
+          "PAIR-VISUAL-REVIEW-DISCLOSURE-004"
         ]
       },
       "independent_oracle": {
@@ -776,7 +920,8 @@
       "fault_detection": {
         "pair_ids": [
           "PAIR-VISUAL-REVIEW-SCALE-002",
-          "PAIR-VISUAL-REVIEW-CROP-003"
+          "PAIR-VISUAL-REVIEW-CROP-003",
+          "PAIR-VISUAL-REVIEW-DISCLOSURE-004"
         ],
         "survivor_ids": [],
         "defect_ledger_ids": [
@@ -786,7 +931,8 @@
       "input_design": {
         "requirement_ids": [
           "REQ-VISUAL-REVIEW-SCALE-002",
-          "REQ-VISUAL-REVIEW-CROP-003"
+          "REQ-VISUAL-REVIEW-CROP-003",
+          "REQ-VISUAL-REVIEW-DISCLOSURE-004"
         ]
       },
       "isolation": {
@@ -805,6 +951,8 @@
           "RUN-LAYOUT-CROP-GREEN",
           "RUN-LAYOUT-SCALE-RED",
           "RUN-LAYOUT-SCALE-GREEN",
+          "RUN-LAYOUT-DISCLOSURE-RED",
+          "RUN-LAYOUT-DISCLOSURE-GREEN",
           "RUN-LAYOUT-ORACLE",
           "RUN-VISUAL-REVIEW-REAL",
           "RUN-LAYOUT-SUITE"

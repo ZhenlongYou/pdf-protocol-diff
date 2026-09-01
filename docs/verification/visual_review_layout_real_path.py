@@ -36,6 +36,14 @@ def main() -> int:
         html = outputs["html"].read_text(encoding="utf-8")
         if html.count('class="table-shot visual-review-shot"') != 3:
             raise AssertionError("VISUAL_REVIEW_CLASS_MISSING")
+        if html.count('<details class="visual-mask-detail">') != len(result.visual_review_items):
+            raise AssertionError("VISUAL_MASK_NOT_COLLAPSED")
+        if '<details class="visual-mask-detail" open>' in html:
+            raise AssertionError("VISUAL_MASK_NOT_COLLAPSED")
+        if "像素变化定位（技术复核）" not in html:
+            raise AssertionError("VISUAL_MASK_READER_LABEL_MISSING")
+        if "红色仅表示像素发生变化，不等同于协议参数或文字内容发生变化。" not in html:
+            raise AssertionError("VISUAL_MASK_EXPLANATION_MISSING")
         compact = "".join(html.split())
         if ".visual-review-shotimg{display:block;width:auto;max-width:100%;" not in compact:
             raise AssertionError("VISUAL_REVIEW_UPSCALED")
@@ -56,6 +64,7 @@ def main() -> int:
                 "preview_width": preview_width,
                 "horizontal_context": "full",
                 "image_upscale_rule": "none",
+                "mask_default_state": "collapsed",
             },
             separators=(",", ":"),
         )

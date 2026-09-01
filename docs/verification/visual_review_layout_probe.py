@@ -17,7 +17,11 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from protocol_pdf_diff.visual_preview import VISUAL_REVIEW_IMAGE_CSS
+from protocol_pdf_diff.visual_preview import (
+    VISUAL_MASK_TECHNICAL_EXPLANATION,
+    VISUAL_REVIEW_IMAGE_CSS,
+    render_visual_mask_disclosure,
+)
 from protocol_pdf_diff.visual_watchdog import _compare_page_images
 
 TEST_ID = "VISUAL_REVIEW_LAYOUT_TEST"
@@ -57,9 +61,25 @@ def _check_scale() -> None:
         raise AssertionError("VISUAL_REVIEW_UPSCALED")
 
 
+def _check_disclosure() -> None:
+    html = render_visual_mask_disclosure('<img src="mask.png" alt="mask">')
+    if '<details class="visual-mask-detail">' not in html:
+        raise AssertionError("VISUAL_MASK_NOT_COLLAPSED")
+    if '<details class="visual-mask-detail" open>' in html:
+        raise AssertionError("VISUAL_MASK_NOT_COLLAPSED")
+    if "像素变化定位（技术复核）" not in html:
+        raise AssertionError("VISUAL_MASK_READER_LABEL_MISSING")
+    if VISUAL_MASK_TECHNICAL_EXPLANATION not in html:
+        raise AssertionError("VISUAL_MASK_EXPLANATION_MISSING")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", choices=("crop", "scale", "all"), default="all")
+    parser.add_argument(
+        "--check",
+        choices=("crop", "scale", "disclosure", "all"),
+        default="all",
+    )
     parser.add_argument("fixtures", nargs="*")
     args = parser.parse_args()
     print(TEST_ID)
@@ -69,6 +89,8 @@ def main() -> int:
                 _check_crop(Path(value))
         if args.check in {"scale", "all"}:
             _check_scale()
+        if args.check in {"disclosure", "all"}:
+            _check_disclosure()
     except (AssertionError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print(str(exc))
         return 1

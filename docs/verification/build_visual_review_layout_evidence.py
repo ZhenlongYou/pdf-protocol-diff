@@ -88,7 +88,11 @@ def run(
 def main() -> int:
     fixture_paths = [f"docs/verification/fixtures/visual-layout-{name}.json" for name in FIXTURES]
     input_ids = [f"IN-LAYOUT-{name.upper().replace('-', '_')}" for name in FIXTURES]
-    requirements = ["REQ-VISUAL-REVIEW-SCALE-002", "REQ-VISUAL-REVIEW-CROP-003"]
+    requirements = [
+        "REQ-VISUAL-REVIEW-SCALE-002",
+        "REQ-VISUAL-REVIEW-CROP-003",
+        "REQ-VISUAL-REVIEW-DISCLOSURE-004",
+    ]
     package_paths = sorted((ROOT / "src" / "protocol_pdf_diff").glob("*.py"))
     source_ids = {
         "visual_preview.py": "SRC-VISUAL-PREVIEW",
@@ -170,6 +174,22 @@ def main() -> int:
             contains=["VISUAL_REVIEW_LAYOUT_TEST", "VISUAL_REVIEW_LAYOUT_OK"],
         ),
         run(
+            "RUN-LAYOUT-DISCLOSURE-RED",
+            "target_red",
+            ["REQ-VISUAL-REVIEW-DISCLOSURE-004"],
+            ["docs/verification/visual_review_layout_probe.py", "--check", "disclosure"],
+            source_variant={"mutation_id": "MUT-LAYOUT-LEGACY"},
+            expected_exit=1,
+            contains=["VISUAL_REVIEW_LAYOUT_TEST", "VISUAL_MASK_NOT_COLLAPSED"],
+        ),
+        run(
+            "RUN-LAYOUT-DISCLOSURE-GREEN",
+            "target_green",
+            ["REQ-VISUAL-REVIEW-DISCLOSURE-004"],
+            ["docs/verification/visual_review_layout_probe.py", "--check", "disclosure"],
+            contains=["VISUAL_REVIEW_LAYOUT_TEST", "VISUAL_REVIEW_LAYOUT_OK"],
+        ),
+        run(
             "RUN-LAYOUT-ORACLE",
             "oracle",
             requirements,
@@ -219,6 +239,14 @@ def main() -> int:
             "oracle_ids": ["ORACLE-LAYOUT-001"],
             "partitions": partition_map,
         },
+        {
+            "id": "REQ-VISUAL-REVIEW-DISCLOSURE-004",
+            "observable": "The pixel-level mask is collapsed by default, clearly labeled as technical review, and explained as non-semantic evidence.",
+            "authority": {"kind": "user", "locator": "2026-09-02 request to treat the mask as a technical intermediate rather than primary reader content"},
+            "threshold": {"comparator": "exact", "value": "details:not-open; summary=technical review; limitation text present", "unit": "HTML disclosure state", "locator": "user-visible HTML report"},
+            "oracle_ids": ["ORACLE-LAYOUT-001"],
+            "partitions": partition_map,
+        },
     ]
     pairs = [
         {
@@ -238,6 +266,15 @@ def main() -> int:
             "failure_signature": "HORIZONTAL_CONTEXT_CROPPED",
             "red_run_id": "RUN-LAYOUT-CROP-RED",
             "green_run_id": "RUN-LAYOUT-CROP-GREEN",
+        },
+        {
+            "id": "PAIR-VISUAL-REVIEW-DISCLOSURE-004",
+            "requirement_id": "REQ-VISUAL-REVIEW-DISCLOSURE-004",
+            "defect_id": "DEF-VISUAL-REVIEW-DISCLOSURE-004",
+            "test_id": "VISUAL_REVIEW_LAYOUT_TEST",
+            "failure_signature": "VISUAL_MASK_NOT_COLLAPSED",
+            "red_run_id": "RUN-LAYOUT-DISCLOSURE-RED",
+            "green_run_id": "RUN-LAYOUT-DISCLOSURE-GREEN",
         },
     ]
     ledger = identity(

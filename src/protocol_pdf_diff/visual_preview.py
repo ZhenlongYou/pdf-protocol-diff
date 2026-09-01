@@ -12,6 +12,20 @@ VISUAL_REVIEW_IMAGE_CSS = """    .visual-review-shot img {
       height: auto;
       margin: 0 auto;
     }"""
+VISUAL_MASK_TECHNICAL_EXPLANATION = (
+    "红色仅表示像素发生变化，不等同于协议参数或文字内容发生变化。"
+)
+
+
+def render_visual_mask_disclosure(diff_image_html: str) -> str:
+    """Keep pixel-level diagnostics available without leading the reader flow."""
+
+    return f"""
+          <details class="visual-mask-detail">
+            <summary>像素变化定位（技术复核）</summary>
+            <p class="change-summary">{VISUAL_MASK_TECHNICAL_EXPLANATION}</p>
+            <div class="table-shot visual-review-shot"><h4>差异掩膜</h4>{diff_image_html}</div>
+          </details>"""
 
 
 def full_width_preview_bbox(

@@ -16841,6 +16841,19 @@ class ProtocolDiffTests(unittest.TestCase):
             "    }",
             report_html,
         )
+        self.assertEqual(
+            1,
+            report_html.count('<details class="visual-mask-detail">'),
+        )
+        self.assertIn(
+            "<summary>像素变化定位（技术复核）</summary>",
+            report_html,
+        )
+        self.assertIn(
+            "红色仅表示像素发生变化，不等同于协议参数或文字内容发生变化。",
+            report_html,
+        )
+        self.assertNotIn('<details class="visual-mask-detail" open>', report_html)
         self.assertEqual(1, len(report_json["visual_review_items"]))
         self.assertIn("视觉差异项 1", desktop_summary)
 

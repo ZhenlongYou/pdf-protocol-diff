@@ -19,3 +19,12 @@ escaped_defects:
     regression_test_id: VISUAL_REVIEW_LAYOUT_TEST
     public_path_rerun_id: RUN-VISUAL-REVIEW-REAL
     state: verified
+  - id: DEF-VISUAL-REVIEW-DISCLOSURE-004
+    acceptance_id: REQ-VISUAL-REVIEW-DISCLOSURE-004
+    user_symptom: "A pixel-level diagnostic mask appeared as prominent reader content even though it is technical audit evidence."
+    discovered_via: user_usability_review
+    failure_mechanism: "The report rendered the mask as an always-visible full card without a reader-facing explanation of its limited meaning."
+    red_green_pair_id: PAIR-VISUAL-REVIEW-DISCLOSURE-004
+    regression_test_id: VISUAL_REVIEW_LAYOUT_TEST
+    public_path_rerun_id: RUN-VISUAL-REVIEW-REAL
+    state: verified

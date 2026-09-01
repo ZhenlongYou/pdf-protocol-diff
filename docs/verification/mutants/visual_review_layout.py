@@ -11,6 +11,18 @@ VISUAL_REVIEW_IMAGE_CSS = """    .visual-review-shot img {
       height: auto;
       background: #fff;
     }"""
+VISUAL_MASK_TECHNICAL_EXPLANATION = (
+    "红色仅表示像素发生变化，不等同于协议参数或文字内容发生变化。"
+)
+
+
+def render_visual_mask_disclosure(diff_image_html: str) -> str:
+    """Reproduce the reader-hostile always-expanded diagnostic block."""
+
+    return (
+        '<div class="table-shot visual-review-shot"><h4>差异掩膜</h4>'
+        f"{diff_image_html}</div>"
+    )
 
 
 def full_width_preview_bbox(

@@ -19,6 +19,8 @@ def main() -> int:
         expected_client = min(payload["source_width"], payload["container_width"])
         if payload["expected_client_width"] != expected_client:
             raise AssertionError("client width must be bounded by intrinsic width and container")
+        if payload["mask_default_open"] is not False:
+            raise AssertionError("technical mask must be collapsed by default")
     print("ORACLE_VISUAL_REVIEW_LAYOUT_OK")
     return 0
 

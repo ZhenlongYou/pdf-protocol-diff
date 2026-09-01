@@ -67,7 +67,7 @@ from .text_utils import (
     reader_symbol_mapping_key,
     truncate,
 )
-from .visual_preview import VISUAL_REVIEW_IMAGE_CSS
+from .visual_preview import VISUAL_REVIEW_IMAGE_CSS, render_visual_mask_disclosure
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -1311,6 +1311,29 @@ def _render_html(
       background: #fff;
     }}
 {VISUAL_REVIEW_IMAGE_CSS}
+    .visual-mask-detail {{
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfcfe;
+      overflow: hidden;
+    }}
+    .visual-mask-detail > summary {{
+      cursor: pointer;
+      padding: 14px 16px;
+      color: var(--muted);
+      font-weight: 700;
+      user-select: none;
+    }}
+    .visual-mask-detail[open] > summary {{
+      border-bottom: 1px solid var(--line);
+    }}
+    .visual-mask-detail > .change-summary {{
+      margin: 12px 16px;
+    }}
+    .visual-mask-detail > .table-shot {{
+      margin: 0 12px 12px;
+    }}
     .table-shot-page {{
       border-bottom: 1px solid var(--line);
     }}
@@ -1665,6 +1688,7 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
         if item.diff_image_data_uri
         else '<p class="change-summary">没有可渲染的差异掩膜。</p>'
     )
+    visual_mask_disclosure = render_visual_mask_disclosure(diff_image)
     return f"""
         <article class="table-visual-card" id="visual-review-{index}">
           <h3>V{index}. 旧页 {old_page} / 新页 {new_page}</h3>
@@ -1673,7 +1697,7 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
             <div class="table-shot visual-review-shot"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
             <div class="table-shot visual-review-shot"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
           </div>
-          <div class="table-shot visual-review-shot" style="margin-top: 12px"><h4>差异掩膜</h4>{diff_image}</div>
+{visual_mask_disclosure}
         </article>
     """
 
