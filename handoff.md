@@ -1,5 +1,44 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-02 视觉证据异常放大与横向裁切修复
+
+### 当前任务
+
+- task_id: `pdf-diff-visual-evidence-native-scale-20260902`
+- 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
+- 工作分支：`project/pdf-protocol-diff`
+- recorded_commit: `469a4dbd7d54e2106fcd215dd613e0c5ba9bd807`
+- status: ready
+- 目标：修复视觉复核图片区异常放大，以及右侧值变化导致表格左半边上下文被裁掉的问题，并用桌面四份 OIF PDF 完成真实报告闭环。
+
+### 已经完成
+
+- 根因一：共享 `.table-shot img { width: 100% }` 把本来较小的视觉证据强制撑满容器。视觉复核卡现在使用独立规则 `width: auto; max-width: 100%`，窄容器可缩小，但绝不超过图片原始像素放大。
+- 根因二：视觉哨兵按变化像素外接框同时裁剪横纵轴；当变化在表格右侧数值列时，左侧 `Characteristic / Symbol / Condition` 等解释列被删掉。现在横向始终保留整页宽度，只在纵向围绕变化行裁剪。
+- 两个用户发现的逃逸缺陷已写入权威账本，并增加变异 RED、修复 GREEN、独立几何 oracle、六类固定输入和真实 HTML 重开路径。测试有效性回执 `/Users/mac/Documents/ProtocolPdfDiffReports/visual_layout_fix_final/test-effectiveness-layout-v2.json`，SHA-256 `154a91021a29a7ef2099c9c5e7582ac758b3d81b26c4698a8b9b9315ee96e18a`，结论 `EXECUTED_EVIDENCE_PASS`。
+- 完整项目测试 `1238/1238` 通过，另有 1 项按环境条件跳过（464.327 秒）；编译、差异检查、两个 GUI smoke、定向回归、独立 oracle 和真实报告路径均通过。
+- 桌面真实 PDF 最终报告：
+  - `oif2023.235.13.pdf -> oif2023.235.14.pdf`：`/Users/mac/Documents/ProtocolPdfDiffReports/visual_layout_fix_final/oif235/protocol_diff_20260902_011249/protocol_diff_report.html`
+  - `oif2024.058.13.pdf -> oif2024.058.14.pdf`：`/Users/mac/Documents/ProtocolPdfDiffReports/visual_layout_fix_final/oif058/protocol_diff_20260902_011249/protocol_diff_report.html`
+- 真实 Chromium 测量：两份报告的旧/新视觉证据均为自然宽度 816 px、实际显示 430 px；差异掩膜自然宽度和实际显示均为 816 px，没有放大。235 组截图 `/Users/mac/Documents/ProtocolPdfDiffReports/visual_layout_fix_final/oif235-visual-review-fixed.png` 已确认第 12 页表格左侧解释列完整可见；058 组同类截图为 `oif058-visual-review-fixed.png`。
+
+### 当前状态或阻塞
+
+- 无代码阻塞。两份真实报告仍保持 `degraded/manual review`，因为视觉哨兵存在未安全配对页或失败页对；本次只修复证据展示完整性，不能把报告改写为“自动确认全部差异”。
+- 根据项目 AGENTS 约束，本轮未启动独立 reviewer agent；用户未明确请求代理复审。已执行主代理多轴代码检查、完整套件、变异检测、独立 oracle 和真实浏览器视觉验收。
+
+### 下一步计划
+
+1. 推送 `project/pdf-protocol-diff`，快进同步 `main`，并复核远端 exact OID。
+2. 后续若希望差异掩膜更紧凑，可按连通区域拆成多张“保留整行横向上下文”的卡片；不得再次裁掉左侧解释列或把图片放大超过自然尺寸。
+
+### 不要再踩的坑
+
+- `.table-shot` 同时服务普通表格和视觉复核证据，不能用一个 `width: 100%` 规则覆盖两种尺寸语义。
+- 右侧数值列的差异没有左侧行名就不可解释；视觉复核截图必须保留整页横向上下文。
+- 浏览器中“看起来合适”不足以验收，要同时核对 `naturalWidth` 与 `clientWidth`，并实际查看完整表格左右边界。
+- 修复报告展示不等于提升识别覆盖率；`degraded/manual review` 边界必须保留。
+
 ## 2026-09-02 视觉差异掩膜误导修复与桌面 PDF 闭环
 
 ### 当前任务
