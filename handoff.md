@@ -1,5 +1,38 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-02 差异掩膜改为读者层默认折叠
+
+### 当前任务
+
+- task_id: `pdf-diff-reader-collapse-visual-mask-20260902`
+- 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
+- 工作分支：`project/pdf-protocol-diff`
+- recorded_commit: `98798af38c7b3635d3b50a3b0fab0f2b5e41b949`
+- status: ready
+- 目标：保留像素掩膜的审计价值，但不再让它作为普通读者的主要内容直接展开。
+
+### 已经完成
+
+- 旧/新协议原图继续直接展示；差异掩膜改为原生 `<details>` 折叠控件，默认关闭，标题为“像素变化定位（技术复核）”。
+- 展开后明确提示：“红色仅表示像素发生变化，不等同于协议参数或文字内容发生变化。”避免把像素变化误读为协议参数变化。
+- 读者披露层级已加入用户逃逸缺陷账本、变异 RED、修复 GREEN、独立 oracle、六类固定输入和真实报告重开验证。回执 `/Users/mac/Documents/ProtocolPdfDiffReports/visual_mask_reader_collapse_evidence/test-effectiveness-layout-v2.json`，SHA-256 `cc1e054d24b399349602cd946c12596b7f3c7c6a5db4c4c4260cd2f49b1af63f`，结论 `EXECUTED_EVIDENCE_PASS`。
+- 完整项目测试 `1238/1238` 通过，另有 1 项按环境条件跳过（465.101 秒）；两个 GUI smoke、编译和差异检查通过。
+- 桌面真实 PDF 最终报告：
+  - 235 组：`/Users/mac/Documents/ProtocolPdfDiffReports/visual_mask_reader_collapse/oif235/protocol_diff_20260902_013034/protocol_diff_report.html`
+  - 058 组：`/Users/mac/Documents/ProtocolPdfDiffReports/visual_mask_reader_collapse/oif058/protocol_diff_20260902_013033/protocol_diff_report.html`
+- 真实 Chromium 初始状态：1 个技术折叠项、0 个展开项、2 张旧/新原图可见、0 张掩膜可见；点击后 1 张掩膜可见且限制说明完整。折叠截图为 `/Users/mac/Documents/ProtocolPdfDiffReports/visual_mask_reader_collapse/oif235-mask-collapsed.png`。
+
+### 当前状态或阻塞
+
+- 无功能阻塞。报告仍为 `degraded/manual review`，折叠只改变阅读层级，不改变识别覆盖率或审计事实。
+- 独立 reviewer agent 未运行：项目 AGENTS 只允许在用户明确请求时启动 reviewer agent。本轮已用完整测试、变异检测、独立 oracle 和真实浏览器路径完成主代理验收。
+
+### 不要再踩的坑
+
+- 像素掩膜是诊断证据，不应默认占据普通读者的主阅读流。
+- 折叠不能等于删除；技术审核人员必须仍可展开并看到原始掩膜与含义边界。
+- 不得把“红色像素”描述为“协议参数已变化”；语义结论必须来自正文、表格或公式证据。
+
 ## 2026-09-02 视觉证据异常放大与横向裁切修复
 
 ### 当前任务
