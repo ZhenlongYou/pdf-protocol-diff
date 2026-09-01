@@ -7,8 +7,10 @@ reports are produced, and chapter/section changes are classified.
 
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -106,7 +108,7 @@ from protocol_pdf_diff.venv_bootstrap import (  # 验证 GUI/命令行入口会�
     reexec_into_project_venv,
     should_reexec_into_project_venv,
 )
-from protocol_pdf_diff.visual_watchdog import detect_visual_review_items
+from protocol_pdf_diff.visual_watchdog import _compare_page_images, detect_visual_review_items
 
 OIF_OLD_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.11.pdf")  # 真实回归样本旧版路径；文件不存在时测试会跳过，避免影响 CI。
 OIF_NEW_SAMPLE = Path("/Users/mac/Downloads/oif2024.058.13.pdf")  # 真实回归样本新版路径；用于验证用户反馈的 OIF 表格差异。
@@ -16827,6 +16829,30 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("图形变化未被文字、表格或公式差异覆盖", report_html)
         self.assertEqual(1, len(report_json["visual_review_items"]))
         self.assertIn("视觉差异项 1", desktop_summary)
+
+    def test_visual_watchdog_diff_mask_does_not_draw_one_union_box_around_distant_changes(self) -> None:
+        """The preview must not mark unchanged pixels between distant visual deltas."""
+
+        old_image = Image.new("RGB", (100, 100), "white")
+        new_image = Image.new("RGB", (100, 100), "white")
+        new_image.paste((0, 0, 0), (10, 10, 20, 20))
+        new_image.paste((0, 0, 0), (80, 80, 90, 90))
+
+        item = _compare_page_images(
+            old_image,
+            new_image,
+            old_page_number=1,
+            new_page_number=1,
+            alignment_method="same-page-text",
+        )
+
+        self.assertIsNotNone(item)
+        assert item is not None and item.diff_image_data_uri is not None
+        encoded = item.diff_image_data_uri.split(",", 1)[1]
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as preview:
+            rendered = preview.convert("RGB")
+            self.assertEqual((220, 38, 38), rendered.getpixel((15, 15)))
+            self.assertEqual((255, 255, 255), rendered.getpixel((50, 10)))
 
     def test_visual_watchdog_aligns_exact_text_pages_after_an_inserted_page(self) -> None:
         """A page insertion must not make the visual watchdog compare unrelated pages."""

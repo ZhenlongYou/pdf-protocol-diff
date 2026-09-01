@@ -18,7 +18,7 @@ from typing import BinaryIO
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from .models import (
     DiffResult,
@@ -30,6 +30,7 @@ from .models import (
     VisualWatchdogAudit,
 )
 from .text_utils import compact_inline
+from .visual_preview import render_material_diff_preview
 
 VISUAL_RENDER_DPI = 96
 VISUAL_PIXEL_DELTA_THRESHOLD = 28
@@ -379,7 +380,7 @@ def _compare_page_images(
     ys, xs = np.nonzero(material_mask)
     diff_bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     preview_bbox = _expanded_bbox(diff_bbox, old_canvas.size)
-    diff_preview = _diff_preview(old_canvas, material_mask, diff_bbox).crop(preview_bbox)
+    diff_preview = render_material_diff_preview(old_canvas, material_mask).crop(preview_bbox)
     return VisualReviewItem(
         old_page_number=old_page_number,
         new_page_number=new_page_number,
@@ -452,21 +453,6 @@ def _same_size_canvases(
         return canvas
 
     return place(old_image), place(new_image)
-
-
-def _diff_preview(
-    old_image: Image.Image,
-    mask: np.ndarray,
-    diff_bbox: tuple[int, int, int, int],
-) -> Image.Image:
-    """Overlay material delta pixels and one bounding box on a dimmed old page."""
-
-    base = np.asarray(old_image, dtype=np.uint8)
-    dimmed = (base.astype(np.float32) * 0.45 + 255.0 * 0.55).astype(np.uint8)
-    dimmed[mask.astype(bool)] = np.array([220, 38, 38], dtype=np.uint8)
-    preview = Image.fromarray(dimmed, mode="RGB")
-    ImageDraw.Draw(preview).rectangle(diff_bbox, outline=(185, 28, 28), width=3)
-    return preview
 
 
 def _image_data_uri(image: Image.Image, *, image_format: str) -> str:
