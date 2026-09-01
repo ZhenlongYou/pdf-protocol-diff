@@ -1,5 +1,42 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-02 视觉差异掩膜误导修复与桌面 PDF 闭环
+
+### 当前任务
+
+- task_id: `pdf-diff-visual-mask-closed-loop-20260901`
+- 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
+- 工作分支：`project/pdf-protocol-diff`
+- 目标：修复视觉差异掩膜把分散变化用一个大红框连起来的问题，并用桌面四份 OIF PDF 通过当前 WebView GUI 完成两组真实比较。
+
+### 已经完成
+
+- 根因已定位：`diff_bbox` 本应只用于裁剪上下文，但旧预览同时把它画成外接红框，导致分散像素变化之间的未变化表格内容也被圈入。真实 PDF 中 `1000/1.0/30/80/1.25/11.8/0.4/0.5` 的品红色变黑色是实际样式变化，不是页配对错误。
+- 预览现在仅将材料变化掩膜像素标为红色；外接框仍只用于裁剪。新增分散变化回归、独立像素 oracle、真实报告路径探针、六类固定输入、缺陷账本和可执行测试有效性证据。
+- 完整项目测试 `1237/1237` 通过，另有 1 项按环境条件跳过（467.102 秒）；定向回归、独立 oracle、真实报告路径、编译、`main.py --gui-smoke-test`、`gui_app.py --smoke-test` 和 `git diff --check` 均通过。
+- 可执行测试有效性回执为 `/Users/mac/Documents/ProtocolPdfDiffReports/visual_mask_fix_evidence/test-effectiveness-receipt-20260902-v2.json`，SHA-256 `5a5e148af80f1e7449c397a7562a993344dd3a3583637c451bd512d41940fbfc`，结论 `EXECUTED_EVIDENCE_PASS`。
+- 当前 WebView GUI 已从权威入口重新打开并核验，包含最近确认的深靛紫双 PDF 界面提交；本轮没有修改 GUI 文件。通过同一 GUI 生成：
+  - `oif2023.235.13.pdf -> oif2023.235.14.pdf`：`/Users/mac/Documents/ProtocolPdfDiffReports/protocol_diff_20260902_002551/protocol_diff_report.html`
+  - `oif2024.058.13.pdf -> oif2024.058.14.pdf`：`/Users/mac/Documents/ProtocolPdfDiffReports/protocol_diff_20260902_002739/protocol_diff_report.html`
+- 两组 GUI 产物都保持 `degraded/manual review`，输入 SHA-256 与视觉哨兵源哈希一致；235 组为正文 7、Table 1、视觉 1，058 组为正文 6、Table 1、视觉 2。
+
+### 当前状态或阻塞
+
+- 代码和真实入口闭环无阻塞。两份报告不得改写为“自动确认全部差异”：235 组视觉哨兵核对 7/8、失败 1、未安全配对页 10；058 组核对 9/10、失败 1、未安全配对页 6，因此仍需回到源 PDF 人工复核。
+- 独立 reviewer agent 未运行：当前任务未获得用户对 reviewer agent 的显式授权；已执行主代理多轴代码审查、独立 oracle、变异检测和完整测试。
+
+### 下一步计划
+
+1. 交付当前修复提交、两份 GUI 报告和测试有效性回执。
+2. 若继续提升视觉审阅体验，可按连通区域生成多个局部卡片，但不能把多个区域再画成一个联合边框。
+
+### 不要再踩的坑
+
+- `diff_bbox` 可以决定裁剪范围，不能作为差异覆盖层；覆盖层只能来自材料变化掩膜。
+- 文本相同不等于视觉相同。颜色、字重或图形变化应保留在视觉复核区，但不能扩大到未变化像素。
+- GUI 与 HTML 报告是两套界面；核对“是否旧版”时必须检查权威入口、包含的 UI 提交和本轮实际改动文件，不能仅凭报告页外观判断。
+- 真实 OIF 全文报告中的 `degraded`、失败页对和未安全配对页必须保留，不得用绿色测试替代人工复核边界。
+
 ## 2026-08-31 识别效率优化复盘文档
 
 ### 当前任务
