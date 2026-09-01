@@ -7,6 +7,8 @@
 - task_id: `pdf-diff-visual-mask-closed-loop-20260901`
 - 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`
 - 工作分支：`project/pdf-protocol-diff`
+- recorded_commit: `bc1ee2ad3b66501fb447890a8d30ee9606b949df`
+- status: ready
 - 目标：修复视觉差异掩膜把分散变化用一个大红框连起来的问题，并用桌面四份 OIF PDF 通过当前 WebView GUI 完成两组真实比较。
 
 ### 已经完成
