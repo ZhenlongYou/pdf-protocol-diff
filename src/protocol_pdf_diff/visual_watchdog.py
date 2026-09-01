@@ -30,7 +30,7 @@ from .models import (
     VisualWatchdogAudit,
 )
 from .text_utils import compact_inline
-from .visual_preview import render_material_diff_preview
+from .visual_preview import full_width_preview_bbox, render_material_diff_preview
 
 VISUAL_RENDER_DPI = 96
 VISUAL_PIXEL_DELTA_THRESHOLD = 28
@@ -379,7 +379,11 @@ def _compare_page_images(
 
     ys, xs = np.nonzero(material_mask)
     diff_bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
-    preview_bbox = _expanded_bbox(diff_bbox, old_canvas.size)
+    preview_bbox = full_width_preview_bbox(
+        diff_bbox,
+        old_canvas.size,
+        padding=VISUAL_PREVIEW_PADDING,
+    )
     diff_preview = render_material_diff_preview(old_canvas, material_mask).crop(preview_bbox)
     return VisualReviewItem(
         old_page_number=old_page_number,
@@ -420,22 +424,6 @@ def _clear_excluded_regions(
         lower = max(0, min(image_height, int(np.ceil((bottom - page_top) / page_height * image_height))))
         if right > left and lower > upper:
             mask[upper:lower, left:right] = 0
-
-
-def _expanded_bbox(
-    bbox: tuple[int, int, int, int],
-    image_size: tuple[int, int],
-) -> tuple[int, int, int, int]:
-    """Add bounded local context so standalone evidence stays compact and readable."""
-
-    left, top, right, bottom = bbox
-    width, height = image_size
-    return (
-        max(0, left - VISUAL_PREVIEW_PADDING),
-        max(0, top - VISUAL_PREVIEW_PADDING),
-        min(width, right + VISUAL_PREVIEW_PADDING),
-        min(height, bottom + VISUAL_PREVIEW_PADDING),
-    )
 
 
 def _same_size_canvases(

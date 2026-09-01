@@ -1,4 +1,4 @@
-"""Render conservative visual-difference evidence for offline reports."""
+"""Frozen pre-fix visual-review layout policy for RED evidence runs."""
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ from PIL import Image
 
 VISUAL_REVIEW_IMAGE_CSS = """    .visual-review-shot img {
       display: block;
-      width: auto;
-      max-width: 100%;
+      width: 100%;
       height: auto;
-      margin: 0 auto;
+      background: #fff;
     }"""
 
 
@@ -20,20 +19,20 @@ def full_width_preview_bbox(
     *,
     padding: int,
 ) -> tuple[int, int, int, int]:
-    """Keep row labels by cropping visual evidence only in the vertical axis."""
+    """Reproduce the escaped defect by cropping both axes around the change."""
 
-    _, top, _, bottom = bbox
+    left, top, right, bottom = bbox
     width, height = image_size
-    return (0, max(0, top - padding), width, min(height, bottom + padding))
+    return (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(width, right + padding),
+        min(height, bottom + padding),
+    )
 
 
 def render_material_diff_preview(old_image: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Dim context and color only pixels proven to differ materially.
-
-    The caller may crop around the union of all changed pixels, but this renderer
-    deliberately adds no union outline. When changes occur on distant rows, such
-    an outline would visually claim that unchanged content between them changed.
-    """
+    """Keep mask rendering correct so layout defects are isolated."""
 
     base = np.asarray(old_image, dtype=np.uint8)
     dimmed = (base.astype(np.float32) * 0.45 + 255.0 * 0.55).astype(np.uint8)

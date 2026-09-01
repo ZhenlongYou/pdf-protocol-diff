@@ -67,6 +67,7 @@ from .text_utils import (
     reader_symbol_mapping_key,
     truncate,
 )
+from .visual_preview import VISUAL_REVIEW_IMAGE_CSS
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -1309,6 +1310,7 @@ def _render_html(
       height: auto;
       background: #fff;
     }}
+{VISUAL_REVIEW_IMAGE_CSS}
     .table-shot-page {{
       border-bottom: 1px solid var(--line);
     }}
@@ -1668,10 +1670,10 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
           <h3>V{index}. 旧页 {old_page} / 新页 {new_page}</h3>
           <p class="change-summary">{_escape(item.reason)} 像素相似度 {item.pixel_similarity:.4f}，变化比例 {item.changed_pixel_ratio:.4%}，配对依据 {_escape(item.alignment_method)}。</p>
           <div class="table-shot-grid">
-            <div class="table-shot"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
-            <div class="table-shot"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
+            <div class="table-shot visual-review-shot"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
+            <div class="table-shot visual-review-shot"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
           </div>
-          <div class="table-shot" style="margin-top: 12px"><h4>差异掩膜</h4>{diff_image}</div>
+          <div class="table-shot visual-review-shot" style="margin-top: 12px"><h4>差异掩膜</h4>{diff_image}</div>
         </article>
     """
 

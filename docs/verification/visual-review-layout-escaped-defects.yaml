@@ -1,15 +1,6 @@
 schema_version: 1
-scope_statement: "Visual watchdog report previews must mark only changed pixels, retain full horizontal context, and never enlarge evidence beyond its intrinsic width."
+scope_statement: "Visual-review reports retain full horizontal context and never enlarge evidence beyond intrinsic width."
 escaped_defects:
-  - id: DEF-VISUAL-MASK-001
-    acceptance_id: REQ-VISUAL-MASK-001
-    user_symptom: "A page with distant color changes was shown with one large red rectangle spanning unchanged table content."
-    discovered_via: user_counterexample
-    failure_mechanism: "The preview painted the union bounding box used for cropping onto the image itself."
-    red_green_pair_id: PAIR-VISUAL-MASK-001
-    regression_test_id: VISUAL_MASK_SCOPE_TEST
-    public_path_rerun_id: RUN-VISUAL-MASK-REAL
-    state: verified
   - id: DEF-VISUAL-REVIEW-SCALE-002
     acceptance_id: REQ-VISUAL-REVIEW-SCALE-002
     user_symptom: "Visual-review source crops and the difference mask were enlarged until table text appeared abnormally huge."

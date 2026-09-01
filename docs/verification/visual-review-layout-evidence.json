@@ -1,0 +1,816 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "visual-review-layout-20260902",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC-PKG-01",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-PKG-02",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "f83088459475e03ab29f517ea14f4d8139205db3151c5ee4f3a768da52841b50",
+          "size_bytes": 43349
+        },
+        {
+          "id": "SRC-PKG-03",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "09f3dd46038612a87bc74725d45293d64d9c768b0e191d93661aa695ebb9d3a3",
+          "size_bytes": 255966
+        },
+        {
+          "id": "SRC-PKG-04",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
+          "size_bytes": 65405
+        },
+        {
+          "id": "SRC-PKG-05",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-PKG-06",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "98f79dcda35b061d8e6c596516ac7a9e2e486558c54bffdc8589d3d3e81a83d6",
+          "size_bytes": 16975
+        },
+        {
+          "id": "SRC-PKG-07",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-PKG-08",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-PKG-09",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "763a091d899eabc83f5faca4dbf9113d90225965da645598b077c588c69f0d0e",
+          "size_bytes": 17456
+        },
+        {
+          "id": "SRC-PKG-10",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "925c5d5f1a0183f74bee47ad895655707efae3938f1c43dd2f8fb5e3e514f3af",
+          "size_bytes": 26115
+        },
+        {
+          "id": "SRC-PKG-11",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-PKG-12",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-PKG-13",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-PKG-14",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-PKG-15",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "63a642b1ffbd80e8bb40333e6f5a0c9330d04f1854e76a1844f83f72f0c6a93e",
+          "size_bytes": 327822
+        },
+        {
+          "id": "SRC-PKG-16",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "a8bc77f2aa65db51ae292852043f8b8c7955ad1fb644aa7d3d878c629df41f86",
+          "size_bytes": 914
+        },
+        {
+          "id": "SRC-PKG-17",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "4e8ebdde5c12dab9d6103293b8b9b9e3be153726b4c7f4881382f20878c41e0d",
+          "size_bytes": 80775
+        },
+        {
+          "id": "SRC-PKG-18",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
+          "size_bytes": 28701
+        },
+        {
+          "id": "SRC-REPORTING",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "09ac1de8d5f06a0528a0eae38bda1972b14abff08729128a8f748e029778f730",
+          "size_bytes": 507284
+        },
+        {
+          "id": "SRC-PKG-20",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-PKG-21",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "cb4a0e4b8da6c08b1816a3cf40a1983d86aee143f0b8484edc675b255bcfd0af",
+          "size_bytes": 140112
+        },
+        {
+          "id": "SRC-PKG-22",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-PKG-23",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "cbaa2a3100e739a3b247cf3566e5aef35f71d519f84471d8c2c454fb94174897",
+          "size_bytes": 39842
+        },
+        {
+          "id": "SRC-PKG-24",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
+          "size_bytes": 4116
+        },
+        {
+          "id": "SRC-PKG-25",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-VISUAL-PREVIEW",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "8df66c5b390dc68711e0751cfb74ca4f4cc1345946b2d3468f312831dd09b43c",
+          "size_bytes": 1366
+        },
+        {
+          "id": "SRC-VISUAL-WATCHDOG",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "6e70435e5b34ba13860ca45cd7bc42186521e5103a334a705599e8ce3e14e43f",
+          "size_bytes": 30172
+        },
+        {
+          "id": "SRC-PKG-28",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "4b42332d816aa71bc37c874f7f40cea0cee4e09b740e0fd75e6dccee264126a8",
+          "size_bytes": 19482
+        },
+        {
+          "id": "SRC-REAL",
+          "path": "docs/verification/visual_review_layout_real_path.py",
+          "sha256": "8a122e35ae3e9973c0f501e660903a0bc3a436e6e9149d6246f057acb9d66884",
+          "size_bytes": 2638
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-VISUAL-REVIEW-SCALE-002",
+          "observable": "Visual-review images render no wider than their intrinsic pixel width while still shrinking to narrow containers.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-02 screenshot showing abnormally enlarged visual-review evidence"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "client_width=min(natural_width, container_width)",
+            "unit": "CSS pixels",
+            "locator": "user-visible HTML report"
+          },
+          "oracle_ids": [
+            "ORACLE-LAYOUT-001"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-LAYOUT-NOMINAL"
+            ],
+            "boundary": [
+              "IN-LAYOUT-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-LAYOUT-INVALID"
+            ],
+            "adversarial": [
+              "IN-LAYOUT-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-LAYOUT-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-LAYOUT-KNOWN_FAILURE"
+            ]
+          }
+        },
+        {
+          "id": "REQ-VISUAL-REVIEW-CROP-003",
+          "observable": "Every visual-review source crop retains the complete horizontal page width so left-side table labels remain visible.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-02 screenshot showing the left half of a table missing"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "preview_width=source_page_width",
+            "unit": "pixels",
+            "locator": "decoded report evidence image"
+          },
+          "oracle_ids": [
+            "ORACLE-LAYOUT-001"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-LAYOUT-NOMINAL"
+            ],
+            "boundary": [
+              "IN-LAYOUT-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-LAYOUT-INVALID"
+            ],
+            "adversarial": [
+              "IN-LAYOUT-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-LAYOUT-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-LAYOUT-KNOWN_FAILURE"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-LAYOUT-NOMINAL",
+          "path": "docs/verification/fixtures/visual-layout-nominal.json",
+          "sha256": "9f7de7f4f4a7db9c62c720afa282bac2da465360c2860c33335900647ef3de6a",
+          "size_bytes": 173,
+          "provenance": "frozen nominal visual-layout fixture"
+        },
+        {
+          "id": "IN-LAYOUT-BOUNDARY",
+          "path": "docs/verification/fixtures/visual-layout-boundary.json",
+          "sha256": "c1bfdb489bdbe04636fcdf86c723ac43beb6752e7d2e04fdb55d2fcbdc56e1b9",
+          "size_bytes": 172,
+          "provenance": "frozen boundary visual-layout fixture"
+        },
+        {
+          "id": "IN-LAYOUT-INVALID",
+          "path": "docs/verification/fixtures/visual-layout-invalid.json",
+          "sha256": "23653811f5bbfaaed1d24dc864760a80abe5d3f33c2931d464fa15310bef06b5",
+          "size_bytes": 162,
+          "provenance": "frozen invalid visual-layout fixture"
+        },
+        {
+          "id": "IN-LAYOUT-ADVERSARIAL",
+          "path": "docs/verification/fixtures/visual-layout-adversarial.json",
+          "sha256": "bd35bce94b0a0792a3e890c72ac041b317cfbfc1ba07218661061aeb5215569b",
+          "size_bytes": 175,
+          "provenance": "frozen adversarial visual-layout fixture"
+        },
+        {
+          "id": "IN-LAYOUT-REALISTIC",
+          "path": "docs/verification/fixtures/visual-layout-realistic.json",
+          "sha256": "81e3bb6ba9090bcbbc428fe33564f18a498c5d80c7266f650c09e504b17d0d7b",
+          "size_bytes": 177,
+          "provenance": "frozen realistic visual-layout fixture"
+        },
+        {
+          "id": "IN-LAYOUT-KNOWN_FAILURE",
+          "path": "docs/verification/fixtures/visual-layout-known-failure.json",
+          "sha256": "e618b6be442ab509c59445960c0146b4ac1af246409381c65cbaf5454773a826",
+          "size_bytes": 175,
+          "provenance": "frozen known-failure visual-layout fixture"
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-LAYOUT-001",
+          "path": "docs/verification/visual_review_layout_probe.py",
+          "sha256": "4dfe56b10d95d29654b0c91d6d3b8080aa8f7174354e08e4704114c3bca2eb3a",
+          "size_bytes": 2621
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-LAYOUT-001",
+          "path": "docs/verification/visual_review_layout_oracle.py",
+          "sha256": "8ceda659d68cc51f648e25092e67d1509946cfc13810d8e4f305991776683a57",
+          "size_bytes": 962,
+          "kind": "closed_form",
+          "independence_basis": "The oracle checks fixture geometry and intrinsic-width arithmetic without importing production code.",
+          "production_source_ids": [
+            "SRC-VISUAL-PREVIEW",
+            "SRC-VISUAL-WATCHDOG",
+            "SRC-REPORTING"
+          ],
+          "validator_run_ids": [
+            "RUN-LAYOUT-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-LAYOUT-LEGACY",
+          "path": "docs/verification/mutants/visual_review_layout.py",
+          "sha256": "2b16fcf5e2d4275887fe1444842142640c33dc88a7755f5090db4ea7b5748aed",
+          "size_bytes": 1178,
+          "target_source_id": "SRC-VISUAL-PREVIEW"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-LAYOUT-REAL",
+          "path": "docs/verification/out/visual-review-layout-real-path.json",
+          "sha256": "2693bec26a85664e0657c31990ef569b639f36ace02e5129815616dfde0660bd",
+          "producer_run_id": "RUN-VISUAL-REVIEW-REAL",
+          "required": true,
+          "min_size_bytes": 1
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-LAYOUT-CROP-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LAYOUT-LEGACY"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [
+            "IN-LAYOUT-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "crop",
+            "docs/verification/fixtures/visual-layout-known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "HORIZONTAL_CONTEXT_CROPPED"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LAYOUT-CROP-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [
+            "IN-LAYOUT-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "crop",
+            "docs/verification/fixtures/visual-layout-known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LAYOUT-SCALE-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LAYOUT-LEGACY"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "scale"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_REVIEW_UPSCALED"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LAYOUT-SCALE-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "scale"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LAYOUT-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002",
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [],
+          "input_ids": [
+            "IN-LAYOUT-NOMINAL",
+            "IN-LAYOUT-BOUNDARY",
+            "IN-LAYOUT-INVALID",
+            "IN-LAYOUT-ADVERSARIAL",
+            "IN-LAYOUT-REALISTIC",
+            "IN-LAYOUT-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_oracle.py",
+            "docs/verification/fixtures/visual-layout-nominal.json",
+            "docs/verification/fixtures/visual-layout-boundary.json",
+            "docs/verification/fixtures/visual-layout-invalid.json",
+            "docs/verification/fixtures/visual-layout-adversarial.json",
+            "docs/verification/fixtures/visual-layout-realistic.json",
+            "docs/verification/fixtures/visual-layout-known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "ORACLE_VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          },
+          "oracle_ids": [
+            "ORACLE-LAYOUT-001"
+          ]
+        },
+        {
+          "id": "RUN-VISUAL-REVIEW-REAL",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002",
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [],
+          "input_ids": [
+            "IN-LAYOUT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_real_path.py"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "REAL_VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          },
+          "produces_artifact_ids": [
+            "ART-LAYOUT-REAL"
+          ],
+          "interface": "report",
+          "observable": "A generated HTML report retains full horizontal evidence and caps rendered width at intrinsic image width."
+        },
+        {
+          "id": "RUN-LAYOUT-SUITE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002",
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LAYOUT-001"
+          ],
+          "input_ids": [
+            "IN-LAYOUT-NOMINAL",
+            "IN-LAYOUT-BOUNDARY",
+            "IN-LAYOUT-INVALID",
+            "IN-LAYOUT-ADVERSARIAL",
+            "IN-LAYOUT-REALISTIC",
+            "IN-LAYOUT-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/visual_review_layout_probe.py",
+            "--check",
+            "all",
+            "docs/verification/fixtures/visual-layout-nominal.json",
+            "docs/verification/fixtures/visual-layout-boundary.json",
+            "docs/verification/fixtures/visual-layout-invalid.json",
+            "docs/verification/fixtures/visual-layout-adversarial.json",
+            "docs/verification/fixtures/visual-layout-realistic.json",
+            "docs/verification/fixtures/visual-layout-known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "VISUAL_REVIEW_LAYOUT_TEST",
+                "VISUAL_REVIEW_LAYOUT_OK"
+              ],
+              "excludes": [
+                "0 tests",
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "ModuleNotFoundError",
+                "Traceback"
+              ]
+            }
+          }
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-VISUAL-REVIEW-SCALE-002",
+          "requirement_id": "REQ-VISUAL-REVIEW-SCALE-002",
+          "defect_id": "DEF-VISUAL-REVIEW-SCALE-002",
+          "test_id": "VISUAL_REVIEW_LAYOUT_TEST",
+          "failure_signature": "VISUAL_REVIEW_UPSCALED",
+          "red_run_id": "RUN-LAYOUT-SCALE-RED",
+          "green_run_id": "RUN-LAYOUT-SCALE-GREEN"
+        },
+        {
+          "id": "PAIR-VISUAL-REVIEW-CROP-003",
+          "requirement_id": "REQ-VISUAL-REVIEW-CROP-003",
+          "defect_id": "DEF-VISUAL-REVIEW-CROP-003",
+          "test_id": "VISUAL_REVIEW_LAYOUT_TEST",
+          "failure_signature": "HORIZONTAL_CONTEXT_CROPPED",
+          "red_run_id": "RUN-LAYOUT-CROP-RED",
+          "green_run_id": "RUN-LAYOUT-CROP-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-VISUAL-REVIEW-LAYOUT",
+          "requirement_ids": [
+            "REQ-VISUAL-REVIEW-SCALE-002",
+            "REQ-VISUAL-REVIEW-CROP-003"
+          ],
+          "unit": "visual-layout fixture case",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-LAYOUT-NOMINAL",
+            "IN-LAYOUT-BOUNDARY",
+            "IN-LAYOUT-INVALID",
+            "IN-LAYOUT-ADVERSARIAL",
+            "IN-LAYOUT-REALISTIC",
+            "IN-LAYOUT-KNOWN_FAILURE"
+          ]
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-VISUAL-REVIEW-LAYOUT",
+          "path": "docs/verification/visual-review-layout-escaped-defects.yaml",
+          "sha256": "3d8478814eeb5a8dc6cc137503c404cd23ac7a0b11829108683b73ca10e0722d",
+          "size_bytes": 1292
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-VISUAL-REVIEW-SCALE-002",
+          "REQ-VISUAL-REVIEW-CROP-003"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-VISUAL-REVIEW-SCALE-002",
+          "PAIR-VISUAL-REVIEW-CROP-003"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-LAYOUT-001"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-VISUAL-REVIEW-SCALE-002",
+          "PAIR-VISUAL-REVIEW-CROP-003"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-VISUAL-REVIEW-LAYOUT"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-VISUAL-REVIEW-SCALE-002",
+          "REQ-VISUAL-REVIEW-CROP-003"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-VISUAL-REVIEW-LAYOUT"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-VISUAL-REVIEW-REAL"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-LAYOUT-CROP-RED",
+          "RUN-LAYOUT-CROP-GREEN",
+          "RUN-LAYOUT-SCALE-RED",
+          "RUN-LAYOUT-SCALE-GREEN",
+          "RUN-LAYOUT-ORACLE",
+          "RUN-VISUAL-REVIEW-REAL",
+          "RUN-LAYOUT-SUITE"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

@@ -16827,6 +16827,20 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertIn("视觉漏检核对", report_html)
         self.assertIn("图形变化未被文字、表格或公式差异覆盖", report_html)
+        self.assertEqual(
+            3,
+            report_html.count('class="table-shot visual-review-shot"'),
+        )
+        self.assertIn(
+            ".visual-review-shot img {\n"
+            "      display: block;\n"
+            "      width: auto;\n"
+            "      max-width: 100%;\n"
+            "      height: auto;\n"
+            "      margin: 0 auto;\n"
+            "    }",
+            report_html,
+        )
         self.assertEqual(1, len(report_json["visual_review_items"]))
         self.assertIn("视觉差异项 1", desktop_summary)
 
@@ -16853,6 +16867,28 @@ class ProtocolDiffTests(unittest.TestCase):
             rendered = preview.convert("RGB")
             self.assertEqual((220, 38, 38), rendered.getpixel((15, 15)))
             self.assertEqual((255, 255, 255), rendered.getpixel((50, 10)))
+
+    def test_visual_watchdog_preview_keeps_full_page_width_for_context(self) -> None:
+        """A right-side change must not crop away the left half of its table context."""
+
+        old_image = Image.new("RGB", (200, 100), "white")
+        new_image = Image.new("RGB", (200, 100), "white")
+        new_image.paste((0, 0, 0), (170, 40, 180, 50))
+
+        item = _compare_page_images(
+            old_image,
+            new_image,
+            old_page_number=1,
+            new_page_number=1,
+            alignment_method="same-page-text",
+        )
+
+        self.assertIsNotNone(item)
+        assert item is not None and item.old_image_data_uri is not None
+        encoded = item.old_image_data_uri.split(",", 1)[1]
+        with Image.open(io.BytesIO(base64.b64decode(encoded))) as preview:
+            self.assertEqual(200, preview.width)
+            self.assertLess(preview.height, old_image.height)
 
     def test_visual_watchdog_aligns_exact_text_pages_after_an_inserted_page(self) -> None:
         """A page insertion must not make the visual watchdog compare unrelated pages."""
