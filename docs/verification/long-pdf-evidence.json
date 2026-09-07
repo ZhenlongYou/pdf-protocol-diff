@@ -9,14 +9,14 @@
         {
           "id": "SRC-LONG-0",
           "path": "docs/verification/escaped-defects.yaml",
-          "sha256": "b6b4781d45123cf4c549972af907c6c811699815af6f1826beb7f7e1283c3944",
-          "size_bytes": 5230
+          "sha256": "969966910d08c5cde30207676dc046241d97d83d65560de934ac946873131522",
+          "size_bytes": 5787
         },
         {
           "id": "SRC-LONG-1",
           "path": "docs/verification/long_pdf_legacy_oracle.py",
-          "sha256": "79e434319ccfecfa089ee333ab9145d41459f3d4125a22c0a4601a5fa96ca0fb",
-          "size_bytes": 33867
+          "sha256": "b3055bffe1aac87f7636b5c6763e5ed8e694981da4b68257d38e4bff01e01712",
+          "size_bytes": 40763
         },
         {
           "id": "SRC-LONG-2",
@@ -81,8 +81,8 @@
         {
           "id": "SRC-LONG-12",
           "path": "src/protocol_pdf_diff/figure_filters.py",
-          "sha256": "98f79dcda35b061d8e6c596516ac7a9e2e486558c54bffdc8589d3d3e81a83d6",
-          "size_bytes": 16975
+          "sha256": "527bfb8ea9b8c1e7784b864789fe0dbcd31d964c9cda648507fc54e982268f49",
+          "size_bytes": 17164
         },
         {
           "id": "SRC-LONG-13",
@@ -237,8 +237,8 @@
         {
           "id": "SRC-LONG-38",
           "path": "tests/test_long_pdf_performance.py",
-          "sha256": "0f83fcf955f8158bc3bfc7c80ad13a57d3e10fce159c6c93130744a4be3ec62d",
-          "size_bytes": 13567
+          "sha256": "a6e55ba536c6cc9bb2c9e2ccdd6564a52d95875e604ca03d8f3fb2a136878e52",
+          "size_bytes": 15402
         }
       ]
     },
@@ -344,8 +344,8 @@
         {
           "id": "IN-LONG-ADVERSARIAL",
           "path": "docs/verification/fixtures/long-pdf-adversarial.json",
-          "sha256": "b0d7373d750da7f8b23d5b8a459d68609ff701bf8b7458e04aecaa595d6afc84",
-          "size_bytes": 2394,
+          "sha256": "8fd48dc31fc63c32d44aeb43ea55024c389275ca733c5656a68bc76c599f2689",
+          "size_bytes": 2658,
           "provenance": "Frozen executable scenario selection: adversarial"
         },
         {
@@ -358,8 +358,8 @@
         {
           "id": "IN-LONG-KNOWN_FAILURE",
           "path": "docs/verification/fixtures/long-pdf-known_failure.json",
-          "sha256": "2bde6bdd29d0551c1471309ca681444c97a89ca2a2ee11ba3963c4ff71e44036",
-          "size_bytes": 1738,
+          "sha256": "bb884acf522153ccbd677e8dd940d456921fb548ce0fca3597290caea50afab4",
+          "size_bytes": 2002,
           "provenance": "Frozen executable scenario selection: known_failure"
         }
       ],
@@ -375,8 +375,8 @@
         {
           "id": "ORACLE-LONG",
           "path": "docs/verification/long_pdf_legacy_oracle.py",
-          "sha256": "79e434319ccfecfa089ee333ab9145d41459f3d4125a22c0a4601a5fa96ca0fb",
-          "size_bytes": 33867,
+          "sha256": "b3055bffe1aac87f7636b5c6763e5ed8e694981da4b68257d38e4bff01e01712",
+          "size_bytes": 40763,
           "kind": "reference_implementation",
           "independence_basis": "Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; direct standard-library difflib block comparison, separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.",
           "production_source_ids": [
@@ -385,7 +385,8 @@
             "SRC-LONG-29",
             "SRC-LONG-7",
             "SRC-LONG-35",
-            "SRC-LONG-11"
+            "SRC-LONG-11",
+            "SRC-LONG-12"
           ],
           "validator_run_ids": [
             "RUN-LONG-ORACLE"
@@ -413,6 +414,13 @@
           "sha256": "dec018606acfbd7b82baebc3b56318460992905bd3f99cdde7255b1e9bee037e",
           "size_bytes": 4063,
           "target_source_id": "SRC-LONG-11"
+        },
+        {
+          "id": "MUT-LONG-CLEANUP",
+          "path": "work/long_pdf_evidence/mutants/cleanup.py",
+          "sha256": "48b50467cc59c9c1a498ba11826ed48e7393c94020e1d7f4da583a502924a6ac",
+          "size_bytes": 17126,
+          "target_source_id": "SRC-LONG-12"
         },
         {
           "id": "MUT-LONG-OCR",
@@ -686,6 +694,104 @@
         },
         {
           "id": "RUN-LONG-SAM-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-CLEANUP-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-CLEANUP"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-CLEANUP-GREEN",
           "role": "target_green",
           "requirement_ids": [
             "REQ-LONG-PDF-PERFORMANCE-005"
@@ -1197,6 +1303,15 @@
           "green_run_id": "RUN-LONG-SAM-GREEN"
         },
         {
+          "id": "PAIR-LONG-CLEANUP",
+          "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "defect_id": "DEF-LONG-CLEANUP",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-CLEANUP-RED",
+          "green_run_id": "RUN-LONG-CLEANUP-GREEN"
+        },
+        {
           "id": "PAIR-LONG-OCR",
           "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
           "defect_id": "DEF-LONG-OCR",
@@ -1238,8 +1353,8 @@
         {
           "id": "LEDGER-LONG",
           "path": "work/long_pdf_evidence/escaped-defects.json",
-          "sha256": "1287d1e3c3cf9106d05db76ab4515948930e590e759f202e98806cb3b9b63255",
-          "size_bytes": 3305
+          "sha256": "dd8f49337997cbd003b32067a180329a8eb49772a38fc3b6a2bdb71bcad1fff8",
+          "size_bytes": 3933
         }
       ]
     },
@@ -1255,6 +1370,7 @@
           "PAIR-LONG-NUMBERS",
           "PAIR-LONG-LCS",
           "PAIR-LONG-SAM",
+          "PAIR-LONG-CLEANUP",
           "PAIR-LONG-OCR",
           "PAIR-LONG-CANCEL"
         ]
@@ -1269,6 +1385,7 @@
           "PAIR-LONG-NUMBERS",
           "PAIR-LONG-LCS",
           "PAIR-LONG-SAM",
+          "PAIR-LONG-CLEANUP",
           "PAIR-LONG-OCR",
           "PAIR-LONG-CANCEL"
         ],
@@ -1301,6 +1418,8 @@
           "RUN-LONG-LCS-GREEN",
           "RUN-LONG-SAM-RED",
           "RUN-LONG-SAM-GREEN",
+          "RUN-LONG-CLEANUP-RED",
+          "RUN-LONG-CLEANUP-GREEN",
           "RUN-LONG-OCR-RED",
           "RUN-LONG-OCR-GREEN",
           "RUN-LONG-CANCEL-RED",

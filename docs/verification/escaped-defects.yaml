@@ -82,3 +82,12 @@ escaped_defects:
     regression_test_id: LONG_PDF_BEHAVIOR_TEST
     public_path_rerun_id: RUN-LONG-REAL
     state: verified
+  - id: DEF-LONG-CLEANUP
+    acceptance_id: REQ-LONG-PDF-PERFORMANCE-005
+    user_symptom: "Full OIF report generation repeatedly cleaned the same coordinate-owned table text for visible and audit views."
+    discovered_via: real_full_document_profile
+    failure_mechanism: "Unconsumed Figure prose-boundary scans ran on the Table-only path; pure canonicalization and prefix/suffix results were recomputed."
+    red_green_pair_id: PAIR-LONG-CLEANUP
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
+    state: verified

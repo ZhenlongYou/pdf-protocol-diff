@@ -822,3 +822,182 @@ def section_match_oracle():
     function = types.FunctionType(_match_sections.__code__, dict(vars(compare)))
     function.__kwdefaults__ = _match_sections.__kwdefaults__
     return function
+
+
+def _strip_one_coordinate_figure_prefix(
+    value: str,
+    source_text: str,
+    *,
+    allow_interleaved_prefix: bool,
+) -> str:
+    """Strip a whole value or one prefix using exactly one Figure crop."""
+
+    observed = _figure_text_tokens(value)
+    source = _figure_text_tokens(source_text)
+    if not observed or not source:
+        return value
+    source_canonical = _figure_text_canonical(source_text)
+    first_token = observed[0][0]
+    if (
+        _coordinate_value_starts_with_prose(value)
+        and (
+            bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(first_token))
+            or bool(re.fullmatch(r"\d+[.)]?", first_token))
+        )
+    ):
+        return value  # 明确句首或编号步骤优先；后文与 Figure 重词不能裁掉真实主语。
+    # A Figure label wall can be followed by a complete sentence.  Prove and
+    # remove that coordinate-owned prefix before applying the whole-value
+    # sentence guard; otherwise the later verb in the sentence protects the
+    # labels too (for example ``Time Undershoot VMA 1 All ... are ...``).
+    prose_start = _coordinate_mixed_prose_start(value, observed)
+    if allow_interleaved_prefix and prose_start is not None:
+        # A bare numeric Figure label immediately before ``All ...`` can look
+        # like a numbered prose item.  Consume it only when the same crop owns
+        # that number; punctuation-bearing ``2. Capture ...`` remains prose.
+        numeric_label = re.match(r"(\d+)\s+(?=[A-Z])", value[prose_start:])
+        if numeric_label is not None:
+            candidate_start = prose_start + numeric_label.end()
+            candidate_prefix = value[:candidate_start]
+            candidate_canonical = _figure_text_canonical(candidate_prefix)
+            candidate_coverage = sum(
+                (Counter(candidate_canonical) & Counter(source_canonical)).values()
+            ) / max(len(candidate_canonical), 1)
+            if candidate_coverage >= 0.94:
+                prose_start = candidate_start
+        prefix = value[:prose_start]
+        prefix_canonical = _figure_text_canonical(prefix)
+        prefix_coverage = sum(
+            (Counter(prefix_canonical) & Counter(source_canonical)).values()
+        ) / max(len(prefix_canonical), 1)
+        if (
+            len(prefix_canonical) >= 8
+            and prefix_coverage >= 0.94
+            and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+        ):
+            return value[prose_start:]
+    if _coordinate_value_starts_with_prose(value):
+        return value
+    observed_canonical = _figure_text_canonical(value)
+    if (
+        len(observed_canonical) >= 8
+        and observed_canonical in source_canonical
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+    character_coverage = sum(
+        (Counter(observed_canonical) & Counter(source_canonical)).values()
+    ) / max(len(observed_canonical), 1)
+    sequence_similarity = SequenceMatcher(
+        None,
+        observed_canonical,
+        source_canonical,
+        autojunk=False,
+    ).ratio()
+    observed_letters = "".join(
+        character for character in observed_canonical if character.isalpha()
+    )
+    source_letters = "".join(
+        character for character in source_canonical if character.isalpha()
+    )
+    if (
+        len(observed_canonical) >= 20
+        and character_coverage >= 0.94
+        and sequence_similarity >= 0.65
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+    if (
+        len(observed_letters) >= 6
+        and observed_letters in source_letters
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    source_counts = Counter(token for token, _start, _end in source)
+    observed_counts = Counter(token for token, _start, _end in observed)
+    matched_count = sum(
+        min(count, source_counts[token])
+        for token, count in observed_counts.items()
+    )
+    if (
+        matched_count >= 3
+        and matched_count / len(observed) >= 0.86
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    # Table headers and diagram labels may be emitted column-first while the
+    # bbox source is row-first (for example ``gDC2 gDC Location ...`` versus
+    # ``g g Location DC2 DC ...``).  Near-complete character ownership by one
+    # crop is sufficient only for a non-sentence fragment; raw audit data stays
+    # untouched even when the reader layer omits it.
+    if (
+        len(observed_canonical) >= 4
+        and character_coverage >= 0.98
+        and len(source_canonical) <= len(observed_canonical) * 8
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    # A lone Figure/Table label such as ``TP1a`` or ``HCB`` is not a useful
+    # prose delta when an individual coordinate crop contains that exact token.
+    if (
+        len(observed) <= 2
+        and matched_count == len(observed)
+        and len(source) >= 5
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
+    ):
+        return ""
+
+    # PDF text layers may split a reversed axis label into single letters while
+    # the section assembler joins them again.  Whitespace-insensitive character
+    # containment restores that same-crop proof without protocol vocabulary.
+    for token_index in range(len(observed) - 1, -1, -1):
+        _token, _start, end = observed[token_index]
+        prefix = value[:end]
+        prefix_canonical = _figure_text_canonical(prefix)
+        prefix_coverage = sum(
+            (
+                Counter(prefix_canonical)
+                & Counter(source_canonical)
+            ).values()
+        ) / max(len(prefix_canonical), 1)
+        if (
+            token_index + 1 < 3
+            or len(prefix_canonical) < 8
+            or (
+                prefix_canonical not in source_canonical
+                and (
+                    not allow_interleaved_prefix
+                    or prefix_coverage < 0.98
+                )
+            )
+            or _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+        ):
+            continue
+        return value[end:]
+
+    remaining = source_counts.copy()
+    prefix_count = 0
+    prefix_end = 0
+    for token, _start, end in observed:
+        if remaining[token] <= 0:
+            break
+        remaining[token] -= 1
+        prefix_count += 1
+        prefix_end = end
+    prefix = value[:prefix_end]
+    if (
+        prefix_count >= 5
+        and prefix_count / len(observed) >= 0.25
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
+    ):
+        return value[prefix_end:]
+    return value
+
+def coordinate_prefix_oracle():
+    from protocol_pdf_diff import figure_filters
+    function = types.FunctionType(_strip_one_coordinate_figure_prefix.__code__, dict(vars(figure_filters)))
+    function.__kwdefaults__ = _strip_one_coordinate_figure_prefix.__kwdefaults__
+    return function

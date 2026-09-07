@@ -164,6 +164,29 @@ class LongPdfPerformanceTests(unittest.TestCase):
             self.assertEqual(2.0 * 12000 / 24001, exact_match.ratio("a" * 12000, "a" * 12000 + "b"))
             self.assertEqual(1.0, exact_match.ratio("a" * 12000, "a" * 12000))
 
+    def test_coordinate_cleanup_preserves_frozen_results_without_unused_scan(self):
+        from protocol_pdf_diff import figure_filters as filters
+        from docs.verification.long_pdf_legacy_oracle import coordinate_prefix_oracle
+        historical = coordinate_prefix_oracle()
+        values = ["", "Time Undershoot VMA 1 All receivers shall support this mode.",
+                  "2. Capture the specified waveform.", "Figure 3. Alpha Beta Gamma Delta",
+                  "普通正文必须保留。", "The receiver shall use alpha mode.",
+                  "A B C D E F G H I J K L", "12.5 mV 2 GHz 0.3 UI"]
+        for value in values:
+            for source in values:
+                for allowed in (False, True):
+                    self.assertEqual(historical(value, source, allow_interleaved_prefix=allowed),
+                                     filters._strip_one_coordinate_figure_prefix(value, source, allow_interleaved_prefix=allowed))
+        with patch.object(filters, "_coordinate_mixed_prose_start", side_effect=AssertionError("unused figure scan")):
+            filters._strip_one_coordinate_figure_prefix("Alpha Beta Gamma Delta", "other source", allow_interleaved_prefix=False)
+        # Visible and audit views reuse only immutable string results, inside
+        # the same comparison. List-token outputs are deliberately not cached.
+        with comparison_scope(), patch.object(filters, "_figure_text_tokens", wraps=filters._figure_text_tokens) as tokenize:
+            first = filters._strip_one_coordinate_figure_prefix(values[1], values[3], allow_interleaved_prefix=True)
+            calls = tokenize.call_count
+            self.assertEqual(first, filters._strip_one_coordinate_figure_prefix(values[1], values[3], allow_interleaved_prefix=True))
+            self.assertEqual(calls, tokenize.call_count)
+
     def test_fallback_preserves_matches_and_reuses_filtered_bodies(self):
         from protocol_pdf_diff.models import Section, DiffOptions
         def section(index, side, word):

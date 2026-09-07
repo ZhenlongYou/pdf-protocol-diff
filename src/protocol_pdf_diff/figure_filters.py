@@ -11,6 +11,7 @@ import unicodedata
 from collections import Counter
 from difflib import SequenceMatcher
 
+from .comparison_session import memoize_comparison
 from .pdf_extract import (
     _figure_caption_is_identifier_only,
     _looks_like_figure_caption,
@@ -145,6 +146,7 @@ def strip_coordinate_owned_visual_fragment(
     return remaining if changed else compact
 
 
+@memoize_comparison(maxsize=256)
 def _strip_one_coordinate_figure_prefix(
     value: str,
     source_text: str,
@@ -171,7 +173,7 @@ def _strip_one_coordinate_figure_prefix(
     # remove that coordinate-owned prefix before applying the whole-value
     # sentence guard; otherwise the later verb in the sentence protects the
     # labels too (for example ``Time Undershoot VMA 1 All ... are ...``).
-    prose_start = _coordinate_mixed_prose_start(value, observed)
+    prose_start = _coordinate_mixed_prose_start(value, observed) if allow_interleaved_prefix else None
     if allow_interleaved_prefix and prose_start is not None:
         # A bare numeric Figure label immediately before ``All ...`` can look
         # like a numbered prose item.  Consume it only when the same crop owns
@@ -318,6 +320,7 @@ def _strip_one_coordinate_figure_prefix(
     return value
 
 
+@memoize_comparison(maxsize=256)
 def _strip_one_coordinate_visual_suffix(value: str, source_text: str) -> str:
     """Strip a non-prose tail proven by one crop after a sentence boundary."""
 
@@ -359,6 +362,7 @@ def _figure_text_tokens(value: str) -> list[tuple[str, int, int]]:
     return tokens
 
 
+@memoize_comparison(maxsize=1024)
 def _figure_text_canonical(value: str) -> str:
     """Normalize spacing-fragmented Figure text for same-crop containment."""
 
