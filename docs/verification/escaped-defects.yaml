@@ -91,3 +91,27 @@ escaped_defects:
     regression_test_id: LONG_PDF_BEHAVIOR_TEST
     public_path_rerun_id: RUN-LONG-REAL
     state: verified
+  - id: DEF-OIF-SOURCE-SCALE
+    acceptance_id: REQ-OIF-SOURCE-SCALE
+    user_symptom: "OIF p561 HCB 72x72 image is stretched across a report card."
+    discovered_via: user_counterexample_20260907
+    failure_mechanism: "Shared table-shot width 100 percent enlarges small source crops."
+    state: open
+  - id: DEF-OIF-STRUCTURE-MATCH
+    acceptance_id: REQ-OIF-STRUCTURE-MATCH
+    user_symptom: "Both versions contain p351-352 and p381 text but report claims addition/deletion."
+    discovered_via: user_counterexample_20260907
+    failure_mechanism: "Weak heading contaminates hierarchy; unmatched becomes confirmed added/deleted without uncertainty propagation."
+    state: open
+  - id: DEF-OIF-REGION-OWNERSHIP
+    acceptance_id: REQ-OIF-REGION-OWNERSHIP
+    user_symptom: "Old p550 table appears as 16 strips; p382 line numbers and blank space are highlighted."
+    discovered_via: user_counterexample_20260907
+    failure_mechanism: "Ambiguous page furniture becomes prose evidence; crop expansion crosses another region owner."
+    state: open
+  - id: DEF-OIF-FIGURE-AS-TABLE
+    acceptance_id: REQ-OIF-FIGURE-AS-TABLE
+    user_symptom: "HCB exists in both versions but is reported as a removed table."
+    discovered_via: user_counterexample_20260907
+    failure_mechanism: "Asymmetric figure/table classification is treated as semantic absence."
+    state: open

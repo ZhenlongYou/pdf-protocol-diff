@@ -1,5 +1,23 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-07 OIF 准确性方案分析（用户要求先分析，停止补丁交付）
+
+- task_id: `pdf-diff-small-image-20260907`
+- owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`
+- status: design_pending
+- recorded_commit: `44b875b90e7168a5134813622c311355cfe9588a`
+- 最新用户明确要求：先从整体方案分析为何错配，不能继续缝补。本阶段仅交付诊断与重构方向；未实施准确性修复。生产代码已恢复上述基线，之前已完成的性能/终止功能保持原样。
+- 曾临时修正 `.table-shot img` 的 width:100% 并运行 1261 项测试（1 skip）；用户转向方案分析后该未交付修改与3个验证文件已移到外部 `performance_fix_20260907/paused_layout_candidate/`，仓库不留代码补丁。`protocol_diff_report_readable.html` 只是样式候选，识别结果未修复，不应作为新准确性报告发布。原始报告保留。
+- 反例一：旧5.2 p561/T2 为 Figure25-9 内的 HCB 小框（72x72像素），p345/T1 为 Figure16-10 内同类框（66x68）。新版p561仍有HCB，报告却标删除。图框被当表格与CSS强制铺满共同放大；仅改尺寸不解决错误删除。
+- 反例二：双方p351/352同有16.4.1.1及16.A正文；旧、新章节祖先被错误变成 `Appendix 2 > 11 > 16.4.1 > 16.4.1.1` 与 `Appendix 2 > 14 > (1) > 16.4.1.1`，边界也分别吞到p352/p354。p127正文跨行 `Appendix 2.E.7, of ...` 被当标题，污染后续栈；16.A与第18章真实标题被上下文规则拒绝。共同短句 `Refer to Section 3.2.8.`（双方p381）所在17.3.2.7同样吞入18章并误报增删。
+- 反例三：旧版656/656页保留ambiguous行号；新版671/685页去除行号、14页不确定。旧p381每个1..48行号后有独立U+F020字形，破坏空白基线证明；诊断内仅去掉这些字形可通过，p382/550本页本来可通过但被全局80%门槛撤销。两版都是1..49，不能改成48或简单下调阈值。原始材料应保留，但不能因此授权确定差异。
+- 反例四：p550双方Table25-7均被完整检测。行号在表格左侧成为正文高亮锚点；每个锚点被表格阻断而独立分簇，再扩宽至页面64%，最终穿过表格生成16个细条。问题是区域归属与扩宽后的不相交约束缺失。
+- 结论门禁缺口：compare.py `_match_sections` 将所有剩余项设为unmatched，compare_sections直接变added/deleted；quality仅全局degraded且编号路径非空就计稳定章节；截图层不继承ambiguous和匹配未解决状态，允许单数字红绿标色。测试绿和性能前后字节相同只能证明原行为保持，不能认证全OIF准确性。
+- 建议整体改造顺序：统一不可变页/词/区域来源与归属及不确定状态；把原文编号、推断章节树和匹配身份分开，约束弱标题的远距离污染；分层匹配支持拆分/合并/移动并保留失败原因，未匹配默认待定位而非增删；逐条结论证据门禁和报告纯展示，按完整归属区域裁剪，不再从字符串重新猜所有权。复用已有PDF/OCR后端、坐标数据、取消/进度和性能优化，不先整体重写。
+- 验收先冻结用户反例与人工真值，另外保留真实增删、参数变化、合法小表、跨页/跨章移动的独立样本；分别量化误报、漏报、未解决覆盖与资源耗时，不能通过隐藏不确定结果假装准确率提高。
+- 证据：外部根 `/Users/mac/Documents/ProtocolPdfDiffReports/performance_fix_20260907`；匹配追踪 `accuracy_diagnosis_matching/matching_diagnosis_evidence.json`；原报告在 `full_final/protocol_diff_20260907_220704_fe2adf6f8e1a4851b7eba2579a8832bc/`；原始提取在相邻 `performance_audit_20260907/old.pickle,new.pickle`。独立只读诊断由 `diagnose_oif_matching`、`diagnose_oif_prose_crops`、`inspect_oif_hcb` 完成。浏览器file协议禁止访问报告，未绕过；本轮未完成全报告浏览器重验，任务浏览器已关闭。
+- 恢复：本阶段只提交分析handoff/开放缺陷账本到 `project/pdf-protocol-diff` 并取消实施claim，main保持44b875。后续在此持久分支上依据终态claim和确切远端OID恢复同范围任务，再按方案定义验收与实施；不得将本次分析称为修复完成。
+
 ## 2026-09-07 长 PDF 性能与终止
 
 - task_id: `pdf-diff-performance-cancel-20260907`
