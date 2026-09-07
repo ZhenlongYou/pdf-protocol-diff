@@ -28,8 +28,8 @@ def main():
               for path,part in zip(fixture_paths, PARTITIONS)]
     probe = identity('tools/verify_long_pdf.py', 'PROBE-LONG')
     oracle = identity('docs/verification/long_pdf_legacy_oracle.py', 'ORACLE-LONG', kind='reference_implementation',
-        independence_basis='Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.',
-        production_source_ids=[source_ids['src/protocol_pdf_diff/'+x] for x in ['compare.py','pdf_extract.py','text_utils.py','comparison_job.py','webview_gui.py']],
+        independence_basis='Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; direct standard-library difflib block comparison, separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.',
+        production_source_ids=[source_ids['src/protocol_pdf_diff/'+x] for x in ['compare.py','pdf_extract.py','text_utils.py','comparison_job.py','webview_gui.py','exact_match.py']],
         validator_run_ids=['RUN-LONG-ORACLE'])
     runs=[];pairs=[];mutations=[]
     def run(run_id,role,reqs,check,paths,mutant=None):
@@ -41,6 +41,7 @@ def main():
     variants=[
         ('NUMBERS','text_utils.py','performance',0,'parsed = _parse_normalized_number_word_phrase(normalized_tokens, index)','parsed = parse_number_word_phrase(tokens, index)'),
         ('LCS','compare.py','performance',0,'if max(len(left), len(right)) > 4096:','if False:  # injected loss of long-key bound'),
+        ('SAM','exact_match.py','performance',0,'if max(len(a), len(b)) <= 4096:', 'if True:  # injected quadratic matching'),
         ('OCR','pdf_extract.py','performance',0,'config="--psm 6", timeout=60','config="--psm 6"'),
         ('CANCEL','webview_gui.py','cancel',1,'self._cancel_event.set()','pass  # injected ignored cancellation request'),
     ]

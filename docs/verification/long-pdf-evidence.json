@@ -9,8 +9,8 @@
         {
           "id": "SRC-LONG-0",
           "path": "docs/verification/escaped-defects.yaml",
-          "sha256": "eb6ac103f2cdbc39dae69bee8a1ef7f2c854dcc6a9785954c0f133180ebb9603",
-          "size_bytes": 4685
+          "sha256": "b6b4781d45123cf4c549972af907c6c811699815af6f1826beb7f7e1283c3944",
+          "size_bytes": 5230
         },
         {
           "id": "SRC-LONG-1",
@@ -45,8 +45,8 @@
         {
           "id": "SRC-LONG-6",
           "path": "src/protocol_pdf_diff/compare.py",
-          "sha256": "41639664a3c4ede380e342d242ed077205bb4976f6b4e1318ffe3c992ce0c4c7",
-          "size_bytes": 260891
+          "sha256": "7f573475c2dba0c6c799cd4458d1a71839c96ddbd85c332049ef583d6ba26a23",
+          "size_bytes": 261775
         },
         {
           "id": "SRC-LONG-7",
@@ -74,165 +74,171 @@
         },
         {
           "id": "SRC-LONG-11",
+          "path": "src/protocol_pdf_diff/exact_match.py",
+          "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+          "size_bytes": 4055
+        },
+        {
+          "id": "SRC-LONG-12",
           "path": "src/protocol_pdf_diff/figure_filters.py",
           "sha256": "98f79dcda35b061d8e6c596516ac7a9e2e486558c54bffdc8589d3d3e81a83d6",
           "size_bytes": 16975
         },
         {
-          "id": "SRC-LONG-12",
+          "id": "SRC-LONG-13",
           "path": "src/protocol_pdf_diff/formula_visuals.py",
           "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
           "size_bytes": 14125
         },
         {
-          "id": "SRC-LONG-13",
+          "id": "SRC-LONG-14",
           "path": "src/protocol_pdf_diff/layout_backend.py",
           "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
           "size_bytes": 11020
         },
         {
-          "id": "SRC-LONG-14",
+          "id": "SRC-LONG-15",
           "path": "src/protocol_pdf_diff/layout_blocks.py",
           "sha256": "763a091d899eabc83f5faca4dbf9113d90225965da645598b077c588c69f0d0e",
           "size_bytes": 17456
         },
         {
-          "id": "SRC-LONG-15",
+          "id": "SRC-LONG-16",
           "path": "src/protocol_pdf_diff/models.py",
           "sha256": "925c5d5f1a0183f74bee47ad895655707efae3938f1c43dd2f8fb5e3e514f3af",
           "size_bytes": 26115
         },
         {
-          "id": "SRC-LONG-16",
+          "id": "SRC-LONG-17",
           "path": "src/protocol_pdf_diff/monotonic_alignment.py",
           "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
           "size_bytes": 2590
         },
         {
-          "id": "SRC-LONG-17",
+          "id": "SRC-LONG-18",
           "path": "src/protocol_pdf_diff/page_furniture.py",
           "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
           "size_bytes": 2847
         },
         {
-          "id": "SRC-LONG-18",
+          "id": "SRC-LONG-19",
           "path": "src/protocol_pdf_diff/page_ocr.py",
           "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
           "size_bytes": 9723
         },
         {
-          "id": "SRC-LONG-19",
+          "id": "SRC-LONG-20",
           "path": "src/protocol_pdf_diff/parsing_benchmark.py",
           "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
           "size_bytes": 34623
         },
         {
-          "id": "SRC-LONG-20",
+          "id": "SRC-LONG-21",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
           "sha256": "19fffd6ec09fd37de3fc49d3186b3b2f2286686b6f6b9280c0b90c5aa6d68872",
           "size_bytes": 329615
         },
         {
-          "id": "SRC-LONG-21",
+          "id": "SRC-LONG-22",
           "path": "src/protocol_pdf_diff/progress.py",
           "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
           "size_bytes": 2087
         },
         {
-          "id": "SRC-LONG-22",
+          "id": "SRC-LONG-23",
           "path": "src/protocol_pdf_diff/prose_source_visuals.py",
           "sha256": "4e8ebdde5c12dab9d6103293b8b9b9e3be153726b4c7f4881382f20878c41e0d",
           "size_bytes": 80775
         },
         {
-          "id": "SRC-LONG-23",
+          "id": "SRC-LONG-24",
           "path": "src/protocol_pdf_diff/quality.py",
           "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
           "size_bytes": 28701
         },
         {
-          "id": "SRC-LONG-24",
+          "id": "SRC-LONG-25",
           "path": "src/protocol_pdf_diff/reporting.py",
           "sha256": "edf1c00cc260d6fcee47c6bfc9e97d2445149679dcd0f9c8f933af494e0f5e2d",
           "size_bytes": 508068
         },
         {
-          "id": "SRC-LONG-25",
+          "id": "SRC-LONG-26",
           "path": "src/protocol_pdf_diff/sample_data.py",
           "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
           "size_bytes": 11394
         },
         {
-          "id": "SRC-LONG-26",
+          "id": "SRC-LONG-27",
           "path": "src/protocol_pdf_diff/sectioning.py",
           "sha256": "cb4a0e4b8da6c08b1816a3cf40a1983d86aee143f0b8484edc675b255bcfd0af",
           "size_bytes": 140112
         },
         {
-          "id": "SRC-LONG-27",
+          "id": "SRC-LONG-28",
           "path": "src/protocol_pdf_diff/table_codec.py",
           "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
           "size_bytes": 2329
         },
         {
-          "id": "SRC-LONG-28",
+          "id": "SRC-LONG-29",
           "path": "src/protocol_pdf_diff/text_utils.py",
           "sha256": "695ba8fad442c6281a3f2ec622e78f8bcaea730863e36d44fad0b72d77b199e9",
           "size_bytes": 40594
         },
         {
-          "id": "SRC-LONG-29",
+          "id": "SRC-LONG-30",
           "path": "src/protocol_pdf_diff/ui_shared.py",
           "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
           "size_bytes": 4116
         },
         {
-          "id": "SRC-LONG-30",
+          "id": "SRC-LONG-31",
           "path": "src/protocol_pdf_diff/venv_bootstrap.py",
           "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
           "size_bytes": 3376
         },
         {
-          "id": "SRC-LONG-31",
+          "id": "SRC-LONG-32",
           "path": "src/protocol_pdf_diff/visual_preview.py",
           "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
           "size_bytes": 1985
         },
         {
-          "id": "SRC-LONG-32",
+          "id": "SRC-LONG-33",
           "path": "src/protocol_pdf_diff/visual_watchdog.py",
           "sha256": "6e70435e5b34ba13860ca45cd7bc42186521e5103a334a705599e8ce3e14e43f",
           "size_bytes": 30172
         },
         {
-          "id": "SRC-LONG-33",
+          "id": "SRC-LONG-34",
           "path": "src/protocol_pdf_diff/webui/index.html",
-          "sha256": "8a972011cd3fa9f6fcd82bb661789081a1233aca9bf1fb0c71a2d21aa0303594",
-          "size_bytes": 23499
+          "sha256": "b58df14f367d8fe5c8970b7ef61d8dbf2ea9df57a345fe92d95dc52e55e77ca6",
+          "size_bytes": 23624
         },
         {
-          "id": "SRC-LONG-34",
+          "id": "SRC-LONG-35",
           "path": "src/protocol_pdf_diff/webview_gui.py",
           "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
           "size_bytes": 23963
         },
         {
-          "id": "SRC-LONG-35",
+          "id": "SRC-LONG-36",
           "path": "tests/__init__.py",
           "sha256": "7028ed77f4cf50ac95f847c9abe62a2960a0437c3e1d5a322e86d63b577a8d23",
           "size_bytes": 626
         },
         {
-          "id": "SRC-LONG-36",
+          "id": "SRC-LONG-37",
           "path": "tests/test_comparison_job.py",
-          "sha256": "339b94aa29b10ac17b6979c37494a5ab2dabdda2a0f0edcf799afe8e41018924",
-          "size_bytes": 11842
+          "sha256": "5e833685da3da39ac9ca73b473170a33e9f9f1ce23c2f47cb3a11282bbde0c30",
+          "size_bytes": 11874
         },
         {
-          "id": "SRC-LONG-37",
+          "id": "SRC-LONG-38",
           "path": "tests/test_long_pdf_performance.py",
-          "sha256": "12a88d7498bb9ac4475841837554b6a4f369f51603b4c00d67d80c2f50313529",
-          "size_bytes": 10597
+          "sha256": "0f83fcf955f8158bc3bfc7c80ad13a57d3e10fce159c6c93130744a4be3ec62d",
+          "size_bytes": 13567
         }
       ]
     },
@@ -338,8 +344,8 @@
         {
           "id": "IN-LONG-ADVERSARIAL",
           "path": "docs/verification/fixtures/long-pdf-adversarial.json",
-          "sha256": "e0d34cfb8606bad86b6b7ae6d8646907692060d6b741a13f9f5eac8bf6c3d9a0",
-          "size_bytes": 1684,
+          "sha256": "b0d7373d750da7f8b23d5b8a459d68609ff701bf8b7458e04aecaa595d6afc84",
+          "size_bytes": 2394,
           "provenance": "Frozen executable scenario selection: adversarial"
         },
         {
@@ -352,8 +358,8 @@
         {
           "id": "IN-LONG-KNOWN_FAILURE",
           "path": "docs/verification/fixtures/long-pdf-known_failure.json",
-          "sha256": "f16319eb30537af350608a2732f578de50f3ea2c533ab3ac1b47d7b4380a694c",
-          "size_bytes": 1266,
+          "sha256": "2bde6bdd29d0551c1471309ca681444c97a89ca2a2ee11ba3963c4ff71e44036",
+          "size_bytes": 1738,
           "provenance": "Frozen executable scenario selection: known_failure"
         }
       ],
@@ -361,8 +367,8 @@
         {
           "id": "PROBE-LONG",
           "path": "tools/verify_long_pdf.py",
-          "sha256": "cb2da65f77e642421d963d4d62b00f0e37b5a2ac3d536dcbce650cec67c8046f",
-          "size_bytes": 3780
+          "sha256": "816dc377c1a38864f256b7ad012fce194b4ee3bb33fd6230c9e3ba93bb278507",
+          "size_bytes": 3828
         }
       ],
       "oracles": [
@@ -372,13 +378,14 @@
           "sha256": "79e434319ccfecfa089ee333ab9145d41459f3d4125a22c0a4601a5fa96ca0fb",
           "size_bytes": 33867,
           "kind": "reference_implementation",
-          "independence_basis": "Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.",
+          "independence_basis": "Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; direct standard-library difflib block comparison, separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.",
           "production_source_ids": [
             "SRC-LONG-6",
-            "SRC-LONG-20",
-            "SRC-LONG-28",
+            "SRC-LONG-21",
+            "SRC-LONG-29",
             "SRC-LONG-7",
-            "SRC-LONG-34"
+            "SRC-LONG-35",
+            "SRC-LONG-11"
           ],
           "validator_run_ids": [
             "RUN-LONG-ORACLE"
@@ -391,28 +398,35 @@
           "path": "work/long_pdf_evidence/mutants/numbers.py",
           "sha256": "16c0a04e3ea9c425e84eb6ecd2e46c70a8f4809dd67d83bedb9644f5a5c5c0e8",
           "size_bytes": 40571,
-          "target_source_id": "SRC-LONG-28"
+          "target_source_id": "SRC-LONG-29"
         },
         {
           "id": "MUT-LONG-LCS",
           "path": "work/long_pdf_evidence/mutants/lcs.py",
-          "sha256": "0860bf231ee742dd3fbf5fc2934a503f5be7442c75d547c5da14afa8a6afaa7a",
-          "size_bytes": 260898,
+          "sha256": "248cb8780e466b1392fde2b39844a4df30f9e94fa03a2b008ffdc16a827a1bd6",
+          "size_bytes": 261782,
           "target_source_id": "SRC-LONG-6"
+        },
+        {
+          "id": "MUT-LONG-SAM",
+          "path": "work/long_pdf_evidence/mutants/sam.py",
+          "sha256": "dec018606acfbd7b82baebc3b56318460992905bd3f99cdde7255b1e9bee037e",
+          "size_bytes": 4063,
+          "target_source_id": "SRC-LONG-11"
         },
         {
           "id": "MUT-LONG-OCR",
           "path": "work/long_pdf_evidence/mutants/ocr.py",
           "sha256": "ea141dcc6a159e6fba2876998083d20b0d16c1a13db421581bcaf4c5813fa0f5",
           "size_bytes": 329603,
-          "target_source_id": "SRC-LONG-20"
+          "target_source_id": "SRC-LONG-21"
         },
         {
           "id": "MUT-LONG-CANCEL",
           "path": "work/long_pdf_evidence/mutants/cancel.py",
           "sha256": "94184b65c07299a4f51d4691f37f1c09dd890bc5658241fad0a6346df41c82a2",
           "size_bytes": 23984,
-          "target_source_id": "SRC-LONG-34"
+          "target_source_id": "SRC-LONG-35"
         }
       ],
       "artifacts": [
@@ -574,6 +588,104 @@
         },
         {
           "id": "RUN-LONG-LCS-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-SAM-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-SAM"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-SAM-GREEN",
           "role": "target_green",
           "requirement_ids": [
             "REQ-LONG-PDF-PERFORMANCE-005"
@@ -1076,6 +1188,15 @@
           "green_run_id": "RUN-LONG-LCS-GREEN"
         },
         {
+          "id": "PAIR-LONG-SAM",
+          "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "defect_id": "DEF-LONG-SAM",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-SAM-RED",
+          "green_run_id": "RUN-LONG-SAM-GREEN"
+        },
+        {
           "id": "PAIR-LONG-OCR",
           "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
           "defect_id": "DEF-LONG-OCR",
@@ -1117,8 +1238,8 @@
         {
           "id": "LEDGER-LONG",
           "path": "work/long_pdf_evidence/escaped-defects.json",
-          "sha256": "c5b40bc67df1a0d4eb6f71ce1bbd2b68a0d8dc88a652ff06675c48b10ce4e041",
-          "size_bytes": 2689
+          "sha256": "1287d1e3c3cf9106d05db76ab4515948930e590e759f202e98806cb3b9b63255",
+          "size_bytes": 3305
         }
       ]
     },
@@ -1133,6 +1254,7 @@
         "pair_ids": [
           "PAIR-LONG-NUMBERS",
           "PAIR-LONG-LCS",
+          "PAIR-LONG-SAM",
           "PAIR-LONG-OCR",
           "PAIR-LONG-CANCEL"
         ]
@@ -1146,6 +1268,7 @@
         "pair_ids": [
           "PAIR-LONG-NUMBERS",
           "PAIR-LONG-LCS",
+          "PAIR-LONG-SAM",
           "PAIR-LONG-OCR",
           "PAIR-LONG-CANCEL"
         ],
@@ -1176,6 +1299,8 @@
           "RUN-LONG-NUMBERS-GREEN",
           "RUN-LONG-LCS-RED",
           "RUN-LONG-LCS-GREEN",
+          "RUN-LONG-SAM-RED",
+          "RUN-LONG-SAM-GREEN",
           "RUN-LONG-OCR-RED",
           "RUN-LONG-OCR-GREEN",
           "RUN-LONG-CANCEL-RED",

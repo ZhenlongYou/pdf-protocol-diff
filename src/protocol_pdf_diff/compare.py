@@ -18,6 +18,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .comparison_session import comparison_session, memoize_comparison
+from .exact_match import ratio as exact_sequence_ratio
 from .figure_filters import filter_figure_visual_snippets
 from .models import (
     DiffOptions,
@@ -1795,7 +1796,8 @@ def compare_sections(
         matches,
     )
     changes: list[SectionChange] = []
-    for old_index, new_index, similarity, match_basis in matches:
+    for completed, (old_index, new_index, similarity, match_basis) in enumerate(matches):
+        report_progress("compare_text", completed, len(matches), unit="章节对")
         old_section = old_sections[old_index] if old_index is not None else None
         new_section = new_sections[new_index] if new_index is not None else None
         if old_section and new_section:
@@ -1907,6 +1909,7 @@ def compare_sections(
                 )
             )
 
+    report_progress("compare_text", len(matches), len(matches), unit="章节对")
     return sorted(changes, key=_change_sort_key)
 
 
@@ -2235,6 +2238,7 @@ def _match_sections(
                 fallback_candidates.append(candidate)
 
     report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
+    report_progress("match_rescue", detail="核对章节对应关系")
     _consume_section_match_candidates(
         fallback_candidates,
         old_sections,
@@ -2732,21 +2736,20 @@ def _monotonic_related_section_pairs(
         if section.role == "technical"
         if _review_unit_key(section.title)
     )
-    old_related_title_counts = {
-        old_index: sum(
-            _review_similarity(old_section.title, new_section.title) >= 0.92
-            for _new_index, new_section, _new_units in new_candidates
-        )
-        for old_index, old_section, _old_units in old_candidates
-    }
-    new_related_title_counts = {
-        new_index: sum(
-            _review_similarity(old_section.title, new_section.title) >= 0.92
-            for _old_index, old_section, _old_units in old_candidates
-        )
-        for new_index, new_section, _new_units in new_candidates
-    }  # 标题互相唯一只需预计算一次，避免在正文候选笛卡尔积中重复扫描。
-    for old_index, old_section, old_units in old_candidates:
+    old_related_title_counts = Counter({index: 0 for index, _section, _units in old_candidates})
+    new_related_title_counts = Counter({index: 0 for index, _section, _units in new_candidates})
+    if require_unique_related_title:
+        for completed, (old_index, old_section, _old_units) in enumerate(old_candidates):
+            report_progress("match_rescue", completed, len(old_candidates), unit="旧版章节",
+                            detail="核对标题对应关系")
+            for new_index, new_section, _new_units in new_candidates:
+                if _review_similarity_at_least(old_section.title, new_section.title, 0.92):
+                    old_related_title_counts[old_index] += 1
+                    new_related_title_counts[new_index] += 1
+    # Each old/new orientation is tested once; both original uniqueness counts
+    # receive that same boolean result. False mode never consumes these counts.
+    for completed, (old_index, old_section, old_units) in enumerate(old_candidates):
+        report_progress("match_rescue_body", completed, len(old_candidates), unit="旧版章节")
         for new_index, new_section, new_units in new_candidates:
             if not preserves_existing_order(old_index, new_index):
                 continue
@@ -2799,7 +2802,7 @@ def _monotonic_related_section_pairs(
                             old_external_locators
                             & _document_relation_external_locator_keys(candidate.body)
                         )
-                        and _review_similarity(old_section.title, candidate.title) >= 0.70
+                        and _review_similarity_at_least(old_section.title, candidate.title, 0.70)
                         for _candidate_index, candidate, _candidate_units in new_candidates
                     ) == 1
                     and sum(
@@ -2807,7 +2810,7 @@ def _monotonic_related_section_pairs(
                             _document_relation_external_locator_keys(candidate.body)
                             & new_external_locators
                         )
-                        and _review_similarity(candidate.title, new_section.title) >= 0.70
+                        and _review_similarity_at_least(candidate.title, new_section.title, 0.70)
                         for _candidate_index, candidate, _candidate_units in old_candidates
                     ) == 1
                 )
@@ -3843,6 +3846,7 @@ def _sample_section_text(value: str) -> str:
     return f"{value[:head_chars]}\n...\n{value[middle_start:middle_end]}\n...\n{value[-tail_chars:]}"
 
 
+@memoize_comparison()
 def _review_similarity(left: str, right: str) -> float:
     """Return a similarity score after display-only punctuation is normalized."""
 
@@ -3852,7 +3856,12 @@ def _review_similarity(left: str, right: str) -> float:
         return 1.0
     if not left_norm or not right_norm:
         return 0.0
-    return difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
+    return exact_sequence_ratio(left_norm, right_norm)
+
+
+@memoize_comparison()
+def _review_similarity_at_least(left: str, right: str, threshold: float) -> bool:
+    return _sequence_ratio_at_least(_review_unit_key(left), _review_unit_key(right), threshold)
 
 
 @memoize_comparison(maxsize=128)
@@ -3910,7 +3919,7 @@ def _sequence_ratio_at_least(left: str, right: str, threshold: float) -> bool:
         upper = 2.0 * _lcs_match_count(left, right) / (len(left) + len(right))
         if upper < threshold:
             return False
-    return matcher.ratio() >= threshold
+    return exact_sequence_ratio(left, right) >= threshold
 
 
 @memoize_comparison()
@@ -4156,7 +4165,7 @@ def _similarity(left: str, right: str) -> float:
         return 1.0
     if not left_norm or not right_norm:
         return 0.0
-    return difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
+    return exact_sequence_ratio(left_norm, right_norm)
 
 
 def _sections_effectively_unchanged(

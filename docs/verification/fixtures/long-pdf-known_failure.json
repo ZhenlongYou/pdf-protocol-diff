@@ -4,7 +4,9 @@
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_plain_words_are_normalized_once_per_stream",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_subscript_candidates_keep_geometry_and_ambiguity",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_table_ocr_has_a_finite_recognition_budget",
-    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle"
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_exact_long_matching_blocks_equal_independent_difflib",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_long_repetitive_score_avoids_quadratic_aligner"
   ],
   "cancel": [
     "tests.test_comparison_job.ComparisonJobTests.test_real_desktop_async_cancel_then_success_and_unique_publication"
@@ -14,6 +16,8 @@
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_indexed_geometry_matches_legacy_all_pairs_at_boundaries",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_skeleton_shortcuts_match_historical_predicate",
-    "tests.test_comparison_job.ComparisonJobTests.test_real_desktop_async_cancel_then_success_and_unique_publication"
+    "tests.test_comparison_job.ComparisonJobTests.test_real_desktop_async_cancel_then_success_and_unique_publication",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_exact_long_matching_blocks_equal_independent_difflib",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_long_repetitive_score_avoids_quadratic_aligner"
   ]
 }

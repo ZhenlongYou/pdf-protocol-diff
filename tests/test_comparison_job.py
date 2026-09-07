@@ -109,7 +109,7 @@ class ComparisonJobTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 8)
             wait_for(lambda: not process_alive(descendant[0]), seconds=3)
             published.assert_not_called()
-            self.assertEqual("preserve me", existing.read_text())
+            self.assertEqual("preserve me", existing.read_text(encoding="utf-8"))
             self.assertEqual([existing], list(root.iterdir()))
 
     def test_worker_crash_is_error_and_cleans_temporary_output(self):
@@ -170,7 +170,7 @@ class ComparisonJobTests(unittest.TestCase):
                 self.assertEqual("success", state["type"], state)
                 html = Path(state["html_path"])
                 self.assertIn("<html", html.read_text(encoding="utf-8").lower())
-                data = json.loads((html.parent / "protocol_diff_data.json").read_text())
+                data = json.loads((html.parent / "protocol_diff_data.json").read_text(encoding="utf-8"))
                 self.assertTrue(data)  # Reopening here checks the actual published report.
                 paths.append(html)
             self.assertNotEqual(paths[0], paths[1])

@@ -73,3 +73,12 @@ escaped_defects:
     regression_test_id: LONG_PDF_BEHAVIOR_TEST
     public_path_rerun_id: RUN-LONG-REAL
     state: verified
+  - id: DEF-LONG-SAM
+    acceptance_id: REQ-LONG-PDF-PERFORMANCE-005
+    user_symptom: "Full OIF comparison still spent many minutes aligning expanded repetitive semantic keys after threshold filtering."
+    discovered_via: real_full_document_profile
+    failure_mechanism: "Accepted replacement candidates require exact scores; difflib longest-substring scans degenerate on long repetitive strings."
+    red_green_pair_id: PAIR-LONG-SAM
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
+    state: verified

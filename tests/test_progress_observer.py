@@ -230,7 +230,7 @@ class ProgressObserverTests(unittest.TestCase):
                     key,
                 )
         self.assertEqual(
-            ["read_old", "read_old_scan", "read_new", "read_new_scan", "match_diff", "sectioning", "match_exact", "match_fallback", "visual_evidence"],
+            ["read_old", "read_old_scan", "read_new", "read_new_scan", "match_diff", "sectioning", "match_exact", "match_fallback", "match_rescue", "match_rescue_body", "compare_text", "visual_evidence"],
             list(dict.fromkeys(event.stage for event in events)),
         )
 

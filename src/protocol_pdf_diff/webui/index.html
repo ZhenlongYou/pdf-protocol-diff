@@ -242,7 +242,7 @@
       let polling = false;
       let runGeneration = 0;
       const runningLabel = document.querySelector("#running-label");
-      const stageNames = { starting: "准备比较", read_old_scan: "预扫描旧版", read_new_scan: "预扫描新版", sectioning: "构建章节", match_exact: "匹配章节", match_fallback: "匹配剩余章节", read_old: "读取旧版", read_new: "读取新版", match_diff: "匹配差异", visual_evidence: "生成视觉证据", report: "生成报告" };
+      const stageNames = { starting: "准备比较", read_old_scan: "预扫描旧版", read_new_scan: "预扫描新版", sectioning: "构建章节", match_exact: "匹配章节", match_fallback: "匹配剩余章节", match_rescue: "核对章节对应关系", match_rescue_body: "核对正文对应关系", compare_text: "比较正文差异", read_old: "读取旧版", read_new: "读取新版", match_diff: "匹配差异", visual_evidence: "生成视觉证据", report: "生成报告" };
       let timer = null;
       let startedAt = 0;
       let focusBeforeDialog = null;

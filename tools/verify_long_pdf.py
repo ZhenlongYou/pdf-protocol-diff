@@ -35,12 +35,12 @@ def real_path():
         result = api.get_run_state()
         assert result["type"] == "success", result
         html = Path(result["html_path"])
-        data = json.loads((html.parent / "protocol_diff_data.json").read_text())
+        data = json.loads((html.parent / "protocol_diff_data.json").read_text(encoding="utf-8"))
         assert (data["old_total_pages"], data["new_total_pages"]) == (4, 5)
         changes = json.dumps(data["changes"])
         for phrase in ("20 working days", "15 working days", "Documentation"):
             assert phrase in changes, phrase
-        assert "<html" in html.read_text().lower()
+        assert "<html" in html.read_text(encoding="utf-8").lower()
         assert not list((root / "out").glob(".protocol-diff-*"))
         witness = {"cancelled_then_restarted": True, "page_counts": [4, 5],
                    "delivery_changed_20_to_15_days": True, "documentation_added": True,
@@ -67,7 +67,7 @@ def main():
             raise ValueError("The declared frozen oracle must be the executed module")
     tests = []
     for filename in args.fixtures:
-        fixture = json.loads(Path(filename).read_text())
+        fixture = json.loads(Path(filename).read_text(encoding="utf-8"))
         tests.extend(fixture[args.check])
     if not tests: raise ValueError("No executable cases selected")
     suite = unittest.defaultTestLoader.loadTestsFromNames(list(dict.fromkeys(tests)))

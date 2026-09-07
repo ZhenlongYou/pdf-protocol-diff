@@ -108,16 +108,61 @@ class LongPdfPerformanceTests(unittest.TestCase):
             self.assertEqual(grid_lcs(a, b), compare._lcs_match_count(a, b))
         # Same character counts defeat the old quick bound; ordering still
         # proves this pair below threshold, without expensive full alignment.
-        with patch.object(compare.difflib.SequenceMatcher, "ratio", side_effect=AssertionError("unbounded key alignment")):
+        with patch.object(compare, "exact_sequence_ratio", side_effect=AssertionError("unbounded key alignment")):
             self.assertFalse(compare._sequence_ratio_at_least("a" * 2200 + "b" * 2200,
                                                             "b" * 2200 + "a" * 2200, .9))
+
+    def test_title_threshold_keeps_original_direction_and_value(self):
+        titles = ["", "Clause 2 Jitter", "Clause 3 Jitter", "Mode: FAST", "Mode: SLOW",
+                  "1.2 Receiver specification", "1.3 Receiver specifications", "SSPRQ", "SSPRQ", "tide", "diet"]
+        with comparison_scope():
+            for left in titles:
+                for right in titles:
+                    for threshold in (.70, .92):
+                        self.assertEqual(compare._review_similarity(left, right) >= threshold,
+                                         compare._review_similarity_at_least(left, right, threshold))
 
     def test_lcs_upper_bound_cannot_certify_a_match(self):
         left, right = "abc" * 1500, "bca" * 1500
         with patch.object(compare, "_lcs_match_count", return_value=len(left)), \
-             patch.object(compare.difflib.SequenceMatcher, "ratio", return_value=.8) as exact:
+             patch.object(compare, "exact_sequence_ratio", return_value=.8) as exact:
             self.assertFalse(compare._sequence_ratio_at_least(left, right, .9))
             exact.assert_called_once()
+
+    def test_exact_long_matching_blocks_equal_independent_difflib(self):
+        import difflib
+        import itertools
+        from protocol_pdf_diff import exact_match
+        words = ["".join(value) for n in range(8) for value in itertools.product("ab", repeat=n)]
+        # Force the new search even for short strings; comparing scores alone
+        # would miss changed tie positions and downstream partition choices.
+        with patch.object(exact_match, "_longest_match", exact_match._automaton_match):
+            for left in words:
+                for right in words:
+                    self.assertEqual(difflib.SequenceMatcher(None, left, right, autojunk=False).get_matching_blocks(),
+                                     exact_match.matching_blocks(left, right), (left, right))
+        rng = random.Random(907)
+        for _ in range(2000):
+            left = "".join(rng.choices("abcβ中", k=rng.randrange(80)))
+            right = "".join(rng.choices("abcβ中", k=rng.randrange(80)))
+            alo, ahi = sorted(rng.choices(range(len(left) + 1), k=2))
+            blo, bhi = sorted(rng.choices(range(len(right) + 1), k=2))
+            self.assertEqual(difflib.SequenceMatcher(None, left, right, autojunk=False).find_longest_match(alo, ahi, blo, bhi),
+                             exact_match._automaton_match(left, right, alo, ahi, blo, bhi))
+        for count in (4095, 4096, 4097):
+            left = ("ab中β" * (count // 4 + 1))[:count - 1] + "x"
+            right = ("b中βa" * (count // 4 + 1))[:count - 1] + "y"
+            self.assertEqual((count, count), (len(left), len(right)))
+            original = difflib.SequenceMatcher(None, left, right, autojunk=False)
+            self.assertEqual(original.get_matching_blocks(), exact_match.matching_blocks(left, right))
+            self.assertEqual(original.ratio(), exact_match.ratio(left, right))
+
+    def test_long_repetitive_score_avoids_quadratic_aligner(self):
+        from protocol_pdf_diff import exact_match
+        # Independent expected value: the sole common run contains 12000 a's.
+        with patch.object(exact_match, "SequenceMatcher", side_effect=AssertionError("quadratic long alignment")):
+            self.assertEqual(2.0 * 12000 / 24001, exact_match.ratio("a" * 12000, "a" * 12000 + "b"))
+            self.assertEqual(1.0, exact_match.ratio("a" * 12000, "a" * 12000))
 
     def test_fallback_preserves_matches_and_reuses_filtered_bodies(self):
         from protocol_pdf_diff.models import Section, DiffOptions
