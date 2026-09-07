@@ -1,0 +1,12 @@
+{
+  "old": [],
+  "new": [
+    "New standalone requirement."
+  ],
+  "old_states": [],
+  "new_states": [
+    "unresolved"
+  ],
+  "partition": "boundary",
+  "provenance": "Manually specified contract example; regression evidence only, not an independent document-family accuracy sample."
+}

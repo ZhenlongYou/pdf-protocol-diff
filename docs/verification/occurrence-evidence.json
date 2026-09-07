@@ -1,0 +1,990 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "occurrence-candidate-regression-20260907",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC-OCC-0",
+          "path": "docs/verification/occurrence_oracle.py",
+          "sha256": "bc5e47f85d3987b247b95a3d613c388fff1c114b2df0e2040d0ce11bd8d830d5",
+          "size_bytes": 2142
+        },
+        {
+          "id": "SRC-OCC-1",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-OCC-2",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "f83088459475e03ab29f517ea14f4d8139205db3151c5ee4f3a768da52841b50",
+          "size_bytes": 43349
+        },
+        {
+          "id": "SRC-OCC-3",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "7f573475c2dba0c6c799cd4458d1a71839c96ddbd85c332049ef583d6ba26a23",
+          "size_bytes": 261775
+        },
+        {
+          "id": "SRC-OCC-4",
+          "path": "src/protocol_pdf_diff/comparison_job.py",
+          "sha256": "deaa0699c4beb3cc70d91a0d0bf2a9bff73939c2e1cc0846a2b038da289ab784",
+          "size_bytes": 11848
+        },
+        {
+          "id": "SRC-OCC-5",
+          "path": "src/protocol_pdf_diff/comparison_session.py",
+          "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+          "size_bytes": 1338
+        },
+        {
+          "id": "SRC-OCC-6",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
+          "size_bytes": 65405
+        },
+        {
+          "id": "SRC-OCC-7",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-OCC-8",
+          "path": "src/protocol_pdf_diff/evidence_alignment.py",
+          "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+          "size_bytes": 15836
+        },
+        {
+          "id": "SRC-OCC-9",
+          "path": "src/protocol_pdf_diff/exact_match.py",
+          "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+          "size_bytes": 4055
+        },
+        {
+          "id": "SRC-OCC-10",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "527bfb8ea9b8c1e7784b864789fe0dbcd31d964c9cda648507fc54e982268f49",
+          "size_bytes": 17164
+        },
+        {
+          "id": "SRC-OCC-11",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-OCC-12",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-OCC-13",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "763a091d899eabc83f5faca4dbf9113d90225965da645598b077c588c69f0d0e",
+          "size_bytes": 17456
+        },
+        {
+          "id": "SRC-OCC-14",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "925c5d5f1a0183f74bee47ad895655707efae3938f1c43dd2f8fb5e3e514f3af",
+          "size_bytes": 26115
+        },
+        {
+          "id": "SRC-OCC-15",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-OCC-16",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-OCC-17",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-OCC-18",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-OCC-19",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "19fffd6ec09fd37de3fc49d3186b3b2f2286686b6f6b9280c0b90c5aa6d68872",
+          "size_bytes": 329615
+        },
+        {
+          "id": "SRC-OCC-20",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+          "size_bytes": 2087
+        },
+        {
+          "id": "SRC-OCC-21",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "4e8ebdde5c12dab9d6103293b8b9b9e3be153726b4c7f4881382f20878c41e0d",
+          "size_bytes": 80775
+        },
+        {
+          "id": "SRC-OCC-22",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
+          "size_bytes": 28701
+        },
+        {
+          "id": "SRC-OCC-23",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "edf1c00cc260d6fcee47c6bfc9e97d2445149679dcd0f9c8f933af494e0f5e2d",
+          "size_bytes": 508068
+        },
+        {
+          "id": "SRC-OCC-24",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-OCC-25",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "cb4a0e4b8da6c08b1816a3cf40a1983d86aee143f0b8484edc675b255bcfd0af",
+          "size_bytes": 140112
+        },
+        {
+          "id": "SRC-OCC-26",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-OCC-27",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "695ba8fad442c6281a3f2ec622e78f8bcaea730863e36d44fad0b72d77b199e9",
+          "size_bytes": 40594
+        },
+        {
+          "id": "SRC-OCC-28",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
+          "size_bytes": 4116
+        },
+        {
+          "id": "SRC-OCC-29",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-OCC-30",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
+        },
+        {
+          "id": "SRC-OCC-31",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "6e70435e5b34ba13860ca45cd7bc42186521e5103a334a705599e8ce3e14e43f",
+          "size_bytes": 30172
+        },
+        {
+          "id": "SRC-OCC-32",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
+          "size_bytes": 23963
+        },
+        {
+          "id": "SRC-OCC-33",
+          "path": "tools/compare_document_evidence.py",
+          "sha256": "5dd379b97b42e689a41de975c4ce88161f519342b16b6f39022627ae76306901",
+          "size_bytes": 4786
+        },
+        {
+          "id": "SRC-OCC-34",
+          "path": "tools/verify_occurrence_contract.py",
+          "sha256": "6287fa1af3795e8c508fdb6cdbdc50177d15b8b35e74e8b5316f3e7e329a636b",
+          "size_bytes": 3670
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-OCCURRENCE-CANDIDATE-CONTRACT",
+          "observable": "On six frozen regression cases, candidate matching conserves occurrences and literal signs, surfaces crossed ownership and unresolved moved replacements, and rejects invalid identities. This is not general PDF accuracy acceptance.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-07 request for generality, accuracy and implementation"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "Every declared per-occurrence state and source string equals the manual fixture",
+            "unit": "regression assertion",
+            "locator": "docs/verification/fixtures/occurrence-*.json"
+          },
+          "oracle_ids": [
+            "ORACLE-OCC"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-OCC-nominal"
+            ],
+            "boundary": [
+              "IN-OCC-boundary"
+            ],
+            "invalid": [
+              "IN-OCC-invalid"
+            ],
+            "adversarial": [
+              "IN-OCC-adversarial"
+            ],
+            "realistic": [
+              "IN-OCC-realistic"
+            ],
+            "known_failure": [
+              "IN-OCC-known_failure"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-OCC-nominal",
+          "path": "docs/verification/fixtures/occurrence-nominal.json",
+          "sha256": "a98d80ddb03002f9b55ce21bb7f07e6274804e2b2dbd9c7d8685d58b68079efd",
+          "size_bytes": 335,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        },
+        {
+          "id": "IN-OCC-boundary",
+          "path": "docs/verification/fixtures/occurrence-boundary.json",
+          "sha256": "a3e24d71faf4e05549ba19c8b89398585b520c53c55b1eee2f830d8455394dba",
+          "size_bytes": 287,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        },
+        {
+          "id": "IN-OCC-invalid",
+          "path": "docs/verification/fixtures/occurrence-invalid.json",
+          "sha256": "bb881e97dbb61f61ec656d6f943182349c94e23ffaa6dfef2493996e109a6105",
+          "size_bytes": 291,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        },
+        {
+          "id": "IN-OCC-adversarial",
+          "path": "docs/verification/fixtures/occurrence-adversarial.json",
+          "sha256": "04814fc582751791c2168ba31793538398b47a12e9baed65a6ad6b250e806a72",
+          "size_bytes": 571,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        },
+        {
+          "id": "IN-OCC-realistic",
+          "path": "docs/verification/fixtures/occurrence-realistic.json",
+          "sha256": "79703d94035e81f9591220101e9bc2d9477294ffd0a3b3e6b28921b5c5531cd5",
+          "size_bytes": 813,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        },
+        {
+          "id": "IN-OCC-known_failure",
+          "path": "docs/verification/fixtures/occurrence-known_failure.json",
+          "sha256": "d4897369221a5f5b7268034d7226a63e9dde503651742486f3426a7d428ac63c",
+          "size_bytes": 551,
+          "provenance": "Manual regression case; not a document-family generalization sample"
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-OCC",
+          "path": "tools/verify_occurrence_contract.py",
+          "sha256": "6287fa1af3795e8c508fdb6cdbdc50177d15b8b35e74e8b5316f3e7e329a636b",
+          "size_bytes": 3670
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-OCC",
+          "path": "docs/verification/occurrence_oracle.py",
+          "sha256": "bc5e47f85d3987b247b95a3d613c388fff1c114b2df0e2040d0ce11bd8d830d5",
+          "size_bytes": 2142,
+          "kind": "manual_expected_values",
+          "independence_basis": "Fixed per-occurrence states, source strings and exact identity counts; no production imports or matching algorithm. A separate executable rejects corrupted evidence. Scope is the six regression scenarios, not PDF parsing or general document accuracy.",
+          "production_source_ids": [
+            "SRC-OCC-8"
+          ],
+          "validator_run_ids": [
+            "RUN-OCC-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-OCC-sign",
+          "path": "work/occurrence-evidence/mutants/sign.py",
+          "sha256": "c16d2110f3c5a2a263a4136e508d26b06134244f535821bb02d5c953f7167005",
+          "size_bytes": 15870,
+          "target_source_id": "SRC-OCC-8"
+        },
+        {
+          "id": "MUT-OCC-absence",
+          "path": "work/occurrence-evidence/mutants/absence.py",
+          "sha256": "c43a6b6b50e4e2ffc7426f217cf7ddb434e7d7720ff19caaf9d7294eb895b71d",
+          "size_bytes": 15814,
+          "target_source_id": "SRC-OCC-8"
+        },
+        {
+          "id": "MUT-OCC-ownership",
+          "path": "work/occurrence-evidence/mutants/ownership.py",
+          "sha256": "5d890e60f39cea718eef8180c4c9af2640ec75f06b4b2bcba551c718a826b17c",
+          "size_bytes": 15815,
+          "target_source_id": "SRC-OCC-8"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-OCC-REAL",
+          "path": "work/occurrence-evidence/real-path.json",
+          "producer_run_id": "RUN-OCC-REAL",
+          "required": true,
+          "min_size_bytes": 100
+        },
+        {
+          "id": "ART-OCC-API",
+          "path": "work/occurrence-evidence/api-path.json",
+          "producer_run_id": "RUN-OCC-API",
+          "required": true,
+          "min_size_bytes": 100
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-OCC-sign-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-realistic"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-OCC-sign"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-sign-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-realistic"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-absence-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-known_failure"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-OCC-absence"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-absence-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-known_failure"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-ownership-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-adversarial"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-OCC-ownership"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-ownership-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-adversarial"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-SUITE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-nominal",
+            "IN-OCC-boundary",
+            "IN-OCC-invalid",
+            "IN-OCC-adversarial",
+            "IN-OCC-realistic",
+            "IN-OCC-known_failure"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-nominal.json",
+            "docs/verification/fixtures/occurrence-boundary.json",
+            "docs/verification/fixtures/occurrence-invalid.json",
+            "docs/verification/fixtures/occurrence-adversarial.json",
+            "docs/verification/fixtures/occurrence-realistic.json",
+            "docs/verification/fixtures/occurrence-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-OCC-API",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-nominal",
+            "IN-OCC-boundary",
+            "IN-OCC-invalid",
+            "IN-OCC-adversarial",
+            "IN-OCC-realistic",
+            "IN-OCC-known_failure"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "docs/verification/fixtures/occurrence-nominal.json",
+            "docs/verification/fixtures/occurrence-boundary.json",
+            "docs/verification/fixtures/occurrence-invalid.json",
+            "docs/verification/fixtures/occurrence-adversarial.json",
+            "docs/verification/fixtures/occurrence-realistic.json",
+            "docs/verification/fixtures/occurrence-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "interface": "api",
+          "observable": "Invoke the public candidate EvidenceDocument/SourceUnit/align_evidence API on all six frozen cases and reopen validated per-occurrence outputs.",
+          "produces_artifact_ids": [
+            "ART-OCC-API"
+          ]
+        },
+        {
+          "id": "RUN-OCC-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [],
+          "input_ids": [
+            "IN-OCC-nominal",
+            "IN-OCC-boundary",
+            "IN-OCC-invalid",
+            "IN-OCC-adversarial",
+            "IN-OCC-realistic",
+            "IN-OCC-known_failure"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/occurrence_oracle.py",
+            "docs/verification/fixtures/occurrence-nominal.json",
+            "docs/verification/fixtures/occurrence-boundary.json",
+            "docs/verification/fixtures/occurrence-invalid.json",
+            "docs/verification/fixtures/occurrence-adversarial.json",
+            "docs/verification/fixtures/occurrence-realistic.json",
+            "docs/verification/fixtures/occurrence-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_ORACLE_REJECTS_CORRUPTION"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "oracle_ids": [
+            "ORACLE-OCC"
+          ]
+        },
+        {
+          "id": "RUN-OCC-REAL",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "probe_ids": [
+            "PROBE-OCC"
+          ],
+          "input_ids": [
+            "IN-OCC-realistic"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_occurrence_contract.py",
+            "--real",
+            "docs/verification/fixtures/occurrence-realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 60,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "OCCURRENCE_BEHAVIOR_TEST",
+                "OCCURRENCE_CHECK_OK",
+                "OCCURRENCE_REAL_PATH_OK"
+              ],
+              "excludes": [
+                "Traceback"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "interface": "cli",
+          "observable": "Fresh real PDF pair reaches the candidate CLI, retains both signed limits in reopened HTML/JSON, and conserves source occurrences.",
+          "produces_artifact_ids": [
+            "ART-OCC-REAL"
+          ]
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-OCC-sign",
+          "requirement_id": "REQ-OCCURRENCE-CANDIDATE-CONTRACT",
+          "defect_id": "CANDIDATE-sign",
+          "test_id": "OCCURRENCE_BEHAVIOR_TEST",
+          "failure_signature": "OCCURRENCE_ASSERTION_FAILED",
+          "red_run_id": "RUN-OCC-sign-RED",
+          "green_run_id": "RUN-OCC-sign-GREEN"
+        },
+        {
+          "id": "PAIR-OCC-absence",
+          "requirement_id": "REQ-OCCURRENCE-CANDIDATE-CONTRACT",
+          "defect_id": "CANDIDATE-absence",
+          "test_id": "OCCURRENCE_BEHAVIOR_TEST",
+          "failure_signature": "OCCURRENCE_ASSERTION_FAILED",
+          "red_run_id": "RUN-OCC-absence-RED",
+          "green_run_id": "RUN-OCC-absence-GREEN"
+        },
+        {
+          "id": "PAIR-OCC-ownership",
+          "requirement_id": "REQ-OCCURRENCE-CANDIDATE-CONTRACT",
+          "defect_id": "CANDIDATE-ownership",
+          "test_id": "OCCURRENCE_BEHAVIOR_TEST",
+          "failure_signature": "OCCURRENCE_ASSERTION_FAILED",
+          "red_run_id": "RUN-OCC-ownership-RED",
+          "green_run_id": "RUN-OCC-ownership-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-OCC",
+          "requirement_ids": [
+            "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+          ],
+          "unit": "frozen regression scenario; no document-family generalization claimed",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-OCC-nominal",
+            "IN-OCC-boundary",
+            "IN-OCC-invalid",
+            "IN-OCC-adversarial",
+            "IN-OCC-realistic",
+            "IN-OCC-known_failure"
+          ]
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-OCC-CANDIDATE",
+          "path": "work/occurrence-evidence/candidate-regressions.json",
+          "sha256": "8feccf384b218c08528482ddabbd6365f891c65a5e6ddd7b5e35ef43dabfbd2b",
+          "size_bytes": 1737
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-OCC-sign",
+          "PAIR-OCC-absence",
+          "PAIR-OCC-ownership"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-OCC"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-OCC-sign",
+          "PAIR-OCC-absence",
+          "PAIR-OCC-ownership"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-OCC-CANDIDATE"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-OCCURRENCE-CANDIDATE-CONTRACT"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-OCC"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-OCC-REAL",
+          "RUN-OCC-API"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-OCC-sign-RED",
+          "RUN-OCC-sign-GREEN",
+          "RUN-OCC-absence-RED",
+          "RUN-OCC-absence-GREEN",
+          "RUN-OCC-ownership-RED",
+          "RUN-OCC-ownership-GREEN",
+          "RUN-OCC-SUITE",
+          "RUN-OCC-API",
+          "RUN-OCC-ORACLE",
+          "RUN-OCC-REAL"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

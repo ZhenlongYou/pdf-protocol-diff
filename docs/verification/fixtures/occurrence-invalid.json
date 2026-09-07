@@ -1,0 +1,11 @@
+{
+  "old": [
+    "First text",
+    "Second text"
+  ],
+  "new": [],
+  "duplicate_ids": true,
+  "expected_exception": "ValueError",
+  "partition": "invalid",
+  "provenance": "Manually specified contract example; regression evidence only, not an independent document-family accuracy sample."
+}

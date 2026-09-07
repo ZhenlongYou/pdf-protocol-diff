@@ -1,0 +1,16 @@
+{
+  "old": [
+    "Unique requirement retained."
+  ],
+  "new": [
+    "Unique requirement retained."
+  ],
+  "old_states": [
+    "equal"
+  ],
+  "new_states": [
+    "equal"
+  ],
+  "partition": "nominal",
+  "provenance": "Manually specified contract example; regression evidence only, not an independent document-family accuracy sample."
+}

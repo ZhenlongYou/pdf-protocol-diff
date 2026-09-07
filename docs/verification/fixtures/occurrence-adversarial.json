@@ -1,0 +1,28 @@
+{
+  "old": [
+    "Mode A",
+    "Typical input voltage 3.0 V",
+    "Mode B",
+    "Typical input voltage 2.5 V"
+  ],
+  "new": [
+    "Mode A",
+    "Typical input voltage 2.5 V",
+    "Mode B",
+    "Typical input voltage 3.0 V"
+  ],
+  "old_states": [
+    "equal",
+    "unresolved",
+    "unresolved",
+    "unresolved"
+  ],
+  "new_states": [
+    "equal",
+    "unresolved",
+    "unresolved",
+    "unresolved"
+  ],
+  "partition": "adversarial",
+  "provenance": "Manually specified contract example; regression evidence only, not an independent document-family accuracy sample."
+}

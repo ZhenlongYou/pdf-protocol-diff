@@ -1,5 +1,27 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-08 通用引擎第一阶段候选保存
+
+- task_id: `pdf-diff-general-engine-20260907`
+- owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`
+- status: candidate_saved_not_production_accepted
+- 起点：`8fc4323eec5e7db8b7f258e74d5ab115dc8ecfd5`，持久分支 `project/pdf-protocol-diff`；生产 main 仍为 `44b875b90e7168a5134813622c311355cfe9588a`。最终保存 OID 以 Git/本轮回复为准，不能把这里的起点当最终源码。
+- 用户已授权按普适性分析实施。本轮完成可核验的引擎对照、来源匹配候选及局部真实反例验证；整体任务仍未完成，未替换桌面默认路径、未认证全量 OIF 报告，开放用户缺陷账本保持原状态。
+- 新工具：`tools/evaluate_parser_candidates.py` 独立进程评测原生/PyMuPDF/PyMuPDF4LLM/Docling/OpenDataLoader；冻结 manifest、runner、PDF 快照与源码哈希，新 worker 绑定完整 input SHA-256。`tools/build_parser_evaluation_fixtures.py` 生成五个可控输入，包括外观相同但内部写入顺序不同的双栏变体。
+- 新接口：`src/protocol_pdf_diff/evidence_alignment.py` 保留每次出现的身份、页、坐标、类型和风险，精确匹配支持分段变化、全局唯一与双锚点局部唯一；所有最终配对统一核验顺序交叉，不能把条件互换判作全体不变。对侧仍有未解释内容时不授权缺失；保留原文符号及词界，坐标与整页文字不一致时保存双视图且不重复计数。
+- `tools/compare_document_evidence.py` 是真实 PDF 的原生候选 CLI，输出来源 JSON 和文字 HTML；`tools/compare_parser_evidence.py` 直接接入冻结解析区域，输出来源与配对 JSON。两者都不是正式桌面报告。历史 Docling 仅支持核验其原生 SHA-256 低64位来源，明确披露截断绑定且complete=False；缺少可验证来源的其他旧结果拒绝读取。不得补写新字段后声称旧解析时已经记录完整输入输出关系。
+- 评测依赖隔离于 `work/parser-evaluation-env`（约1.6GiB），生产 `.venv` 未安装重型候选。实际版本：Docling 2.126.0、docling-core 2.95.0、PyMuPDF4LLM 1.28.2、OpenDataLoader 2.5.7。Java 使用已有 PyCharm jbr，通过 JAVA_HOME 指定；未新装系统Java。Docling模型缓存是本轮下载，保留以供后续复测。
+- 八案例32次同机运行：原生4/8、PyMuPDF4LLM6/8、Docling7/8、OpenDataLoader4/8通过所选检查；这不是准确率，包含开发样本和已知反例，尚无独立文档家族验收。Docling表格行列警告仍存在。手册人工参考为DPOJET物理88页Table29，论文为amser物理1、5页；OIF不能作为唯一泛化证据。
+- 两份整本候选管线耗时：PyMuPDF4LLM旧656页95.468秒、新685页102.245秒；Docling旧451.002秒、新437.862秒。是新进程导入/初始化/转换/保存/规范化/检查时间，模型已下载，不是全比较时间或首次安装时间。长文计量绑定旧冻结runner；最终Docling映射仅重放原始输出，未重跑模型，严格分开记录。worker RSS不含子进程，不冒充总峰值。
+- 原始Docling adapter 经独立审查修正跨页多prov整段复制、picture children及页边层遗漏、单prov列表charspan口径不同导致文字清空、表格Markdown格式偏置等。最终投影两份空list_item均0，p1跨页对象只保留其真实字符范围。后续必须继续保留raw，不能用模型表格字符串覆盖原始文字。
+- 旧原生checkpoint桥接结果1341/1341整页未决，已拒绝该接入路线。直接从Docling区域接入后，用户截图中物理p351、p352、p381的共同正文均找到双方来源；没有文档名/页码/原句特制规则。最终24,923旧＋13,638新非空区域，19,454来源单元仍未决，含页边行号；匹配0.242秒仅该阶段，不包括解析/JSON/图表报告。不能将这三个原句回归视作整份OIF修复。
+- 补充双栏检查：两份PDF在2倍渲染下像素SHA完全相同；整列写入时Docling/ODL通过，交错写入时失败。原生两份通过、PyMuPDF4LLM两份失败。新生成器保留两变体；原始32次记录不回填、不改称新结果。
+- 最后匹配/接入行为变更后的完整套件：1278项、159.859秒、1 skip；18项候选定向检查通过。公开PDF CLI检查保留+3.0/-3.0变化及来源ID；主桌面入口 `main.py --gui-smoke-test` 通过。六固定回归合同的v2 `occurrence-receipt-accepted-candidate.json` 为 EXECUTED_EVIDENCE_PASS / verified_scope_only，包含三个实际故障注入、独立手写预期、API与CLI入口；不认证解析器或整体PDF准确性。
+- 独立只读审查：`review_occurrence_candidate` 已逐项关闭已报候选反例（重复消费守恒、移动修改误删、条件互换、词界丢失、逆序锚点与来源绑定）；`review_parser_benchmark` 关闭跨页复制和列表丢失；`review_engine_architecture` 核对评测记录与结论边界。真实桌面OIF新报告和最终浏览器版面未验收；不得称生产修复完成。
+- 证据全部在 `work/general-evaluation/`：`reviewed/`、`long/`、`source-bound-controlled/`、`stream-order-check/`、`docling-occurrences-final/`、最终完整测试日志及回执；私有PDF/raw不进Git。详细方法和入口见 `docs/verification/general-engine-evaluation-20260907.md`。旧用户报告及原生窗口未改动。
+- 后续恢复：从本次终态claim记录的持久分支精确OID继续同项目任务。首先建立原生字词与候选区域的一一归属及覆盖核验，按证据选择原生/复杂版面路线；再补表格行列、重复条件、扫描/混合页及真实独立文档的误报/漏报/未决率。结果展示必须继承区域归属，保持真实尺寸和完整上下文，复用现有取消与原子发布。通过这些门槛前不接默认路径；不能靠全部降级未决或隐藏难内容达标。
+
+
 ## 2026-09-07 普适性、准确性和效率设计约束
 
 - task_id: `pdf-diff-general-design-20260907`

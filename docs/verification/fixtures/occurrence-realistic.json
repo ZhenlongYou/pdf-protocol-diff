@@ -1,0 +1,24 @@
+{
+  "old": [
+    "First unique anchor retained for independent verification.",
+    "The operating limit is +3.0 V.",
+    "Last unique anchor retained for independent verification."
+  ],
+  "new": [
+    "First unique anchor retained for independent verification.",
+    "The operating limit is -3.0 V.",
+    "Last unique anchor retained for independent verification."
+  ],
+  "old_states": [
+    "equal",
+    "modified",
+    "equal"
+  ],
+  "new_states": [
+    "equal",
+    "modified",
+    "equal"
+  ],
+  "partition": "realistic",
+  "provenance": "Manually specified contract example; regression evidence only, not an independent document-family accuracy sample. Uses the existing real-PDF sign-change regression text. Very short documents retain the native extraction warning; they are not certified by this case."
+}
