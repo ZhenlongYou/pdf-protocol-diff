@@ -667,6 +667,21 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
     if start_index >= len(tokens):
         return None
     normalized = [_normalize_number_word_token(token) for token in tokens]
+    return _parse_normalized_number_word_phrase(normalized, start_index)
+
+
+def _parse_normalized_number_word_phrase(
+    normalized: list[str], start_index: int,
+) -> tuple[str, int] | None:
+    """Reuse one immutable normalized stream and reject non-number starts early."""
+
+    # Every successful grammar branch starts with a cardinal, ``a`` or ``half``.
+    # This necessary gate does not alter the existing numeric grammar or context.
+    if start_index >= len(normalized):
+        return None
+    initial = normalized[start_index]
+    if initial not in {"a", "half"} and _compact_number_word_value(initial) is None:
+        return None
     if (
         normalized[start_index] == "a"
         and start_index + 1 < len(normalized)
@@ -675,8 +690,9 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         # ``a hundred`` and ``a million`` are ordinary cardinal phrases.  Keep
         # the substitution local to a following scale so an article in prose
         # can never become a count on its own.
-        normalized[start_index] = "one"
-        return parse_number_word_phrase(normalized, start_index)
+        local_tokens = list(normalized)
+        local_tokens[start_index] = "one"
+        return _parse_normalized_number_word_phrase(local_tokens, start_index)
     if (
         normalized[start_index : start_index + 2] == ["half", "a"]
         and start_index + 2 < len(normalized)
@@ -714,7 +730,7 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         ]
         if any(scale >= target_scale for scale in prefix_scales):
             continue  # Repeated/descending scale chains are not one atomic count.
-        prefix = parse_number_word_phrase(tokens[start_index:half_index], 0)
+        prefix = _parse_normalized_number_word_phrase(normalized[start_index:half_index], 0)
         if prefix is None or prefix[1] != half_index - start_index:
             continue
         scaled_chain = canonicalize_numeric_scale_chain(
@@ -769,7 +785,7 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
         and scale_end - first_scale >= 2
         and chain_is_terminal
     ):
-        multiplier = parse_number_word_phrase(tokens[start_index:first_scale], 0)
+        multiplier = _parse_normalized_number_word_phrase(normalized[start_index:first_scale], 0)
         if multiplier is not None and multiplier[1] == first_scale - start_index:
             scaled = canonicalize_numeric_scale_chain(
                 multiplier[0],
@@ -859,7 +875,7 @@ def canonicalize_number_word_tokens(
                 canonical.append(scaled_digit)
                 index = scale_end
                 continue
-        parsed = parse_number_word_phrase(tokens, index)
+        parsed = _parse_normalized_number_word_phrase(normalized_tokens, index)
         if parsed:
             value, consumed = parsed
             next_index = index + consumed

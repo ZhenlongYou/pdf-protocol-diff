@@ -196,6 +196,8 @@ class WebviewGuiTests(unittest.TestCase):
                 "open_html_report",
                 "open_output_dir",
                 "run_comparison",
+                "cancel_comparison",
+                "get_run_state",
             },
             exposed,
         )
@@ -209,6 +211,8 @@ class WebviewGuiTests(unittest.TestCase):
         self.assertFalse(first["ok"])
         self.assertFalse(second["ok"])
         self.assertIn("无法启动比较任务", second["error"])
+        self.assertFalse(api._running)
+        self.assertEqual("error", api.get_run_state()["type"])
 
     def test_close_is_cancelled_only_while_a_run_is_active(self) -> None:
         api = ProtocolDiffWebApi()

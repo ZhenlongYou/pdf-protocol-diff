@@ -84,6 +84,8 @@ from protocol_pdf_diff.venv_bootstrap import reexec_into_project_venv  # noqa: E
 
 
 if __name__ == "__main__":  # PyCharm 直接运行 main.py 时先切到项目 .venv，避免缺少 pdfplumber。
+    from multiprocessing import freeze_support
+    freeze_support()
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 使用 sys.prefix 判断环境，避开 macOS 软链接误判。
 
 from protocol_pdf_diff.compare import run_diff  # noqa: E402

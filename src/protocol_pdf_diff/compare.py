@@ -10,12 +10,14 @@ section context, but final sign-off should still inspect the source PDFs.
 from __future__ import annotations
 
 import difflib
+from types import MappingProxyType
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .comparison_session import comparison_session, memoize_comparison
 from .figure_filters import filter_figure_visual_snippets
 from .models import (
     DiffOptions,
@@ -37,7 +39,7 @@ from .pdf_extract import (
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
-from .progress import ProgressEvent, ProgressObserver, notify_progress
+from .progress import ProgressEvent, ProgressObserver, notify_progress, progress_session, report_progress
 from .prose_source_visuals import build_prose_source_visuals
 from .quality import (
     PairAssessment,
@@ -124,6 +126,8 @@ _DISPLAYED_FORMULA_RELATION_RE = re.compile(
 _DISPLAYED_FORMULA_ARITHMETIC_RE = re.compile(r"[+*/^√∑∫]")
 
 
+@comparison_session
+@progress_session
 def run_diff(
     old_pdf: str | Path,
     new_pdf: str | Path,
@@ -253,6 +257,7 @@ def _assessment_with_visual_review(
     )
 
 
+@comparison_session
 def compare_extractions(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,
@@ -281,8 +286,11 @@ def compare_extractions(
         new_extraction.table_visuals,
         new_extraction.pages,
     )
+    report_progress("sectioning", 0, 4, unit="轮")
     old_reconciliation_sections = section_document(old_extraction)
+    report_progress("sectioning", 1, 4, unit="轮")
     new_reconciliation_sections = section_document(new_extraction)
+    report_progress("sectioning", 2, 4, unit="轮")
     old_sections = section_document(
         _extraction_without_page_bound_table_captions(
             old_extraction,
@@ -290,6 +298,7 @@ def compare_extractions(
             repaired_tables=old_table_visuals,
         )
     )
+    report_progress("sectioning", 3, 4, unit="轮")
     new_sections = section_document(
         _extraction_without_page_bound_table_captions(
             new_extraction,
@@ -297,6 +306,7 @@ def compare_extractions(
             repaired_tables=new_table_visuals,
         )
     )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
+    report_progress("sectioning", 4, 4, unit="轮")
     old_header_section = _running_header_section(old_extraction)
     new_header_section = _running_header_section(new_extraction)
     old_header_section, new_header_section = _ignore_trailing_header_page_only_difference(
@@ -1753,6 +1763,7 @@ def _exact_table_text_page_number(
     return matching_pages[0] if len(matching_pages) == 1 else fallback
 
 
+@comparison_session
 def compare_sections(
     old_sections: list[Section],
     new_sections: list[Section],
@@ -2094,9 +2105,15 @@ def _match_sections(
     matches: list[tuple[int | None, int | None, float, str]] = []
 
     exact_candidates: list[tuple[float, int, int]] = []
+    exact_total = sum(len(old_indexes) * len(exact_new_by_key.get(key, []))
+                      for key, old_indexes in exact_old_by_key.items())
+    exact_completed = 0
+    report_progress("match_exact", 0, exact_total, unit="候选对")
     for identity_key, old_indexes in exact_old_by_key.items():
         for old_index in old_indexes:
             for new_index in exact_new_by_key.get(identity_key, []):
+                report_progress("match_exact", exact_completed, exact_total, unit="候选对")
+                exact_completed += 1
                 old_section = old_sections[old_index]
                 new_section = new_sections[new_index]
                 body_similarity = _exact_identity_similarity(
@@ -2124,6 +2141,7 @@ def _match_sections(
                 # 相同编号并不保证是同一条款：插入新条款会占用旧编号并整体后移。
                 # 即使标题未变，也必须由实际可比文本达到用户阈值；证据不足时保守显示新增/删除。
 
+    report_progress("match_exact", exact_completed, exact_total, unit="候选对")
     for similarity, old_index, new_index in sorted(
         exact_candidates,
         key=lambda item: (-item[0], abs(item[1] - item[2]), item[2], item[1]),
@@ -2144,7 +2162,10 @@ def _match_sections(
     )
     fallback_candidates: list[tuple[float, int, int, str]] = []
     late_fallback_candidates: list[tuple[float, int, int, str]] = []
+    old_matching_bodies: dict[int, str] = {}
+    new_matching_bodies: dict[int, str] = {}
     for new_index, new_section in enumerate(new_sections):
+        report_progress("match_fallback", new_index, len(new_sections), unit="章节")
         if new_index in matched_new:
             continue
         for old_index, old_section in enumerate(old_sections):
@@ -2152,29 +2173,31 @@ def _match_sections(
                 continue
             if (old_index, new_index) in rejected_exact_pairs:
                 continue
-            raw_body_similarity = _section_similarity(
-                old_section.body,
-                new_section.body,
+            raw_body_similarity = _section_similarity_for_threshold(
+                old_section.body, new_section.body, options.min_section_match_similarity,
             )
+            # None proves below-threshold; no numeric score from this rejected
+            # branch is emitted or used in ordering candidates.
+            if raw_body_similarity is None:
+                raw_body_similarity = 0.0
             body_similarity = raw_body_similarity
             used_evidence_suppression = (
                 raw_body_similarity < options.min_section_match_similarity
             )
             if used_evidence_suppression:
-                old_matching_body = _section_matching_body(
-                    old_section.body,
-                    old_table_unit_keys,
-                )
-                new_matching_body = _section_matching_body(
-                    new_section.body,
-                    new_table_unit_keys,
-                )
+                if old_index not in old_matching_bodies:
+                    old_matching_bodies[old_index] = _section_matching_body(old_section.body, old_table_unit_keys)
+                if new_index not in new_matching_bodies:
+                    new_matching_bodies[new_index] = _section_matching_body(new_section.body, new_table_unit_keys)
+                old_matching_body = old_matching_bodies[old_index]
+                new_matching_body = new_matching_bodies[new_index]
                 if not old_matching_body or not new_matching_body:
                     continue
-                body_similarity = _section_similarity(
-                    old_matching_body,
-                    new_matching_body,
-                )  # 原始正文不足时才剔除结构化/已证明表格与 Figure 单元重试。
+                body_similarity = _section_similarity_for_threshold(
+                    old_matching_body, new_matching_body, options.min_section_match_similarity,
+                )
+                if body_similarity is None:
+                    continue  # The exact original score cannot meet the user threshold.
             if body_similarity < options.min_section_match_similarity:
                 continue  # 正文证据不足时保守保留新增/删除，避免把完全重写的同名章节强配。
             score = _section_match_score(old_section, new_section)
@@ -2211,6 +2234,7 @@ def _match_sections(
             else:
                 fallback_candidates.append(candidate)
 
+    report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
     _consume_section_match_candidates(
         fallback_candidates,
         old_sections,
@@ -3641,12 +3665,32 @@ _MAX_ALL_PAIR_UNIT_MATCHES = 1024  # 32×32 以内可穷举；更长章节必须
 _MAX_WHOLE_BODY_REVIEW_KEY_CHARS = 2048  # 只在短正文分句数量漂移时计算整段语义键，避免长章节二次扫描退化。
 
 
+@memoize_comparison()
 def _section_similarity(left: str, right: str) -> float:
     """Return a bounded similarity score for section matching and reporting."""
 
     left_sample = _sample_section_text(left)  # 采样保留章节开头和结尾，兼顾标题、定义和表格续行。
     right_sample = _sample_section_text(right)  # 两边使用同样采样策略，分数才可比较。
     return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
+
+
+@memoize_comparison()
+def _normalized_section_sample(text: str) -> str:
+    return normalize_for_similarity(_sample_section_text(text))
+
+
+@memoize_comparison()
+def _section_similarity_for_threshold(left: str, right: str, threshold: float) -> float | None:
+    """Return the original score, or None only when an upper bound rejects it."""
+    left_norm, right_norm = _normalized_section_sample(left), _normalized_section_sample(right)
+    matcher = difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False)
+    if matcher.real_quick_ratio() < threshold or matcher.quick_ratio() < threshold:
+        return None
+    if left_norm or right_norm:
+        upper = 2.0 * _lcs_match_count(left_norm, right_norm) / (len(left_norm) + len(right_norm))
+        if upper < threshold:
+            return None
+    return _section_similarity(left, right)
 
 
 def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> str:
@@ -3709,13 +3753,18 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         whole_right_key = _review_unit_key(right)
         if whole_left_key and whole_left_key == whole_right_key:
             return 1.0  # 短正文整段键允许PDF分句边界漂移；结构化分号仍留在语义键中。
+    matched_count_cache: int | None = None
+
+    def skeleton_count() -> int:
+        nonlocal matched_count_cache
+        if matched_count_cache is None:
+            matched_count_cache = _review_unit_skeleton_match_count(
+                left_units, right_units, left_keys=left_unit_keys, right_keys=right_unit_keys,
+            )
+        return matched_count_cache
+
     if _unproven_record_order_conflict(left_units, right_units):
-        matched_unit_count = _review_unit_skeleton_match_count(
-            left_units,
-            right_units,
-            left_keys=left_unit_keys,
-            right_keys=right_unit_keys,
-        )
+        matched_unit_count = skeleton_count()
         shorter_count = min(len(left_units), len(right_units))
         if matched_unit_count >= 2 and matched_unit_count / shorter_count >= 0.75:
             return max(
@@ -3725,12 +3774,7 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
             )
             # 多数记录骨架稳定可证明仍是同一章；逐条对应关系仍留给报告层保守显示。
     if len(left_units) != len(right_units):
-        matched_unit_count = _review_unit_skeleton_match_count(
-            left_units,
-            right_units,
-            left_keys=left_unit_keys,
-            right_keys=right_unit_keys,
-        )
+        matched_unit_count = skeleton_count()
         shorter_count = min(len(left_units), len(right_units))
         if matched_unit_count != shorter_count:
             stable_ratio = matched_unit_count / shorter_count
@@ -3772,12 +3816,7 @@ def _exact_identity_similarity(left: str, right: str) -> float | None:
         ):
             return None  # 共享 uses 2 等普通计数只找候选，不能绕过单句语义骨架门。
         return raw_score  # 无局部结构证据时仍按原始相似度，不让长标题强行配对 ALPHA/OMEGA。
-    matched_unit_count = _review_unit_skeleton_match_count(
-        left_units,
-        right_units,
-        left_keys=left_unit_keys,
-        right_keys=right_unit_keys,
-    )
+    matched_unit_count = skeleton_count()
     if matched_unit_count < len(left_units):
         stable_ratio = matched_unit_count / len(left_units)
         if matched_unit_count < 2 or stable_ratio < 0.75:
@@ -3816,32 +3855,89 @@ def _review_similarity(left: str, right: str) -> float:
     return difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False).ratio()
 
 
-def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
-    """Require local lexical continuity without treating a technical edit as disjoint prose."""
+@memoize_comparison(maxsize=128)
+def _lcs_sample_masks(value: str):
+    """Small immutable masks reused across a row of section candidates."""
+    masks: dict[str, int] = {}
+    for index, char in enumerate(value):
+        masks[char] = masks.get(char, 0) | (1 << index)
+    return MappingProxyType(masks)
 
-    if _review_unit_key(left) == _review_unit_key(right):
-        return True
-    if (
-        _standalone_table_reference_number(left)
-        and _standalone_table_reference_number(right)
-    ):
-        return True  # 完整表引用是通用结构定位语法，编号变化不应拆散同一章节。
-    if _unit_has_unproven_label_syntax(left) or _unit_has_unproven_label_syntax(right):
-        return False  # 无 schema provenance 时，冒号标签不猜测字段身份。
-    if max(_review_similarity(left, right), _similarity(left, right)) >= 0.90:
-        return True  # 短数值、状态词或大小写技术标识符变化仍是同一句。
-    left_field = _assignment_field_key(left)
-    right_field = _assignment_field_key(right)
-    if left_field and left_field == right_field:
-        return True  # 显式 `=` 左值稳定时，值槽的不透明技术枚举仍是同一条修改。
-    left_words = _meaningful_review_words(left)
-    right_words = _meaningful_review_words(right)
-    if not left_words or not right_words:
+
+def _lcs_match_count(left: str, right: str) -> int:
+    """Exact common-subsequence length using a bit-parallel DP row.
+
+    A set bit marks a column where the LCS row increases. The subtraction
+    propagates each new character match to its earliest available column.
+    Python integers keep the full bit row, with no fixed-width truncation.
+    This is only an upper bound on difflib's chosen matching-block count.
+    """
+    if len(left) < len(right):
+        left, right = right, left
+    if len(right) <= 2048:
+        masks = _lcs_sample_masks(right)
+    else:
+        # Huge semantic keys are handled once and dropped rather than filling
+        # the sample cache with large bit vectors.
+        masks = {}
+        for index, char in enumerate(right):
+            masks[char] = masks.get(char, 0) | (1 << index)
+    state = 0
+    for char in left:
+        union = masks.get(char, 0) | state
+        state = union & ~(union - ((state << 1) | 1))
+    return state.bit_count()
+
+
+def _sequence_ratio_at_least(left: str, right: str, threshold: float) -> bool:
+    """Use proven upper bounds before the unchanged, exact difflib ratio.
+
+    No sampling or autojunk is introduced. Both quick ratios bound ratio()
+    from above, so only candidates that cannot reach the threshold are skipped.
+    """
+    if left == right:
+        return 1.0 >= threshold
+    if not left or not right:
+        return 0.0 >= threshold
+    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
+    if matcher.real_quick_ratio() < threshold or matcher.quick_ratio() < threshold:
         return False
-    shared_words = left_words & right_words
-    return len(shared_words) >= 2 and len(shared_words) / min(
-        len(left_words), len(right_words)
-    ) >= 0.60  # 要求大部分实质词不变，拒绝只共享 defines/requirements 类套话的互异正文。
+    if max(len(left), len(right)) > 4096:
+        # Long hexadecimal identifiers can expand into huge semantic keys.
+        # difflib's noncrossing blocks concatenate to a common subsequence,
+        # therefore their count cannot exceed the exact LCS length. Reject
+        # only below this upper bound; never replace the original ratio.
+        upper = 2.0 * _lcs_match_count(left, right) / (len(left) + len(right))
+        if upper < threshold:
+            return False
+    return matcher.ratio() >= threshold
+
+
+@memoize_comparison()
+def _review_units_share_sentence_skeleton(left: str, right: str) -> bool:
+    """Keep every original identity guard and success condition, cheapest first."""
+
+    left_key, right_key = _review_unit_key(left), _review_unit_key(right)
+    if left_key == right_key:
+        return True
+    if (_standalone_table_reference_number(left)
+            and _standalone_table_reference_number(right)):
+        return True
+    if _unit_has_unproven_label_syntax(left) or _unit_has_unproven_label_syntax(right):
+        return False  # Colon labels still need schema provenance, before any success test.
+    left_field, right_field = _assignment_field_key(left), _assignment_field_key(right)
+    if left_field and left_field == right_field:
+        return True
+    left_words, right_words = _meaningful_review_words(left), _meaningful_review_words(right)
+    if left_words and right_words:
+        shared = len(left_words & right_words)
+        if shared >= 2 and shared / min(len(left_words), len(right_words)) >= 0.60:
+            return True
+    # The original success conditions form an OR. Moving cheap positives ahead
+    # of string alignment preserves the boolean result, including wordless units.
+    return (_sequence_ratio_at_least(normalize_for_similarity(left),
+                                     normalize_for_similarity(right), 0.90)
+            or _sequence_ratio_at_least(left_key, right_key, 0.90))
 
 
 def _review_units_have_complete_skeleton_matching(
@@ -4013,6 +4109,7 @@ def _review_unit_skeleton_match_count(
     return proven_count + matched_count
 
 
+@memoize_comparison()
 def _assignment_field_key(value: str) -> str:
     """Return a stable left-hand field only for explicit equals assignments."""
 
@@ -4049,6 +4146,7 @@ def _unit_has_unproven_label_syntax(value: str) -> bool:
     return bool(re.search(r"[:：]", value))
 
 
+@memoize_comparison()
 def _similarity(left: str, right: str) -> float:
     """Return normalized SequenceMatcher ratio for two text values."""
 
@@ -4704,6 +4802,7 @@ _PROTECTED_NUMBER_WORD_SUFFIXES = frozenset(
 )
 
 
+@memoize_comparison()
 def _review_unit_key(value: str) -> str:
     """Normalize a unit for deciding whether a visible diff is substantive.
 

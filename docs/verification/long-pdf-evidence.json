@@ -1,0 +1,1192 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "long-pdf-performance-cancel-20260907",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC-LONG-0",
+          "path": "docs/verification/escaped-defects.yaml",
+          "sha256": "eb6ac103f2cdbc39dae69bee8a1ef7f2c854dcc6a9785954c0f133180ebb9603",
+          "size_bytes": 4685
+        },
+        {
+          "id": "SRC-LONG-1",
+          "path": "docs/verification/long_pdf_legacy_oracle.py",
+          "sha256": "79e434319ccfecfa089ee333ab9145d41459f3d4125a22c0a4601a5fa96ca0fb",
+          "size_bytes": 33867
+        },
+        {
+          "id": "SRC-LONG-2",
+          "path": "gui_app.py",
+          "sha256": "0f1265784e7220682f7dfa886feab1fd832fd5667bf003bd0e2fa354554cf252",
+          "size_bytes": 1234
+        },
+        {
+          "id": "SRC-LONG-3",
+          "path": "main.py",
+          "sha256": "ad186b6f9be98e38c3b4ec5820c353935a9a2a1e859914f39cf5229488d49e51",
+          "size_bytes": 11180
+        },
+        {
+          "id": "SRC-LONG-4",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-LONG-5",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "f83088459475e03ab29f517ea14f4d8139205db3151c5ee4f3a768da52841b50",
+          "size_bytes": 43349
+        },
+        {
+          "id": "SRC-LONG-6",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "41639664a3c4ede380e342d242ed077205bb4976f6b4e1318ffe3c992ce0c4c7",
+          "size_bytes": 260891
+        },
+        {
+          "id": "SRC-LONG-7",
+          "path": "src/protocol_pdf_diff/comparison_job.py",
+          "sha256": "deaa0699c4beb3cc70d91a0d0bf2a9bff73939c2e1cc0846a2b038da289ab784",
+          "size_bytes": 11848
+        },
+        {
+          "id": "SRC-LONG-8",
+          "path": "src/protocol_pdf_diff/comparison_session.py",
+          "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+          "size_bytes": 1338
+        },
+        {
+          "id": "SRC-LONG-9",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
+          "size_bytes": 65405
+        },
+        {
+          "id": "SRC-LONG-10",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-LONG-11",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "98f79dcda35b061d8e6c596516ac7a9e2e486558c54bffdc8589d3d3e81a83d6",
+          "size_bytes": 16975
+        },
+        {
+          "id": "SRC-LONG-12",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-LONG-13",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-LONG-14",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "763a091d899eabc83f5faca4dbf9113d90225965da645598b077c588c69f0d0e",
+          "size_bytes": 17456
+        },
+        {
+          "id": "SRC-LONG-15",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "925c5d5f1a0183f74bee47ad895655707efae3938f1c43dd2f8fb5e3e514f3af",
+          "size_bytes": 26115
+        },
+        {
+          "id": "SRC-LONG-16",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-LONG-17",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-LONG-18",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-LONG-19",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-LONG-20",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "19fffd6ec09fd37de3fc49d3186b3b2f2286686b6f6b9280c0b90c5aa6d68872",
+          "size_bytes": 329615
+        },
+        {
+          "id": "SRC-LONG-21",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+          "size_bytes": 2087
+        },
+        {
+          "id": "SRC-LONG-22",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "4e8ebdde5c12dab9d6103293b8b9b9e3be153726b4c7f4881382f20878c41e0d",
+          "size_bytes": 80775
+        },
+        {
+          "id": "SRC-LONG-23",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
+          "size_bytes": 28701
+        },
+        {
+          "id": "SRC-LONG-24",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "edf1c00cc260d6fcee47c6bfc9e97d2445149679dcd0f9c8f933af494e0f5e2d",
+          "size_bytes": 508068
+        },
+        {
+          "id": "SRC-LONG-25",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-LONG-26",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "cb4a0e4b8da6c08b1816a3cf40a1983d86aee143f0b8484edc675b255bcfd0af",
+          "size_bytes": 140112
+        },
+        {
+          "id": "SRC-LONG-27",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-LONG-28",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "695ba8fad442c6281a3f2ec622e78f8bcaea730863e36d44fad0b72d77b199e9",
+          "size_bytes": 40594
+        },
+        {
+          "id": "SRC-LONG-29",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
+          "size_bytes": 4116
+        },
+        {
+          "id": "SRC-LONG-30",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-LONG-31",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
+        },
+        {
+          "id": "SRC-LONG-32",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "6e70435e5b34ba13860ca45cd7bc42186521e5103a334a705599e8ce3e14e43f",
+          "size_bytes": 30172
+        },
+        {
+          "id": "SRC-LONG-33",
+          "path": "src/protocol_pdf_diff/webui/index.html",
+          "sha256": "8a972011cd3fa9f6fcd82bb661789081a1233aca9bf1fb0c71a2d21aa0303594",
+          "size_bytes": 23499
+        },
+        {
+          "id": "SRC-LONG-34",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
+          "size_bytes": 23963
+        },
+        {
+          "id": "SRC-LONG-35",
+          "path": "tests/__init__.py",
+          "sha256": "7028ed77f4cf50ac95f847c9abe62a2960a0437c3e1d5a322e86d63b577a8d23",
+          "size_bytes": 626
+        },
+        {
+          "id": "SRC-LONG-36",
+          "path": "tests/test_comparison_job.py",
+          "sha256": "339b94aa29b10ac17b6979c37494a5ab2dabdda2a0f0edcf799afe8e41018924",
+          "size_bytes": 11842
+        },
+        {
+          "id": "SRC-LONG-37",
+          "path": "tests/test_long_pdf_performance.py",
+          "sha256": "12a88d7498bb9ac4475841837554b6a4f369f51603b4c00d67d80c2f50313529",
+          "size_bytes": 10597
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "observable": "Skip redundant normalization, impossible geometry pairs and impossible long-key alignment without changing the frozen recognition results; each table OCR call has a finite budget.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-07 long PDF 89-minute report and request to implement performance/cancel fixes"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "All selected behavioral assertions and independent oracles pass",
+            "unit": "behavior",
+            "locator": "tests/test_long_pdf_performance.py and tests/test_comparison_job.py"
+          },
+          "oracle_ids": [
+            "ORACLE-LONG"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-LONG-NOMINAL"
+            ],
+            "boundary": [
+              "IN-LONG-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-LONG-INVALID"
+            ],
+            "adversarial": [
+              "IN-LONG-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-LONG-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-LONG-KNOWN_FAILURE"
+            ]
+          }
+        },
+        {
+          "id": "REQ-DESKTOP-CANCEL-006",
+          "observable": "Cancel, worker crash, cleanup retry, window close and restart preserve process ownership and publish only complete reports.",
+          "authority": {
+            "kind": "user",
+            "locator": "2026-09-07 long PDF 89-minute report and request to implement performance/cancel fixes"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "All selected behavioral assertions and independent oracles pass",
+            "unit": "behavior",
+            "locator": "tests/test_long_pdf_performance.py and tests/test_comparison_job.py"
+          },
+          "oracle_ids": [
+            "ORACLE-LONG"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-LONG-NOMINAL"
+            ],
+            "boundary": [
+              "IN-LONG-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-LONG-INVALID"
+            ],
+            "adversarial": [
+              "IN-LONG-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-LONG-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-LONG-KNOWN_FAILURE"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-LONG-NOMINAL",
+          "path": "docs/verification/fixtures/long-pdf-nominal.json",
+          "sha256": "6aa69efceac06367592d60b8853baa0f4b54d8105639ee36c559e407910e8237",
+          "size_bytes": 916,
+          "provenance": "Frozen executable scenario selection: nominal"
+        },
+        {
+          "id": "IN-LONG-BOUNDARY",
+          "path": "docs/verification/fixtures/long-pdf-boundary.json",
+          "sha256": "77909192616943adebc48cb8fbc2fdd3773d76bb44a896eaf246a23b542af4b9",
+          "size_bytes": 868,
+          "provenance": "Frozen executable scenario selection: boundary"
+        },
+        {
+          "id": "IN-LONG-INVALID",
+          "path": "docs/verification/fixtures/long-pdf-invalid.json",
+          "sha256": "6ff8098a41f24a6a6dc31d59ff6cf3b92c0ea03691f578050e8427f0c65f7223",
+          "size_bytes": 905,
+          "provenance": "Frozen executable scenario selection: invalid"
+        },
+        {
+          "id": "IN-LONG-ADVERSARIAL",
+          "path": "docs/verification/fixtures/long-pdf-adversarial.json",
+          "sha256": "e0d34cfb8606bad86b6b7ae6d8646907692060d6b741a13f9f5eac8bf6c3d9a0",
+          "size_bytes": 1684,
+          "provenance": "Frozen executable scenario selection: adversarial"
+        },
+        {
+          "id": "IN-LONG-REALISTIC",
+          "path": "docs/verification/fixtures/long-pdf-realistic.json",
+          "sha256": "2fd57720ac72f8885a33f455411491c73fbcbe6d11e3bb2d603af78fbe14ec2c",
+          "size_bytes": 1103,
+          "provenance": "Frozen executable scenario selection: realistic"
+        },
+        {
+          "id": "IN-LONG-KNOWN_FAILURE",
+          "path": "docs/verification/fixtures/long-pdf-known_failure.json",
+          "sha256": "f16319eb30537af350608a2732f578de50f3ea2c533ab3ac1b47d7b4380a694c",
+          "size_bytes": 1266,
+          "provenance": "Frozen executable scenario selection: known_failure"
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-LONG",
+          "path": "tools/verify_long_pdf.py",
+          "sha256": "cb2da65f77e642421d963d4d62b00f0e37b5a2ac3d536dcbce650cec67c8046f",
+          "size_bytes": 3780
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-LONG",
+          "path": "docs/verification/long_pdf_legacy_oracle.py",
+          "sha256": "79e434319ccfecfa089ee333ab9145d41459f3d4125a22c0a4601a5fa96ca0fb",
+          "size_bytes": 33867,
+          "kind": "reference_implementation",
+          "independence_basis": "Frozen db45c03 historical implementations share only unchanged grammar/geometry primitives; separate grid-DP and explicit process/report observations independently check new behavior. This does not certify all historical recognition semantics.",
+          "production_source_ids": [
+            "SRC-LONG-6",
+            "SRC-LONG-20",
+            "SRC-LONG-28",
+            "SRC-LONG-7",
+            "SRC-LONG-34"
+          ],
+          "validator_run_ids": [
+            "RUN-LONG-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-LONG-NUMBERS",
+          "path": "work/long_pdf_evidence/mutants/numbers.py",
+          "sha256": "16c0a04e3ea9c425e84eb6ecd2e46c70a8f4809dd67d83bedb9644f5a5c5c0e8",
+          "size_bytes": 40571,
+          "target_source_id": "SRC-LONG-28"
+        },
+        {
+          "id": "MUT-LONG-LCS",
+          "path": "work/long_pdf_evidence/mutants/lcs.py",
+          "sha256": "0860bf231ee742dd3fbf5fc2934a503f5be7442c75d547c5da14afa8a6afaa7a",
+          "size_bytes": 260898,
+          "target_source_id": "SRC-LONG-6"
+        },
+        {
+          "id": "MUT-LONG-OCR",
+          "path": "work/long_pdf_evidence/mutants/ocr.py",
+          "sha256": "ea141dcc6a159e6fba2876998083d20b0d16c1a13db421581bcaf4c5813fa0f5",
+          "size_bytes": 329603,
+          "target_source_id": "SRC-LONG-20"
+        },
+        {
+          "id": "MUT-LONG-CANCEL",
+          "path": "work/long_pdf_evidence/mutants/cancel.py",
+          "sha256": "94184b65c07299a4f51d4691f37f1c09dd890bc5658241fad0a6346df41c82a2",
+          "size_bytes": 23984,
+          "target_source_id": "SRC-LONG-34"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-LONG-REAL",
+          "path": "work/long_pdf_evidence/real_path.json",
+          "producer_run_id": "RUN-LONG-REAL",
+          "required": true,
+          "min_size_bytes": 100
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-LONG-NUMBERS-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-NUMBERS"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-NUMBERS-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-LCS-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-LCS"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-LCS-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-OCR-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-OCR"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-OCR-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-CANCEL-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LONG-CANCEL"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "cancel",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_ASSERTION_FAILED"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-CANCEL-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "cancel",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005",
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-NOMINAL",
+            "IN-LONG-BOUNDARY",
+            "IN-LONG-INVALID",
+            "IN-LONG-ADVERSARIAL",
+            "IN-LONG-REALISTIC",
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "oracle",
+            "--oracle-material",
+            "docs/verification/long_pdf_legacy_oracle.py",
+            "docs/verification/fixtures/long-pdf-nominal.json",
+            "docs/verification/fixtures/long-pdf-boundary.json",
+            "docs/verification/fixtures/long-pdf-invalid.json",
+            "docs/verification/fixtures/long-pdf-adversarial.json",
+            "docs/verification/fixtures/long-pdf-realistic.json",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "oracle_ids": [
+            "ORACLE-LONG"
+          ]
+        },
+        {
+          "id": "RUN-LONG-PERFORMANCE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-NOMINAL",
+            "IN-LONG-BOUNDARY",
+            "IN-LONG-INVALID",
+            "IN-LONG-ADVERSARIAL",
+            "IN-LONG-REALISTIC",
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "performance",
+            "docs/verification/fixtures/long-pdf-nominal.json",
+            "docs/verification/fixtures/long-pdf-boundary.json",
+            "docs/verification/fixtures/long-pdf-invalid.json",
+            "docs/verification/fixtures/long-pdf-adversarial.json",
+            "docs/verification/fixtures/long-pdf-realistic.json",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-CANCEL",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-NOMINAL",
+            "IN-LONG-BOUNDARY",
+            "IN-LONG-INVALID",
+            "IN-LONG-ADVERSARIAL",
+            "IN-LONG-REALISTIC",
+            "IN-LONG-KNOWN_FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "cancel",
+            "docs/verification/fixtures/long-pdf-nominal.json",
+            "docs/verification/fixtures/long-pdf-boundary.json",
+            "docs/verification/fixtures/long-pdf-invalid.json",
+            "docs/verification/fixtures/long-pdf-adversarial.json",
+            "docs/verification/fixtures/long-pdf-realistic.json",
+            "docs/verification/fixtures/long-pdf-known_failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_CHECK_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LONG-REAL",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005",
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-LONG"
+          ],
+          "input_ids": [
+            "IN-LONG-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "tools/verify_long_pdf.py",
+            "--check",
+            "real",
+            "docs/verification/fixtures/long-pdf-realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 90,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "LONG_PDF_BEHAVIOR_TEST",
+                "LONG_PDF_REAL_PATH_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "interface": "gui",
+          "observable": "Production asynchronous GUI facade cancels, restarts, and publishes a parser-reopened 4/5 page report retaining the known 20-to-15-day change and added Documentation.",
+          "produces_artifact_ids": [
+            "ART-LONG-REAL"
+          ]
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-LONG-NUMBERS",
+          "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "defect_id": "DEF-LONG-NUMBERS",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-NUMBERS-RED",
+          "green_run_id": "RUN-LONG-NUMBERS-GREEN"
+        },
+        {
+          "id": "PAIR-LONG-LCS",
+          "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "defect_id": "DEF-LONG-LCS",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-LCS-RED",
+          "green_run_id": "RUN-LONG-LCS-GREEN"
+        },
+        {
+          "id": "PAIR-LONG-OCR",
+          "requirement_id": "REQ-LONG-PDF-PERFORMANCE-005",
+          "defect_id": "DEF-LONG-OCR",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-OCR-RED",
+          "green_run_id": "RUN-LONG-OCR-GREEN"
+        },
+        {
+          "id": "PAIR-LONG-CANCEL",
+          "requirement_id": "REQ-DESKTOP-CANCEL-006",
+          "defect_id": "DEF-LONG-CANCEL",
+          "test_id": "LONG_PDF_BEHAVIOR_TEST",
+          "failure_signature": "LONG_PDF_ASSERTION_FAILED",
+          "red_run_id": "RUN-LONG-CANCEL-RED",
+          "green_run_id": "RUN-LONG-CANCEL-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-LONG",
+          "requirement_ids": [
+            "REQ-LONG-PDF-PERFORMANCE-005",
+            "REQ-DESKTOP-CANCEL-006"
+          ],
+          "unit": "independent task and frozen scenario",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-LONG-NOMINAL",
+            "IN-LONG-BOUNDARY",
+            "IN-LONG-INVALID",
+            "IN-LONG-ADVERSARIAL",
+            "IN-LONG-REALISTIC",
+            "IN-LONG-KNOWN_FAILURE"
+          ]
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-LONG",
+          "path": "work/long_pdf_evidence/escaped-defects.json",
+          "sha256": "c5b40bc67df1a0d4eb6f71ce1bbd2b68a0d8dc88a652ff06675c48b10ce4e041",
+          "size_bytes": 2689
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-LONG-PDF-PERFORMANCE-005",
+          "REQ-DESKTOP-CANCEL-006"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-LONG-NUMBERS",
+          "PAIR-LONG-LCS",
+          "PAIR-LONG-OCR",
+          "PAIR-LONG-CANCEL"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-LONG"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-LONG-NUMBERS",
+          "PAIR-LONG-LCS",
+          "PAIR-LONG-OCR",
+          "PAIR-LONG-CANCEL"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-LONG"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-LONG-PDF-PERFORMANCE-005",
+          "REQ-DESKTOP-CANCEL-006"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-LONG"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-LONG-REAL"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-LONG-NUMBERS-RED",
+          "RUN-LONG-NUMBERS-GREEN",
+          "RUN-LONG-LCS-RED",
+          "RUN-LONG-LCS-GREEN",
+          "RUN-LONG-OCR-RED",
+          "RUN-LONG-OCR-GREEN",
+          "RUN-LONG-CANCEL-RED",
+          "RUN-LONG-CANCEL-GREEN",
+          "RUN-LONG-ORACLE",
+          "RUN-LONG-PERFORMANCE",
+          "RUN-LONG-CANCEL",
+          "RUN-LONG-REAL"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

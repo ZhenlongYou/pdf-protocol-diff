@@ -1,0 +1,16 @@
+{
+  "partition": "invalid",
+  "performance": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_number_grammar_matches_frozen_baseline_and_known_values"
+  ],
+  "cancel": [
+    "tests.test_comparison_job.ComparisonJobTests.test_worker_crash_is_error_and_cleans_temporary_output"
+  ],
+  "oracle": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_number_grammar_matches_frozen_baseline_and_known_values",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_indexed_geometry_matches_legacy_all_pairs_at_boundaries",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_skeleton_shortcuts_match_historical_predicate",
+    "tests.test_comparison_job.ComparisonJobTests.test_worker_crash_is_error_and_cleans_temporary_output"
+  ]
+}

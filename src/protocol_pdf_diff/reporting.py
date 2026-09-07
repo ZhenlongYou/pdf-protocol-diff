@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .comparison_session import comparison_session
+
 import csv
 import difflib
 import html as html_lib
@@ -303,6 +305,7 @@ class _NumberedTableRun:
     descriptor: str  # 去除严格表号后的长描述；短标题保持空串，不能充当锚点。
 
 
+@comparison_session
 def write_reports(
     result: DiffResult,
     output_dir: str | Path,
@@ -328,7 +331,7 @@ def write_reports(
         old_sections=result.old_sections,
         new_sections=result.new_sections,
     )  # 读者正文去重需要全部已配对表，包括因内容完全相同而不生成变化卡的表。
-    table_changes = _ordered_table_changes(_build_table_changes(result))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
+    table_changes = _ordered_table_changes(_build_table_changes(result, table_groups=table_groups))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
     # 读者表格只中和完整值中的定位编号，任何其它字符变化仍保留该行。
     reader_table_changes = _reader_table_changes(table_changes)
     reader_table_evidence: list[TableChange | _TableVisualGroup] = [
@@ -1702,19 +1705,20 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
     """
 
 
-def _build_table_changes(result: DiffResult) -> list[TableChange]:
+def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[TableChange]:
     """Pair visual tables and materialize one reusable list of changed facts."""
 
     if provenance_inputs_are_identical(result.provenance):
         return []  # 同一不可变字节快照和页窗不生成结构不确定性复核卡；风险仍由 assessment 说明。
 
     changes: list[TableChange] = []
-    for group in _paired_table_visuals(
+    groups = table_groups if table_groups is not None else _paired_table_visuals(
         result.old_table_visuals,
         result.new_table_visuals,
         old_sections=result.old_sections,
         new_sections=result.new_sections,
-    ):
+    )
+    for group in groups:
         if _table_group_is_isolated_one_cell_image_fragment(group):
             continue  # 图中孤立短标签即使被网格检测框住，也没有足够证据宣称新增/删除表格。
         row_change_list = _table_row_changes(group.old_tables, group.new_tables)

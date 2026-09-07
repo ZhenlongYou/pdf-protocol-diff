@@ -45,12 +45,14 @@ class ProgressObserverTests(unittest.TestCase):
             )
 
         self.assertEqual([2, 3], [page.page_number for page in extraction.pages])
-        self.assertEqual([0, 1, 2], [event.completed_pages for event in events])
+        extracted = [event for event in events if event.stage == "read_new"]
+        scanned = [event for event in events if event.stage == "read_new_scan"]
+        self.assertEqual([0, 1, 2], [event.completed_pages for event in extracted])
+        self.assertEqual([1, 2], [event.completed_pages for event in scanned])
         self.assertTrue(all(event.total_pages == 2 for event in events))
-        self.assertTrue(all(event.stage == "read_new" for event in events))
         self.assertTrue(all(event.side == "new" for event in events))
 
-    def test_page_zero_event_is_emitted_only_after_coordinate_prescan(self) -> None:
+    def test_prescan_progress_precedes_normal_extraction_zero(self) -> None:
         timeline: list[str] = []
         original_coordinate_reader = pdf_extract_module.extract_pdfplumber_coordinate_words
 
@@ -59,7 +61,7 @@ class ProgressObserverTests(unittest.TestCase):
             return original_coordinate_reader(*args, **kwargs)
 
         def record_progress(event: ProgressEvent) -> None:
-            timeline.append(f"progress-{event.completed_pages}")
+            timeline.append(f"{event.stage}-{event.completed_pages}")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = write_multipage_text_pdf(
@@ -73,9 +75,10 @@ class ProgressObserverTests(unittest.TestCase):
                 extract_pdf_text(pdf_path, progress_observer=record_progress)
 
         last_scan = max(index for index, item in enumerate(timeline) if item == "coordinate-scan")
-        first_progress = min(index for index, item in enumerate(timeline) if item.startswith("progress-"))
-        self.assertGreater(first_progress, last_scan)
-        self.assertEqual("progress-0", timeline[first_progress])
+        first_scan_progress = timeline.index("read_pdf_scan-1")
+        first_extraction = timeline.index("read_pdf-0")
+        self.assertLess(first_scan_progress, last_scan)
+        self.assertGreater(first_extraction, last_scan)
 
     def test_run_diff_emits_real_stage_order_without_changing_result(self) -> None:
         old_extraction = ExtractionResult(Path("old.pdf"), [], total_pages=3)
@@ -227,7 +230,7 @@ class ProgressObserverTests(unittest.TestCase):
                     key,
                 )
         self.assertEqual(
-            ["read_old", "read_new", "match_diff", "visual_evidence"],
+            ["read_old", "read_old_scan", "read_new", "read_new_scan", "match_diff", "sectioning", "match_exact", "match_fallback", "visual_evidence"],
             list(dict.fromkeys(event.stage for event in events)),
         )
 

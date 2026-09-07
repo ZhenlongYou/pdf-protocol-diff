@@ -1,0 +1,23 @@
+{
+  "partition": "adversarial",
+  "performance": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_cache_lifetime_exception_and_thread_isolation",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_fallback_preserves_matches_and_reuses_filtered_bodies",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_lcs_upper_bound_cannot_certify_a_match"
+  ],
+  "cancel": [
+    "tests.test_comparison_job.ComparisonJobTests.test_crashed_leader_does_not_leave_ocr_descendant",
+    "tests.test_comparison_job.ComparisonJobTests.test_cleanup_failure_keeps_ownership_until_retry_succeeds"
+  ],
+  "oracle": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_number_grammar_matches_frozen_baseline_and_known_values",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_indexed_geometry_matches_legacy_all_pairs_at_boundaries",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_skeleton_shortcuts_match_historical_predicate",
+    "tests.test_comparison_job.ComparisonJobTests.test_crashed_leader_does_not_leave_ocr_descendant",
+    "tests.test_comparison_job.ComparisonJobTests.test_cleanup_failure_keeps_ownership_until_retry_succeeds",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_fallback_preserves_matches_and_reuses_filtered_bodies",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_lcs_upper_bound_cannot_certify_a_match"
+  ]
+}

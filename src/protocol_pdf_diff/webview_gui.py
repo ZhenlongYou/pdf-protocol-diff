@@ -16,12 +16,14 @@ import json
 import os
 import sys
 import threading
+import uuid
 import webbrowser
 from collections.abc import Callable, Mapping
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .comparison_job import ComparisonCancelled, run_isolated_comparison
 from .progress import ProgressEvent
 from .ui_shared import (
     default_output_dir,
@@ -141,6 +143,11 @@ class ProtocolDiffWebApi:
         self._run_lock = threading.Lock()
         self._running = False
         self._last_outputs: dict[str, Path] = {}
+        self._cancel_event = threading.Event()
+        self._run_state: dict[str, object] = {"type": "idle", "revision": 0}
+        self._revision = 0
+        self._published = False
+        self._close_requested = False
 
     def bind_window(self, window: Any) -> None:
         self._window = window
@@ -190,6 +197,10 @@ class ProtocolDiffWebApi:
             if self._running:
                 return {"ok": False, "error": "比较正在运行。"}
             self._running = True
+            self._cancel_event = threading.Event()
+            self._published = False
+            self._close_requested = False
+            self._record_state_locked({"type": "running", "stage": "starting"})
         worker = threading.Thread(
             target=self._run_worker,
             args=(dict(config),),
@@ -201,6 +212,7 @@ class ProtocolDiffWebApi:
         except RuntimeError as exc:
             with self._run_lock:
                 self._running = False
+                self._record_state_locked({"type": "error", "message": f"无法启动比较任务：{exc}"})
             return {"ok": False, "error": f"无法启动比较任务：{exc}"}
         return {"ok": True, "started": True}
 
@@ -273,22 +285,89 @@ class ProtocolDiffWebApi:
             }
         return {"ok": True, "path": str(path)}
 
+    def get_run_state(self) -> dict[str, object]:
+        """Polling keeps slow WebView evaluation away from process cleanup."""
+        with self._run_lock:
+            return dict(self._run_state)
+
+    def cancel_comparison(self) -> dict[str, object]:
+        with self._run_lock:
+            if not self._running:
+                return {"ok": True, "cancelled": False}
+            if self._published:
+                return {"ok": False, "error": "报告已完成，正在恢复界面。"}
+            self._cancel_event.set()
+            self._record_state_locked({"type": "cancelling", "message": "正在停止并清理临时文件…"})
+        return {"ok": True, "requested": True}
+
+    def _record_state_locked(self, payload):
+        self._revision += 1
+        self._run_state = {**payload, "revision": self._revision}
+
+    def _publish_progress(self, payload):
+        with self._run_lock:
+            if payload.get("type") == "cleanup_error" or not self._cancel_event.is_set():
+                self._record_state_locked(payload)
+
+    def _publish_report(self, outputs, payload):
+        source = outputs["report_dir"]
+        # The staging root and destination share a filesystem. The unique name
+        # avoids same-second collisions; pre-existing reports are never reused.
+        destination = source.parent.parent / (source.name + "_" + uuid.uuid4().hex)
+        with self._run_lock:
+            if self._cancel_event.is_set():
+                raise ComparisonCancelled()
+            if destination.exists():
+                raise FileExistsError(f"报告目录已存在：{destination}")
+            source.rename(destination)
+            published = {key: destination / path.relative_to(source) for key, path in outputs.items()}
+            self._last_outputs = published
+            self._published = True
+        return {**payload, "html_path": str(published["html"]), "report_dir": str(destination)}
+
     def _run_worker(self, config: dict[str, object]) -> None:
+        payload = {"type": "error", "message": "比较任务意外结束。"}
         try:
-            self.run_comparison_sync(config)
+            old_pdf, new_pdf, output_dir, options = self._collect_config(config)
+            payload = run_isolated_comparison(
+                old_pdf, new_pdf, options, output_dir, self._cancel_event,
+                self._publish_progress, self._publish_report,
+            )
+        except ComparisonCancelled:
+            payload = {"type": "cancelled", "message": "已取消，可重新开始比较。"}
+        except Exception as exc:  # Every terminal failure must restore the form.
+            payload = {"type": "error", "message": str(exc) or type(exc).__name__}
         finally:
             with self._run_lock:
                 self._running = False
+                self._record_state_locked(payload)
+                close_requested = self._close_requested
+                terminal_revision = self._revision
+        if close_requested and self._window is not None:
+            # Cleanup is already finished; closing cannot strand a worker.
+            self._window.destroy()
+        elif payload["type"] == "success" and bool(config.get("auto_open")):
+            # Capture this run's path and revision before the next run can
+            # replace last_outputs. A slow browser must not overwrite its state.
+            notice = None
+            try:
+                if not webbrowser.open(Path(payload["html_path"]).resolve().as_uri()):
+                    notice = "系统未能打开 HTML 报告，请检查默认浏览器设置。"
+            except (OSError, ValueError, webbrowser.Error) as exc:
+                notice = str(exc)
+            if notice:
+                with self._run_lock:
+                    if self._revision == terminal_revision:
+                        self._record_state_locked({**payload, "notice": notice})
 
     def _handle_close_request(self) -> bool:
-        """Cancel normal close requests while report files are being written."""
-
+        """A close during work requests cancellation, then closes after cleanup."""
         with self._run_lock:
-            running = self._running
-        if running:
-            self._emit({"type": "notice", "message": "比较正在运行，完成后再关闭窗口。"})
-            return False
-        return True
+            if not self._running:
+                return True
+            self._close_requested = True
+        self.cancel_comparison()
+        return False
 
     def _collect_config(
         self, config: Mapping[str, object]
@@ -340,6 +419,8 @@ class ProtocolDiffWebApi:
                 "side": event.side,
                 "completed_pages": event.completed_pages,
                 "total_pages": event.total_pages,
+                "unit": event.unit,
+                "detail": event.detail,
             }
         )
 
@@ -406,6 +487,12 @@ class ProtocolDiffJsApi:
 
     def run_comparison(self, config: Mapping[str, object]) -> dict[str, object]:
         return self._controller.run_comparison(config)
+
+    def cancel_comparison(self) -> dict[str, object]:
+        return self._controller.cancel_comparison()
+
+    def get_run_state(self) -> dict[str, object]:
+        return self._controller.get_run_state()
 
     def open_html_report(self) -> dict[str, object]:
         return self._controller.open_html_report()

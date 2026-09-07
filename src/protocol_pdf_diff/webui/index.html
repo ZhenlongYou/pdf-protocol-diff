@@ -215,6 +215,7 @@
       <div class="actions">
         <div class="run-state" role="status"><span id="running-label">正在比较</span><div class="run-track"><i></i></div></div>
         <div class="result-actions"><button id="open-report" class="chip" type="button">打开 HTML 报告</button><button id="open-dir" class="chip" type="button">打开输出目录</button></div>
+        <button id="cancel" class="chip" type="button" hidden>终止比较</button>
         <button id="start" class="primary" type="button">开始比较</button>
       </div>
     </footer>
@@ -236,8 +237,12 @@
       const app = document.querySelector("#app");
       const status = document.querySelector("#status");
       const start = document.querySelector("#start");
+      const cancel = document.querySelector("#cancel");
+      let stateRevision = -1;
+      let polling = false;
+      let runGeneration = 0;
       const runningLabel = document.querySelector("#running-label");
-      const stageNames = { read_old: "读取旧版", read_new: "读取新版", match_diff: "匹配差异", visual_evidence: "生成视觉证据", report: "生成报告" };
+      const stageNames = { starting: "准备比较", read_old_scan: "预扫描旧版", read_new_scan: "预扫描新版", sectioning: "构建章节", match_exact: "匹配章节", match_fallback: "匹配剩余章节", read_old: "读取旧版", read_new: "读取新版", match_diff: "匹配差异", visual_evidence: "生成视觉证据", report: "生成报告" };
       let timer = null;
       let startedAt = 0;
       let focusBeforeDialog = null;
@@ -250,7 +255,8 @@
       function setRunning(running) {
         state.running = running; app.classList.toggle("running", running);
         start.disabled = running; start.textContent = running ? "比较中" : "开始比较";
-        document.querySelectorAll("button, input").forEach(control => { if (control !== start) control.disabled = running; });
+        cancel.hidden = !running; cancel.disabled = false; cancel.textContent = "终止比较";
+        document.querySelectorAll("button, input").forEach(control => { if (control !== start && control !== cancel) control.disabled = running; });
         clearInterval(timer); timer = null;
         if (running) {
           startedAt = Date.now();
@@ -285,7 +291,7 @@
           if (payload.type === "running") { setRunning(true); status.textContent = "正在比较"; app.classList.remove("success"); }
           if (payload.type === "progress") {
             const stage = stageNames[payload.stage] || payload.stage;
-            status.textContent = payload.completed_pages != null ? `${stage} · 第 ${payload.completed_pages}/${payload.total_pages} 页` : stage;
+            status.textContent = payload.completed_pages != null ? `${stage} · ${payload.completed_pages}/${payload.total_pages} ${payload.unit || "页"}` : stage;
           }
           if (payload.type === "success") {
             setRunning(false); app.classList.add("success");
@@ -293,10 +299,35 @@
             const summary = counts ? `${payload.reliability} · 正文 ${counts.body} · Table ${counts.table} · 视觉 ${counts.visual}` : `${payload.reliability} · 统计请查看报告`;
             status.textContent = payload.notice || summary;
           }
+          if (payload.type === "cancelling") { cancel.disabled = true; cancel.textContent = "正在停止"; status.textContent = payload.message; }
+          if (payload.type === "cleanup_error") { cancel.disabled = false; cancel.textContent = "重试终止"; status.textContent = payload.message; }
+          if (payload.type === "cancelled") { setRunning(false); app.classList.remove("success"); status.textContent = payload.message; }
           if (payload.type === "error") { setRunning(false); app.classList.remove("success"); status.textContent = payload.message; }
           if (payload.type === "notice") { status.textContent = payload.message; }
         }
       };
+      cancel.addEventListener("click", async () => {
+        cancel.disabled = true; cancel.textContent = "正在停止";
+        try {
+          const response = await window.pywebview.api.cancel_comparison();
+          if (!response.ok) { status.textContent = response.error; cancel.disabled = false; cancel.textContent = "重试终止"; }
+        } catch (_error) { status.textContent = "未能请求终止，请重试。"; cancel.disabled = false; cancel.textContent = "重试终止"; }
+      });
+      // Only one poll is in flight. A stalled JS renderer cannot block the
+      // Python supervisor's cancellation or process-tree cleanup.
+      setInterval(async () => {
+        if (!state.running || polling || !window.pywebview) return;
+        polling = true;
+        const generation = runGeneration;
+        try {
+          const payload = await window.pywebview.api.get_run_state();
+          if (generation === runGeneration && payload.revision > stateRevision) {
+            stateRevision = payload.revision;
+            window.protocolDiff.receive(payload);
+          }
+        } catch (_error) { status.textContent = "暂时无法读取进度，可重试终止操作。"; }
+        finally { polling = false; }
+      }, 250);
       document.querySelectorAll("[data-choose]").forEach(button => button.addEventListener("click", () => choosePdf(button.dataset.choose)));
       document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { const [side, mode] = button.dataset.mode.split(":"); setMode(side, mode); }));
       function setAdvanced(open) {
@@ -330,6 +361,7 @@
       document.querySelector("#max-snippets").addEventListener("input", event => document.querySelector("#snippets-chip").textContent = `每章 ${event.target.value}`);
       document.querySelector("#start").addEventListener("click", async () => {
         if (state.running) return;
+        runGeneration += 1;
         setRunning(true); status.textContent = "正在比较";
         try {
           const response = await window.pywebview.api.run_comparison(config());

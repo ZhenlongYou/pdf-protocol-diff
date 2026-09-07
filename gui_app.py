@@ -21,6 +21,8 @@ from protocol_pdf_diff.venv_bootstrap import reexec_into_project_venv  # noqa: E
 
 
 if __name__ == "__main__":  # 只有用户直接启动 GUI 时才切换环境，避免测试导入时替换进程。
+    from multiprocessing import freeze_support
+    freeze_support()
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 先进入 .venv，再导入 WebView 和 PDF 依赖。
 
 from protocol_pdf_diff.webview_gui import main, run_smoke_test  # noqa: E402

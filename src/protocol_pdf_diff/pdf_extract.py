@@ -13,6 +13,8 @@ import hashlib  # 对实际交给解析器的 PDF 快照计算摘要，避免报
 import io  # 在内存中保存 JPEG 截图，避免生成临时图片文件。
 import math  # 用页面对角线和字符间距确认完整水印簇，避免误删孤立旋转字母。
 import re  # 使用正则识别行号边栏、表头和表格值模式。
+from bisect import bisect_left, bisect_right
+
 import shutil  # 检测 tesseract 可执行文件是否存在，决定是否启用 OCR。
 import tempfile  # 大 PDF 快照超过内存阈值时自动落到临时文件，仍保持解析字节与摘要一致。
 from collections import (
@@ -250,20 +252,16 @@ def _extract_pdf_text_with_pdfplumber(
             for index in range(selected_start, selected_end + 1)
         ]  # 先固定页窗并保留用户可见的 1-based 页码，供坐标证据复用。
         selected_page_count = len(selected_pages)
-        coordinate_pages = {
-            index: _filtered_layout_page(
-                page,
-                coordinate_words=None,
-                gutter_boxes=(),
-                footer_boxes=(),
-                header_boxes=(),
+        coordinate_evidence = {}
+        for scanned, (index, page) in enumerate(selected_pages, 1):
+            coordinate_page = _filtered_layout_page(
+                page, coordinate_words=None, gutter_boxes=(), footer_boxes=(), header_boxes=(),
             )
-            for index, page in selected_pages
-        }  # 坐标词唯一观测先剔除完整 DRAFT 字形，避免水印与正文合成一个巨型词；页边事实仍原样保留。
-        coordinate_evidence = {
-            index: extract_pdfplumber_coordinate_words(coordinate_pages[index], index)
-            for index, _page in selected_pages
-        }  # 每页坐标词仍只读取一次，随后同时供跨页行号证明、块生成和阅读顺序检查。
+            coordinate_evidence[index] = extract_pdfplumber_coordinate_words(coordinate_page, index)
+            notify_progress(progress_observer, ProgressEvent(
+                stage=progress_stage + "_scan", side=progress_side,
+                completed_pages=scanned, total_pages=selected_page_count,
+            ))
         gutter_boxes_by_page = _document_proven_line_number_gutter_boxes(
             selected_pages,
             {index: evidence[0] for index, evidence in coordinate_evidence.items()},
@@ -774,13 +772,39 @@ def _repair_body_visual_subscript_order(
     if not raw_characters or raw_characters != coordinate_characters:
         return text  # 坐标词未完整覆盖比较文本时，不能用局部几何改写整页正文。
 
-    candidate_edges = [
-        (base_index, suffix_index)
-        for base_index, base_word in enumerate(observed_words)
-        for suffix_index, suffix_word in enumerate(observed_words)
-        if base_index != suffix_index
-        and _body_words_form_visual_subscript(base_word, suffix_word)
-    ]
+    if not all(math.isfinite(float(word[key])) for word in observed_words
+               for key in ("x0", "x1", "top", "bottom")):
+        # Non-finite coordinates were historically handled by the full
+        # predicate. An unsorted NaN key cannot participate in a bisect index.
+        candidate_edges = [(i, j) for i, base in enumerate(observed_words)
+                           for j, suffix in enumerate(observed_words)
+                           if i != j and _body_words_form_visual_subscript(base, suffix)]
+    else:
+        # Index a necessary horizontal condition from the original predicate. Keep
+        # ALL candidates in the interval: nearest-neighbour pruning would lose the
+        # competing edges used below to reject ambiguous subscript assignments.
+        x_order = sorted(range(len(observed_words)), key=lambda i: observed_words[i]["x0"])
+        x_values = [float(observed_words[i]["x0"]) for i in x_order]
+        candidate_edges = []
+        for base_index, base_word in enumerate(observed_words):
+            size = _word_effective_size(base_word)
+            base_x1 = float(base_word["x1"])
+            # Expand by one representable float at the edge to avoid changing a
+            # boundary decision through the algebraic rearrangement of subtraction.
+            lower = math.nextafter(base_x1 + math.nextafter(-size * 0.20, -math.inf), -math.inf)
+            upper = math.nextafter(base_x1 + math.nextafter(size * 0.35, math.inf), math.inf)
+            for offset in range(bisect_left(x_values, lower), bisect_right(x_values, upper)):
+                suffix_index = x_order[offset]
+                if base_index == suffix_index:
+                    continue
+                suffix_word = observed_words[suffix_index]
+                vertical_offset = float(suffix_word["top"]) - float(base_word["top"])
+                if not size * 0.15 <= vertical_offset <= size * 0.65:
+                    continue
+                if _body_words_form_visual_subscript(base_word, suffix_word):
+                    candidate_edges.append((base_index, suffix_index))
+        candidate_edges.sort()  # Preserve the original ordered-pair enumeration.
+
     if not candidate_edges:
         return text
     endpoint_degrees = Counter(
@@ -4520,7 +4544,7 @@ def _ocr_table_image(image: object) -> tuple[str, str]:
     except ModuleNotFoundError:
         return "", "OCR 未启用：pytesseract 未安装。"
     try:
-        text = pytesseract.image_to_string(image, config="--psm 6")  # psm 6 适合统一块状表格区域。
+        text = pytesseract.image_to_string(image, config="--psm 6", timeout=60)  # psm 6 适合统一块状表格区域。
     except Exception as exc:
         return "", f"OCR 失败: {exc}"
     normalized = "\n".join(line for line in (normalize_line(raw) for raw in text.splitlines()) if line)

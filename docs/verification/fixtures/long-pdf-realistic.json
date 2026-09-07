@@ -1,0 +1,18 @@
+{
+  "partition": "realistic",
+  "performance": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_skeleton_shortcuts_match_historical_predicate"
+  ],
+  "cancel": [
+    "tests.test_comparison_job.ComparisonJobTests.test_close_during_work_cancels_before_destroying_window",
+    "tests.test_comparison_job.ComparisonJobTests.test_slow_old_auto_open_cannot_replace_new_result"
+  ],
+  "oracle": [
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_number_grammar_matches_frozen_baseline_and_known_values",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_indexed_geometry_matches_legacy_all_pairs_at_boundaries",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_skeleton_shortcuts_match_historical_predicate",
+    "tests.test_comparison_job.ComparisonJobTests.test_close_during_work_cancels_before_destroying_window",
+    "tests.test_comparison_job.ComparisonJobTests.test_slow_old_auto_open_cannot_replace_new_result"
+  ]
+}

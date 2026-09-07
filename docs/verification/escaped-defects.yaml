@@ -1,5 +1,5 @@
 schema_version: 1
-scope_statement: "Visual watchdog report previews must mark only changed pixels, retain full horizontal context, and never enlarge evidence beyond its intrinsic width."
+scope_statement: "Long PDF computation and cancellation, plus visual watchdog report previews must mark only changed pixels, retain full horizontal context, and never enlarge evidence beyond its intrinsic width."
 escaped_defects:
   - id: DEF-VISUAL-MASK-001
     acceptance_id: REQ-VISUAL-MASK-001
@@ -36,4 +36,40 @@ escaped_defects:
     red_green_pair_id: PAIR-VISUAL-REVIEW-DISCLOSURE-004
     regression_test_id: VISUAL_REVIEW_LAYOUT_TEST
     public_path_rerun_id: RUN-VISUAL-REVIEW-REAL
+    state: verified
+  - id: DEF-LONG-NUMBERS
+    acceptance_id: REQ-LONG-PDF-PERFORMANCE-005
+    user_symptom: "907-page comparison reportedly ran 89 minutes without a result and could not be stopped. Original document unavailable; OIF CEI 5.2/5.3 used for local audit."
+    discovered_via: user_performance_report_and_local_reproduction
+    failure_mechanism: "Repeated full-stream normalization for each ordinary token."
+    red_green_pair_id: PAIR-LONG-NUMBERS
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
+    state: verified
+  - id: DEF-LONG-LCS
+    acceptance_id: REQ-LONG-PDF-PERFORMANCE-005
+    user_symptom: "907-page comparison reportedly ran 89 minutes without a result and could not be stopped. Original document unavailable; OIF CEI 5.2/5.3 used for local audit."
+    discovered_via: user_performance_report_and_local_reproduction
+    failure_mechanism: "Hexadecimal identifier signatures inflate semantic keys and trigger very expensive full string alignment."
+    red_green_pair_id: PAIR-LONG-LCS
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
+    state: verified
+  - id: DEF-LONG-OCR
+    acceptance_id: REQ-LONG-PDF-PERFORMANCE-005
+    user_symptom: "907-page comparison reportedly ran 89 minutes without a result and could not be stopped. Original document unavailable; OIF CEI 5.2/5.3 used for local audit."
+    discovered_via: user_performance_report_and_local_reproduction
+    failure_mechanism: "Table OCR had no finite timeout."
+    red_green_pair_id: PAIR-LONG-OCR
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
+    state: verified
+  - id: DEF-LONG-CANCEL
+    acceptance_id: REQ-DESKTOP-CANCEL-006
+    user_symptom: "907-page comparison reportedly ran 89 minutes without a result and could not be stopped. Original document unavailable; OIF CEI 5.2/5.3 used for local audit."
+    discovered_via: user_performance_report_and_local_reproduction
+    failure_mechanism: "Desktop comparison ran in a non-cancellable thread and had no stop control."
+    red_green_pair_id: PAIR-LONG-CANCEL
+    regression_test_id: LONG_PDF_BEHAVIOR_TEST
+    public_path_rerun_id: RUN-LONG-REAL
     state: verified
