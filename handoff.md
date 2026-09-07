@@ -1,5 +1,26 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-07 长 PDF 性能与终止
+
+- task_id: `pdf-diff-performance-cancel-20260907`
+- owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`
+- recorded_commit: `bff2fdd53474c2baab9037f44642d711fe274a74`
+- status: ready
+- 权威仓库：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff`；持久分支 `project/pdf-protocol-diff`；起点 `db45c03f8d4bc0c15485349403449920f52bc736`。继承 cwd 已是此仓库的符号链接。
+- 用户授权：修复几百页 PDF 处理过久及不能终止的问题。原始约 907 页、89 分钟无结果的文件不可用；使用本地 OIF CEI 5.2（656 页）和 5.3（685 页）。不承诺该原始故障已经逐文件复现。
+- 已实现：独立工作进程、OCR 子进程树终止、关闭窗口先清理、取消后恢复和重启、只有完整报告才原子发布；清理失败保留所有权并重试。界面显示终止按钮、运行时间及扫描/章节匹配/正文差异阶段。
+- 性能处理：数字词规范化避免重复全流扫描；视觉下标只枚举几何可能邻居且保留浮点边界；单任务有界纯函数缓存；阈值上界排除不可能候选；长重复文本通过 suffix automaton 保留 difflib 的最长连续匹配、方向及最早位置规则；报告清理复用不可变结果并跳过表格路径未消费的图注判断。表格与整页 OCR 单次均有 60 秒上限；整份累计 OCR 预算仍未实现。
+- 提取实测：基线 448.593 + 337.225 秒，优化后 160.626 + 154.835 秒；两份完整提取 checkpoint 的字节 SHA-256 均与基线相同。原始基线没有完成整个比较，不能给出整份对比的基线加速比。
+- 长字符串独立证据：65025 二字母有序对、另一路 132496 三字母有序对完整匹配块一致；非零子区间、多语和真实长度 4095/4096/4097/5003 验证通过。实际 OIF 约 9.6 万和 16.2 万字符 key 的新算法分别约 0.09/0.18 秒；9 组真实切片与标准库完整匹配块一致。没有运行旧巨型 key，不能虚构其加速比。
+- 本地最后行为变更后全套 1260 项，168.382 秒通过（1 条条件 skip）；阶段/清理定向 21 项通过。v2 `receipt-cleanup.json`：16 个实际执行 run，`EXECUTED_EVIDENCE_PASS`，SHA-256 `347f23feb47bc17567f2039083503bdd62298ad04095c75724ad42e5802aab26`。
+- 原生窗口验证：读取旧版 371/656 页时终止，423 ms 后观察到取消及表单恢复；章节匹配中也可取消；生成视觉证据约 17 分钟时终止，513 ms 后观察到取消。随后用户亲自运行 235.13/235.14 并确认完成，界面显示正文 7、Table 1、视觉 1。该用户报告保留在外部证据目录的 `gui_full/protocol_diff_20260907_214359_26bdd5933b944330bf4eaa1a0b4fffdf`，不得作为清理用临时文件删除。
+- 最新跨平台 CI：`https://github.com/ZhenlongYou/pdf-protocol-diff/actions/runs/34129381087` 对同一代码 bff2fdd，macOS/Windows 各 1261 项通过（29 条环境条件 skip），打包及原生启动检查通过；两端只有 Upload artifact 因 GitHub artifact storage quota 失败。没有新的可下载安装包；未执行 frozen Windows 包中的真实 OCR 树取消。
+- 完整 OIF 最终冷读通过同一桌面异步门面在后台完成，避免干扰用户窗口：1703.406 秒（约 28 分 23 秒），六个输出完整发布，工作进程已退出、无本次临时目录。终态记录 `full-final-result.json`；最终报告 `full_final/protocol_diff_20260907_220704_fe2adf6f8e1a4851b7eba2579a8832bc/protocol_diff_report.html`。这是本机本次运行，不能外推为原始 907 页文件的耗时保证。
+- 中间版本完整比较/报告重放 1779.505 秒，最后清理优化后同阶段重放 1373.737 秒（均不含提取）；不能当作原始 db45 基线。两次重放与最终冷读的 JSON、两份 CSV 均字节相同；HTML/Markdown/TXT 各仅一处生成时间不同，3870 张图像和全部报告内容均保持一致。记录 `full-report-cleanup-equivalence.json` 与 `cold-full-verification.json`。
+- 报告检查范围：参考报告页窗 656/685，3870 张内嵌图片全部可解码、无坏锚点；独立抽看 Table/Figure 源图可读。完整浏览器排版及全内容准确性未认证。报告保留 degraded：视觉哨兵 0/2 对完成、2 对失败、174 页未安全配对。额外观察：旧版 p358 正文样图把页边 40–48 行号及页脚标红，未证明本轮引入，仍需后续独立处理，不能宣传标色完全准确。
+- 本轮唯一外部证据目录：`/Users/mac/Documents/ProtocolPdfDiffReports/performance_fix_20260907`；基线目录 `performance_audit_20260907`。重复提取 pickle 已确认与基线字节相同后移除 107260284 字节；原始 PDF、基线 checkpoint、用户报告均保留。私有材料和报告不进入 Git。
+- 交付约定：最终 handoff 记录上一个已知代码 OID；两个独立 reviewer 对包含本段的最终 OID 写 attestation，main 与项目分支必须快进到同一最终 OID。实际集成与推送结果以外部 `delivery-receipt.json`、`delivery-gate.log` 及共享 claim 的 integrated 终态为准。后续准确性工作可从上述 p358 标色观察继续，本轮不宣称解决该问题。
+
 ## 2026-09-02 差异掩膜改为读者层默认折叠
 
 ### 当前任务
