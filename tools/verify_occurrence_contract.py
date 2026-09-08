@@ -18,7 +18,7 @@ def main():
     try:
         real = "--real" in sys.argv
         for path in [arg for arg in sys.argv[1:] if arg != "--real"]:
-            fixture = json.loads(Path(path).read_text())
+            fixture = json.loads(Path(path).read_text(encoding="utf-8"))
             if real:
                 from protocol_pdf_diff.sample_data import write_multipage_text_pdf
                 root = ROOT / "work/occurrence-evidence/real"
@@ -30,14 +30,14 @@ def main():
                            str(root / "old.pdf"), str(root / "new.pdf"), "--output", str(root / "report")]
                 run = subprocess.run(command, capture_output=True, text=True, timeout=30)
                 assert run.returncode == 0, run.stderr
-                payload = json.loads((root / "report/evidence.json").read_text())
+                payload = json.loads((root / "report/evidence.json").read_text(encoding="utf-8"))
                 maps = {side:{u["occurrence_id"]:f"{side}:{i}" for i,u in enumerate(payload[side]["units"])} for side in ("old", "new")}
                 observed = {side+"_texts":[u["text"].strip() for u in payload[side]["units"]] for side in ("old", "new")}
                 observed["relations"] = [{"kind":r["kind"], **{side+"_ids":[maps[side][i] for i in r[side+"_ids"]] for side in ("old", "new")}} for r in payload["alignment"]["relations"]]
                 validate(fixture, observed)
-                report = (root / "report/report.html").read_text()
+                report = (root / "report/report.html").read_text(encoding="utf-8")
                 assert "+3.0 V" in report and "-3.0 V" in report
-                (ROOT / "work/occurrence-evidence/real-path.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+                (ROOT / "work/occurrence-evidence/real-path.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
                 print("OCCURRENCE_REAL_PATH_OK")
                 continue
             try:
@@ -60,7 +60,7 @@ def main():
     if records:
         target = ROOT / 'work/occurrence-evidence/api-path.json'
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(records, ensure_ascii=False, indent=2))
+        target.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
     print("OCCURRENCE_CHECK_OK")
     return 0
 

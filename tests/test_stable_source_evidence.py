@@ -241,7 +241,7 @@ class StableSourceEvidenceTests(unittest.TestCase):
             self.assertEqual('review',change.change_type)
             self.assertTrue(change.review_reason)
             self.assertTrue(all(not h.changed_token_indexes for h in _change_highlights(change,side='new')))
-            report=write_reports(uncertain,root/'report',DiffOptions())['html'].read_text()
+            report=write_reports(uncertain,root/'report',DiffOptions())['html'].read_text(encoding="utf-8")
             self.assertIn('新版待核实原文',report)
             self.assertIn('-3.0 V',report)
 

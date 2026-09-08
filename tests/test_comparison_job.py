@@ -128,7 +128,7 @@ class ComparisonJobTests(unittest.TestCase):
             descendants = []
             with self.assertRaisesRegex(RuntimeError, "退出|结束"):
                 run_isolated_comparison(root / "a", root / "b", DiffOptions(), root,
-                    threading.Event(), lambda p: descendants.append(p["pid"]), Mock(),
+                    threading.Event(), lambda p: None if p.get("type") == "cleanup_error" else descendants.append(p["pid"]), Mock(),
                     worker_target=_child_crashes_with_descendant)
             self.assertEqual(1, len(descendants))
             wait_for(lambda: not process_alive(descendants[0]), seconds=3)

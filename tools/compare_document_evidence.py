@@ -37,7 +37,7 @@ def main():
     payload = {"schema_version": 1, "status": "candidate", "alignment": asdict(result),
                "old": asdict(old), "new": asdict(new),
                "timings": {"extraction_seconds": extracted - started, "alignment_seconds": ended - extracted}}
-    (args.output / "evidence.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    (args.output / "evidence.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     lookup = {u.occurrence_id: u for document in (old, new) for u in document.units}
     labels = {"equal": "内容对应", "resegmented": "内容相同，分段不同", "added": "新增",
               "deleted": "删除", "modified": "对应范围内替换", "unresolved": "对应关系待确认"}
@@ -65,7 +65,7 @@ def main():
             page += "".join(f"<p>PDF 第 {u.page} 页：{html.escape(u.text)}</p>" for u in document.alternate_source_views)
             page += "</details>"
     page += "<table><tr><th>旧版原文</th><th>新版原文</th></tr>" + "".join(rows) + "</table></html>"
-    (args.output / "report.html").write_text(page)
+    (args.output / "report.html").write_text(page, encoding="utf-8")
     print(json.dumps({"status": "candidate", "unresolved_units": result.unresolved_unit_count, "seconds": ended - started}))
     return 0
 

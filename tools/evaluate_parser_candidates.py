@@ -154,7 +154,7 @@ def run_engine(engine: str, path: Path, output: Path) -> dict:
         converter = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
         result = converter.convert(path)
         raw = result.document.export_to_dict()
-        (output / "raw.json").write_text(json.dumps(raw, ensure_ascii=False))
+        (output / "raw.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
         pages = docling_pages(result.document)
         versions = {"docling": importlib.metadata.version("docling")}
         config = {"ocr": False, "table_structure": True, "pipeline": "standard"}
@@ -163,7 +163,7 @@ def run_engine(engine: str, path: Path, output: Path) -> dict:
         raw = pymupdf4llm.to_json(str(path), use_ocr=False)
         if isinstance(raw, str):
             raw = json.loads(raw)
-        (output / "raw.json").write_text(json.dumps(raw, ensure_ascii=False))
+        (output / "raw.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
         pages = []
         for p in raw["pages"]:
             blocks = []
@@ -179,7 +179,7 @@ def run_engine(engine: str, path: Path, output: Path) -> dict:
     elif engine == "opendataloader":
         import opendataloader_pdf
         opendataloader_pdf.convert(input_path=[str(path)], output_dir=str(output), format="json", quiet=True)
-        raw = json.loads((output / (path.stem + ".json")).read_text())
+        raw = json.loads((output / (path.stem + ".json")).read_text(encoding="utf-8"))
         pages = []
         by_page = {}
         def content_tree(item):
@@ -243,7 +243,7 @@ def main() -> int:
         except ImportError:
             result["peak_worker_rss_bytes"] = None
         # Worker RSS excludes JVM / OCR descendants; never label it total memory.
-        (args.output / "result.json").write_text(json.dumps(result, ensure_ascii=False))
+        (args.output / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         return 0
     if not args.manifest or args.timeout <= 0:
         parser.error("--manifest and positive --timeout are required")
@@ -284,7 +284,7 @@ def main() -> int:
             subset.save(snapshot)
         identity = {"source_sha256": hashlib.sha256(source_bytes).hexdigest(), "physical_pages": selected,
                     "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
-        (case_dir / "source.json").write_text(json.dumps(identity, indent=2))
+        (case_dir / "source.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
         for engine in args.engines:
             target = case_dir / engine
             target.mkdir(exist_ok=True)
@@ -311,7 +311,7 @@ def main() -> int:
                             raise
                         if process.returncode:
                             raise subprocess.CalledProcessError(process.returncode, command)
-                    result = json.loads((target / "result.json").read_text())
+                    result = json.loads((target / "result.json").read_text(encoding="utf-8"))
                     checks = check_expectations(result["pages"], case.get("expect", {}))
                     entry.update({k: result[k] for k in ("versions", "config", "parse_seconds", "peak_worker_rss_bytes")})
                     entry["checks"] = checks
@@ -321,7 +321,7 @@ def main() -> int:
                     entry["error"] = type(exc).__name__
             entry["wall_seconds"] = time.perf_counter() - begin
             summary["runs"].append(entry)
-            (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+            (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
             print(json.dumps({k: entry[k] for k in ("case", "engine", "status", "wall_seconds")}), flush=True)
     return 1 if any(r["status"] != "PASS" for r in summary["runs"]) else 0
 

@@ -66,7 +66,7 @@ class ParserCandidateToolTests(unittest.TestCase):
                                   str(old), str(new), "--output", str(output)],
                                  cwd=root, capture_output=True, text=True, timeout=30)
             self.assertEqual(0, run.returncode, run.stderr)
-            payload = json.loads((output / "evidence.json").read_text())
+            payload = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
             self.assertEqual(hashlib.sha256(old.read_bytes()).hexdigest(), payload["old"]["source_sha256"])
             self.assertEqual(hashlib.sha256(new.read_bytes()).hexdigest(), payload["new"]["source_sha256"])
             for side in ("old", "new"):
@@ -75,7 +75,7 @@ class ParserCandidateToolTests(unittest.TestCase):
                 self.assertEqual(Counter(expected), Counter(observed))
             relations = payload["alignment"]["relations"]
             self.assertEqual(1, sum(r["kind"] == "modified" for r in relations))
-            html = (output / "report.html").read_text()
+            html = (output / "report.html").read_text(encoding="utf-8")
             self.assertIn("+3.0 V", html)
             self.assertIn("-3.0 V", html)
 
@@ -84,13 +84,13 @@ class ParserCandidateToolTests(unittest.TestCase):
             root = Path(temporary)
             pdf = write_multipage_text_pdf(root / "input.pdf", [["A literal source requirement."]])
             manifest = root / "manifest.json"
-            manifest.write_text(json.dumps({"cases": [{"id": "empty-oracle", "path": str(pdf), "pages": [1]}]}))
+            manifest.write_text(json.dumps({"cases": [{"id": "empty-oracle", "path": str(pdf), "pages": [1]}]}), encoding="utf-8")
             output = root / "result"
             command = [sys.executable, str(ROOT / "tools/evaluate_parser_candidates.py"), "--manifest", str(manifest),
                        "--output", str(output), "--engines", "pymupdf"]
             run = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=30)
             self.assertEqual(1, run.returncode, run.stderr)
-            result = json.loads((output / "summary.json").read_text())
+            result = json.loads((output / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest.read_bytes(), (output / "manifest.json").read_bytes())
             self.assertEqual(hashlib.sha256(manifest.read_bytes()).hexdigest(), result["manifest_sha256"])
             self.assertTrue(result["native_source_files"])
@@ -98,18 +98,18 @@ class ParserCandidateToolTests(unittest.TestCase):
             self.assertEqual([], result["runs"][0]["checks"])
             rerun = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=30)
             self.assertNotEqual(0, rerun.returncode)
-            self.assertEqual(result, json.loads((output / "summary.json").read_text()))
+            self.assertEqual(result, json.loads((output / "summary.json").read_text(encoding="utf-8")))
             document, provenance = read_evidence(output/'empty-oracle','pymupdf')
             self.assertEqual('sha256', provenance['input_binding'])
             self.assertTrue(document.units)
             parser_output = output/'empty-oracle/pymupdf/result.json'
-            wrong = json.loads(parser_output.read_text())
+            wrong = json.loads(parser_output.read_text(encoding="utf-8"))
             wrong['input_sha256'] = '0'*64
-            parser_output.write_text(json.dumps(wrong))
+            parser_output.write_text(json.dumps(wrong), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, 'another input'):
                 read_evidence(output/'empty-oracle','pymupdf')
             del wrong['input_sha256']
-            parser_output.write_text(json.dumps(wrong))
+            parser_output.write_text(json.dumps(wrong), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, 'lacks a verifiable'):
                 read_evidence(output/'empty-oracle','pymupdf')
 

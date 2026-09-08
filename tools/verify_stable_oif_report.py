@@ -29,8 +29,8 @@ def snippets(change):
             yield pair['new']
 
 
-def audit(root, source_root=None):
-    evidence = json.loads((root/'evidence.json').read_text())
+def audit(root, source_root=None, report_root=None):
+    evidence = json.loads((root/'evidence.json').read_text(encoding="utf-8"))
     assert evidence['status'] == 'PASS', 'GUI did not finish successfully'
     assert evidence['source_before'] == evidence['source_after'], 'source drift during GUI execution'
     if source_root:
@@ -39,10 +39,12 @@ def audit(root, source_root=None):
     run = next(r for r in evidence['runs'] if r['name']=='oif-full')
     assert run['status']=='PASS' and not run['dom_after']['startDisabled']
     assert run['dom_after']['cancelHidden'] and not run['dom_after']['running']
+    report = report_root or Path(run['terminal']['report_dir'])
     for path, sha in run['artifacts'].items():
-        assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==sha, f'artifact changed: {path}'
-    report = Path(run['terminal']['report_dir'])
-    data = json.loads((report/'protocol_diff_data.json').read_text())
+        material = report/Path(path).name
+        assert hashlib.sha256(material.read_bytes()).hexdigest()==sha, f'artifact changed: {material}'
+
+    data = json.loads((report/'protocol_diff_data.json').read_text(encoding="utf-8"))
     for side, digest in INPUTS.items():
         assert data['provenance']['inputs'][side]['sha256']==digest, 'wrong acceptance source'
     changes = data['changes']
@@ -67,14 +69,15 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('evidence_root',type=Path)
     parser.add_argument('--source-root',type=Path)
+    parser.add_argument('--report-root',type=Path,help='Relocated artifact snapshot; original GUI hashes still apply')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     try:
-        result=audit(args.evidence_root,args.source_root)
+        result=audit(args.evidence_root,args.source_root,args.report_root)
     except AssertionError as exc:
         result={'status':'FAIL','error':str(exc)}
     args.output.parent.mkdir(parents=True,exist_ok=True)
-    args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2))
+    args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2), encoding="utf-8")
     print('STABLE_OIF_REPORT_'+result['status'],result.get('error',''))
     return int(result['status']!='PASS')
 
