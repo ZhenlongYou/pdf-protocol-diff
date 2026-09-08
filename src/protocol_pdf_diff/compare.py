@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .catalog_evidence import catalog_identity_similarity
 from .comparison_session import comparison_session, memoize_comparison
 from .exact_match import ratio as exact_sequence_ratio
 from .figure_filters import filter_figure_visual_snippets
@@ -320,6 +321,10 @@ def compare_extractions(
         old_sections.insert(0, old_header_section)
     if new_header_section is not None:
         new_sections.insert(0, new_header_section)
+    for sections, extraction in ((old_sections, old_extraction), (new_sections, new_extraction)):
+        footer = _running_footer_section(extraction)
+        if footer is not None:
+            sections.insert(0, footer)
     assessment = assess_pair(old_extraction, new_extraction, old_sections, new_sections)
     provenance = build_provenance(old_extraction, new_extraction, options)
     identical_inputs = provenance_inputs_are_identical(provenance)
@@ -354,6 +359,9 @@ def compare_extractions(
             options,
             suppressed_old_table_unit_keys=old_covered_table_unit_keys,
             suppressed_new_table_unit_keys=new_covered_table_unit_keys,
+            source_extractions=((old_extraction, new_extraction)
+                                if old_extraction.source_sha256 or new_extraction.source_sha256
+                                else None),
         )
     )  # 同一快照页窗不存在语义差异；不同输入仍只在各自版本隐藏已证明的表格原文单元。
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
@@ -396,6 +404,37 @@ def compare_extractions(
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
     )
+
+
+def _running_footer_section(extraction: ExtractionResult) -> Section | None:
+    # Source extraction alone identifies a folio. Never trim terminal numbers
+    # here: a revision or technical value remains meaningful metadata.
+    observations = []
+    for page in extraction.pages:
+        seen = set()
+        for raw in (getattr(page, "running_footer_values", ()) or getattr(page, "running_footer_texts", ())):
+            value = compact_inline(raw)
+            if value and value not in seen:
+                observations.append((page.page_number, value))
+                seen.add(value)
+    if not observations:
+        return None
+    page_count = len({page for page, _value in observations})
+    counts = Counter(value for _page, value in observations)
+    observed, emitted = [], set()
+    for page, value in observations:
+        if counts[value] == page_count:
+            if value in emitted:
+                continue
+            emitted.add(value)
+        observed.append((page, value))
+    title = "运行页脚（坐标证据）"
+    return Section(section_id="running-footer-evidence", heading=title, title=title,
+                   level=1, heading_path=(title,), number_path=(),
+                   start_page=min(page for page, _value in observations),
+                   end_page=max(page for page, _value in observations),
+                   body="\n".join(value for _page, value in observed), role="document_metadata",
+                   page_bodies=tuple(observed))
 
 
 def _running_header_section(extraction: ExtractionResult) -> Section | None:
@@ -1773,6 +1812,7 @@ def compare_sections(
     suppressed_table_unit_keys: set[str] | None = None,
     suppressed_old_table_unit_keys: set[str] | None = None,
     suppressed_new_table_unit_keys: set[str] | None = None,
+    source_extractions: tuple[ExtractionResult, ExtractionResult] | None = None,
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
@@ -1795,6 +1835,7 @@ def compare_sections(
         new_sections,
         matches,
     )
+    residual_units = _unconsumed_literal_units(old_sections, new_sections, matches) if source_extractions else None
     changes: list[SectionChange] = []
     for completed, (old_index, new_index, similarity, match_basis) in enumerate(matches):
         report_progress("compare_text", completed, len(matches), unit="章节对")
@@ -1880,15 +1921,20 @@ def compare_sections(
                 options.max_snippets_per_section,
                 suppressed_table_unit_keys=new_table_unit_keys,
             )
+            decision, decision_reason = _one_sided_change_type(
+                "added", new_index, matches, old_sections, new_sections, source_extractions, residual_units,
+            )
             changes.append(
                 SectionChange(
-                    change_type="added",
+                    change_type=decision,
+                    review_reason=decision_reason,
                     old_section=None,
                     new_section=new_section,
                     similarity=0.0,
                     added_snippets=added_snippets,
                     omitted_snippet_count=omitted_count,
                     audit_added_snippets=audit_added,
+                    match_basis="unmatched_source_coverage_checked" if source_extractions else match_basis,
                 )
             )
         elif old_section:
@@ -1897,20 +1943,109 @@ def compare_sections(
                 options.max_snippets_per_section,
                 suppressed_table_unit_keys=old_table_unit_keys,
             )
+            decision, decision_reason = _one_sided_change_type(
+                "deleted", old_index, matches, old_sections, new_sections, source_extractions, residual_units,
+            )
             changes.append(
                 SectionChange(
-                    change_type="deleted",
+                    change_type=decision,
+                    review_reason=decision_reason,
                     old_section=old_section,
                     new_section=None,
                     similarity=0.0,
                     removed_snippets=removed_snippets,
                     omitted_snippet_count=omitted_count,
                     audit_removed_snippets=audit_removed,
+                    match_basis="unmatched_source_coverage_checked" if source_extractions else match_basis,
                 )
             )
 
     report_progress("compare_text", len(matches), len(matches), unit="章节对")
     return sorted(changes, key=_change_sort_key)
+
+
+def _literal_prose_units(section):
+    from .evidence_alignment import literal_key
+    return Counter(key for unit in _split_units(section.body)
+                   if len(key := literal_key(unit)) >= 80 and not _is_table_review_unit(unit))
+
+
+def _unconsumed_literal_units(old_sections, new_sections, matches):
+    """Count source occurrences left after each established pair consumes its own.
+
+    A repeated boilerplate already explained by a pair cannot be reused as
+    evidence against an actual extra occurrence elsewhere in the document.
+    """
+    old = [_literal_prose_units(section) for section in old_sections]
+    new = [_literal_prose_units(section) for section in new_sections]
+    for a, b, _score, _basis in matches:
+        if a is not None and b is not None:
+            shared = old[a] & new[b]
+            old[a].subtract(shared)
+            new[b].subtract(shared)
+    totals = (Counter(), Counter())
+    for total, sections in zip(totals, (old, new)):
+        for units in sections:
+            total.update(units)
+    return totals
+
+
+def _one_sided_change_type(kind, index, matches, old_sections, new_sections, extractions, residual_units=None):
+    """Authorize absence only inside an intact, anchored source search interval.
+
+    Section-only callers retain their legacy comparison contract. The PDF path
+    supplies both extraction snapshots and can never turn incomplete source
+    coverage or an unconsumed shared occurrence into confirmed absence.
+    """
+    if extractions is None:
+        return kind, ""
+    old_side = kind == "deleted"
+    own_sections, other_sections = (old_sections, new_sections) if old_side else (new_sections, old_sections)
+    own, other = extractions if old_side else extractions[::-1]
+    section = own_sections[index]
+    def complete(extraction, start, end):
+        pages = {p.page_number: p for p in extraction.pages}
+        return bool(extraction.source_sha256 and all(
+            n in pages and pages[n].blocks and not pages[n].layout_risk
+            and not pages[n].ocr_used and not pages[n].image_dominant
+            and not pages[n].ambiguous_line_number_sides
+            for n in range(start, end + 1)))
+    if not complete(own, section.start_page, section.end_page):
+        return "review", "本侧原文范围的提取或版面证据不完整。"
+    paired = [(a, b) if old_side else (b, a) for a, b, _, basis in matches
+              if a is not None and b is not None and basis != "user_page_window_anchor"]
+    before = max((pair for pair in paired if pair[0] < index), default=None)
+    after = min((pair for pair in paired if pair[0] > index), default=None)
+    if before is None and after is None:
+        return "review", "没有可靠的前后章节锚点来定位对侧搜索范围。"
+    if before is not None and after is not None and before[1] >= after[1]:
+        return "review", "前后锚点顺序冲突，可能存在重排。"
+    start = other_sections[before[1]].start_page if before else 1
+    end = other_sections[after[1]].end_page if after else other.total_pages
+    if not end or not complete(other, start, end):
+        return "review", "对侧对应范围的提取或版面证据不完整。"
+    # A page window cannot prove absence beyond its selected ends.
+    if (before is None and (other.selected_start_page or 1) != 1
+            or after is None and (other.selected_end_page or other.total_pages) != other.total_pages):
+        return "review", "所选页窗不能证明范围外不存在对应内容。"
+    from .evidence_alignment import literal_key
+    key = literal_key(section.body)
+    if not key:
+        return "review", "章节没有可核对的正文内容。"
+    if residual_units and _literal_prose_units(section) & residual_units[1 if old_side else 0]:
+        return "review", "对侧仍有尚未配对的相同正文出现，需核实章节拆分或移动。"
+    paired_by_other = {b: a for a, b in paired}
+    for other_index, candidate in enumerate(other_sections):
+        candidate_key = literal_key(candidate.body)
+        if not candidate_key or not (key in candidate_key or candidate_key in key):
+            continue
+        original_index = paired_by_other.get(other_index)
+        # An occurrence already retained verbatim by its own counterpart is
+        # consumed. A second identical paragraph still has a real multiplicity.
+        if original_index is not None and literal_key(own_sections[original_index].body) == candidate_key:
+            continue
+        return "review", "对侧仍有未解决的共同内容，可能发生拆分、合并或移动。"
+    return kind, ""
 
 
 def _fold_moved_children_into_matched_parents(
@@ -1941,6 +2076,8 @@ def _fold_moved_children_into_matched_parents(
     ]
     consumed_old: set[int] = set()
     consumed_new: set[int] = set()
+    old_target_spans: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    new_target_spans: dict[int, list[tuple[int, int]]] = defaultdict(list)
 
     for old_index, new_index, _similarity, _basis in matches:
         if old_index is None or new_index is not None:
@@ -1957,7 +2094,8 @@ def _fold_moved_children_into_matched_parents(
         ancestor_old_index, ancestor_new_index = ancestor_pair
         if not _moved_child_body_is_contained(
             child.body,
-            new_reconciled[ancestor_new_index].body,
+            new_sections[ancestor_new_index].body,
+            new_target_spans[ancestor_new_index],
         ):
             continue
         old_reconciled[ancestor_old_index] = _section_with_descendant_body(
@@ -1981,7 +2119,8 @@ def _fold_moved_children_into_matched_parents(
         ancestor_old_index, ancestor_new_index = ancestor_pair
         if not _moved_child_body_is_contained(
             child.body,
-            old_reconciled[ancestor_old_index].body,
+            old_sections[ancestor_old_index].body,
+            old_target_spans[ancestor_old_index],
         ):
             continue
         new_reconciled[ancestor_new_index] = _section_with_descendant_body(
@@ -2026,36 +2165,33 @@ def _deepest_matched_ancestor_pair(
     return old_index, new_index
 
 
-def _moved_child_body_is_contained(child_body: str, target_parent_body: str) -> bool:
-    """Require two long child units to occur verbatim inside the target parent."""
-
-    child_units = [
-        _review_unit_key(unit)
-        for unit in _split_units(child_body)
-        if len(_review_unit_key(unit)) >= 40
-    ]
-    target_units = [
-        _review_unit_key(unit)
-        for unit in _split_units(target_parent_body)
-        if len(_review_unit_key(unit)) >= 40
-    ]
-    matched_lengths: list[int] = []
-    used_target_indexes: set[int] = set()
-    for child_key in child_units:
-        target_index = next(
-            (
-                index
-                for index, target_key in enumerate(target_units)
-                if index not in used_target_indexes
-                and (child_key in target_key or target_key in child_key)
-            ),
-            None,
-        )
-        if target_index is None:
-            continue
-        used_target_indexes.add(target_index)
-        matched_lengths.append(len(child_key))
-    return len(matched_lengths) >= 2 and sum(matched_lengths) >= 120
+def _moved_child_body_is_contained(
+    child_body: str, target_parent_body: str,
+    consumed_spans: list[tuple[int, int]] | None = None,
+) -> bool:
+    """Reserve ordered literal occurrences; all unmatched child text stays in delta."""
+    from .evidence_alignment import literal_key
+    child_units = [literal_key(unit) for unit in _split_units(child_body)]
+    long_units = [unit for unit in child_units if len(unit) >= 40]
+    target = literal_key(target_parent_body)
+    consumed = consumed_spans if consumed_spans is not None else []
+    proposed = []
+    cursor = 0
+    for child in long_units:
+        start = target.find(child, cursor)
+        while start >= 0:
+            end = start + len(child)
+            if ((start == 0 or target[start - 1].isspace())
+                    and (end == len(target) or target[end].isspace())
+                    and not any(start < b and end > a for a, b in consumed)):
+                proposed.append((start, end))
+                cursor = end
+                break
+            start = target.find(child, start + 1)
+    if len(proposed) < 2 or sum(b - a for a, b in proposed) < 120:
+        return False
+    consumed.extend(proposed)
+    return True
 
 
 def _section_with_descendant_body(parent: Section, child: Section) -> Section:
@@ -2119,10 +2255,12 @@ def _match_sections(
                 exact_completed += 1
                 old_section = old_sections[old_index]
                 new_section = new_sections[new_index]
-                body_similarity = _exact_identity_similarity(
-                    old_section.body,
-                    new_section.body,
-                )
+                body_similarity = catalog_identity_similarity(old_section, new_section)
+                if body_similarity is None:
+                    body_similarity = _exact_identity_similarity(
+                        old_section.body,
+                        new_section.body,
+                    )
                 if body_similarity is None:
                     rejected_exact_pairs.add((old_index, new_index))
                     continue

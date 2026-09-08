@@ -838,8 +838,21 @@ class PrintedLineNumberDuplicateTests(unittest.TestCase):
             )
         )
 
-    def test_value_above_print_grid_range_revokes_filtering(self) -> None:
-        cluster = [self._grid_word(value) for value in range(1, 51)]
+    def test_distinct_observed_print_grid_lengths_are_supported(self) -> None:
+        for length in (32, 40, 50, 56):
+            with self.subTest(length=length):
+                cluster = [self._grid_word(value) for value in range(1, length + 1)]
+                metrics = _printed_line_number_grid_metrics(
+                    cluster, all_words=cluster, page_width=self.page_width,
+                    page_height=self.page_height,
+                )
+                self.assertIsNotNone(metrics)
+                self.assertEqual(length, len(metrics[0]))
+
+    def test_value_outside_observed_print_grid_revokes_filtering(self) -> None:
+        # A valid 50-line publication is supported; an off-grid technical value is not.
+        cluster = [self._grid_word(value) for value in range(1, 50)]
+        cluster.append(self._grid_word(101))
 
         self.assertIsNone(
             _printed_line_number_grid_metrics(

@@ -21,6 +21,8 @@ from typing import BinaryIO
 from PIL import Image, ImageDraw
 
 from .figure_filters import filter_figure_visual_snippets
+from .heading_evidence import source_region_role
+from .source_regions import bottom_margin_furniture
 from .models import (
     DiffResult,
     DocumentBlock,
@@ -336,7 +338,8 @@ def _section_heading_entries(
         tuple[DocumentBlock, tuple[float, float, float, float], str]
     ] = []
     for index, block in enumerate(blocks):
-        if not _looks_like_numbered_figure_boundary_heading(block.text):
+        if (not _looks_like_numbered_figure_boundary_heading(block.text)
+                or source_region_role(page, block.text)):
             continue
         bbox = block.bbox
         text_parts = [block.text]
@@ -433,6 +436,8 @@ def _change_highlights(
         changed_indexes.difference_update(_reference_locator_token_indexes(value))
         if filter_figure_visual_snippets((value,)):
             highlights.append(_SnippetHighlight(value, frozenset(changed_indexes)))
+    if change.change_type == "review":
+        return tuple(_SnippetHighlight(item.text, frozenset()) for item in highlights)
     return tuple(highlights)
 
 
@@ -1354,15 +1359,8 @@ def _looks_like_bottom_margin_furniture(
 ) -> bool:
     """Recognize one wide, shallow line isolated in the extreme bottom margin."""
 
-    _page_left, page_top, _page_right, page_bottom = page_bbox
-    page_height = max(1.0, page_bottom - page_top)
-    content_width = max(1.0, content_right - content_left)
-    return bool(
-        "\n" not in block.text
-        and block.bbox[1] >= page_top + page_height * 0.90
-        and block.bbox[3] - block.bbox[1] <= page_height * 0.035
-        and block.bbox[2] - block.bbox[0] >= content_width * 0.55
-        and _BOTTOM_MARGIN_FURNITURE_HINT_RE.search(block.text)
+    return bottom_margin_furniture(
+        block.text, block.bbox, page_bbox, content_left, content_right
     )
 
 
@@ -2023,7 +2021,21 @@ def _crop_region_for_cluster(
         cluster=cluster,
         blocking_bboxes=blocking_bboxes,
     )
-    if right - left < minimum_width or crop_bottom - crop_top < 8.0:
+    # 可读宽度只是期望，不能授权吞入同高度的相邻表格/图形。
+    cluster_left = min(box[0] for box in cluster)
+    cluster_right = max(box[2] for box in cluster)
+    cluster_top = min(box[1] for box in cluster)
+    cluster_bottom = max(box[3] for box in cluster)
+    for blocker in blocking_bboxes:
+        if min(crop_bottom, blocker[3]) <= max(crop_top, blocker[1]):
+            continue
+        if cluster_right <= blocker[0]:
+            right = min(right, blocker[0] - _SOURCE_BLOCKER_CROP_GAP)
+        elif cluster_left >= blocker[2]:
+            left = max(left, blocker[2] + _SOURCE_BLOCKER_CROP_GAP)
+        elif min(cluster_bottom, blocker[3]) > max(cluster_top, blocker[1]):
+            return None  # 本文词自身与另一所有者重叠，不能伪造无冲突截图。
+    if right - left < 1.0 or crop_bottom - crop_top < 8.0:
         return None
     return (left, crop_top, right, crop_bottom)
 

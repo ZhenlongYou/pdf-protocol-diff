@@ -17229,7 +17229,11 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, temp_path / "reports", DiffOptions())
             html_size = outputs["html"].stat().st_size
 
-        self.assertEqual([], result.changes)
+        self.assertEqual([], [c for c in result.changes
+                              if (c.new_section or c.old_section).role == "technical"])
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("document_metadata", result.changes[0].new_section.role)
+        self.assertTrue(result.changes[0].replaced_snippets)  # 元数据保留版本变更，正文和像素层不重复报。
         self.assertEqual([], result.visual_review_items)
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
@@ -17322,7 +17326,11 @@ class ProtocolDiffTests(unittest.TestCase):
 
             result = run_diff(old_pdf, new_pdf, DiffOptions())
 
-        self.assertEqual([], result.changes)
+        self.assertEqual([], [c for c in result.changes
+                              if (c.new_section or c.old_section).role == "technical"])
+        self.assertEqual(1, len(result.changes))
+        self.assertEqual("document_metadata", result.changes[0].new_section.role)
+        self.assertTrue(result.changes[0].replaced_snippets)  # 元数据保留版本变更，正文和像素层不重复报。
         self.assertEqual([], result.visual_review_items)
         self.assertTrue(result.provenance.visual_watchdog_audit.complete)
         self.assertTrue(result.assessment.allows_no_difference_conclusion)

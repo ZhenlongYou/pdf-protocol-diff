@@ -1,0 +1,42 @@
+{
+  "bottom_requirement-120.pdf": {
+    "sha256": "6ba42baf7cf5d9e0c1b0868b30944f5a50e80bb16048ae72f8fd3fb918d74654",
+    "bytes": 1393
+  },
+  "bottom_requirement-150.pdf": {
+    "sha256": "1b086ac36c818cd1c46b446fb1e8d61ed423c0fb3c9cc71ea151f6b8b530e1d9",
+    "bytes": 1395
+  },
+  "empty.pdf": {
+    "sha256": "e0922064d39ab10b11f9414b0e89f91990fd4afff7615658f787676cca1fb130",
+    "bytes": 6215
+  },
+  "footer-distribution-new.pdf": {
+    "sha256": "384b10b708179f08aea316106dd022731b4cd2fee0cf5b497837c98a65d0d6a9",
+    "bytes": 3336
+  },
+  "footer-distribution-old.pdf": {
+    "sha256": "f597f37c460e2438bb6f739534d23a2ad275c94d8357c3e7c8c6350203ad4e5b",
+    "bytes": 3336
+  },
+  "long-numeric-revision-1.pdf": {
+    "sha256": "85a1e555f5a51d347d1bb23e92bc7e60a532d3801e987e1f555f282493901a8e",
+    "bytes": 1395
+  },
+  "long-numeric-revision-2.pdf": {
+    "sha256": "485507fdf4f89afd350997da9514fd645a9f15c2b674ccf6042f2f5baddcea5a",
+    "bytes": 1396
+  },
+  "owned-glyph-evidence.ttf": {
+    "sha256": "fd9c9cdea507e33308169ead986837781717c9123d22393ce4c6eebd4b151a6e",
+    "bytes": 4420
+  },
+  "two-column-owners.pdf": {
+    "sha256": "d6526f4beae47f3b47353062edba71179ed9e474e14ef82b2121f9a191ef91e5",
+    "bytes": 11915
+  },
+  "visible.pdf": {
+    "sha256": "459b31772387b5d6c5c27529db2ab8dc2ffb3a957630248b958a1fcfe5b061cb",
+    "bytes": 6215
+  }
+}

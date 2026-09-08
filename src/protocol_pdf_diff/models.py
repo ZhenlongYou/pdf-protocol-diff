@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math  # 配置模型用有限性检查阻止 NaN/Inf 绕过章节匹配阈值。
 from dataclasses import dataclass, field
+from collections import Counter
 from enum import Enum
 from numbers import (
     Real,  # bool 虽是 int 子类，但不能作为相似度；Real 明确公共 API 的数值契约。
@@ -86,6 +87,9 @@ class DocumentBlock:
         compare=False,
         repr=False,
     )  # 原生文字行保留逐词 bbox，供截图精确标色；OCR/表格缺少词级证据时保持空。
+    word_styles: tuple[tuple[str, float], ...] = field(
+        default=(), compare=False, repr=False,
+    )  # 与 word_boxes 逐项对应的原始字体/字号；不能用整行字体替正文词推断标题。
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,10 @@ class PageText:
     visual_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 仅保存坐标已证明并从比较文字过滤的页脚/页边噪声区域，视觉哨兵可据此精确屏蔽。
     running_header_texts: tuple[str, ...] = ()  # 跨页坐标证明的运行页眉从正文分离，但原文仍进入版本间结构化比较。
     vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 原生 PDF 矩形/曲线/线段的几何包络；只作图形区域正向证据，不改写正文。
+    source_blank_glyphs: tuple[tuple[tuple[float, float, float, float], str, str, int, int], ...] = ()
+    formula_bboxes: tuple[tuple[float, float, float, float], ...] = ()
+    running_footer_values: tuple[str, ...] = ()  # 仅按已证明页码词的来源身份去除 folio，保留版本和技术数值。
+    running_footer_texts: tuple[str, ...] = ()  # 原文页脚独立保留，避免混入正文但仍可审计比较。
 
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
@@ -142,6 +150,8 @@ class PageExtractionAudit:
     comparison_text_source: str = "native"  # native 或通过安全门的 docling，便于 JSON 重放。
     layout_backend_version: str | None = None
     visual_noise_bbox_count: int = 0  # 只记录屏蔽区域数量，不泄漏坐标或页边文字。
+    running_footer_texts: tuple[str, ...] = ()
+    blank_glyph_evidence: tuple[tuple[str, str, int, int, int], ...] = ()  # 原始字符、字体摘要、CID、GID、数量。
 
 
 @dataclass(frozen=True)
@@ -186,6 +196,10 @@ def snapshot_page_extraction_audit(
             comparison_text_source=page.comparison_text_source,
             layout_backend_version=page.layout_backend_version,
             visual_noise_bbox_count=len(page.visual_noise_bboxes),
+            running_footer_texts=getattr(page, "running_footer_texts", ()),
+            blank_glyph_evidence=tuple((*key, count) for key, count in sorted(Counter(
+                item[1:] for item in getattr(page, "source_blank_glyphs", ())
+            ).items())),
         )
         for page in extraction.pages
     )
@@ -455,6 +469,7 @@ class SectionChange:
         compare=False,
         repr=False,
     )  # 读者层中性复核证据；不计入核心差异，JSON/CSV 原始审计仍使用 audit_* 字段。
+    review_reason: str = ""
 
     @property
     def role(self) -> str:

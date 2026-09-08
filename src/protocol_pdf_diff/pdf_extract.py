@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from statistics import median
 
+from .source_regions import running_footer_words, running_footer_folio
 from .formula_visuals import extract_formula_visuals
 from .layout_blocks import (
     build_pdfplumber_text_blocks,
@@ -79,8 +80,7 @@ _LINE_NUMBER_MIN_RUN = 20  # 同列还须有长连续段，零散页边数字不
 _LINE_NUMBER_COLUMN_TOLERANCE_RATIO = 0.006  # 行号按内侧边缘聚类；约 0.6% 页宽容纳字距误差但隔离正文数字。
 _DOCUMENT_LINE_NUMBER_MIN_PAGES = 3  # 单页或两页长列表仍有语义歧义；至少三页才能证明出版级重复网格。
 _DOCUMENT_LINE_NUMBER_MIN_PAGE_COVERAGE = 0.80  # 打印行号应覆盖绝大多数选定页，局部编号表不得获得全文删除权。
-_DOCUMENT_LINE_NUMBER_LAST_VALUE = 49  # 当前只识别每页重置的 1..49 印刷行网格，避免泛化到任意正文列表。
-_DOCUMENT_LINE_NUMBER_MIN_DISTINCT_VALUES = 45  # 允许 DRAFT 水印合并少量行号字形，但每页必须仍接近完整。
+_DOCUMENT_LINE_NUMBER_MIN_DISTINCT_VALUES = 24  # 短列表不授权；终点由实际重置网格观测，不能绑定某份文档。
 _DOCUMENT_LINE_NUMBER_MIN_SINGLETON_ANCHORS = 24  # 重复技术数字不能主导网格拟合；至少半页数值需各有唯一候选。
 _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES = 8  # 真行号会给空白视觉行编号；真列表的每个序号通常都有同基线正文。
 _DOCUMENT_LINE_NUMBER_GRID_ORIGIN_TOLERANCE = 0.006  # 跨页首行的归一化 y 位置需稳定，排除页内局部数字表。
@@ -232,10 +232,13 @@ def _extract_pdf_text_with_pdfplumber(
         outline_heading_paths = _pdf_outline_heading_paths(source_snapshot)
         source_snapshot.seek(0)
         pdf = pdfplumber.open(source_snapshot)
+        from .glyph_evidence import evidence_page, EvidencePage, EvidenceResourceManager, source_blank_glyphs
+        pdf.rsrcmgr = EvidenceResourceManager()
     except Exception as exc:  # 快照或 PDF 解析失败时给出包含文件名的错误。
         source_snapshot.close()
         raise PdfReadError(f"无法读取 PDF: {path}\n原因: {exc}") from exc
 
+    selected_pages = []
     try:  # 使用上下文式关闭底层文件句柄，避免长批处理时占用文件。
         total_pages = len(pdf.pages)  # 记录源 PDF 总页数，报告页码范围需要它。
         selected_start, selected_end = _resolve_page_range(
@@ -248,7 +251,7 @@ def _extract_pdf_text_with_pdfplumber(
         table_visuals: list[TableVisual] = []  # 保存表格截图和识别摘要，供 HTML 报告显示。
         formula_visuals: list[FormulaVisual] = []  # 显示公式单独保留无标注源截图和几何上下标。
         selected_pages = [
-            (index, pdf.pages[index - 1])
+            (index, evidence_page(pdf, pdf.pages[index - 1], index))
             for index in range(selected_start, selected_end + 1)
         ]  # 先固定页窗并保留用户可见的 1-based 页码，供坐标证据复用。
         selected_page_count = len(selected_pages)
@@ -336,6 +339,12 @@ def _extract_pdf_text_with_pdfplumber(
             )
             formula_visuals.extend(page_formulas)
             warnings.extend(formula_warnings)
+            try:
+                blank_glyph_proof = source_blank_glyphs(page)
+            except Exception:
+                blank_glyph_proof = ()
+                layout_risk = True
+                warnings.append(f"第 {index} 页空白字形来源审计不可用，保留已提取内容并需复核。")
             pages.append(
                 PageText(
                     page_number=index,
@@ -354,7 +363,11 @@ def _extract_pdf_text_with_pdfplumber(
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
                     running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
+                    running_footer_texts=_footer_source_texts(page, coordinate_evidence[index][0]),
+                    running_footer_values=_footer_source_texts(page, coordinate_evidence[index][0], omit_proven_folio=True),
                     vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
+                    source_blank_glyphs=blank_glyph_proof,
+                    formula_bboxes=tuple(formula.bbox for formula in page_formulas),
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
             notify_progress(
@@ -367,8 +380,15 @@ def _extract_pdf_text_with_pdfplumber(
                 ),
             )
     finally:
-        pdf.close()  # 明确关闭 pdfplumber 打开的文件资源。
-        source_snapshot.close()  # 解析器始终读取这份快照；摘要与实际解析字节严格绑定。
+        try:
+            for _index, page in selected_pages:
+                if isinstance(page, EvidencePage):
+                    page.close()  # 自有页面包装器也要释放布局与文字缓存。
+        finally:
+            try:
+                pdf.close()
+            finally:
+                source_snapshot.close()  # 所有页面关闭后才释放同一来源快照。
 
     return _finalize_extraction_result(
         path=path,
@@ -489,7 +509,7 @@ def _extract_pdfplumber_page_text(
         )
     if gutter_boxes:
         warnings.append(
-            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由至少三页的重置 1..49 "
+            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由至少三页的连续重置数字序列 "
             "稳定网格与空白编号基线共同证明为打印行号；"
             "已证明并从比较文本过滤，原始坐标块仍保留供审计。"
         )
@@ -1562,12 +1582,12 @@ def _document_proven_line_number_gutter_boxes(
         tuple[list[str], str | None],
     ] | None = None,
 ) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
-    """Return edge boxes only for a document-wide printed 1..49 line grid.
+    """Return edge boxes only for a document-wide printed reset line grid.
 
     A long aligned list is still semantic content.  Destructive comparison-text
     filtering therefore needs independent evidence that lists do not provide:
-    at least three pages, high selected-page coverage, a nearly complete 1..49
-    reset on every supporting page, stable vertical pitch/origin, and several
+    at least three pages, high selected-page coverage, a nearly complete observed
+    reset grid on every supporting page, stable vertical pitch/origin, and several
     numbered baselines that contain no body text at all.  Raw coordinate blocks
     are built before these boxes are applied, so the source evidence remains
     available for audit.
@@ -1682,7 +1702,7 @@ def _printed_line_number_grid_metrics(
     page_width: float,
     page_height: float,
 ) -> tuple[tuple[tuple[float, float, float, float], ...], float, float] | None:
-    """Validate a near-complete, evenly spaced 1..49 grid with blank rows."""
+    """Validate a near-complete observed reset grid with numbered blank rows."""
 
     value_words: dict[int, list[dict[str, object]]] = {}
     for word in cluster:
@@ -1690,15 +1710,15 @@ def _printed_line_number_grid_metrics(
         if not text.isdigit():
             return None
         value = int(text)
-        if not 1 <= value <= _DOCUMENT_LINE_NUMBER_LAST_VALUE:
-            return None  # 同一窄列混入 50+技术值时，它就不是可安全删除的 1..49 网格。
+        if not 1 <= value <= 100:
+            return None  # 与后面的每页 1%-3% 行距约束一致，排除任意大技术数值。
         value_words.setdefault(value, []).append(word)
     values = sorted(value_words)
     if (
         len(values) < _DOCUMENT_LINE_NUMBER_MIN_DISTINCT_VALUES
         or not values
         or values[0] != 1
-        or values[-1] != _DOCUMENT_LINE_NUMBER_LAST_VALUE
+        or len(values) < math.ceil(values[-1] * 0.90)
     ):
         return None  # 起点、终点和覆盖率共同证明每页独立重置。
 
@@ -1802,7 +1822,7 @@ def _printed_line_number_grid_metrics(
     if orphan_baselines < _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES:
         return None  # 每个数字都有同基线正文时，它仍可能是合法编号列表。
     split_fragment_boxes = _split_missing_grid_number_fragment_boxes(
-        missing_values=set(range(1, _DOCUMENT_LINE_NUMBER_LAST_VALUE + 1))
+        missing_values=set(range(1, values[-1] + 1))
         - set(values),
         selected_words=selected_words,
         all_words=all_words,
@@ -2035,8 +2055,19 @@ def _proven_running_footer_boxes(
         for line in url_lines
         if any(abs(line[0] - marker[0]) <= 48.0 for marker in marker_lines)
     ]
+    generic_words = {
+        id(word)
+        for _top, _bottom, _text, line_words in bottom_lines
+        if running_footer_words(
+            [(str(w.get("text", "")), float(w["x0"]), float(w["top"]),
+              float(w["x1"]), float(w["bottom"])) for w in line_words],
+            (0, 0, width, height),
+        )
+        for word in line_words
+    }
     if not marker_lines or not clustered_url_lines:
-        return ()
+        return tuple(_tight_word_bbox(word, width=width, height=height)
+                     for word in bottom_words if id(word) in generic_words)
 
     proof_lines = [*marker_lines, *clustered_url_lines]
     footer_start = min(line[0] for line in proof_lines)
@@ -2061,8 +2092,21 @@ def _proven_running_footer_boxes(
     return tuple(
         _tight_word_bbox(word, width=width, height=height)
         for word in bottom_words
-        if id(word) in selected_word_ids
+        if id(word) in selected_word_ids or id(word) in generic_words
     )
+
+
+def _footer_source_texts(page, words, *, omit_proven_folio=False):
+    boxes = _proven_running_footer_boxes(page, words=words)
+    selected = [w for w in words if _layout_object_inside_any_box(w, boxes)]
+    result = []
+    for _top, _bottom, _text, row in _word_line_records(selected):
+        source_words = [(str(w.get("text", "")), float(w["x0"]), float(w["top"]),
+                         float(w["x1"]), float(w["bottom"]))
+                        for w in sorted(row, key=lambda w: float(w["x0"]))]
+        folio = running_footer_folio(source_words, page_bounds(page)) if omit_proven_folio else None
+        result.append(" ".join(w[0] for w in source_words if w is not folio))
+    return tuple(result)
 
 
 def _looks_like_running_footer_marker(line_text: str) -> bool:
@@ -2317,47 +2361,6 @@ def _figure_safe_horizontal_word_clusters(
         return ()  # 坏坐标不能只污染某一条 gap；整条 visual line 的 Figure 几何证据统一作废。
     materialized_characters = tuple(page_characters)
 
-    def descriptor_lead_stays_outside_table_lane(
-        ordered_words: list[dict[str, object]],
-        start_index: int,
-    ) -> bool:
-        """Prove the first two descriptor words remain outside the table lane."""
-
-        if start_index + 1 >= len(ordered_words):
-            return False
-        first_word = ordered_words[start_index]
-        second_word = ordered_words[start_index + 1]
-        try:
-            next_gap = float(second_word["x0"]) - float(first_word["x1"])
-            first_size = float(first_word.get("size", 0.0) or 0.0)
-            first_left = float(first_word["x0"])
-            first_right = float(first_word["x1"])
-            second_left = float(second_word["x0"])
-            second_right = float(second_word["x1"])
-        except (KeyError, TypeError, ValueError):
-            return False
-        if (
-            not all(
-                math.isfinite(value)
-                for value in (
-                    next_gap,
-                    first_size,
-                    first_left,
-                    first_right,
-                    second_left,
-                    second_right,
-                )
-            )
-            or first_right <= first_left
-            or second_right <= second_left
-            or next_gap > max(4.0, first_size * 0.5)
-        ):
-            return False
-        return (
-            max(first_right, second_right) <= bbox[0]
-            or min(first_left, second_left) >= bbox[2]
-        )
-
     def gap_is_painted_as_spaces(
         previous_word: dict[str, object],
         next_word: dict[str, object],
@@ -2489,10 +2492,6 @@ def _figure_safe_horizontal_word_clusters(
                 gap > gap_limit
                 and _figure_caption_is_identifier_only(
                     _word_cluster_text(tight_clusters[-1])
-                )
-                and descriptor_lead_stays_outside_table_lane(
-                    ordered_words,
-                    word_index,
                 )
                 and gap_is_painted_as_spaces(previous, word)
             )

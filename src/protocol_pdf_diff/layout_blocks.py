@@ -399,6 +399,10 @@ def _text_block_from_word_line(
             )
             for word in word_line
         ),
+        word_styles=tuple(
+            (str(word.get("fontname", "")), float(word.get("size", 0) or 0))
+            for word in word_line
+        ),
     )
 
 

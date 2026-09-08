@@ -99,6 +99,8 @@ class ComparisonJobTests(unittest.TestCase):
             descendant = []
             published = Mock()
             def progress(payload):
+                if payload.get("type") == "cleanup_error":
+                    return  # The public observer also receives transient cleanup retries.
                 descendant.append(payload["pid"])
                 self.assertTrue(process_alive(payload["pid"]))
                 cancel.set()

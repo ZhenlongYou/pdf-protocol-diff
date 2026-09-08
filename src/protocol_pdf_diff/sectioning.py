@@ -14,6 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
+from .heading_evidence import line_word_evidence, strong_heading_style, source_region_role
 
 from .models import (
     DocumentBlockKind,
@@ -31,7 +32,8 @@ from .text_utils import (
 
 _CHINESE_NUM = r"零〇一二三四五六七八九十百千万两0-9\d"
 _DOCUMENT_METADATA_TITLE_RE = re.compile(
-    r"(?i)(?:^contents$|^目录$|\btable\s+of\s+contents\b|"
+    r"(?i)(?:^contents$|^目录$|^图目录$|^表目录$|^插图目录$|"
+    r"^list\s+of\s+(?:figures|tables|illustrations)$|\btable\s+of\s+contents\b|"
     r"\b(?:legal\s+)?notice\b|法律声明|\bcopyright\b|版权|"
     r"\bforeword\b|\bpreface\b|前言|序言|"
     r"\b(?:revision|version|change|document|release|amendment)\s+history\b|"
@@ -66,8 +68,8 @@ _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
     (
         re.compile(
             r"^((?i:annex|appendix)\s+"
-            r"(?:[A-Z]|[A-Z]{2}|[IVXLCDM]{2,5}|\d+))"
-            r"(?:(?:[\s:.–—-]+)(.{0,120}))?$"
+            r"(?:[A-Z]{1,2}|[IVXLCDM]{2,5}|\d+)(?:\.(?:[A-Z]|\d+))*)"
+            r"(?:(?:\s+|[:–—-]\s*|\.(?!\w)\s*)(.{0,120}))?$"
         ),
         1,
         "annex",
@@ -146,8 +148,13 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     document titles, confidentiality banners, and similar furniture.
     """
 
+    formula_boxes = {}
+    for formula in extraction.formula_visuals:
+        formula_boxes.setdefault(formula.page_number, []).append(formula.bbox)
+    source_pages = [replace(page, formula_bboxes=tuple(formula_boxes.get(page.page_number, ())))
+                    for page in extraction.pages]
     cleaned_pages = _merge_standalone_heading_lines(
-        _remove_repeating_page_furniture(_remove_proven_margin_noise(extraction.pages))
+        _remove_repeating_page_furniture(_remove_proven_margin_noise(source_pages))
     )
     sections: list[Section] = []
     current: _OpenSection | None = None
@@ -177,9 +184,31 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            source_heading_is_strong = strong_heading_style(page, heading_candidate) if re.match(r"\d", heading_candidate) else False
+            if heading is None and source_heading_is_strong:
+                heading = detect_heading(heading_candidate, source_proves_non_table=True)
+            non_heading_owner = source_region_role(page, heading_candidate)
+            if (heading and line_index > 0 and len(page_lines[line_index - 1]) >= 35
+                    and _continues_source_paragraph(page, page_lines[line_index - 1], heading_candidate)):
+                non_heading_owner = "paragraph_continuation"
+            if non_heading_owner:
+                heading = None
+                source_heading_is_strong = False
+            if (heading and any(getattr(block, "word_styles", ()) for block in page.blocks)
+                    and not line_word_evidence(page, heading_candidate)):
+                heading = None  # 无法绑定实际连续原文的重排/公式片段不得创建章节祖先。
+            if heading and not source_heading_is_strong:
+                # 只有数值/运算符的表达式不是章节标题。内容保留在正文，不凭数学排版建父栈。
+                if not any(character.isalpha() for character in heading.title) and heading.title:
+                    heading = None
+                elif (line_index > 0 and re.match(r"(?i)^(appendix|annex|section|clause)\b", heading_candidate)
+                      and line_word_evidence(page, heading_candidate)
+                      and _continues_source_paragraph(page, page_lines[line_index - 1], heading_candidate)):
+                    heading = None
             dense_heading_was_recovered = False
             if (
                 heading is None
+                and not non_heading_owner
                 and _looks_like_table_row(heading_candidate)
                 and (dense_heading := _detect_dense_numbered_heading_under_parent(
                     heading_candidate,
@@ -244,6 +273,12 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     contents_heading_paths.add(contents_path)
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
             if heading:
+                if source_heading_is_strong and re.match(r"^\d", heading.number):
+                    # 有独立来源样式的章节先恢复自身编号祖先，再交给上下文分类。
+                    heading_stack = [item for item in heading_stack if
+                                     re.match(r"(?i)^(?:part|annex|appendix)\b", item.number)
+                                     or heading.number.startswith(item.number + ".")]
+                    deep_numeric_context = ()
                 heading = _contextualize_heading(heading, heading_stack)
             prose_list_intro_text = _numbered_list_intro_context(
                 current.lines if current is not None else []
@@ -364,7 +399,13 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 if not _looks_like_real_integer_heading_after_deep_context(heading):
                     heading = None
             if heading and _has_inconsistent_numeric_parent(heading, heading_stack):
-                heading = None  # 当前父编号与候选前缀冲突时，更像表格/引用中的旧编号。
+                if strong_heading_style(page, heading_candidate):
+                    # 来源样式与正文独立区分的真标题可恢复祖先；错误旧栈无权否决它。
+                    heading_stack = [item for item in heading_stack
+                                     if heading.number.startswith(item.number + ".")]
+                    heading = _contextualize_heading(heading, heading_stack)
+                else:
+                    heading = None
             if heading:
                 saw_heading = True
                 procedure_step_numbers.clear()  # 新章节结束上一个 Procedure 的局部步骤序列。
@@ -514,13 +555,13 @@ def _contextualize_heading(
     )
 
 
-def detect_heading(line: str) -> HeadingInfo | None:
+def detect_heading(line: str, *, source_proves_non_table: bool = False) -> HeadingInfo | None:
     """Return heading metadata if a line looks like a protocol heading."""
 
     candidate = compact_inline(line)
     if not candidate or len(candidate) > 140:
         return None
-    if _looks_like_table_row(candidate):
+    if _looks_like_table_row(candidate) and not source_proves_non_table:
         return None
 
     for pattern, configured_level, kind in _HEADING_PATTERNS:
@@ -535,6 +576,8 @@ def detect_heading(line: str) -> HeadingInfo | None:
         )
         if kind == "paren":
             number = f"({number})"
+        if kind == "annex" and "." in number and not title:
+            return None  # 无标题的子条款引用残片不能独立创建全文父容器。
         # 三类点号编号都按完整结构标记计算层级，保留 31.A.1 的字母节点。
         if kind in {"numeric", "named_numeric", "annex_numeric", "numeric_letter"}:
             numeric_number = re.sub(r"(?i)^(?:chapter|section|clause)\s+", "", number)
@@ -1094,9 +1137,34 @@ def _proven_numbered_heading_descendant_candidate(
     return f"{candidate_number} {compact_inline(match.group('title'))}"
 
 
+def _continues_source_paragraph(page: PageText, previous: str, current: str) -> bool:
+    """A style-identical, closely spaced unfinished line cannot start a container."""
+    previous = _line_without_ambiguous_margin_number(
+        previous, page.ambiguous_line_number_sides
+    )
+    if not previous or previous[-1] in ".。:：;；!?！？":
+        return False
+    before, after = line_word_evidence(page, previous), line_word_evidence(page, current)
+    if not before or not after:
+        return False
+    before_styles = {style for _word, style in before}
+    after_styles = {style for _word, style in after}
+    if len(before_styles) != 1 or before_styles != after_styles:
+        return False
+    size = next(iter(before_styles))[1]
+    gap = min(w[2] for w, _ in after) - max(w[4] for w, _ in before)
+    aligned = abs(min(w[1] for w, _ in before) - min(w[1] for w, _ in after)) <= size * .8
+    # Font metric rounding can overlap consecutive baselines by a fraction of
+    # a point. This tolerance cannot join distinct columns or formula rows.
+    return size > 0 and aligned and -size * .1 <= gap <= size * .8
+
+
 def _physical_line_font_names(page: PageText, line: str) -> tuple[str, ...]:
     """把清洗后的物理行绑定回唯一原生文字块的实际字体集合。"""
 
+    words = line_word_evidence(page, line)
+    if words:
+        return tuple(sorted({style[0] for _word, style in words if style[0]}))
     target = compact_inline(line)
     matches: list[tuple[str, ...]] = []
     for block in page.blocks:

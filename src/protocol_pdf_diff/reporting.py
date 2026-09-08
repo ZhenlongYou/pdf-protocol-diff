@@ -539,6 +539,7 @@ def write_reports(
                 "similarity",
                 "match_basis",
                 "match_basis_label",
+                "review_reason",
                 "summary",
                 "added_snippets",
                 "removed_snippets",
@@ -805,6 +806,8 @@ def _append_markdown_changes(
         summary = _change_summary(change)
         if summary:
             lines.append(f"- 差异摘要: {summary}")
+        if change.review_reason:
+            lines.append(f"- 待核实原因: {change.review_reason}")
 
         if change.replaced_snippets:
             lines.append("- 替换片段:")
@@ -824,7 +827,7 @@ def _append_markdown_changes(
                 lines.append(f"  - 旧: {_reader_snippet_text(pair.old)}")
                 lines.append(f"    新: {_reader_snippet_text(pair.new)}")
         if change.added_snippets:
-            lines.append("- 新增片段:")
+            lines.append("- 新版待核实原文:" if change.change_type == "review" else "- 新增片段:")
             for snippet in _reader_single_list_groups(change.added_snippets):
                 lines.append(
                     "  - "
@@ -834,7 +837,7 @@ def _append_markdown_changes(
                     )
                 )
         if change.removed_snippets:
-            lines.append("- 删除片段:")
+            lines.append("- 旧版待核实原文:" if change.change_type == "review" else "- 删除片段:")
             for snippet in _reader_single_list_groups(change.removed_snippets):
                 lines.append(
                     "  - "
@@ -1183,7 +1186,7 @@ def _render_html(
       background: #f8fafc;
       border-bottom: 1px solid var(--line);
     }}
-    .prose-source-page img {{ display: block; width: 100%; height: auto; background: #fff; }}
+    .prose-source-page img {{ display: block; width: auto; max-width: 100%; height: auto; background: #fff; }}
     .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
     .prose-source-omitted {{
       padding: 8px 10px;
@@ -1309,7 +1312,8 @@ def _render_html(
     }}
     .table-shot img {{
       display: block;
-      width: 100%;
+      width: auto;
+      max-width: 100%;
       height: auto;
       background: #fff;
     }}
@@ -1476,8 +1480,13 @@ def _render_change_html(
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
     review_pairs = _render_review_pairs_html(change.review_replaced_snippets)
-    added = _render_single_list("新增片段", change.added_snippets, "ins")
-    removed = _render_single_list("删除片段", change.removed_snippets, "del")
+    neutral = change.change_type == "review"
+    if neutral:
+        pairs = "\n".join(_render_pair_html(pair.old, pair.new, neutral=True) for pair in change.replaced_snippets)
+    added = _render_single_list("新版待核实原文" if neutral else "新增片段", change.added_snippets, "span" if neutral else "ins")
+    removed = _render_single_list("旧版待核实原文" if neutral else "删除片段", change.removed_snippets, "span" if neutral else "del")
+    if change.review_reason:
+        match_basis_html += f'<div class="match-basis">{_escape(change.review_reason)}</div>'
     omitted = _render_omitted_html(change.omitted_snippet_count)
     text_body = (pairs or "") + review_pairs + added + removed + omitted
     source_visual_html = (
@@ -1534,18 +1543,21 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
         group.old_visuals,
         "旧版无对应原文区域",
         omitted_page_count=group.old_omitted_page_count,
-        display_mode="old-highlight",
+        display_mode="raw" if group.change_type == "review" else "old-highlight",
     )
     new_side = _render_prose_source_visual_side(
         "新版原文区域",
         group.new_visuals,
         "新版无对应原文区域",
         omitted_page_count=group.new_omitted_page_count,
-        display_mode="new-highlight",
+        display_mode="raw" if group.change_type == "review" else "new-highlight",
     )
+    legend = ("原文出处：对应关系尚待核实，不作新增或删除标色。"
+              if group.change_type == "review" else
+              "原文坐标浅色标注（逐词）：旧版淡红、新版淡绿；表格、Figure 与页边行号不进入正文标色。")
     return (
         '<div class="prose-source-visual">'
-        '<div class="prose-source-visual-legend">原文坐标浅色标注（逐词）：旧版淡红、新版淡绿；表格、Figure 与页边行号不进入正文标色。</div>'
+        f'<div class="prose-source-visual-legend">{legend}</div>'
         f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
         '</div>'
     )
@@ -8302,9 +8314,11 @@ def _change_summary(change: SectionChange) -> str:
     if change.review_replaced_snippets:
         parts.append(f"{len(change.review_replaced_snippets)} 处结构顺延复核")
     if change.added_snippets:
-        parts.append(f"{len(_reader_single_list_groups(change.added_snippets))} 段新增")
+        label = "段新版待核实原文" if change.change_type == "review" else "段新增"
+        parts.append(f"{len(_reader_single_list_groups(change.added_snippets))} {label}")
     if change.removed_snippets:
-        parts.append(f"{len(_reader_single_list_groups(change.removed_snippets))} 段删除")
+        label = "段旧版待核实原文" if change.change_type == "review" else "段删除"
+        parts.append(f"{len(_reader_single_list_groups(change.removed_snippets))} {label}")
     if change.omitted_snippet_count:
         parts.append(f"{change.omitted_snippet_count} 处未展示")
 
@@ -8354,10 +8368,11 @@ def _wording_token_keys(texts: list[str]) -> tuple[str, ...]:
     )
 
 
-def _render_pair_html(old_text: str, new_text: str) -> str:
+def _render_pair_html(old_text: str, new_text: str, *, neutral: bool = False) -> str:
     """Render old/new replacement snippets with inline highlighting."""
 
-    old_html, new_html = _inline_diff_html(old_text, new_text)
+    old_html, new_html = ((_escape(old_text), _escape(new_text)) if neutral
+                          else _inline_diff_html(old_text, new_text))
     difference_hint = _reader_pair_difference_hint(old_text, new_text)
     old_html = _render_collapsible_snippet_html(
         old_text,
@@ -8497,7 +8512,8 @@ def _render_single_list(title: str, snippets: list[str], css_class: str) -> str:
         return ""
     items: list[str] = []
     for snippet in _reader_single_list_groups(snippets):
-        marked_html = f'<mark class="{css_class}">{_escape(snippet)}</mark>'
+        marked_html = (_escape(snippet) if css_class == "span"
+                       else f'<mark class="{css_class}">{_escape(snippet)}</mark>')
         rendered_html = _render_collapsible_snippet_html(
             snippet,
             marked_html,
@@ -12599,6 +12615,7 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
                 "old_pages": change.old_section.page_range if change.old_section else "",
                 "similarity": f"{change.similarity:.3f}" if change.old_section and change.new_section else "",
                 "match_basis": change.match_basis,
+                "review_reason": getattr(change, "review_reason", ""),
                 "match_basis_label": _MATCH_BASIS_LABELS.get(
                     change.match_basis,
                     change.match_basis,
@@ -12836,6 +12853,10 @@ def _extraction_audit_to_dict(
             "comparison_text_source": page_audit.comparison_text_source,
             "layout_backend_version": page_audit.layout_backend_version,
             "visual_noise_bbox_count": page_audit.visual_noise_bbox_count,
+            **({"running_footer_texts": page_audit.running_footer_texts}
+               if getattr(page_audit, "running_footer_texts", ()) else {}),
+            **({"blank_glyph_evidence": page_audit.blank_glyph_evidence}
+               if getattr(page_audit, "blank_glyph_evidence", ()) else {}),
         }
         for page_audit in audit_pages
     ]
@@ -13053,6 +13074,7 @@ def _change_to_dict(
         "new_pages": change.new_section.page_range if change.new_section else None,
         "similarity": round(change.similarity, 6),
         "match_basis": change.match_basis,
+                "review_reason": getattr(change, "review_reason", ""),
         "match_basis_label": _MATCH_BASIS_LABELS.get(
             change.match_basis,
             change.match_basis,
