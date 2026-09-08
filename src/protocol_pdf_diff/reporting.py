@@ -904,6 +904,7 @@ def _render_html(
     comparison_note = _comparison_method_note(result)
     scope_note = _report_scope_note(options)
     assessment_html = _render_assessment_html(_assessment_for_report(result))
+    assessment_html += _render_visual_coverage_html(result)
     # HTML 与 Markdown 共用技术正文口径，元信息只留在机器审计文件。
     technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
@@ -12753,6 +12754,32 @@ def _assessment_for_report(result: DiffResult) -> PairAssessment:
     )
 
 
+def _render_visual_coverage_html(result: DiffResult) -> str:
+    """Make incomplete pixel coverage locatable without claiming a difference."""
+
+    audit = result.provenance.visual_watchdog_audit if result.provenance else None
+    if audit is None or not audit.coverage_issues:
+        return ""
+    def source_link(path: Path, page: int | None) -> str:
+        if page is None:
+            return "未确定"
+        return f'<a href="{_escape(Path(path).resolve().as_uri())}#page={page}">{page}</a>'
+    rows = "".join(
+        f"<tr><td>{source_link(result.old_pdf, issue.old_page_number)}</td>"
+        f"<td>{source_link(result.new_pdf, issue.new_page_number)}</td>"
+        f"<td>{_escape(issue.reason)}</td></tr>"
+        for issue in audit.coverage_issues
+    )
+    return (
+        '<details class="visual-coverage-details"><summary>查看未核对页面及原因'
+        f'（{len(audit.coverage_issues)} 项）</summary>'
+        '<p>下表使用 PDF 物理页码。这些页面尚未完成像素比较，不能据此判断图形相同或不同。'
+        '“未确定”表示没有安全的对应页，请回到源文件人工核对。</p>'
+        '<table><thead><tr><th>旧版 PDF 页</th><th>新版 PDF 页</th><th>原因</th></tr></thead>'
+        f'<tbody>{rows}</tbody></table></details>'
+    )
+
+
 def _render_assessment_html(assessment: PairAssessment) -> str:
     """Render the prominent reliability state shown above the report body."""
 
@@ -12891,6 +12918,12 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
                 "source_hashes_match": visual_audit.source_hashes_match,
                 "old_visual_source_sha256": visual_audit.old_visual_source_sha256,
                 "new_visual_source_sha256": visual_audit.new_visual_source_sha256,
+                "coverage_issues": [
+                    {"old_page_number": issue.old_page_number,
+                     "new_page_number": issue.new_page_number, "reason": issue.reason,
+                     "category": issue.category}
+                    for issue in visual_audit.coverage_issues
+                ],
             }
             if visual_audit is not None
             else None

@@ -26,6 +26,7 @@ from .models import (
     ExtractionResult,
     PageText,
     Section,
+    VisualCoverageIssue,
     VisualReviewItem,
     VisualWatchdogAudit,
 )
@@ -72,6 +73,20 @@ def detect_visual_review_items(
     ) + sum(
         page_number not in covered_new_pages for page_number in unmatched_new_pages
     )
+    coverage_issues = [
+        *[VisualCoverageIssue(p, None, "未能建立唯一的页面对应关系，像素尚未核对。")
+          for p in unmatched_old_pages if p not in covered_old_pages],
+        *[VisualCoverageIssue(None, p, "未能建立唯一的页面对应关系，像素尚未核对。")
+          for p in unmatched_new_pages if p not in covered_new_pages],
+    ]
+
+    def record_unchecked_pairs(reason: str, category: str) -> None:
+        for old_number, new_number, _method in eligible_page_pairs:
+            if (old_number, new_number) not in processed_pairs:
+                coverage_issues.append(VisualCoverageIssue(old_number, new_number, reason, category))
+                processed_pairs.add((old_number, new_number))
+
+    processed_pairs: set[tuple[int, int]] = set()
     warnings: list[str] = []
     if ambiguous_page_count:
         warnings.append(
@@ -91,12 +106,14 @@ def detect_visual_review_items(
             excluded_region_count=0,
             complete=ambiguous_page_count == 0,
             source_hashes_match=None,
+            coverage_issues=tuple(coverage_issues),
         )
 
     try:
         import pypdfium2
     except ModuleNotFoundError:
         warnings.append("视觉漏检哨兵未运行：pypdfium2 未安装。")
+        record_unchecked_pairs("图像读取组件不可用，像素尚未核对。", "unavailable")
         return [], warnings, VisualWatchdogAudit(
             enabled=True,
             attempted=True,
@@ -108,6 +125,7 @@ def detect_visual_review_items(
             excluded_region_count=0,
             complete=False,
             source_hashes_match=None,
+            coverage_issues=tuple(coverage_issues),
         )
 
     old_snapshot: BinaryIO | None = None
@@ -130,6 +148,7 @@ def detect_visual_review_items(
             and new_visual_sha == new_extraction.source_sha256
         )
         if not hashes_match:
+            record_unchecked_pairs("图像与文字来自不同文件快照，已停止像素核对。", "unavailable")
             warnings.append(
                 "视觉漏检哨兵未使用像素证据：渲染快照与文字抽取快照的 SHA-256 不一致。"
             )
@@ -146,6 +165,7 @@ def detect_visual_review_items(
                 source_hashes_match=False,
                 old_visual_source_sha256=old_visual_sha,
                 new_visual_source_sha256=new_visual_sha,
+                coverage_issues=tuple(coverage_issues),
             )
 
         old_snapshot.seek(0)
@@ -160,16 +180,22 @@ def detect_visual_review_items(
         for old_page_number, new_page_number, alignment_method in eligible_page_pairs:
             old_page = old_pages[old_page_number]
             new_page = new_pages[new_page_number]
-            if not _text_layout_comparable(old_page, new_page):
+            layout_reason = _text_layout_incompatibility(old_page, new_page)
+            if layout_reason is not None:
                 failed_page_pair_count += 1
+                coverage_issues.append(VisualCoverageIssue(old_page_number, new_page_number,
+                    layout_reason, "layout"))
+                processed_pairs.add((old_page_number, new_page_number))
                 warnings.append(
                     "视觉漏检哨兵未生成像素差异卡："
-                    f"旧第 {old_page_number} / 新第 {new_page_number} 页的文字版式"
-                    "发生整体移动、换行或重排，当前像素坐标不可直接比较。"
+                    f"旧第 {old_page_number} / 新第 {new_page_number} 页：{layout_reason}"
                 )
                 continue
             if alignment_method == "reader-equivalent-text":
                 failed_page_pair_count += 1
+                coverage_issues.append(VisualCoverageIssue(old_page_number, new_page_number,
+                    "引用编号发生变化，但缺少逐字符坐标，不能安全排除编号区域。", "locator"))
+                processed_pairs.add((old_page_number, new_page_number))
                 warnings.append(
                     "视觉漏检哨兵未生成像素差异卡："
                     f"旧第 {old_page_number} / 新第 {new_page_number} 页仅含纯引用编号变化，"
@@ -201,8 +227,12 @@ def detect_visual_review_items(
                     new_excluded_bboxes=new_excluded,
                 )
                 checked_page_pair_count += 1
+                processed_pairs.add((old_page_number, new_page_number))
             except Exception as exc:
                 failed_page_pair_count += 1
+                coverage_issues.append(VisualCoverageIssue(old_page_number, new_page_number,
+                    f"页面图像核对失败：{type(exc).__name__}。", "error"))
+                processed_pairs.add((old_page_number, new_page_number))
                 warnings.append(
                     "视觉漏检哨兵未能核对"
                     f"旧第 {old_page_number} / 新第 {new_page_number} 页："
@@ -212,6 +242,7 @@ def detect_visual_review_items(
             if item is not None:
                 items.append(item)
     except Exception as exc:
+        record_unchecked_pairs(f"图像核对中断：{type(exc).__name__}。", "error")
         failed_page_pair_count = max(
             failed_page_pair_count,
             len(eligible_page_pairs) - checked_page_pair_count,
@@ -254,6 +285,7 @@ def detect_visual_review_items(
         ),
         old_visual_source_sha256=old_visual_sha,
         new_visual_source_sha256=new_visual_sha,
+        coverage_issues=tuple(coverage_issues),
     )
 
 
@@ -470,6 +502,10 @@ def _reader_page_identity(value: str) -> str:
 
 
 def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:
+    return _text_layout_incompatibility(old_page, new_page) is None
+
+
+def _text_layout_incompatibility(old_page: PageText, new_page: PageText) -> str | None:
     """Prove that direct pixel subtraction has a shared text coordinate frame.
 
     The watchdog deliberately does not guess a geometric transform.  It first
@@ -502,11 +538,11 @@ def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:
     old_blocks = visible_text_blocks(old_page)
     new_blocks = visible_text_blocks(new_page)
     if not old_blocks and not new_blocks:
-        return True
+        return None
     if len(old_blocks) != len(new_blocks):
-        return False
+        return "文字版式证据中的文本块数量不同，不能直接比较像素。"
     if old_page.page_bbox is None or new_page.page_bbox is None:
-        return False
+        return "缺少页面坐标，不能核对文字版式与像素位置。"
 
     for (old_text, old_bbox), (new_text, new_bbox) in zip(
         old_blocks,
@@ -514,15 +550,15 @@ def _text_layout_comparable(old_page: PageText, new_page: PageText) -> bool:
         strict=True,
     ):
         if old_text != new_text:
-            return False
+            return "对应文本块内容不同，无法证明文字版式与像素位置一致。"
         if not _bboxes_share_page_geometry(
             old_bbox,
             new_bbox,
             old_page_bbox=old_page.page_bbox,
             new_page_bbox=new_page.page_bbox,
         ):
-            return False
-    return True
+            return "文字版式坐标发生移动或重排，不能直接比较像素。"
+    return None
 
 
 def _bboxes_intersect(

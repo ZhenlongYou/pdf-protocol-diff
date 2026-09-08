@@ -270,6 +270,16 @@ class VisualReviewItem:
 
 
 @dataclass(frozen=True)
+class VisualCoverageIssue:
+    """A physical page or pair whose pixels could not be safely compared."""
+
+    old_page_number: int | None
+    new_page_number: int | None
+    reason: str
+    category: str = "unpaired"  # unpaired / layout / locator / unavailable / error
+
+
+@dataclass(frozen=True)
 class VisualWatchdogAudit:
     """One run's immutable visual-watchdog coverage and source binding facts."""
 
@@ -285,6 +295,7 @@ class VisualWatchdogAudit:
     source_hashes_match: bool | None
     old_visual_source_sha256: str | None = None
     new_visual_source_sha256: str | None = None
+    coverage_issues: tuple[VisualCoverageIssue, ...] = ()
 
 
 @dataclass(frozen=True)

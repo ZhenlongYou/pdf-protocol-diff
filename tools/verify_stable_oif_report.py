@@ -7,6 +7,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+from collections import Counter
 from pathlib import Path
 
 INPUTS = {
@@ -51,8 +53,17 @@ def audit(root, source_root=None, report_root=None):
     changed = [' '.join(s.split()) for c in changes for s in snippets(c)]
     for anchor in ANCHORS:
         assert not any(anchor in text for text in changed), f'common source mislabeled: {anchor}'
-    assert not any('Optical Internetworking Forum' in s for c in changes
-                   if c['role']=='technical' for s in snippets(c)), 'footer mixed into technical changes'
+    # Publisher names in the Notice/copyright are real content. Unchanged
+    # footer context on both sides is also not a difference. The escaped
+    # defect was a running footer inserted into only one side of body text.
+    footer_pattern = r'Optical Internetworking Forum\s*-\s*Clause\s+\d+'
+    for change in changes:
+        if change['role'] != 'technical' or change['change_type'] == 'review':
+            continue
+        for prefix in ('', 'display_'):
+            old = list(change[prefix+'removed_snippets']) + [p['old'] for p in change[prefix+'replaced_snippets']]
+            new = list(change[prefix+'added_snippets']) + [p['new'] for p in change[prefix+'replaced_snippets']]
+            assert Counter(re.findall(footer_pattern, ' '.join(old))) == Counter(re.findall(footer_pattern, ' '.join(new))), 'one-sided running footer in technical changes'
     catalogs = [c for c in changes if 'List of Figures' in c['report_location']]
     assert not any(c['change_type'] in ('added','deleted') for c in catalogs), 'whole shared catalog added/deleted'
     for side in INPUTS:
