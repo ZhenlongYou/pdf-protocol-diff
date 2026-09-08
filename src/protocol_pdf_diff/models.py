@@ -267,6 +267,8 @@ class VisualReviewItem:
     old_image_data_uri: str = ""  # 旧页离线缩略图，仅供 HTML 人工复核。
     new_image_data_uri: str = ""  # 新页离线缩略图，仅供 HTML 人工复核。
     diff_image_data_uri: str = ""  # 差异掩膜预览，不伪装成语义结论。
+    focus_regions: tuple[tuple[int, int, int, int], ...] = ()  # 全部物质变化簇，坐标相对预览图；只作导航。
+    preview_size: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -509,6 +511,8 @@ class ProseSourceVisual:
     highlight_region_count: int
     matched_snippet_count: int
     precision: str = "source-coordinate-region"
+    source_words: tuple[tuple[float, float, float, float, str], ...] = ()  # 实际源词；空词标记被过滤/跨block的断点，禁止跨断点导航。
+    source_view_box: tuple[float, float, float, float] | None = None  # 像素取整后截图实际对应的 PDF 区域。
 
 
 @dataclass(frozen=True)

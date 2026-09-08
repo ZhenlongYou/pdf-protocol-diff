@@ -70,6 +70,7 @@ from .text_utils import (
     truncate,
 )
 from .visual_preview import VISUAL_REVIEW_IMAGE_CSS, render_visual_mask_disclosure
+from .reader_focus import FOCUS_CSS, FOCUS_SCRIPT, render_change_focus, source_button
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -400,7 +401,7 @@ def write_reports(
             new_figure_texts_by_page,
         )
         reader_change = _reader_section_change(
-            change,
+            _complete_reader_occurrences(change),
             reader_table_evidence,
             figure_visual_sides=(
                 bool(old_figure_sources),
@@ -916,7 +917,7 @@ def _render_html(
         change.change_type != "review" for change in technical_changes
     )
     table_changes = _ordered_table_changes(table_changes)
-    indexed_technical = list(enumerate(technical_changes, start=1))
+    indexed_technical = sorted(enumerate(technical_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
     materialized_source_visuals = tuple(prose_source_visuals)
     prose_visual_lookup = {
         _prose_source_visual_identity(group): group
@@ -1250,6 +1251,7 @@ def _render_html(
     mark {{ border-radius: 3px; padding: 0 2px; }}
     .ins {{ color: var(--add); background: var(--add-bg); }}
     .del {{ color: var(--del); background: var(--del-bg); text-decoration: line-through; }}
+    {FOCUS_CSS}
     .change-summary {{
       color: var(--muted);
       background: #f7f9fc;
@@ -1426,6 +1428,7 @@ def _render_html(
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
+      <p class="reader-guide">阅读顺序：先看变化明细，再按需定位原文。标为“需复核”的内容、像素变化及补充原图不等于已确认的技术变化；无法可靠核对的范围仍在顶部清单中保留。</p>
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -1439,12 +1442,13 @@ def _render_html(
         </dl>
       </section>
       {table_visual_html}
-      {figure_visual_html}
-      {visual_review_html}
-      <h2 class="section-heading" id="text-changes">技术正文变化</h2>
+      <h2 class="section-heading" id="text-changes">技术正文变化与复核</h2>
       {technical_cards}
+      {visual_review_html}
+      {figure_visual_html}
     </main>
   </div>
+{FOCUS_SCRIPT}
 </body>
 </html>
 """
@@ -1491,20 +1495,23 @@ def _render_change_html(
     omitted = _render_omitted_html(change.omitted_snippet_count)
     text_body = (pairs or "") + review_pairs + added + removed + omitted
     source_visual_html = (
-        _render_prose_source_visual_group(prose_source_visual)
+        _render_prose_source_visual_group(prose_source_visual, prefix=f"change-{index}-source")
         if prose_source_visual is not None
         else ""
     )
     if source_visual_html:
         text_detail = (
             '<details class="prose-text-details"><summary>查看文字识别明细</summary>'
-            f'<div class="prose-text-details-body">{text_body}</div></details>'
+            '<div class="prose-text-details-body">完整片段已在上方逐条保留；'
+            '<a href="protocol_diff_data.json">查看全部审计数据及来源</a>。</div></details>'
             if text_body
             else ""
         )
-        body = source_visual_html + text_detail
+        focus = render_change_focus(change, prose_source_visual, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
+        body = focus + source_visual_html + text_detail
     else:
-        body = text_body
+        focus = render_change_focus(change, None, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
+        body = focus if focus else text_body
     if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
     return f"""
@@ -1536,7 +1543,7 @@ def _prose_source_visual_identity(
     return (group.change_type, group.old_section_id, group.new_section_id)
 
 
-def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
+def _render_prose_source_visual_group(group: ProseSourceVisualGroup, *, prefix: str = "") -> str:
     if not group.old_visuals and not group.new_visuals:
         return ""
     old_side = _render_prose_source_visual_side(
@@ -1545,6 +1552,7 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
         "旧版无对应原文区域",
         omitted_page_count=group.old_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "old-highlight",
+        source_prefix=prefix + "-old" if prefix else "",
     )
     new_side = _render_prose_source_visual_side(
         "新版原文区域",
@@ -1552,6 +1560,7 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup) -> str:
         "新版无对应原文区域",
         omitted_page_count=group.new_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "new-highlight",
+        source_prefix=prefix + "-new" if prefix else "",
     )
     legend = ("原文出处：对应关系尚待核实，不作新增或删除标色。"
               if group.change_type == "review" else
@@ -1571,10 +1580,11 @@ def _render_figure_source_visual_groups(
     if not cards:
         return ""
     return (
-        '<section class="figure-source-section" id="figure-source-evidence">'
+        '<details class="figure-source-section focus-more" id="figure-source-evidence">'
+        '<summary>补充 Figure 原图证据（未自动判定图内变化，可展开核对）</summary>'
         '<h2 class="section-heading">Figure 原图核对</h2>'
         '<p class="figure-source-visual-note">Figure 按图题与文档顺序配对；只并排呈现原图，不自动标色或解析图内标签。</p>'
-        f'{cards}</section>'
+        f'{cards}</details>'
     )
 
 
@@ -1619,6 +1629,7 @@ def _render_prose_source_visual_side(
     *,
     omitted_page_count: int = 0,
     display_mode: str = "raw",
+    source_prefix: str = "",
 ) -> str:
     materialized = tuple(visuals)
     if materialized:
@@ -1628,12 +1639,15 @@ def _render_prose_source_visual_side(
             "raw": "原始裁剪，无标色",
         }.get(display_mode, "原始裁剪")
         pages = "".join(
-            '<figure class="prose-source-page">'
+            '<figure class="prose-source-page"'
+            + (f' id="{_escape(source_prefix)}-{visual_index}"' if source_prefix else '')
+            +
+            f' data-source-view="{_escape(json.dumps(visual.source_view_box))}">'
             f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label)}</figcaption>'
             f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
             f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
             '</figure>'
-            for visual in materialized
+            for visual_index, visual in enumerate(materialized)
         )
     else:
         pages = f'<div class="prose-source-empty">{_escape(empty_message)}</div>'
@@ -1655,7 +1669,7 @@ def _render_table_changes_html(table_changes: list[TableChange]) -> str:
         return ""
     cards = "\n".join(
         _render_table_change_html(index, change)
-        for index, change in enumerate(table_changes, start=1)
+        for index, change in sorted(enumerate(table_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
     )
     return f"""
       <section class="table-visuals" id="table-changes">
@@ -1705,13 +1719,32 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
         else '<p class="change-summary">没有可渲染的差异掩膜。</p>'
     )
     visual_mask_disclosure = render_visual_mask_disclosure(diff_image)
+    buttons = []
+    for region_index, box in enumerate(item.focus_regions, 1):
+        targets = {
+            "old": {"id": f"visual-{index}-old", "box": box, "page": old_page} if item.old_image_data_uri else None,
+            "new": {"id": f"visual-{index}-new", "box": box, "page": new_page} if item.new_image_data_uri else None,
+        }
+        buttons.append(source_button(targets, f"核对区域 {region_index}"))
+    focus_actions = "".join(buttons[:8])
+    if len(buttons) > 8:
+        focus_actions += f'<details class="focus-more"><summary>其余 {len(buttons)-8} 个定位区域（全部保留）</summary>{"".join(buttons[8:])}</details>'
+    focus_note = (
+        f"检测到 {len(buttons)} 个像素变化区域。点击查看双方对应位置；定位框内也可能包含未变化内容，不代表技术要求已改变。"
+        if buttons else "本项未保留可靠的局部定位坐标；请结合完整原文及折叠的差异掩膜核对，不能据此判断具体技术变化。"
+    )
+    view = (0, 0, *item.preview_size) if item.preview_size else None
+    view_attr = _escape(json.dumps(view))
     return f"""
         <article class="table-visual-card" id="visual-review-{index}">
           <h3>V{index}. 旧页 {old_page} / 新页 {new_page}</h3>
+          <p class="focus-help">{focus_note}</p>
+          <div class="visual-focus-actions">{focus_actions}</div>
+          <div class="focus-preview" aria-live="polite"></div>
           <p class="change-summary">{_escape(item.reason)} 像素相似度 {item.pixel_similarity:.4f}，变化比例 {item.changed_pixel_ratio:.4%}，配对依据 {_escape(item.alignment_method)}。</p>
           <div class="table-shot-grid">
-            <div class="table-shot visual-review-shot"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
-            <div class="table-shot visual-review-shot"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
+            <div class="table-shot visual-review-shot" id="visual-{index}-old" data-source-view="{view_attr}"><h4>旧协议 · 第 {old_page} 页</h4>{old_image}</div>
+            <div class="table-shot visual-review-shot" id="visual-{index}-new" data-source-view="{view_attr}"><h4>新协议 · 第 {new_page} 页</h4>{new_image}</div>
           </div>
 {visual_mask_disclosure}
         </article>
@@ -4050,8 +4083,9 @@ def _render_table_change_html(
           <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
           <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
           新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
-          <div class="table-shot-grid">{old_shot}{new_shot}</div>
+          <h4 class="table-focus-heading">先看具体变化</h4>
           {rows_html}
+          <div class="table-shot-grid">{old_shot}{new_shot}</div>
         </div>
     """
 
@@ -4155,13 +4189,17 @@ def _render_table_row_summary(
         *review_rows[:review_budget],
     ]  # 实质变化至少保留一席；两类同时存在时也固定保留一条不确定性证据。
     visible_rows = [_render_table_row_change(row) for row in visible_source_rows]
-    omitted_count = max(0, len(source_rows) - len(visible_source_rows))
+    remaining_rows = material_rows[len(visible_material_rows):] + review_rows[review_budget:]
+    omitted_count = len(remaining_rows)
     omitted_note = (
-        f'<div class="omitted-note">另有 {omitted_count} 行表格变化未展示；可结合上方截图复核完整表格。</div>'
-        if omitted_count
-        else ""
+        f'<details class="focus-more"><summary>其余 {omitted_count} 行表格变化（全部保留）</summary>'
+        '<table class="table-row-summary"><thead><tr><th>项目</th><th>旧版</th><th>新版</th><th>类型</th></tr></thead><tbody>'
+        + "".join(_render_table_row_change(row) for row in remaining_rows)
+        + '</tbody></table></details>'
+        if omitted_count else ""
     )
     return (
+        f'<p class="focus-help">共 {len(source_rows)} 条表格明细，先展示 {len(visible_source_rows)} 条；需复核 {len(review_rows)} 条。</p>'
         '<table class="table-row-summary"><thead><tr>'
         '<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>'
         '</tr></thead><tbody>'
@@ -6911,7 +6949,9 @@ def _render_table_row_change(row_change: TableRowChange) -> str:
         reader_old_value,
         reader_new_value,
     )
-    if (
+    if row_change.change_type == "需人工复核":
+        old_value_html, new_value_html = _escape(reader_old_value), _escape(reader_new_value)
+    elif (
         reader_old_value
         and reader_new_value
         and len(compact_inline(reader_old_value)) <= _READER_TABLE_VALUE_MAX_CHARS
@@ -8369,6 +8409,22 @@ def _wording_token_keys(texts: list[str]) -> tuple[str, ...]:
     )
 
 
+def _focus_allows_deltas(old_text: str, new_text: str) -> bool:
+    # Linearized math/table text retains the established neutral reader hint;
+    # fragmented extraction is not a trustworthy compact word change.
+    return not any(_reader_snippet_collapse_kind(value) for value in (old_text, new_text))
+
+
+def _focus_context_html(old_text: str, new_text: str, neutral: bool) -> tuple[str, str]:
+    old_html, new_html = ((_escape(old_text), _escape(new_text))
+                          if neutral or not old_text or not new_text or re.search(r"[\ue000-\uf8ff]", old_text + new_text)
+                          else _inline_diff_html(old_text, new_text))
+    hint = (_reader_pair_difference_hint(old_text, new_text) if old_text and new_text
+            else _reader_single_side_evidence_hint(old_text or new_text))
+    return tuple(_render_collapsible_snippet_html(text, rendered, difference_hint=hint)
+                 for text, rendered in ((old_text, old_html), (new_text, new_html)))
+
+
 def _render_pair_html(old_text: str, new_text: str, *, neutral: bool = False) -> str:
     """Render old/new replacement snippets with inline highlighting."""
 
@@ -9607,6 +9663,19 @@ def _reader_table_structure_status(tables: tuple[TableVisual, ...]) -> str:
     if flat_count:
         return "部分行列边界未验证"
     return "行列边界已识别"
+
+
+def _complete_reader_occurrences(change: SectionChange) -> SectionChange:
+    """Apply reader cleanup to all audit occurrences, not just the initial budget."""
+    added = list(_audit_added_snippets(change))
+    removed = list(_audit_removed_snippets(change))
+    replaced = list(_audit_replaced_snippets(change))
+    recovered = (len(added) + len(removed) + len(replaced)
+                 - len(change.added_snippets) - len(change.removed_snippets)
+                 - len(change.replaced_snippets))
+    return replace(change, added_snippets=added, removed_snippets=removed,
+                   replaced_snippets=replaced,
+                   omitted_snippet_count=max(0, change.omitted_snippet_count - max(0,recovered)))
 
 
 def _reader_section_change(
@@ -13306,4 +13375,6 @@ def _visual_review_item_to_dict(item: VisualReviewItem) -> dict[str, object]:
         "reason": item.reason,
         "alignment_method": item.alignment_method,
         "diff_bbox": list(item.diff_bbox) if item.diff_bbox is not None else None,
+        "focus_regions": [list(box) for box in item.focus_regions],
+        "preview_size": list(item.preview_size) if item.preview_size is not None else None,
     }

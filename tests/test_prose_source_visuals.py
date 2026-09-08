@@ -87,10 +87,10 @@ class _FirstViewText(HTMLParser):
 class ProseSourceVisualReportTests(unittest.TestCase):
     """Exercise the real PDF -> comparison -> standalone HTML path."""
 
-    def test_long_modified_prose_leads_with_highlighted_source_and_collapses_text_detail(
+    def test_long_modified_prose_leads_with_changes_and_preserves_highlighted_source(
         self,
     ) -> None:
-        """The PDF view is primary; OCR text remains available as secondary audit detail."""
+        """Concrete changes lead; full side-by-side source evidence remains available."""
 
         common = [
             "The receiver calibration procedure records the signal generator state.",
@@ -137,7 +137,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             first_view = _FirstViewText()
             first_view.feed(html)
             first_view.close()
-            self.assertNotIn(old_steps[0], "".join(first_view.parts))
+            self.assertIn(old_steps[0], "".join(first_view.parts))
+            self.assertLess(html.index('class="reader-focus"'), html.index('class="prose-source-visual-grid"'))
             self.assertIn("Calibration step 1 uses", html)
             self.assertIn("101", html)
 

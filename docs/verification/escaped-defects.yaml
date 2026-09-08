@@ -127,3 +127,12 @@ escaped_defects:
     regression_test_id: STABLE_PROBE_TEST::figure
     public_path_rerun_id: RUN-FINAL-OIF-NATIVE-REPORT
     state: verified
+  - id: DEF-READER-FOCUS
+    acceptance_id: REQ-READER-FOCUS-CONSERVATION
+    user_symptom: "Paired source screenshots still require users to find most differences manually; insufficient review-effort reduction."
+    discovered_via: user_usability_review_20260908
+    failure_mechanism: "Count-only summaries, collapsed literal evidence and table row truncation leave change discovery to the reader."
+    red_green_pair_id: PAIR-READER-DISPLAY
+    regression_test_id: READER_TEST::display
+    public_path_rerun_id: RUN-READER-NATIVE-REPORT
+    state: open

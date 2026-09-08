@@ -768,9 +768,48 @@ def _build_side_visuals(
                         matched_snippet_count if crop_index == 0 else 0
                     ),
                     precision="source-coordinate-word-translucent-highlight",
+                    source_words=_owned_crop_words(
+                        page, crop_bbox,
+                        (*page.visual_noise_bboxes,
+                         *(excluded_bboxes_by_page or {}).get(page_number, ()),
+                         *_section_page_boundary_bboxes(page, section, page_number=page_number)),
+                        page_body_by_number.get(page_number, ""),
+                    ),
+                    source_view_box=_rounded_crop_view_box(page.page_bbox, crop_bbox, image.size),
                 )
             )
     return visuals, max(0, len(ranked) - len(selected))
+
+
+def _rounded_crop_view_box(page_bbox, crop_bbox, image_size):
+    """Carry the exact pixel-rounded viewport used by the JPEG crop."""
+    x, y, right, bottom = page_bbox
+    sx, sy = image_size[0] / (right - x), image_size[1] / (bottom - y)
+    return (max(0, round((crop_bbox[0] - x) * sx)) / sx + x,
+            max(0, round((crop_bbox[1] - y) * sy)) / sy + y,
+            min(image_size[0], round((crop_bbox[2] - x) * sx)) / sx + x,
+            min(image_size[1], round((crop_bbox[3] - y) * sy)) / sy + y)
+
+
+def _owned_crop_words(page, crop_bbox, exclusions, allowed_text):
+    """Keep observed word identity; partial, excluded and unowned words fail closed."""
+    words = []
+    for block in page.blocks:
+        # A removed word or another source block must not manufacture adjacent
+        # words (e.g. deleting an excluded NOT cannot prove "limit = 8 mA").
+        words.append((0.0, 0.0, 0.0, 0.0, ""))
+        if (block.kind is DocumentBlockKind.TABLE
+                or not _paragraph_line_belongs_to_section(block.text, allowed_text)):
+            continue
+        for word, x0, y0, x1, y1 in block.word_boxes:
+            box = (x0, y0, x1, y1)
+            if (crop_bbox[0] <= x0 < x1 <= crop_bbox[2]
+                    and crop_bbox[1] <= y0 < y1 <= crop_bbox[3]
+                    and not any(_bboxes_overlap(box, other) for other in exclusions)):
+                words.append((*box, word))
+            else:
+                words.append((0.0, 0.0, 0.0, 0.0, ""))
+    return tuple(words)
 
 
 def _section_page_boundary_bboxes(

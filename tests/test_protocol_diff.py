@@ -5886,7 +5886,7 @@ class ProtocolDiffTests(unittest.TestCase):
             html = paths["html"].read_text(encoding="utf-8")
             payload = json.loads(paths["json"].read_text(encoding="utf-8"))
 
-        self.assertIn("另有 8 行表格变化未展示", html)  # 28 行变化展示 20 行时必须说明遗漏数量。
+        self.assertIn("其余 8 行表格变化（全部保留）", html)  # 28 行变化展示 20 行时必须说明遗漏数量。
         self.assertGreaterEqual(html.count("无对应表格截图"), 2)  # 不相似的新旧表不能按顺序硬凑成一组。
         self.assertNotIn("Table math notation", html)  # fb*n 与 fb×n 等价，整张未变化表不进入报告。
         self.assertTrue(
@@ -22876,7 +22876,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("第一章 总则", locations[0])
         self.assertEqual("第一章 总则 / 第2节 交付要求", locations[1])
 
-    def test_html_explains_when_snippets_are_omitted_by_limit(self) -> None:
+    def test_html_recovers_audit_snippets_beyond_initial_display_limit(self) -> None:
         old_extraction = ExtractionResult(
             pdf_path=Path("old.pdf"),
             pages=[PageText(page_number=1, text="1 Scope\nOld requirement.")],
@@ -22892,7 +22892,10 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, Path(temp_dir), options)
             report_html = outputs["html"].read_text(encoding="utf-8")
 
-        self.assertIn("另有 1 条差异片段未展示", report_html)
+        self.assertNotIn("另有 1 条差异片段未展示", report_html)
+        self.assertIn("1 条明细", report_html)
+        self.assertIn("Old", report_html)
+        self.assertIn("New", report_html)
         self.assertNotIn("仅元数据或位置发生变化", report_html)
 
 

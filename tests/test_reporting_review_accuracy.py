@@ -65,7 +65,9 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
 
         self.assertIn("表格结构复核", html)
         self.assertIn("需人工复核", html)
-        self.assertIn("另有 2 行表格变化未展示", html)
+        self.assertIn("其余 2 行表格变化（全部保留）", html)
+        self.assertIn("<td>P20</td>", html)
+        self.assertIn("表格结构复核", html.split('<details class="focus-more">')[0])
 
     def test_material_row_is_never_hidden_by_many_review_rows(self) -> None:
         """Twenty uncertainty rows cannot hide the only confirmed limit change."""
@@ -101,7 +103,9 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertIn('<mark class="del">1</mark> dB', html)
         self.assertIn('<mark class="ins">3</mark> dB', html)
         self.assertIn("需人工复核", html)
-        self.assertIn("另有 1 行表格变化未展示", html)
+        self.assertIn("其余 1 行表格变化（全部保留）", html)
+        self.assertIn("<td>复核项 19</td>", html)
+        self.assertIn("CRITICAL_LIMIT", html.split('<details class="focus-more">')[0])
 
     def test_structure_review_describes_empty_and_mixed_sides_truthfully(self) -> None:
         """An absent side is not structured, and a mixed side is not wholly flat."""

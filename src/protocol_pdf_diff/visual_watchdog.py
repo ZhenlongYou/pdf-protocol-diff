@@ -417,6 +417,22 @@ def _compare_page_images(
         padding=VISUAL_PREVIEW_PADDING,
     )
     diff_preview = render_material_diff_preview(old_canvas, material_mask).crop(preview_bbox)
+    # Nearby material pixels share a navigation target; no pixel is removed and
+    # these boxes never participate in semantic decisions or the original mask.
+    grouped = cv2.dilate(material_mask, np.ones((9, 9), dtype=np.uint8))
+    count, grouped_labels, _, _ = cv2.connectedComponentsWithStats(grouped, connectivity=8)
+    group_ids = grouped_labels[ys, xs]
+    lefts = np.full(count, material_mask.shape[1], dtype=np.int32)
+    tops = np.full(count, material_mask.shape[0], dtype=np.int32)
+    rights = np.full(count, -1, dtype=np.int32)
+    bottoms = np.full(count, -1, dtype=np.int32)
+    np.minimum.at(lefts, group_ids, xs)
+    np.minimum.at(tops, group_ids, ys)
+    np.maximum.at(rights, group_ids, xs)
+    np.maximum.at(bottoms, group_ids, ys)
+    regions = [(int(lefts[i])-preview_bbox[0], int(tops[i])-preview_bbox[1],
+                int(rights[i])+1-preview_bbox[0], int(bottoms[i])+1-preview_bbox[1])
+               for i in range(1, count) if rights[i] >= 0]
     return VisualReviewItem(
         old_page_number=old_page_number,
         new_page_number=new_page_number,
@@ -429,6 +445,8 @@ def _compare_page_images(
         old_image_data_uri=_image_data_uri(old_canvas.crop(preview_bbox), image_format="JPEG"),
         new_image_data_uri=_image_data_uri(new_canvas.crop(preview_bbox), image_format="JPEG"),
         diff_image_data_uri=_image_data_uri(diff_preview, image_format="PNG"),
+        focus_regions=tuple(sorted(regions, key=lambda box: (box[1], box[0]))),
+        preview_size=diff_preview.size,
     )
 
 

@@ -1,5 +1,16 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-08 报告读者负担优化（进行中）
+
+- task_id: `pdf-diff-reader-focus-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: implementation_validation_in_progress。
+- canonical 与持久分支仍为本项目 / `project/pdf-protocol-diff`；任务基底 `1fee70c7f7c4bff06fc4c166c4faef82151f9420`。当前改动未提交、未集成，不替代下节已接受版本。
+- 用户目标：保留旧新源图，但先列明确字词和表格行变化，点击可靠来源定位；完整上下文、全部已生成的正文/表格条目及不确定性保留，避免让用户重新逐图找不同。
+- 实现：报告事实优先、每项局部原图导航、唯一物理源词定位及断点屏障、正文audit occurrence恢复、表格剩余条目可展开、像素区域仅作定位、配图证据移至末尾折叠。不改变比较结论及原差异掩膜；不新增OIF特例。完整条件不按句号或固定词数裁掉。
+- 独立反例已复核：NOT排除后不可跨断点定位；重复短句不猜位置；跨行唯一变化可以定位；Mode A和Fig. B等前文条件保留；audit23全部可达。全部是范围证据，尚待本轮整本OIF、原生点击与正式门禁。
+- 本轮回归原始日志在 `work/reader-focus/`；首三次全suite暴露可见性/旧视图契约及绕过既有字形/版面渲染的问题，记录保留，第四次运行中。不得用早期局部绿替代最后完整suite。
+- 接续入口：先heartbeat同一claim，检查正在运行的full-suite-4和full-gui日志；交付根 `/Users/mac/Documents/ProtocolPdfDiffReports/reader_focus_20260908`。独立v2材料 `/tmp/pdf-reader-focus-gate`，最终绑定真实GUI及source/test freeze后才可接受。权威缺陷 `DEF-READER-FOCUS` 仍open。详细接受范围见 `docs/verification/reader-focus-20260908.md`。
+
+
 ## 2026-09-08 正式路径修复与稳定性验收
 
 - task_id: `pdf-diff-stable-closeout-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: ready。

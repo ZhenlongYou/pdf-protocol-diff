@@ -1,0 +1,1 @@
+Independent reviewer-created two-line PDF. First line: Receiver limit = 8 mA. Second line: Receiver limit NOT = 8 mA. Excluding the physical NOT word must never make the second line a navigation match for the first. The PDF was independently created locally for this project; no third-party source material.
