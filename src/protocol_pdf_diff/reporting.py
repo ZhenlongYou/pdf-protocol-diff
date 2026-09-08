@@ -1133,7 +1133,7 @@ def _render_html(
       align-items: start;
       margin-bottom: 12px;
     }}
-    .change-title {{ font-size: 18px; }}
+    .change-title {{ font-size: 18px; overflow-wrap: anywhere; }}
     .pages {{ color: var(--muted); font-size: 13px; white-space: nowrap; }}
     .compare-grid {{
       display: grid;
