@@ -1,15 +1,18 @@
 # PDF Protocol Diff Handoff
 
-## 2026-09-08 报告读者负担优化（进行中）
+## 2026-09-08 报告读者负担优化
 
-- task_id: `pdf-diff-reader-focus-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: implementation_validation_in_progress。
-- canonical 与持久分支仍为本项目 / `project/pdf-protocol-diff`；任务基底 `1fee70c7f7c4bff06fc4c166c4faef82151f9420`。当前改动未提交、未集成，不替代下节已接受版本。
-- 用户目标：保留旧新源图，但先列明确字词和表格行变化，点击可靠来源定位；完整上下文、全部已生成的正文/表格条目及不确定性保留，避免让用户重新逐图找不同。
-- 实现：报告事实优先、每项局部原图导航、唯一物理源词定位及断点屏障、正文audit occurrence恢复、表格剩余条目可展开、像素区域仅作定位、配图证据移至末尾折叠。不改变比较结论及原差异掩膜；不新增OIF特例。完整条件不按句号或固定词数裁掉。
-- 独立反例已复核：NOT排除后不可跨断点定位；重复短句不猜位置；跨行唯一变化可以定位；Mode A和Fig. B等前文条件保留；audit23全部可达。全部是范围证据，尚待本轮整本OIF、原生点击与正式门禁。
-- 本轮回归原始日志在 `work/reader-focus/`；首三次全suite暴露可见性/旧视图契约及绕过既有字形/版面渲染的问题，记录保留，第四次运行中。不得用早期局部绿替代最后完整suite。
-- 接续入口：先heartbeat同一claim，检查正在运行的full-suite-4和full-gui日志；交付根 `/Users/mac/Documents/ProtocolPdfDiffReports/reader_focus_20260908`。独立v2材料 `/tmp/pdf-reader-focus-gate`，最终绑定真实GUI及source/test freeze后才可接受。权威缺陷 `DEF-READER-FOCUS` 仍open。详细接受范围见 `docs/verification/reader-focus-20260908.md`。
-
+- task_id: `pdf-diff-reader-focus-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: ready。
+- recorded_commit: `949ce785ec3ababa2f03612ea151a8a8deb1de2a`（最后行为变更提交，本handoff终态提交之前）；canonical与持久分支仍为本项目 / `project/pdf-protocol-diff`，目标main。最终双独立attestation及main/GitHub精确OID以交付根 `delivery-receipt.json` 和协调门禁为准。
+- 用户目标：保留旧新源图，先给出具体文字/表格行变化及完整条件，按可靠源词定位，超出首屏的全部已有正文/表格条目仍可展开。报告包含检测变化、待核实项及补充原图；不能把出现在报告里等同于确定技术变更。
+- 实现：事实先于截图；数值按带符号小数/指数的原文整体呈现；混合私用字体字符单独中性标注，真实数值变化仍保留；来源按唯一物理词跨度定位，排除词和块间留断点；不按固定词数或句号剪去条件。恢复全部已有audit occurrence；表格其余行及所有像素区域可展开；像素框仅作定位；Figure补充证据移至末尾折叠。没有OIF特例，不改变比较结论和差异掩膜。
+- 交付根 `/Users/mac/Documents/ProtocolPdfDiffReports/reader_focus_20260908`。用户最终HTML为 `report/protocol_diff_report.html`，SHA `4a5c398895b09e179bc5764a29e51acb274e6536ffca0905461a08aa7e661995`；JSON SHA `3ae62ebc9a622970d74d4c3c54af45b784da934531ef25e6f52a43e0df311215`。原生源GUI整本OIF656/685页完成1065.038秒（17分45秒），始末源SHA一致；同期有测试与打包，不能将其与之前1008.138秒当严格性能基准。
+- 最后发现窄窗长目录引导点标题撑宽至671px：独立验证为旧版同样存在的问题。仅加标题自动换行后严格520/520，无截字和隐藏overflow。整本比较不重复提取：原始full-gui-final报告原样保留，最终report仅替换与当前生成器完全相同的一条CSS；`report-style-refresh.json`证明其余全部源码和五个审计文件不变，不冒充第二次完整GUI比较。当前源码另走原生真实PDF路径与全部测试。
+- 实际最终HTML原生验证 `oif-native-final/layout.json` PASS：1297图全部加载，无坏图/放大/宽窄溢出；正文与像素两类定位实点正确，完整其余条目可展开，HCB原图与覆盖清单可见。独立旧新审计11组守恒；9017按钮/17958侧目标无错页/侧/跨卡/缺图，7个边缘仅≤0.48源像素的round裁剪偏差，保留初轮检查器FAIL及0.51px负控。上述静态结果针对原HTML；最终仅CSS变化，定位数据逐字节不变。
+- 视觉仍有431条未核对记录（225配对页保守跳过，206单侧页），不认证全部页面一致。MQ82原“短段也必须双侧截图”强要求首次FAIL保留：两段330/341字符未达原有500字符截图门槛。本轮条件合同仅认证完整事实、缺图明确未知且不猜位置；不声称MQ82通过正向定位。完整条件/符号/单位与出现次数均保留。精确取整、缺图降级均不是准确率保证。
+- 最后行为变更后完整1307项、153.750秒、1条件skip；日志 `work/reader-focus/full-suite-final.log`。STRICT v2正式执行25run、8对RED/GREEN、八行PASS：`test-effectiveness/final-executed-receipt.json`，SHA `d258420a6acf48dde1c96c88fbc092a04a81bf8164a7b8690571cab163978111`，仅 `verified_scope_only`。authority ledger `DEF-READER-FOCUS` 已通过同一公开报告路径验证；scoped ledger由完整账本精确投影且实际比对。
+- 新本机app `desktop/ProtocolPdfDiff.app`，当前CSS源码权威打包与冻结WK启动PASS，始末SHA一致，已确认app自包含并清理本轮重复onedir/build-work。整本OIF由源GUI执行，非冻结binary；Windows冻结版及907页原文件未测。此任务不新增算法性能或任意PDF准确率保证。
+- 详细验收见 `docs/verification/reader-focus-20260908.md`。恢复先核对最终delivery receipt、claim和refs，保留失败历史与原始用户报告；不把旧prep、首次强要求FAIL或源GUI产物说成其他阶段的成功。
 
 ## 2026-09-08 正式路径修复与稳定性验收
 

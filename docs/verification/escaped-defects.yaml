@@ -135,4 +135,4 @@ escaped_defects:
     red_green_pair_id: PAIR-READER-DISPLAY
     regression_test_id: READER_TEST::display
     public_path_rerun_id: RUN-READER-NATIVE-REPORT
-    state: open
+    state: verified
