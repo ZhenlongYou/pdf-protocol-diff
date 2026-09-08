@@ -1,5 +1,5 @@
 schema_version: 1
-scope_statement: "Long PDF computation and cancellation, plus visual watchdog report previews must mark only changed pixels, retain full horizontal context, and never enlarge evidence beyond its intrinsic width."
+scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
   - id: DEF-VISUAL-MASK-001
     acceptance_id: REQ-VISUAL-MASK-001
@@ -96,22 +96,34 @@ escaped_defects:
     user_symptom: "OIF p561 HCB 72x72 image is stretched across a report card."
     discovered_via: user_counterexample_20260907
     failure_mechanism: "Shared table-shot width 100 percent enlarges small source crops."
-    state: open
+    red_green_pair_id: PAIR-STABLE-SCALE
+    regression_test_id: STABLE_PROBE_TEST::scale
+    public_path_rerun_id: RUN-FINAL-OIF-NATIVE-REPORT
+    state: verified
   - id: DEF-OIF-STRUCTURE-MATCH
     acceptance_id: REQ-OIF-STRUCTURE-MATCH
     user_symptom: "Both versions contain p351-352 and p381 text but report claims addition/deletion."
     discovered_via: user_counterexample_20260907
     failure_mechanism: "Weak heading contaminates hierarchy; unmatched becomes confirmed added/deleted without uncertainty propagation."
-    state: open
+    red_green_pair_id: PAIR-STABLE-GLYPH
+    regression_test_id: STABLE_PROBE_TEST::glyph
+    public_path_rerun_id: RUN-FINAL-OIF-NATIVE-REPORT
+    state: verified
   - id: DEF-OIF-REGION-OWNERSHIP
     acceptance_id: REQ-OIF-REGION-OWNERSHIP
     user_symptom: "Old p550 table appears as 16 strips; p382 line numbers and blank space are highlighted."
     discovered_via: user_counterexample_20260907
-    failure_mechanism: "Ambiguous page furniture becomes prose evidence; crop expansion crosses another region owner."
-    state: open
+    failure_mechanism: "Ambiguous page furniture becomes prose evidence; crop expansion crosses another region owner. Corrected source ownership removes the false prose markup. Pages without safe pixel pairing remain explicitly unverified with physical page numbers and causes; p382 pixel equality is not certified."
+    red_green_pair_id: PAIR-STABLE-CROP
+    regression_test_id: STABLE_PROBE_TEST::crop
+    public_path_rerun_id: RUN-FINAL-OIF-NATIVE-REPORT
+    state: verified
   - id: DEF-OIF-FIGURE-AS-TABLE
     acceptance_id: REQ-OIF-FIGURE-AS-TABLE
     user_symptom: "HCB exists in both versions but is reported as a removed table."
     discovered_via: user_counterexample_20260907
     failure_mechanism: "Asymmetric figure/table classification is treated as semantic absence."
-    state: open
+    red_green_pair_id: PAIR-STABLE-FIGURE
+    regression_test_id: STABLE_PROBE_TEST::figure
+    public_path_rerun_id: RUN-FINAL-OIF-NATIVE-REPORT
+    state: verified

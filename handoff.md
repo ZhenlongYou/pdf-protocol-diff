@@ -1,5 +1,22 @@
 # PDF Protocol Diff Handoff
 
+## 2026-09-08 正式路径修复与稳定性验收
+
+- task_id: `pdf-diff-stable-closeout-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: ready。
+- recorded_commit: `7f6f48f1c84472899b599101d2492ce9f2cf1e20`（代码提交在本handoff最终提交之前）。canonical根为本项目，持久分支为 `project/pdf-protocol-diff`，目标main。最终精确提交、双独立attestation和main/GitHub一致性由 `/Users/mac/Documents/ProtocolPdfDiffReports/stable_delivery_20260908/delivery-receipt.json` 及协调门禁记录给出，不用先前候选OID代替。
+- 已在默认生产路径实现：CID/GID实际空轮廓证据及词界、字体/位置绑定章节、图表/公式/正文共用区域归属、每次出现的共文身份、证据不足的中性待核实结果、完整目录配对、来源页码词与页脚版本次数保留、原生尺寸截图、逐页视觉未核对清单。没有OIF文件名、页码、机构名或原句特例。
+- 最终实际OIF完整GUI证据 `/Users/mac/Documents/ProtocolPdfDiffReports/stable_accepted_20260908/evidence.json`：旧656页/新685页，1008.138秒（16分48秒），运行始末源码SHA一致，完整六份报告。此前同机1703.406秒（28分23秒），耗时减少40.8%；是同输入端到端对照，包含准确性修复导致的工作量变化，不是相同输出微基准。907页原始文件未取得。
+- 最终HTML为 `stable_accepted_20260908/reports/protocol_diff_20260908_112205_924cdc23699f4f92bbd77da2e8a9a033/protocol_diff_report.html`（相对 `/Users/mac/Documents/ProtocolPdfDiffReports`），SHA `259e70afca5ff086dc5b72d0803ff288570aabb4f02bb35eeea9b8024c21e9c3`；JSON SHA `77fe792da2502d4f7d615d6b5136a262439e4bbdbee9afbecaaaaf9a16c83d7b`。三个原共文anchor无误增删，目录唯一双侧modified，p550无条带且表格完整，p561无误表/HCB原图完整。独立实际产物审查存 `stable_delivery_20260908/reviews/accepted-artifact-review.md`。
+- 真实WK报告检查1297张图片全部加载、无损坏/实际CSS放大/横向溢出；HCB和覆盖清单另有原生截图。首次严格native探针发现一张mask的DOMRect多1/64 CSS像素、computedStyle等于自然尺寸，按WebKit原始精度并以独立CSS边界约束复核；自检拒绝2/64及CSS真实放大。第一次BLOCKED回执和精确原材料保存在v2目录的 `attempt-1-native-quantization`，未覆盖失败历史。
+- 视觉覆盖实际为128/353对，185对文本块数不同、40对块内容不同而保守跳过，另206个单侧页未安全配对，运行异常0。431条完整页码/原因均在JSON和HTML清单中。p382双方均明确unpaired/NOT_RUN，无正文误标；不能称其像素核验通过。整份OIF仍是需人工复核、不能自动判一致。
+- 最后行为变更后的完整回归1297项157.824秒（1条件skip），默认桌面smoke通过。STRICT v2正式执行41run、11对RED/GREEN、八行均PASS，`EXECUTED_EVIDENCE_PASS / verified_scope_only`。清单与回执在 `/Users/mac/Documents/ProtocolPdfDiffReports/stable_delivery_20260908/test-effectiveness/`；`final-executed-receipt.json` SHA `78958ed764b544e6e372779c3a0528cb70210fe784509506ba1e0f385d7f24ea`。四个authoritative OIF缺陷已按真实公开路径验证更新为verified；这不认证任意PDF的整体准确率。
+- 独立家族：HN73首次FAIL保留，修复后原gold回归PASS；CP46首次独立留出PASS并在当前源重跑，保留重复2→3和+1.50→-1.50mV及行归属。DPOJET p88限定条件通过；AMSER复杂数学/阅读顺序未认证。11机制还覆盖页脚末数字、版本次数、双栏来源、完整目录及058 p18同一词跨度多证明路径，防只针对OIF截图修补。
+- 终止/重启正式WK证据 `/tmp/pdf-diff-wk-cancel-lDdSpn`：读取/视觉阶段后台取消约0.03–0.11秒，界面恢复约0.17–0.30秒，同窗口重启成功，历史输出不变；相关生产取消源码未变。两处测试回调兼容cleanup_error重试，未放松产品清理策略。Windows冻结应用整本OCR取消未实测。
+- 新版本机app：`/Users/mac/Documents/ProtocolPdfDiffReports/stable_delivery_20260908/desktop/ProtocolPdfDiff.app`，独立输出未覆盖原安装，权威打包器及真实冻结WK启动检查PASS，binary SHA `e62991a375b309df784d1650ac9a5bd56cd259147205a4a6a77769fb2f547f3d`；source before/after一致，详见同目录build-evidence.json。完整OIF使用源GUI执行，非冻结binary；额外CUA文件选择操作因Mac锁屏NOT_RUN，未尝试解锁或替代控制。已清理本次重复onedir和build-work，保留自包含app、spec和日志。
+- 远端7f6f48检查 https://github.com/ZhenlongYou/pdf-protocol-diff/actions/runs/34182496589 ：macOS/Windows测试、构建及适用原生renderer检查成功，总状态失败仅因GitHub Artifact storage quota导致安装包未上传。未删除他人制品；不得称CI全绿或Windows安装包已发布。
+- 详细验收及来源链接见 `docs/verification/stable-closeout-20260908.md`；恢复工作先核对最终交付回执、协调claim、canonical main与持久分支，保留现有用户报告及独立失败历史。复杂扫描/数学、多栏等未认证类别继续如实降级，不能靠强配、隐藏或全局删符号获得表面通过。
+
+
 ## 2026-09-08 通用引擎第一阶段候选保存
 
 - task_id: `pdf-diff-general-engine-20260907`
