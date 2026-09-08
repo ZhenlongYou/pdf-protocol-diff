@@ -13,11 +13,11 @@ import fitz
 from PIL import Image, ImageDraw
 from protocol_pdf_diff.models import DiffOptions, ProseSourceVisual, ProseSourceVisualGroup, Section, SectionChange, SnippetPair, TableChange, TableRowChange
 from protocol_pdf_diff.reader_focus import difference_windows, locate_source, delta_spans
-from protocol_pdf_diff.reporting import _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, write_reports
+from protocol_pdf_diff.reporting import _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, _render_visual_review_items_html, write_reports
 from protocol_pdf_diff.visual_watchdog import _compare_page_images
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
-from protocol_pdf_diff.prose_source_visuals import _owned_crop_words
+from protocol_pdf_diff.prose_source_visuals import _eligible_change, _is_critical_short_change, _owned_crop_words
 from protocol_pdf_diff.models import DiffResult
 
 
@@ -34,6 +34,26 @@ def source(text, page=12, y=30):
 
 
 class ReaderFocusTests(unittest.TestCase):
+    def test_short_numeric_or_negation_change_is_eligible_for_source_crops(self):
+        old = 'Mode A limit shall be +1.50 mV.'
+        new = 'Mode A limit shall be -1.50 mV.'
+        numeric = SectionChange('modified', section(old), section(new, sid='n'), .9, replaced_snippets=[SnippetPair(old, new)])
+        self.assertLess(len(old) + len(new), 500)
+        self.assertTrue(_is_critical_short_change(numeric))
+        self.assertTrue(_eligible_change(numeric))
+
+        old = 'The receiver shall not enable the lane.'
+        new = 'The receiver shall enable the lane.'
+        negation = SectionChange('modified', section(old), section(new, sid='n'), .9, replaced_snippets=[SnippetPair(old, new)])
+        self.assertTrue(_is_critical_short_change(negation))
+        self.assertTrue(_eligible_change(negation))
+
+        old = 'This sentence changes only ordinary wording.'
+        new = 'This sentence changes only nearby wording.'
+        ordinary = SectionChange('modified', section(old), section(new, sid='n'), .9, replaced_snippets=[SnippetPair(old, new)])
+        self.assertFalse(_is_critical_short_change(ordinary))
+        self.assertFalse(_eligible_change(ordinary))
+
     def test_compact_changes_keep_complete_written_numbers_and_glyph_uncertainty(self):
         for old,new in (('3.0 V','2.5 V'),('+1.50 mV','-1.50 mV'),('1e-6','1e-9'),('1.50 mV','-1.50 mV'),('-1.50 mV','1.50 mV'),('3 V','3.5 V')):
             spans=list(delta_spans(old,new))
@@ -147,10 +167,19 @@ class ReaderFocusTests(unittest.TestCase):
         self.assertGreater(item.focus_regions[1][1],item.focus_regions[0][3])
         rendered=_render_visual_review_item_html(7,item)
         self.assertIn('核对区域 1',rendered);self.assertIn('核对区域 2',rendered)
+        self.assertIn('class="visual-focus-band"',rendered)
+        self.assertIn('不代表一个技术事件',rendered)
         self.assertIn('不代表技术要求已改变',rendered)
         self.assertIn('visual-7-old',rendered);self.assertIn('visual-7-new',rendered)
         unchanged=_compare_page_images(old,old,old_page_number=3,new_page_number=5,alignment_method='same-page-text')
         self.assertIsNone(unchanged)
+
+    def test_visual_cards_are_disclosed_without_removing_any_page(self):
+        old=Image.new('RGB',(120,160),'white');new=old.copy();ImageDraw.Draw(new).rectangle((10,20,30,40),fill='black')
+        item=_compare_page_images(old,new,old_page_number=3,new_page_number=5,alignment_method='same-page-text')
+        rendered=_render_visual_review_items_html([item])
+        self.assertIn('展开 1 页视觉复核证据（默认收起，全部保留；V1. 至 V1.）',rendered)
+        self.assertIn('id="visual-review-1"',rendered)
 
     def test_real_pdf_compare_and_report_preserve_numeric_direction(self):
         with tempfile.TemporaryDirectory() as tmp:

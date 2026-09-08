@@ -1,0 +1,1 @@
+{"prose":["modified"],"table":["review"],"visual":true,"coverage":[["unpaired","no safe page mapping"]],"expected":{"ids":["C1","T1","V1","U1"],"counts":{"detected":1,"review":2,"coverage":1},"detected_facts":1}}

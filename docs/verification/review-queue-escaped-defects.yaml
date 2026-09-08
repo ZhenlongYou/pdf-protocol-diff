@@ -1,0 +1,12 @@
+schema_version: 1
+scope_statement: "The reader report must separate confirmed content changes, review evidence, and incomplete comparison coverage into source-linked review actions."
+escaped_defects:
+  - id: DEF-REVIEW-QUEUE-005
+    acceptance_id: REQ-REVIEW-QUEUE-005
+    user_symptom: "The report mixed confirmed differences, pixel review evidence and incomplete coverage in one long view, so a reader had to rediscover what required action."
+    discovered_via: user_usability_review_20260908
+    failure_mechanism: "Evidence channels retained their raw card counts but the reader layer had no typed, source-linked action list and could invite readers to treat unlike counts as one change total."
+    red_green_pair_id: PAIR-REVIEW-QUEUE-005
+    regression_test_id: REVIEW_QUEUE_TEST
+    public_path_rerun_id: RUN-REVIEW-QUEUE-REAL
+    state: verified

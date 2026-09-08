@@ -150,8 +150,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertGreater(visuals[0]["new_highlight_region_count"], 0)
             self.assertNotIn("image_data_uri", json.dumps(visuals))
 
-    def test_short_change_keeps_compact_text_without_source_screenshot(self) -> None:
-        """A small wording edit should not pay the visual weight of a PDF crop."""
+    def test_short_numeric_change_gets_one_source_screenshot_per_side(self) -> None:
+        """A small limit edit needs source context even below the long-text budget."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -169,11 +169,13 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-            self.assertNotIn('class="prose-source-visual-grid"', html)
+            self.assertIn('class="prose-source-visual-grid"', html)
             self.assertNotIn('class="prose-source-details"', html)
             self.assertIn("100", html)
             self.assertIn("120", html)
-            self.assertEqual([], payload["prose_source_visuals"])
+            self.assertEqual(1, len(payload["prose_source_visuals"]))
+            self.assertEqual([1], payload["prose_source_visuals"][0]["old_pages"])
+            self.assertEqual([1], payload["prose_source_visuals"][0]["new_pages"])
 
     def test_figure_only_change_renders_raw_images_without_text_comparison(self) -> None:
         """A Figure change remains visible as old/new raw images, never as label-wall diff."""
