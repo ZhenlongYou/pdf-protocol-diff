@@ -165,8 +165,8 @@
         {
           "id": "SRC-PKG-27",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "e38fb60ccf5fb2325c3fd5a1dec579a37dae9da14da9e71b71c23fe7edee350a",
-          "size_bytes": 527880
+          "sha256": "aa943c3deef5bd43b44fa7a602fb9a072b26d6877904ee63aca6ae1c1aa2f1d7",
+          "size_bytes": 527897
         },
         {
           "id": "SRC-REVIEW-QUEUE",

@@ -629,7 +629,7 @@ def _render_markdown(
 
     counts = _change_counts(result.changes)
     # write_reports 已把元信息从读者副本剔除；此处只渲染技术正文，避免空板块和零值指标占空间。
-    technical_changes = _reader_technical_card_changes(result.changes)
+    technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
         len(change.review_replaced_snippets)
         or (1 if change.change_type == "review" else 0)
@@ -638,7 +638,7 @@ def _render_markdown(
     material_technical_count = sum(
         change.change_type != "review" for change in technical_changes
     )
-    table_changes = _reader_table_card_changes(table_changes)
+    table_changes = _ordered_table_changes(table_changes)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     comparison_note = _comparison_method_note(result)
     scope_note = _report_scope_note(options)

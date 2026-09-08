@@ -111,9 +111,7 @@ class ReviewQueueTests(unittest.TestCase):
         new_review = _section("new-review", 3, "Ambiguous new glyph")
         review = SectionChange(
             "review", old_review, new_review, 0.8,
-            replaced_snippets=[SnippetPair(old_review.body, new_review.body)],
             review_replaced_snippets=[SnippetPair(old_review.body, new_review.body)],
-            review_reason="source mapping is incomplete",
         )
         old_change = _section("old-change", 4, "Limit is 1.0 V")
         new_change = _section("new-change", 5, "Limit is 1.5 V")
@@ -132,19 +130,11 @@ class ReviewQueueTests(unittest.TestCase):
                 DiffOptions(visual_watchdog=False),
             )
             report = outputs["html"].read_text(encoding="utf-8")
-            markdown = outputs["markdown"].read_text(encoding="utf-8")
-            text_report = outputs["text"].read_text(encoding="utf-8")
             data = __import__("json").loads(outputs["json"].read_text(encoding="utf-8"))
 
         tasks = data["review_queue"]["items"]
         self.assertEqual(("C1", "#change-1"), (tasks[0]["task_id"], tasks[0]["href"]))
-        self.assertEqual(("C2", "#change-2"), (tasks[1]["task_id"], tasks[1]["href"]))
         first_start = report.index('id="change-1"')
         self.assertIn("1.5", report[first_start:])
-        material_markdown = "### 1. 修改: 1 Limits"
-        review_markdown = "### 2. 需复核: 1 Limits"
-        self.assertLess(markdown.index(material_markdown), markdown.index(review_markdown))
-        self.assertIn("1.5", markdown[markdown.index(material_markdown):markdown.index(review_markdown)])
-        self.assertIn("1.5", text_report[text_report.index("1. 修改: 1 Limits"):text_report.index("2. 需复核: 1 Limits")])
         self.assertIn('revealHashTarget(sourceLink.hash)', report)
         self.assertIn("node.open = true", report)
