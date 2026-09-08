@@ -9166,8 +9166,8 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("Jitter 31.3.18.2.1 Host", rendered)
             self.assertIn("Sinusoidal Interface", rendered)
             self.assertIn("TP4a", rendered)
-        self.assertIn("1内容变化事项", rendered_reports[0])
-        self.assertIn("1待核实事项", rendered_reports[0])
+        self.assertIn("1核心技术变化", rendered_reports[0])
+        self.assertIn("2正文字符复核项", rendered_reports[0])
         # JSON 继续保存全部原始引用与子条款标题；物理行结构不再伪造
         # ``Jitter + 编号`` 的合并审计事实。
         self.assertIn("specified in Table 31-2", audit)
@@ -23297,7 +23297,7 @@ class ReportRoleSerializationTests(unittest.TestCase):
         # JSON/CSV 是无损审计面，必须继续输出 document_metadata 事实。
         self.assertTrue(any(change["role"] == "document_metadata" for change in payload["changes"]))
         self.assertTrue(any(row["role"] == "document_metadata" for row in prose_rows))
-        self.assertIn("<span>内容变化事项</span>", html)
+        self.assertIn("<span>核心技术变化</span>", html)
 
 
 if __name__ == "__main__":

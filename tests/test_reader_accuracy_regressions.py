@@ -2932,11 +2932,11 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             self.assertIn("U+03B3", reader_output)
             self.assertIn("需人工复核", reader_output)
         self.assertIn(
-            "<strong>0</strong><span>内容变化事项</span>",
+            "<strong>0</strong><span>核心技术变化</span>",
             reader_outputs[0],
         )
         self.assertIn(
-            "<strong>1</strong><span>待核实事项</span>",
+            "<strong>1</strong><span>正文字符复核项</span>",
             reader_outputs[0],
         )
 
@@ -2968,8 +2968,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 temp_dir,
                 DiffOptions(),
             )["html"].read_text(encoding="utf-8")
-        self.assertIn("<strong>0</strong><span>内容变化事项</span>", operator_html)
-        self.assertIn("<strong>1</strong><span>待核实事项</span>", operator_html)
+        self.assertIn("<strong>0</strong><span>核心技术变化</span>", operator_html)
+        self.assertIn("<strong>1</strong><span>正文字符复核项</span>", operator_html)
         self.assertIn("U+F03C", operator_html)
 
         operator_wording_result = compare_extractions(

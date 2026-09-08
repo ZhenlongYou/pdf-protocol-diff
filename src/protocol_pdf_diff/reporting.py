@@ -71,7 +71,6 @@ from .text_utils import (
 )
 from .visual_preview import VISUAL_REVIEW_IMAGE_CSS, render_visual_mask_disclosure
 from .reader_focus import FOCUS_CSS, FOCUS_SCRIPT, render_change_focus, source_button
-from .review_queue import ReviewTask, build_review_tasks, task_counts
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -335,7 +334,7 @@ def write_reports(
     )  # 读者正文去重需要全部已配对表，包括因内容完全相同而不生成变化卡的表。
     table_changes = _ordered_table_changes(_build_table_changes(result, table_groups=table_groups))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
     # 读者表格只中和完整值中的定位编号，任何其它字符变化仍保留该行。
-    reader_table_changes = _ordered_table_changes(_reader_table_changes(table_changes))
+    reader_table_changes = _reader_table_changes(table_changes)
     reader_table_evidence: list[TableChange | _TableVisualGroup] = [
         *table_changes,
         *table_groups,
@@ -441,24 +440,12 @@ def write_reports(
         result,
         changes=reader_changes,
     )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 的 raw 字段继续保存原始比较事实。
-    reader_technical_changes = sorted(
-        (change for change in reader_changes if change.role == "technical"),
-        key=lambda change: change.change_type == "review",
-    )
-    visual_audit = result.provenance.visual_watchdog_audit if result.provenance else None
-    review_tasks = build_review_tasks(
-        reader_technical_changes,
-        reader_table_changes,
-        result.visual_review_items,
-        visual_audit.coverage_issues if visual_audit is not None else (),
-    )
     markdown = _render_markdown(reader_result, options, reader_table_changes)
     html = _render_html(
         reader_result,
         options,
         reader_table_changes,
         prose_source_visuals=result.prose_source_visuals,
-        review_tasks=review_tasks,
     )
     text = _markdown_to_plain_text(markdown)
     csv_rows = _rows_for_csv(result.changes)
@@ -514,14 +501,6 @@ def write_reports(
             _prose_source_visual_group_to_dict(group)
             for group in result.prose_source_visuals
         ],
-        "review_queue": {
-            "items": [task.to_dict() for task in review_tasks],
-            "counts": task_counts(review_tasks),
-            "note": (
-                "审阅事项是用户下一步动作，文字、表格、像素和覆盖记录的原始计数"
-                "仍分别保留，不能相加为技术变化数量。"
-            ),
-        },
         "old_sections": [_section_to_dict(section) for section in result.old_sections],
         "new_sections": [_section_to_dict(section) for section in result.new_sections],
         "old_table_visuals": [_table_visual_to_dict(table) for table in result.old_table_visuals],
@@ -919,7 +898,6 @@ def _render_html(
     table_changes: list[TableChange],
     *,
     prose_source_visuals: Iterable[ProseSourceVisualGroup] = (),
-    review_tasks: Iterable[ReviewTask] = (),
 ) -> str:
     """Render an easy-to-scan standalone HTML review report."""
 
@@ -940,7 +918,6 @@ def _render_html(
     )
     table_changes = _ordered_table_changes(table_changes)
     indexed_technical = sorted(enumerate(technical_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
-    materialized_review_tasks = tuple(review_tasks)
     materialized_source_visuals = tuple(prose_source_visuals)
     prose_visual_lookup = {
         _prose_source_visual_identity(group): group
@@ -1004,11 +981,6 @@ def _render_html(
     table_visual_html = _render_table_changes_html(table_changes)
     figure_visual_html = _render_figure_source_visual_groups(figure_source_visuals)
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
-    review_queue_html = _render_review_queue_html(materialized_review_tasks)
-    review_counts = task_counts(materialized_review_tasks)
-    detected_fact_count = sum(
-        task.fact_count for task in materialized_review_tasks if task.status == "detected"
-    )
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
         len(_material_table_row_changes(change))
@@ -1085,27 +1057,7 @@ def _render_html(
     }}
     .metric strong {{ display: block; font-size: 28px; line-height: 1.1; }}
     .metric span {{ color: var(--muted); font-size: 13px; }}
-    .review-queue {{ margin: 0 0 18px; }}
-    .review-queue > h2 {{ margin: 0; font-size: 20px; }}
-    .review-queue-note {{ margin: 6px 0 12px; color: var(--muted); font-size: 13px; }}
-    .review-filter-bar {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }}
-    .review-filter {{ border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 999px; padding: 5px 10px; cursor: pointer; font: inherit; font-size: 13px; }}
-    .review-filter[aria-pressed="true"] {{ border-color: var(--blue); background: #eef5ff; color: #173e6e; }}
-    .review-task-list {{ display: grid; gap: 9px; }}
-    .review-task {{ display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; border-top: 1px solid var(--line); padding: 10px 0; }}
-    .review-task:first-child {{ border-top: 0; padding-top: 0; }}
-    .review-task-title {{ color: #173e6e; font-weight: 650; text-decoration: none; }}
-    .review-task-detail {{ color: var(--muted); font-size: 13px; margin: 3px 0 0; }}
-    .review-status {{ display: inline-block; min-width: 72px; padding: 2px 8px; border-radius: 999px; font-size: 12px; text-align: center; background: #edf2f7; color: #425466; }}
-    .review-status-detected {{ background: var(--add-bg); color: var(--add); }}
-    .review-status-review {{ background: var(--mod-bg); color: var(--mod); }}
-    .review-status-coverage {{ background: #eef2f8; color: #425466; }}
-    .review-mark {{ border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 7px; color: #40576f; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }}
-    .review-task[data-user-state="done"] {{ opacity: .65; }}
-    .review-task[data-user-state="followup"] {{ border-left: 3px solid #b78223; padding-left: 8px; }}
-    .visual-focus-band {{ margin: 7px 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }}
-    .visual-focus-band > summary {{ cursor: pointer; padding: 7px 0; color: var(--blue); font-size: 13px; }}
-    .meta, .change-card, .empty-state, .review-queue {{
+    .meta, .change-card, .empty-state {{
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1468,24 +1420,15 @@ def _render_html(
     </aside>
     <main>
       <section class="summary">
-        <div class="metric"><strong>{review_counts["detected"]}</strong><span>内容变化事项</span></div>
-        <div class="metric"><strong>{review_counts["review"]}</strong><span>待核实事项</span></div>
-        <div class="metric"><strong>{review_counts["coverage"]}</strong><span>未完成核对原因</span></div>
-        <div class="metric"><strong>{detected_fact_count}</strong><span>内容变化明细</span></div>
+        <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
+        <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
+        <div class="metric"><strong>0</strong><span>公式自动对比（已关闭）</span></div>
+        <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉漏检核对</span></div>
+        <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
+        <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
+        <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
-      <details class="focus-more"><summary>查看按原始证据通道统计的明细（不同单位不能相加）</summary>
-        <section class="summary">
-          <div class="metric"><strong>{material_technical_count}</strong><span>正文变化卡</span></div>
-          <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
-          <div class="metric"><strong>0</strong><span>公式自动对比（已关闭）</span></div>
-          <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉复核页面</span></div>
-          <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
-          <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
-          <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
-        </section>
-      </details>
       <p class="reader-guide">阅读顺序：先看变化明细，再按需定位原文。标为“需复核”的内容、像素变化及补充原图不等于已确认的技术变化；无法可靠核对的范围仍在顶部清单中保留。</p>
-      {review_queue_html}
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -1506,93 +1449,9 @@ def _render_html(
     </main>
   </div>
 {FOCUS_SCRIPT}
-{_REVIEW_QUEUE_SCRIPT}
 </body>
 </html>
 """
-
-
-def _render_review_queue_html(tasks: tuple[ReviewTask, ...]) -> str:
-    """Render user actions before the evidence channel-specific report cards."""
-
-    if not tasks:
-        return (
-            '<section class="review-queue"><h2>审阅队列</h2>'
-            '<p class="review-queue-note">当前没有可定位的审阅事项；是否可确认一致仍需查看上方覆盖范围。</p>'
-            '</section>'
-        )
-    counts = task_counts(tasks)
-    labels = {"detected": "内容变化", "review": "待核实", "coverage": "未完成核对"}
-    filters = ''.join(
-        f'<button type="button" class="review-filter" data-review-filter="{status}" '
-        f'aria-pressed="{str(status == "detected").lower()}">{label} {counts[status]}</button>'
-        for status, label in labels.items()
-    )
-    filters = (
-        '<button type="button" class="review-filter" data-review-filter="all" aria-pressed="false">全部 '
-        + str(len(tasks)) + '</button>' + filters
-    )
-    rows = ''.join(
-        '<article class="review-task" '
-        f'data-review-status="{_escape(task.status)}" data-review-task="{_escape(task.task_id)}">'
-        f'<span class="review-status review-status-{_escape(task.status)}">{_escape(labels[task.status])}</span>'
-        '<div>'
-        f'<a class="review-task-title" href="{_escape(task.href)}">{_escape(task.title)}</a>'
-        f'<p class="review-task-detail">{_escape(task.detail)}</p>'
-        '</div>'
-        '<span>'
-        '<button type="button" class="review-mark" data-review-action="done">标为已阅</button> '
-        '<button type="button" class="review-mark" data-review-action="followup">需跟进</button>'
-        '</span></article>'
-        for task in tasks
-    )
-    return (
-        '<section class="review-queue" id="review-queue"><h2>审阅队列</h2>'
-        '<p class="review-queue-note">每一项对应一个可回到源证据的用户动作。内容变化、待核实和未完成核对的单位不同，'
-        '不相加为“技术变化”数量；标记仅保存在本机浏览器中，不会修改报告结论。</p>'
-        f'<div class="review-filter-bar">{filters}</div><div class="review-task-list">{rows}</div></section>'
-    )
-
-
-_REVIEW_QUEUE_SCRIPT = r'''<script>
-(() => {
-  const queue = document.getElementById('review-queue');
-  if (!queue) return;
-  const key = 'protocol-pdf-diff-review:' + location.pathname;
-  let states = {};
-  try { states = JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) { states = {}; }
-  const render = () => {
-    queue.querySelectorAll('[data-review-task]').forEach(row => {
-      const state = states[row.dataset.reviewTask] || '';
-      row.dataset.userState = state;
-      row.querySelectorAll('[data-review-action]').forEach(button => {
-        const active = button.dataset.reviewAction === state;
-        button.textContent = active
-          ? (state === 'done' ? '取消已阅' : '取消跟进')
-          : (button.dataset.reviewAction === 'done' ? '标为已阅' : '需跟进');
-      });
-    });
-  };
-  const persist = () => { try { localStorage.setItem(key, JSON.stringify(states)); } catch (_) {} };
-  queue.addEventListener('click', event => {
-    const filter = event.target.closest('[data-review-filter]');
-    if (filter) {
-      const wanted = filter.dataset.reviewFilter;
-      queue.querySelectorAll('[data-review-filter]').forEach(button => button.setAttribute('aria-pressed', String(button === filter)));
-      queue.querySelectorAll('[data-review-task]').forEach(row => { row.hidden = wanted !== 'all' && row.dataset.reviewStatus !== wanted; });
-      return;
-    }
-    const button = event.target.closest('[data-review-action]');
-    if (!button) return;
-    const row = button.closest('[data-review-task]');
-    const next = button.dataset.reviewAction;
-    states[row.dataset.reviewTask] = states[row.dataset.reviewTask] === next ? '' : next;
-    if (!states[row.dataset.reviewTask]) delete states[row.dataset.reviewTask];
-    persist(); render();
-  });
-  render();
-})();
-</script>'''
 
 
 def _render_change_html(
@@ -1785,7 +1644,7 @@ def _render_prose_source_visual_side(
             +
             f' data-source-view="{_escape(json.dumps(visual.source_view_box))}">'
             f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label)}</figcaption>'
-            f'<img loading="lazy" src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
+            f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
             f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
             '</figure>'
             for visual_index, visual in enumerate(materialized)
@@ -1834,33 +1693,9 @@ def _render_visual_review_items_html(items: list[VisualReviewItem]) -> str:
       <section class="table-visuals" id="visual-review-items">
         <h2>视觉漏检核对</h2>
         <p class="change-summary">以下页面的可抽取文字完全一致，或只含已用逐行坐标屏蔽的引用定位编号变化，但源 PDF 仍存在未解释的实质像素变化。它们是防止漏报的人工复核证据，不会被自动解释成正文、表格或公式修改。</p>
-        <details class="focus-more"><summary>展开 {len(items)} 页视觉复核证据（默认收起，全部保留；V1. 至 V{len(items)}.）</summary>{cards}</details>
+        {cards}
       </section>
     """
-
-
-def _visual_region_bands(
-    regions: tuple[tuple[int, int, int, int], ...],
-) -> tuple[tuple[int, ...], ...]:
-    """Group only nearby page bands for disclosure, never as semantic events.
-
-    The watchdog's connected components remain the source of truth.  These
-    bands are a reader-control layer: a large sparse page no longer presents
-    dozens of buttons before the user asks to inspect that page region.
-    """
-
-    if not regions:
-        return ()
-    bands: list[list[int]] = []
-    band_bottom: int | None = None
-    for index, (_left, top, _right, bottom) in enumerate(regions, 1):
-        if band_bottom is None or top > band_bottom + 48:
-            bands.append([index])
-            band_bottom = bottom
-        else:
-            bands[-1].append(index)
-            band_bottom = max(band_bottom, bottom)
-    return tuple(tuple(band) for band in bands)
 
 
 def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
@@ -1869,17 +1704,17 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
     old_page = item.old_page_number if item.old_page_number is not None else "-"
     new_page = item.new_page_number if item.new_page_number is not None else "-"
     old_image = (
-        f'<img loading="lazy" src="{item.old_image_data_uri}" alt="旧版第 {old_page} 页视觉证据">'
+        f'<img src="{item.old_image_data_uri}" alt="旧版第 {old_page} 页视觉证据">'
         if item.old_image_data_uri
         else '<p class="change-summary">旧版无对应页面。</p>'
     )
     new_image = (
-        f'<img loading="lazy" src="{item.new_image_data_uri}" alt="新版第 {new_page} 页视觉证据">'
+        f'<img src="{item.new_image_data_uri}" alt="新版第 {new_page} 页视觉证据">'
         if item.new_image_data_uri
         else '<p class="change-summary">新版无对应页面。</p>'
     )
     diff_image = (
-        f'<img loading="lazy" src="{item.diff_image_data_uri}" alt="V{index} 差异掩膜">'
+        f'<img src="{item.diff_image_data_uri}" alt="V{index} 差异掩膜">'
         if item.diff_image_data_uri
         else '<p class="change-summary">没有可渲染的差异掩膜。</p>'
     )
@@ -1891,13 +1726,9 @@ def _render_visual_review_item_html(index: int, item: VisualReviewItem) -> str:
             "new": {"id": f"visual-{index}-new", "box": box, "page": new_page} if item.new_image_data_uri else None,
         }
         buttons.append(source_button(targets, f"核对区域 {region_index}"))
-    focus_actions = "".join(
-        '<details class="visual-focus-band"><summary>页面区带 '
-        f'{band_index}：{len(region_indexes)} 个像素区域（仅定位，不代表一个技术事件）</summary>'
-        + ''.join(buttons[region_index - 1] for region_index in region_indexes)
-        + '</details>'
-        for band_index, region_indexes in enumerate(_visual_region_bands(item.focus_regions), 1)
-    )
+    focus_actions = "".join(buttons[:8])
+    if len(buttons) > 8:
+        focus_actions += f'<details class="focus-more"><summary>其余 {len(buttons)-8} 个定位区域（全部保留）</summary>{"".join(buttons[8:])}</details>'
     focus_note = (
         f"检测到 {len(buttons)} 个像素变化区域。点击查看双方对应位置；定位框内也可能包含未变化内容，不代表技术要求已改变。"
         if buttons else "本项未保留可靠的局部定位坐标；请结合完整原文及折叠的差异掩膜核对，不能据此判断具体技术变化。"
@@ -13009,7 +12840,7 @@ def _render_visual_coverage_html(result: DiffResult) -> str:
         for issue in audit.coverage_issues
     )
     return (
-        '<details class="visual-coverage-details" id="visual-coverage"><summary>查看未核对页面及原因'
+        '<details class="visual-coverage-details"><summary>查看未核对页面及原因'
         f'（{len(audit.coverage_issues)} 项）</summary>'
         '<p>下表使用 PDF 物理页码。这些页面尚未完成像素比较，不能据此判断图形相同或不同。'
         '“未确定”表示没有安全的对应页，请回到源文件人工核对。</p>'

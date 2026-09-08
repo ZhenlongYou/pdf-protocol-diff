@@ -41,7 +41,6 @@ from .visual_watchdog import _render_page, _snapshot_pdf
 
 PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS = 500
 PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE = 3
-PROSE_SOURCE_VISUAL_CRITICAL_MAX_PAGES_PER_SIDE = 1
 PROSE_SOURCE_VISUAL_RENDER_DPI = 120
 _MIN_BLOCK_TOKEN_OVERLAP = 0.45
 _MIN_MATCHED_BLOCK_TOKENS = 3
@@ -78,10 +77,6 @@ _DISPLAYED_FORMULA_OPERATOR_RE = re.compile(r"[=≤≥<>±×÷*/^∑∫√]|[\ue
 _BOTTOM_MARGIN_FURNITURE_HINT_RE = re.compile(
     r"(?i)\b(?:clause|consortium|copyright|draft|edition|forum|page|revision|"
     r"specification|standard|version|working\s+group|www\.|https?://)\b|©"
-)
-_SHORT_CRITICAL_TOKEN_RE = re.compile(
-    r"(?:[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?)|(?:\b(?:not|shall|must|may|不得|必须|应)\b)|[≤≥<>±]",
-    flags=re.IGNORECASE,
 )
 
 
@@ -238,18 +233,12 @@ def _build_visual_groups(
         old_snippets = _change_highlights(change, side="old")
         new_snippets = _change_highlights(change, side="new")
         if _eligible_change(change):
-            max_pages_per_side = (
-                PROSE_SOURCE_VISUAL_CRITICAL_MAX_PAGES_PER_SIDE
-                if _is_critical_short_change(change)
-                else PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE
-            )
             old_visuals, old_omitted_page_count = _build_side_visuals(
                 old_document,
                 change.old_section,
                 old_pages,
                 old_snippets,
                 side="old",
-                max_pages=max_pages_per_side,
                 excluded_bboxes_by_page=old_prose_blockers,
             )
             new_visuals, new_omitted_page_count = _build_side_visuals(
@@ -258,7 +247,6 @@ def _build_visual_groups(
                 new_pages,
                 new_snippets,
                 side="new",
-                max_pages=max_pages_per_side,
                 excluded_bboxes_by_page=new_prose_blockers,
             )
         else:
@@ -387,7 +375,7 @@ def _is_wrapped_heading_continuation(block: DocumentBlock) -> bool:
 
 
 def _eligible_change(change: SectionChange) -> bool:
-    """Use source crops for long changes and short high-risk literal edits."""
+    """Use screenshots only when text walls would materially hurt scanning."""
 
     if change.role != "technical" or change.change_type == "unchanged":
         return False
@@ -402,30 +390,7 @@ def _eligible_change(change: SectionChange) -> bool:
     changed_characters += sum(
         len(value) for value in _change_snippets(change, side="new")
     )
-    return (
-        changed_characters >= PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS
-        or _is_critical_short_change(change)
-    )
-
-
-def _is_critical_short_change(change: SectionChange) -> bool:
-    """Recognize small edits users cannot safely review without source context.
-
-    This is a screenshot-allocation rule, never a claim about engineering impact.
-    A changed numeric value, sign/operator, or negation/modal word receives one
-    source page per side when coordinate matching succeeds.  Section/Table/Figure
-    locator numbers have already been removed from ``changed_token_indexes``.
-    """
-
-    for side in ("old", "new"):
-        for highlight in _change_highlights(change, side=side):
-            tokens = _tokens(highlight.text)
-            if any(
-                index < len(tokens) and _SHORT_CRITICAL_TOKEN_RE.search(tokens[index])
-                for index in highlight.changed_token_indexes
-            ):
-                return True
-    return False
+    return changed_characters >= PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS
 
 
 def _change_snippets(change: SectionChange, *, side: str) -> tuple[str, ...]:
@@ -684,7 +649,6 @@ def _build_side_visuals(
     snippets: tuple[_SnippetHighlight, ...],
     *,
     side: str = "old",
-    max_pages: int = PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE,
     excluded_bboxes_by_page: dict[
         int,
         tuple[tuple[float, float, float, float], ...],
@@ -773,7 +737,7 @@ def _build_side_visuals(
             )
         )
     ranked = sorted(candidates, key=lambda item: (-item[1], item[0]))
-    selected = ranked[:max_pages]
+    selected = ranked[:PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE]
     selected.sort(key=lambda item: item[0])
     visuals: list[ProseSourceVisual] = []
     for page_number, _score, boxes, crop_regions, matched_snippet_count in selected:

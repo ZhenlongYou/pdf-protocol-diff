@@ -557,14 +557,12 @@ def _actual_events(
         )
     for visual_index, visual in enumerate(payload.get("visual_review_items", []), start=1):
         visual_marker = f"V{visual_index}."
+        visual_scope_key = f"V{visual_index}"
         visibility = _literal_visibility(
             (visual_marker,),
             reader_blob,
-            # A default-collapsed visual card remains reader-reachable through
-            # the visible summary that names all V identifiers.  Unlike prose
-            # and table literals, the visual event has no text fact to repeat
-            # inside an open card, so the public summary is its HTML scope.
-            scope_key="",
+            scope_hints=(visual_marker,),
+            scope_key=_reader_scope_key(visual, fallback=visual_scope_key),
         )
         events.append(
             {
@@ -710,9 +708,7 @@ def _literal_visibility(
             if structured_surface
             else (evidence.full_text,)
         )
-        if structured_surface and not scope_key and not scope_hints:
-            candidates = (evidence.full_text,)
-        elif scope_key and keyed_blocks:
+        if scope_key and keyed_blocks:
             candidates = tuple(
                 block for key, block in keyed_blocks if key == scope_key
             )
