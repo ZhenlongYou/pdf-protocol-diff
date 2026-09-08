@@ -11,17 +11,17 @@
 - 新增 `review_queue.py`，以来源链接生成类型化审阅事项；同一正文或表格卡同时含确认和不确定事实时拆为两个事项但回到同一原证据卡，避免确认变化被错误降级。
 - HTML 默认显示内容变化；待核实、覆盖不足和原始通道计数保留可切换/可展开入口。视觉页与页内区域默认折叠且按需加载，未删除任何区域或掩膜；浏览器本地的已阅/跟进状态不写回结果。
 - 短的数值、正负号、比较符、否定和规范性情态词变化可保留一页一侧来源图；普通短文字仍受原截图预算控制。
-- 最后完整回归：`1312` 项通过、`1` 项条件跳过，153.893 秒；`.venv/bin/python main.py --gui-smoke-test` 通过。严格门禁清单 `docs/verification/review-queue-evidence.json` 已在新鲜副本执行，结果 `EXECUTED_EVIDENCE_PASS`，仅覆盖该审阅队列范围。
+- 独立审查发现并修复两项报告路径问题：队列编号、JSON 卡号和 HTML 锚点现使用同一显示顺序；视觉和覆盖事项的跳转会展开祖先折叠区。顶部移除了混合正文片段与表格行的“内容变化明细”数字。完整回归 `1313` 项通过、`1` 项条件跳过，151.856 秒；`.venv/bin/python main.py --gui-smoke-test` 通过。
+- 严格门禁清单 `docs/verification/review-queue-evidence.json` 已在当前源码重新执行，结果 `EXECUTED_EVIDENCE_PASS / verified_scope_only`；最终回执为 `/Users/mac/Documents/ProtocolPdfDiffReports/review_queue_20260908/test-effectiveness/final-executed-receipt.json`，SHA-256 `bb6dcaadec01dae54c00c61d5bec40eb42058fc255077a95d2c4c6f9d6e81b21`。
 
 ### 当前状态或阻塞
 
-无代码阻塞。待用本轮提交的精确源码重新生成 OIF 5.2/5.3 报告，检查新的审阅队列在长文档中保留原始计数并默认收起视觉证据；907 页用户原始样本仍未提供，不能声称该文件已验收。
+无代码阻塞。提交 `a7528edf40f811c54b16cc8baaa5775755f8792c` 生成了新的完整 OIF 5.2/5.3 报告：`/Users/mac/Documents/ProtocolPdfDiffReports/review_queue_20260908/oif_report_final/protocol_diff_20260908_193814/protocol_diff_report.html`，端到端 1055.27 秒。HTML SHA-256 `ac8d176267e3726e301b456dd8ce7f012510912bcb99bbb0c5fd5c420e091d53`，JSON SHA-256 `a962d598478664928ae4b2936146d7ebb15858584222c21febda1c652f9f7f66`。队列有 200 个内容变化动作、200 个待核实动作、3 个未完成核对原因；其中 128 项视觉证据和 431 条未覆盖页记录保持独立，未被计为技术变化。浏览器验证首屏默认选择“内容变化”，视觉详情默认折叠，点击视觉动作会打开对应证据。报告状态仍为 `degraded / 需人工复核`。907 页用户原始样本仍未提供，不能声称该文件已验收。
 
 ### 下一步计划
 
-1. 提交并推送当前受测源码。
-2. 在提交源码上运行 OIF 5.2/5.3，检查报告与 JSON 的事项/证据守恒。
-3. 执行交付门和独立审阅，更新本节的精确 OID 与产物路径。
+1. 如继续做准确性工作，先以此 OIF 报告的 `degraded` 证据和独立文档家族真值定位误配，不能将审阅队列呈现层当作识别准确性修复。
+2. 若取得用户的 907 页原始样本，独立记录输入身份、运行时间、取消延迟与识别结果，不能拿本次 OIF 时间替代。
 
 ### 不要再踩的坑
 
