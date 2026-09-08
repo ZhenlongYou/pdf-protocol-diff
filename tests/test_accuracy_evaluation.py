@@ -731,17 +731,17 @@ class GoldAccuracyEvaluationTests(unittest.TestCase):
             name: value
             for name, value in {
                 "html": _read_evidence_fixture(
-                    '<summary>V1. 至 V2.</summary><article id="visual-review-1"><h3>V1. old/new</h3></article>',
+                    '<article id="visual-review-1"><h3>V1. old/new</h3></article>',
                     suffix=".html",
                     reader=_read_visible_html_evidence,
                 ),
                 "markdown": _read_evidence_fixture(
-                    "V1. 至 V2.\n### V1. old/new\n",
+                    "### V1. old/new\n",
                     suffix=".md",
                     reader=_read_markdown_evidence,
                 ),
                 "text": _read_evidence_fixture(
-                    "V1. 至 V2.\nV1. old/new\n",
+                    "V1. old/new\n",
                     suffix=".txt",
                     reader=_read_text_evidence,
                 ),

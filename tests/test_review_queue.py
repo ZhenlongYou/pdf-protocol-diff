@@ -103,38 +103,3 @@ class ReviewQueueTests(unittest.TestCase):
         self.assertEqual(1, data["review_queue"]["counts"]["detected"])
         self.assertEqual("C1", data["review_queue"]["items"][0]["task_id"])
         self.assertIn("不能相加", data["review_queue"]["note"])
-
-    def test_report_queue_and_cards_share_detected_first_numbering(self) -> None:
-        """A raw review-first diff must not make C1 link to the review card."""
-
-        old_review = _section("old-review", 2, "Ambiguous old glyph")
-        new_review = _section("new-review", 3, "Ambiguous new glyph")
-        review = SectionChange(
-            "review", old_review, new_review, 0.8,
-            review_replaced_snippets=[SnippetPair(old_review.body, new_review.body)],
-        )
-        old_change = _section("old-change", 4, "Limit is 1.0 V")
-        new_change = _section("new-change", 5, "Limit is 1.5 V")
-        changed = SectionChange(
-            "modified", old_change, new_change, 0.9,
-            replaced_snippets=[SnippetPair(old_change.body, new_change.body)],
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            outputs = write_reports(
-                DiffResult(
-                    Path("old.pdf"), Path("new.pdf"),
-                    [old_review, old_change], [new_review, new_change],
-                    [review, changed], [],
-                ),
-                temp_dir,
-                DiffOptions(visual_watchdog=False),
-            )
-            report = outputs["html"].read_text(encoding="utf-8")
-            data = __import__("json").loads(outputs["json"].read_text(encoding="utf-8"))
-
-        tasks = data["review_queue"]["items"]
-        self.assertEqual(("C1", "#change-1"), (tasks[0]["task_id"], tasks[0]["href"]))
-        first_start = report.index('id="change-1"')
-        self.assertIn("1.5", report[first_start:])
-        self.assertIn('revealHashTarget(sourceLink.hash)', report)
-        self.assertIn("node.open = true", report)

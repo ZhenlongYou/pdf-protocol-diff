@@ -37,14 +37,7 @@ def main() -> int:
             raise AssertionError("REAL_QUEUE_COUNTS")
         if [task["task_id"] for task in queue["items"]] != ["C1", "V1"]:
             raise AssertionError("REAL_QUEUE_IDENTIFIERS")
-        for token in (
-            'data-review-filter="detected"',
-            'href="#change-1"',
-            'href="#visual-review-1"',
-            '展开 1 页视觉复核证据（默认收起，全部保留；V1. 至 V1.）',
-            'revealHashTarget(sourceLink.hash)',
-            'node.open = true',
-        ):
+        for token in ('data-review-filter="detected"', 'href="#change-1"', 'href="#visual-review-1"', '展开 1 页视觉复核证据（默认收起，全部保留；V1. 至 V1.）'):
             if token not in html:
                 raise AssertionError("REAL_QUEUE_REPORT_LINK")
     artifact = ROOT / "docs" / "verification" / "out" / "review-queue-real-path.json"

@@ -422,15 +422,12 @@ def write_reports(
         new_sections=result.new_sections,
         full_document_selected=_full_document_selected_for_reader_cleanup(result),
     )
-    reader_technical_changes = _reader_technical_card_changes(reader_changes)
-    reader_table_card_changes = _reader_table_card_changes(reader_table_changes)
-    # JSON, queue links and rendered cards must share this exact order.  A
-    # review card that happens to occur first in raw diff order is deliberately
-    # displayed after detected evidence; numbering it before that reorder makes
-    # a queue link land on the wrong source card.
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
-        for index, change in enumerate(reader_technical_changes, start=1)
+        for index, change in enumerate(
+            (change for change in reader_changes if change.role == "technical"),
+            start=1,
+        )
     }
     reader_changes_by_identity = {
         _section_change_reader_identity(change): change
@@ -438,16 +435,20 @@ def write_reports(
     }
     reader_table_card_ids = {
         _table_change_reader_identity(change): f"T{index}"
-        for index, change in enumerate(reader_table_card_changes, start=1)
+        for index, change in enumerate(reader_table_changes, start=1)
     }
     reader_result = replace(
         result,
         changes=reader_changes,
     )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 的 raw 字段继续保存原始比较事实。
+    reader_technical_changes = sorted(
+        (change for change in reader_changes if change.role == "technical"),
+        key=lambda change: change.change_type == "review",
+    )
     visual_audit = result.provenance.visual_watchdog_audit if result.provenance else None
     review_tasks = build_review_tasks(
         reader_technical_changes,
-        reader_table_card_changes,
+        reader_table_changes,
         result.visual_review_items,
         visual_audit.coverage_issues if visual_audit is not None else (),
     )
@@ -937,8 +938,8 @@ def _render_html(
     material_technical_count = sum(
         change.change_type != "review" for change in technical_changes
     )
-    table_changes = _reader_table_card_changes(table_changes)
-    indexed_technical = tuple(enumerate(_reader_technical_card_changes(technical_changes), start=1))
+    table_changes = _ordered_table_changes(table_changes)
+    indexed_technical = sorted(enumerate(technical_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
     materialized_review_tasks = tuple(review_tasks)
     materialized_source_visuals = tuple(prose_source_visuals)
     prose_visual_lookup = {
@@ -1005,6 +1006,9 @@ def _render_html(
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     review_queue_html = _render_review_queue_html(materialized_review_tasks)
     review_counts = task_counts(materialized_review_tasks)
+    detected_fact_count = sum(
+        task.fact_count for task in materialized_review_tasks if task.status == "detected"
+    )
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
         len(_material_table_row_changes(change))
@@ -1467,6 +1471,7 @@ def _render_html(
         <div class="metric"><strong>{review_counts["detected"]}</strong><span>内容变化事项</span></div>
         <div class="metric"><strong>{review_counts["review"]}</strong><span>待核实事项</span></div>
         <div class="metric"><strong>{review_counts["coverage"]}</strong><span>未完成核对原因</span></div>
+        <div class="metric"><strong>{detected_fact_count}</strong><span>内容变化明细</span></div>
       </section>
       <details class="focus-more"><summary>查看按原始证据通道统计的明细（不同单位不能相加）</summary>
         <section class="summary">
@@ -1569,28 +1574,12 @@ _REVIEW_QUEUE_SCRIPT = r'''<script>
     });
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(states)); } catch (_) {} };
-  const revealHashTarget = (hash) => {
-    if (!hash || hash === '#') return;
-    let target;
-    try { target = document.getElementById(decodeURIComponent(hash.slice(1))); } catch (_) { return; }
-    if (!target) return;
-    for (let node = target; node; node = node.parentElement) {
-      if (node.tagName === 'DETAILS') node.open = true;
-    }
-  };
   queue.addEventListener('click', event => {
     const filter = event.target.closest('[data-review-filter]');
     if (filter) {
       const wanted = filter.dataset.reviewFilter;
       queue.querySelectorAll('[data-review-filter]').forEach(button => button.setAttribute('aria-pressed', String(button === filter)));
       queue.querySelectorAll('[data-review-task]').forEach(row => { row.hidden = wanted !== 'all' && row.dataset.reviewStatus !== wanted; });
-      return;
-    }
-    const sourceLink = event.target.closest('.review-task-title');
-    if (sourceLink) {
-      // The browser applies the fragment scroll after this listener.  Open
-      // nested disclosures first so the requested source is actually visible.
-      revealHashTarget(sourceLink.hash);
       return;
     }
     const button = event.target.closest('[data-review-action]');
@@ -1602,8 +1591,6 @@ _REVIEW_QUEUE_SCRIPT = r'''<script>
     persist(); render();
   });
   render();
-  revealHashTarget(location.hash);
-  window.addEventListener('hashchange', () => revealHashTarget(location.hash));
 })();
 </script>'''
 
@@ -12939,24 +12926,6 @@ def _ordered_table_changes(changes: list[TableChange]) -> list[TableChange]:
     """Show technical table evidence before publication-history tables."""
 
     return sorted(changes, key=lambda change: change.role == "document_metadata")
-
-
-def _reader_technical_card_changes(changes: list[SectionChange]) -> list[SectionChange]:
-    """Use one stable order for prose card IDs, queue actions, and HTML."""
-
-    return sorted(
-        (change for change in changes if change.role == "technical"),
-        key=lambda change: change.change_type == "review",
-    )
-
-
-def _reader_table_card_changes(changes: list[TableChange]) -> list[TableChange]:
-    """Keep table review cards after detected evidence everywhere they appear."""
-
-    return sorted(
-        _ordered_table_changes(changes),
-        key=lambda change: change.change_type == "review",
-    )
 
 
 def _comparison_method_note(result: DiffResult) -> str:

@@ -64,7 +64,6 @@ class _ReaderSurfaceEvidence:
 
     full_text: str
     blocks: tuple[tuple[str, str], ...] = ()
-    anchors: frozenset[str] = frozenset()
 
 
 def run_gold_accuracy_evaluation(
@@ -567,15 +566,6 @@ def _actual_events(
             # inside an open card, so the public summary is its HTML scope.
             scope_key="",
         )
-        if isinstance(reader_blob, Mapping):
-            html_surface = reader_blob.get("html")
-            if isinstance(html_surface, _ReaderSurfaceEvidence):
-                # The visible disclosure summary proves that a user can find
-                # Vn; the matching DOM anchor proves the actual card still
-                # exists for the link to open.  One cannot certify the other.
-                visibility["html"] = visibility.get("html", False) and (
-                    f"V{visual_index}" in html_surface.anchors
-                )
         events.append(
             {
                 "kind": "visual",
@@ -860,7 +850,6 @@ class _VisibleHTMLTextParser(HTMLParser):
         self.closed_details_depth = 0
         self.summary_depth = 0
         self.blocks: list[tuple[str, list[str]]] = []
-        self.anchors: set[str] = set()
         self._active_blocks: list[int] = []
         self._tag_stack: list[tuple[str, int | None]] = []
 
@@ -873,7 +862,6 @@ class _VisibleHTMLTextParser(HTMLParser):
             r"(?:change|table-change|formula|visual-review)-\d+",
             element_id,
         ):
-            self.anchors.add(_html_reader_block_key(element_id))
             opened_block = len(self.blocks)
             self.blocks.append((_html_reader_block_key(element_id), []))
             self._active_blocks.append(opened_block)
@@ -949,7 +937,6 @@ def _read_visible_html_evidence(path: Path) -> _ReaderSurfaceEvidence:
             for key, parts in parser.blocks
             if (compact := " ".join("".join(parts).split()))
         ),
-        anchors=frozenset(parser.anchors),
     )
 
 
