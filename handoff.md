@@ -3,7 +3,8 @@
 ## 当前任务：原页截图优先（2026-09-10）
 
 - task_id: `pdf-screenshot-first-20260910`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `219a794f3c725e80c2d3f2c4d7126e735a670d7f`。
-- status: in_progress。已实现原页优先、折叠文字、显示1.000末尾附录、完整表格上下文；正在全套回归、独立审查及STRICT真实报告验收。
+- status: ready；recorded_commit: `023dd0446cf989a995f18569f842f5bc38141bb3`。原页优先、折叠文字、显示1.000末尾附录、完整表格上下文已完成范围验证。最后行为变更后完整1327项、207.741秒、1条件skip，无失败；`full-complete.log`。STRICT `strict-complete.json` 15次运行、6组负控、八行通过，仅 `verified_scope_only`。两位独立审查发现的近似句/孤立词误着色和附录PUA退化均按真实PDF或三格式公开报告路径闭环；最终exact-OID attestation及main/远端状态以正式delivery receipt为准。
+- 原生GUI核心流程与入口smoke通过；原报告三个反馈位置的最终预览为 `/Users/mac/Documents/ProtocolPdfDiffReports/screenshot_first_20260910/original-examples/protocol_diff_20260910_012233/protocol_diff_report.html`，SHA `0227889efa6043e2d3d5cffe9db35de1b97708d08dcd0762ff8352403c996111`。`native-complete/layout.json`验证7源图、默认关闭4折叠区、实际点击放大及520px窄窗；最终PNG目视完整647页上下文与494页图。预览仅重放原始三个位置事实，不是整本重比；整本636/685页耗时/峰值资源未复测。重启源工具后新生成报告应用本轮展示，旧报告不覆盖。
 - 验收和恢复入口：`docs/verification/screenshot-first-20260910.md`；证据根 `/Users/mac/Documents/ProtocolPdfDiffReports/screenshot_first_20260910`。原始用户报告不覆盖。
 
 ## 当前任务：只报告实质内容变化（2026-09-09）

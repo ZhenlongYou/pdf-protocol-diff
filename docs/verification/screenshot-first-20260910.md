@@ -11,3 +11,11 @@
 证据根 `/Users/mac/Documents/ProtocolPdfDiffReports/screenshot_first_20260910`。首轮完整回归记录保留；预期迁移仅调整用户明确改变的首屏/相似度归档要求，保留数值、符号、发生次数、原 bbox 和哈希失配保护。原生 WebKit 的 `screenshot_first_native.py` 实际加载报告、检查默认折叠、图片加载、放大交互和窄窗；PNG 人工目视确认第 494 页整幅接线图已完整显示。
 
 最终测试、严格回执、真实路径与远端提交以 handoff 和该证据根内最终记录为准。未复测整本 636/685 页总耗时，不认证任意 PDF 的语义等价；旧报告需重新生成才应用新展示。
+
+独立审查额外发现并修复两种误着色：近似的 Mode A/B 行、孤立相同数值抢占句子位置。现在每个变化词按完整上下文的匹配词总量选择唯一物理位置，同分位置保持中性；真实 PDF 的像素回归分别验证目标词红差>10、未变化词红差<5。旧实现的两个提交作为独立负控留在STRICT记录中。附录未知PUA字符仍在HTML/MD/TXT显式说明，JSON/CSV原文保留。
+
+最终展示预览重放原始用户报告的三个反馈位置，刷新相同源PDF坐标图片，未重算整本配对：`/Users/mac/Documents/ProtocolPdfDiffReports/screenshot_first_20260910/original-examples/protocol_diff_20260910_012233/protocol_diff_report.html`；HTML SHA-256 `0227889efa6043e2d3d5cffe9db35de1b97708d08dcd0762ff8352403c996111`。原始facts保留，主区1条正文/1个检测区域，1.000正文1条收在末尾附录。`native-complete/layout.json`证实7张源图正常加载、4个明细/附录折叠默认关闭、实际放大和520像素窄窗无横向溢出；最终PNG目视确认647页章节上下文与494页整幅图完整。
+
+`strict-complete.json`执行15次、6组有效RED/GREEN负控，八行通过，仅`verified_scope_only`。最后行为提交为`023dd0446cf989a995f18569f842f5bc38141bb3`。完整回归与最终Git交付另见handoff；整本636/685页耗时与峰值资源未复测。
+
+最后行为变更后的完整回归：1327项，207.741秒，1个条件跳过，无失败（`full-complete.log`）。原生GUI真实比较入口及原始位置报告的画面/交互均已通过；签署与精确main/GitHub交付由项目正式门禁完成，结果保存在同一证据根。
