@@ -407,7 +407,7 @@
       "artifacts": [
         {
           "id": "ART-CONTENT-REAL",
-          "path": "docs/verification/out/content-only-real.json",
+          "path": "work/content-only-gate/real-artifact.json",
           "producer_run_id": "RUN-CONTENT-REAL",
           "required": true,
           "min_size_bytes": 30
@@ -830,7 +830,7 @@
             "docs/verification/content_only_probe.py",
             "docs/verification/fixtures/content-only/realistic.json",
             "--artifact",
-            "docs/verification/out/content-only-real.json"
+            "work/content-only-gate/real-artifact.json"
           ],
           "executable": {
             "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",

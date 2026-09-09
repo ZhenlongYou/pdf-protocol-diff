@@ -4,8 +4,8 @@
 
 - task_id: `pdf-content-only-20260909`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `8becb689f32edaa30d9a7c6f37afdf6bbca32f3d`。
 - 已完成：取得正式写入权；保存旧取消任务的已提交历史；修复作者分类、编号目录边界、普通大小写/单元格折行、纯归属提示；全文邮箱不参与差异，混合句保留实际参数变化；CSV 与读者内容清单统一，JSON 新增内容清单并保留原始取证。
-- 状态：实现中，针对性检查通过；完整回归、真实 PDF/GUI、独立审查和交付门禁尚未完成。`DEF-CONTENT-ONLY-20260909` 为 fixed_unverified。
-- 下一步：补充反例、检查全套回归；运行真实来源与 GUI；执行 STRICT v2 和双独立审查，按同一精确源码交付。
+- status: ready；recorded_commit: `fa2eba88011dda57d27d430f8681a16edb11ce97`。最终行为源码完整 1317 项（1 skip）和 27 场景通过；STRICT `strict-executed-final.json` 为 EXECUTED_EVIDENCE_PASS / verified_scope_only。缺陷账本已由同一公开报告路径复验为 verified。
+- 验证：原生 GUI 桥接生成内容报告、真实 OIF 前置页作者/邮箱/目录/版权清单归零；Table 1-9 纯折行不报表格差异。两位 reviewer 已关闭重要发现，最终文档提交后的 exact-OID attest、main/GitHub 引用与官方交付门禁以证据根 `delivery-receipt.json` 为准。窄页窗仍可能保留行号/来源不足复核；未认证整本 OIF、907 页输入或任意 PDF 语义一致。详情 `docs/verification/content-only-20260909.md`。
 - 不要再踩：不能按相似度 1/字符集合判等；不能删除全文含邮箱的整句；不能把数字/单位/条件归属移动当排版；不能恢复未验收的旧报告视图；旧分支已归档，精确恢复路径和证据见 `docs/verification/content-only-20260909.md`。
 
 ## 2026-09-08 报告读者负担优化

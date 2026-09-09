@@ -85,7 +85,7 @@ def main():
                           failure_signature='CONTENT_CONTRACT_FAIL',red_run_id=red,green_run_id=green))
     runs.append(run('RUN-CONTENT-ORACLE','oracle',['docs/verification/content_only_oracle.py',*fixture_paths],input_ids,oracle=True))
     runs.append(run('RUN-CONTENT-SUITE','suite',['docs/verification/content_only_probe.py',*fixture_paths],input_ids))
-    artifact_path='docs/verification/out/content-only-real.json'
+    artifact_path='work/content-only-gate/real-artifact.json'
     runs.append(run('RUN-CONTENT-REAL','real_path',['docs/verification/content_only_probe.py',fixture_paths[4],'--artifact',artifact_path],[input_ids[4]],artifact=True))
     ledger_all=yaml.safe_load((ROOT/'docs/verification/escaped-defects.yaml').read_text())
     scoped=[d for d in ledger_all['escaped_defects'] if d['id']=='DEF-CONTENT-ONLY-20260909']
