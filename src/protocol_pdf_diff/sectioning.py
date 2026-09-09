@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha1
 from math import ceil
 from .heading_evidence import line_word_evidence, strong_heading_style, source_region_role
+from .source_regions import CAPTION
 
 from .models import (
     DocumentBlockKind,
@@ -42,7 +43,9 @@ _DOCUMENT_METADATA_TITLE_RE = re.compile(
     r"\bdocument\s+control\b|\bapproval\s+(?:record|history)\b|"
     r"\bdistribution\s+list\b|"
     r"修订历史|版本历史|变更历史|变更日志|修订记录|发布记录|"
-    r"文件控制|文档控制|批准记录|审批记录|分发清单)"
+    r"文件控制|文档控制|批准记录|审批记录|分发清单|"
+    r"^(?:authors?|editors?|contributors?|contacts?|contact\s+information|"
+    r"author\s+information|作者|编者|编辑|贡献者|联系人|联系方式|作者信息)$)"
 )
 
 _HEADING_PATTERNS: tuple[tuple[re.Pattern[str], int, str], ...] = (
@@ -160,6 +163,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     current: _OpenSection | None = None
     heading_stack: list[HeadingInfo] = []
     inside_contents = False
+    contents_has_locators = False
     contents_heading_stack: list[HeadingInfo] = []
     contents_heading_paths: set[tuple[str, ...]] = set()
     deep_numeric_context: tuple[str, ...] = ()
@@ -172,8 +176,6 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     opening_label = _opening_section_label(extraction)
 
     for page_index, page in enumerate(cleaned_pages):
-        if _is_contents_page(page.text):
-            inside_contents = True
         page_lines = page.text.splitlines()
         for line_index, raw_line in enumerate(page_lines):
             line = normalize_line(raw_line)
@@ -184,6 +186,14 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 page.ambiguous_line_number_sides,
             )  # 数字仍留在正文；这里只阻止已知页边候选成为章节号或污染真实标题身份。
             heading = detect_heading(heading_candidate)
+            contents_title = _contents_title(heading_candidate)
+            if contents_title:
+                heading = (replace(heading, title=contents_title) if heading
+                           else HeadingInfo(heading_candidate, "", contents_title, 1))
+                inside_contents = True
+                contents_has_locators = False
+                contents_heading_stack.clear()
+                contents_heading_paths.clear()
             source_heading_is_strong = strong_heading_style(page, heading_candidate) if re.match(r"\d", heading_candidate) else False
             if heading is None and source_heading_is_strong:
                 heading = detect_heading(heading_candidate, source_proves_non_table=True)
@@ -251,7 +261,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 if heading is None
                 else None
             )  # 技术比值等可能触发表格保护而不成为标题，但仍可作为后续列表项的结构证据。
-            if heading and inside_contents:
+            if heading and inside_contents and not contents_title:
                 contents_heading = _contextualize_heading(heading, contents_heading_stack)
                 candidate_contents_stack = _updated_stack(
                     contents_heading_stack,
@@ -262,13 +272,19 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     for item in candidate_contents_stack
                     if item.number
                 )
-                if contents_path in contents_heading_paths:
+                has_locator = _contents_entry_has_locator(page_lines, line_index)
+                if (not has_locator and re.match(r"(?i)^(?:part|annex|appendix)\b", heading.number)
+                        and line_index + 1 < len(page_lines)
+                        and detect_heading(normalize_line(page_lines[line_index + 1]))):
+                    has_locator = _contents_entry_has_locator(page_lines, line_index + 1)
+                if not has_locator and (source_heading_is_strong or contents_path in contents_heading_paths or contents_has_locators):
                     # 正文通常从目录已经列过的首个编号重新开始；同页和跨页均以
                     # 第一次完整层级路径重复作为目录结束信号，并保留真实正文标题。
                     inside_contents = False
                     contents_heading_stack.clear()
                     contents_heading_paths.clear()
                 else:
+                    contents_has_locators = contents_has_locators or has_locator
                     contents_heading_stack = candidate_contents_stack
                     contents_heading_paths.add(contents_path)
                     heading = None  # 目录条目属于文档元数据，不参与技术章节匹配。
@@ -517,14 +533,39 @@ def _is_contents_page(text: str) -> bool:
         line = normalize_line(raw_line)
         if line:
             visible_lines.append(line)
-    return any(
-        re.fullmatch(
-            r"(?i)(?:(?:table\s+of\s+contents|contents)"
-            r"(?:\s*\(\s*continued\s*\))?|目\s*录(?:\s*[（(]\s*续\s*[）)])?)",
-            line,
-        )
-        for line in visible_lines[:12]
+    return any(_contents_title(line) for line in visible_lines[:12])
+
+
+def _contents_title(line: str) -> str:
+    """Accept a numbered publication title, never an entry with a page locator."""
+
+    match = re.fullmatch(
+        r"(?i)(?:\d+(?:\.\d+)*[.、]?\s+)?"
+        r"((?:table\s+of\s+contents|contents)(?:\s*\(\s*continued\s*\))?|"
+        r"目\s*录(?:\s*[（(]\s*续\s*[）)])?)", line,
     )
+    return ("目录" if match.group(1).startswith("目") else "Contents") if match else ""
+
+
+def _contents_entry_has_locator(lines: list[str], index: int) -> bool:
+    """Include wrapped entry continuations, but never the next numbered entry."""
+
+    parts = []
+    # A source subscript can add extra physical lines inside one title. Scan
+    # until the next heading/body boundary rather than assuming a line count.
+    for offset, raw in enumerate(lines[index:]):
+        text = normalize_line(raw)
+        if offset and (detect_heading(text) or CAPTION.match(text)):
+            return False
+        if offset and (
+            re.search(r"(?i)\b(?:shall|must|should)\b", text)
+            or re.search(r"必须|不得|应当|应满足|不超过|[=<>≤≥]", text)
+        ):
+            return False  # 后继正文里的省略号/范围不是目录引导点。
+        parts.append(text)
+        if re.search(r"(?:\.{3,}|…{2,}|(?:\.\s*){3,})\s*(?:\d+|[ivxlcdm]+)\s*$", " ".join(parts), re.I):
+            return True
+    return False
 
 
 def canonical_number_identity(number: str) -> str:

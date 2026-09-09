@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-CONTENT-ONLY-20260909
+    acceptance_id: REQ-CONTENT-ONLY
+    user_symptom: "大小写、空格、作者、邮箱、目录与无实际内容变化的表格归属提示产生无价值差异。"
+    discovered_via: user_counterexample
+    failure_mechanism: "章节元数据分类不全，目录条目被解析为正文，排版等价和表格质量告警没有与内容差异分开。"
+    red_green_pair_id: PAIR-CONTENT-ONLY
+    regression_test_id: CONTENT_ONLY_TEST
+    public_path_rerun_id: RUN-CONTENT-REAL
+    state: fixed_unverified
   - id: DEF-VISUAL-MASK-001
     acceptance_id: REQ-VISUAL-MASK-001
     user_symptom: "A page with distant color changes was shown with one large red rectangle spanning unchanged table content."

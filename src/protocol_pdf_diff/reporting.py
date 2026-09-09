@@ -71,6 +71,7 @@ from .text_utils import (
 )
 from .visual_preview import VISUAL_REVIEW_IMAGE_CSS, render_visual_mask_disclosure
 from .reader_focus import FOCUS_CSS, FOCUS_SCRIPT, render_change_focus, source_button
+from .content_equivalence import cosmetic_content_equal, neutral_email_text
 
 _CHANGE_LABELS = {
     "added": "新增",
@@ -448,9 +449,12 @@ def write_reports(
         prose_source_visuals=result.prose_source_visuals,
     )
     text = _markdown_to_plain_text(markdown)
-    csv_rows = _rows_for_csv(result.changes)
-    table_csv_rows = _rows_for_table_csv(table_changes)
+    csv_rows = _rows_for_csv(reader_changes)
+    table_csv_rows = _rows_for_table_csv(reader_table_changes)
     sections_payload = {
+        "comparison_focus": "substantive_content",
+        "content_changes": [_change_to_dict(change) for change in reader_changes],
+        "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
         "old_pdf": str(result.old_pdf),
         "new_pdf": str(result.new_pdf),
         "old_total_pages": _source_page_count(result, "old"),
@@ -9580,7 +9584,7 @@ def _reader_table_changes(
             for row in change.row_changes
             if not (
                 can_hide_generic_review
-                and row.item == "表格结构复核"
+                and row.item in {"表格结构复核", "表格行归属", "表格行列结构"}
                 and row.change_type == "需人工复核"
             )
         )
@@ -9591,6 +9595,10 @@ def _reader_table_changes(
             if not _reader_values_match_after_locator_renumbering(
                 row.old_value,
                 row.new_value,
+            )
+            and not (
+                change.old_tables and change.new_tables
+                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True)
             )
         )
         reference_only_suppressed = bool(row_changes) and not reference_filtered_rows
@@ -9606,16 +9614,9 @@ def _reader_table_changes(
         ):
             continue
         if not row_changes and change.change_type == "review":
-            if not can_hide_generic_review:
-                continue
-            row_changes = (
-                TableRowChange(
-                    item="表格行列结构",
-                    old_value=_reader_table_structure_status(change.old_tables),
-                    new_value=_reader_table_structure_status(change.new_tables),
-                    change_type="需人工复核",
-                ),
-            )  # 隐去冗长抽取告警，但保留紧凑复核事实，禁止把未知结构伪装成全量一致。
+            continue  # 无具体内容差异的结构疑问保留在质量/原始证据中，不生成差异卡。
+        if not row_changes and not change.caption_changed and change.old_tables and change.new_tables:
+            continue
         change_type = change.change_type
         if (
             change.old_tables
@@ -9626,7 +9627,10 @@ def _reader_table_changes(
         ):
             change_type = "review"
         reader_changes.append(
-            replace(change, change_type=change_type, row_changes=row_changes)
+            replace(change, change_type=change_type, row_changes=tuple(
+                replace(row, old_value=neutral_email_text(row.old_value), new_value=neutral_email_text(row.new_value))
+                for row in row_changes
+            ))
         )
     return reader_changes
 
@@ -9690,6 +9694,33 @@ def _reader_section_change(
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
+    # 用户排除了全文邮箱；仅变地址的片段消失，混合句仍保留其要求、数值和条件。
+    def email_free_values(values):
+        return [cleaned for value in values if (cleaned := neutral_email_text(value))]
+
+    def email_free_pairs(pairs):
+        return [SnippetPair(old, new) for pair in pairs
+                if (old := neutral_email_text(pair.old)) != (new := neutral_email_text(pair.new))]
+
+    email_audit_complete = all(value is not None for value in (
+        change.audit_added_snippets, change.audit_removed_snippets, change.audit_replaced_snippets))
+    email_original_omitted = change.omitted_snippet_count
+    change = replace(
+        change,
+        added_snippets=email_free_values(change.added_snippets),
+        removed_snippets=email_free_values(change.removed_snippets),
+        replaced_snippets=email_free_pairs(change.replaced_snippets),
+        audit_added_snippets=(email_free_values(change.audit_added_snippets) if change.audit_added_snippets is not None else None),
+        audit_removed_snippets=(email_free_values(change.audit_removed_snippets) if change.audit_removed_snippets is not None else None),
+        audit_replaced_snippets=(email_free_pairs(change.audit_replaced_snippets) if change.audit_replaced_snippets is not None else None),
+        review_replaced_snippets=email_free_pairs(change.review_replaced_snippets),
+    )
+    change = replace(change, omitted_snippet_count=max(
+        0, len(change.audit_added_snippets) + len(change.audit_removed_snippets)
+        + len(change.audit_replaced_snippets) - len(change.added_snippets)
+        - len(change.removed_snippets) - len(change.replaced_snippets))
+        if email_audit_complete else email_original_omitted)
+
     # The full heading fact is the strongest proof of a pure locator renumber.
     # Remove it before coordinate-owned Figure/Table cleanup can trim only the
     # numbered prefix and leave a misleading bare ``章节标题`` fragment.
@@ -9733,6 +9764,11 @@ def _reader_section_change(
     # 整句除显式定位编号外完全相同时视为一致；技术数字或文字有变化就不会命中。
     # helper 会保留已经移入中性复核区的双侧原文。
     change = _reader_change_without_locator_renumbering(change)
+    if change is None:
+        return None
+    change = _reader_change_without_replaced_pairs(
+        change, lambda pair: cosmetic_content_equal(pair.old, pair.new)
+    )
     if change is None:
         return None
     change = _reader_change_without_covered_standalone_table_references(change)
@@ -11604,7 +11640,7 @@ def _reader_table_change_proves_section_duplicate(
         return False
     if not all(table.row_alignment_reliable for table in tables):
         if not isinstance(table_change, TableChange) or not _table_review_rows(table_change):
-            return False  # 行归属未知时只有显式、可见的复核卡才能替代重复正文墙；静默组不得授权隐藏。
+            return False  # 未验证归属仍须有完整原始复核证据；该证据保存在 JSON，不要求占读者差异卡。
     old_caption_keys = {
         key
         for table in table_change.old_tables
@@ -12783,7 +12819,9 @@ def _report_scope_note(options: DiffOptions) -> str:
     """Explain output boundaries that matter during protocol review."""
 
     return (
-        "主要比较 PDF 中可抽取文字，正文以源 PDF 截图作为第一视觉层，"
+        "只报告正文和表格的实质内容差异；作者、联系方式、目录及出版记录不计入差异，"
+        "已确认的纯排版、自动折行和章节改号不计入差异；"
+        "正文以源 PDF 截图作为第一视觉层，"
         "表格会额外提供截图辅助复核；"
         "公式自动对比已关闭：分式、根号、上下标和式号只用于版面隔离，不生成公式增删、修改、相似度或颜色差分结论；"
         "文字一致页的图片、印章和普通矢量图变化会由视觉漏检哨兵提示，但不会自动解释图形语义；"

@@ -1,5 +1,13 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：只报告实质内容变化（2026-09-09）
+
+- task_id: `pdf-content-only-20260909`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `8becb689f32edaa30d9a7c6f37afdf6bbca32f3d`。
+- 已完成：取得正式写入权；保存旧取消任务的已提交历史；修复作者分类、编号目录边界、普通大小写/单元格折行、纯归属提示；全文邮箱不参与差异，混合句保留实际参数变化；CSV 与读者内容清单统一，JSON 新增内容清单并保留原始取证。
+- 状态：实现中，针对性检查通过；完整回归、真实 PDF/GUI、独立审查和交付门禁尚未完成。`DEF-CONTENT-ONLY-20260909` 为 fixed_unverified。
+- 下一步：补充反例、检查全套回归；运行真实来源与 GUI；执行 STRICT v2 和双独立审查，按同一精确源码交付。
+- 不要再踩：不能按相似度 1/字符集合判等；不能删除全文含邮箱的整句；不能把数字/单位/条件归属移动当排版；不能恢复未验收的旧报告视图；旧分支已归档，精确恢复路径和证据见 `docs/verification/content-only-20260909.md`。
+
 ## 2026-09-08 报告读者负担优化
 
 - task_id: `pdf-diff-reader-focus-20260908`；owner: `01a07b86-21ae-7fa1-af49-6ecf75c4a49b`；status: ready。

@@ -165,13 +165,12 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertEqual(0, table_payload["row_change_count"])
         self.assertEqual(1, table_payload["review_count"])
         self.assertIn("<strong>0</strong><span>变化表格</span>", html)
-        self.assertIn("<strong>1</strong><span>表格复核项</span>", html)
+        self.assertIn("<strong>0</strong><span>表格复核项</span>", html)
         self.assertNotIn("表格结构复核", html)
-        self.assertIn("表格行列结构", html)
-        self.assertIn("行列边界未验证", html)
-        self.assertIn("表格补充证据（变化与复核）", html)
-        self.assertIn("表格结构复核", table_csv)
-        self.assertIn("需人工复核", table_csv)
+        self.assertNotIn("表格行列结构", html)
+        self.assertNotIn("表格结构复核", table_csv)
+        self.assertEqual([], payload['content_table_changes'])
+        # 2026-09-09 用户要求：同文表格只保留 JSON 质量取证，不占内容差异卡或 CSV。
 
     def test_identical_snapshot_window_has_no_table_review_cards(self) -> None:
         """Identical source bytes cannot contain a semantic table difference."""
@@ -331,7 +330,7 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
             self.assertIn("Target BER", rendered)
             self.assertNotIn("表格结构复核", rendered)
         self.assertIn("Target BER", table_csv)
-        self.assertIn("表格结构复核", table_csv)
+        self.assertNotIn("表格结构复核", table_csv)
         self.assertEqual(2, len(payload["table_changes"][0]["row_changes"]))
 
     def test_unreliable_multirow_alignment_cannot_confirm_row_value_swaps(self) -> None:
