@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "id": "ordinary",
+      "kind": "partition",
+      "score": 0.9,
+      "main": 1,
+      "appendix": 0
+    }
+  ]
+}

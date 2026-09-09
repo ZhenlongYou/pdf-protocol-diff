@@ -153,9 +153,13 @@ class _VisibleHTMLTextParser(HTMLParser):
 
 
 def _visible_html_text(value: str) -> str:
-    """Return text visible before a reader expands any closed details."""
+    """Read reviewable content, opening the user-requested text/appendix folds.
+
+    Diagnostic and arbitrary hidden audit blocks remain closed.
+    """
 
     parser = _VisibleHTMLTextParser()
+    value = re.sub(r'<details class="(prose-text-details|table-text-details|similarity-review-appendix)"', r'<details open class="\1"', value)
     parser.feed(value)
     parser.close()
     return "".join(parser.parts)
@@ -1790,7 +1794,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         summary_text = app.summary_var.set.call_args.args[0]
         self.assertIn("章节修改 0", summary_text)
-        self.assertIn("表格变化 1", summary_text)
+        self.assertIn("表格变化 0", summary_text)  # 配对相似度显示 1.000，按当前用户要求进入附录。
 
     def test_desktop_summary_uses_the_same_reader_counts_as_the_report(self) -> None:
         """Filtered reader cards, not raw audit facts, define the visible summary."""
@@ -4166,7 +4170,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("operating windows", html)  # 大段正文句子必须仍在报告里。
         self.assertIn('class="del">10</mark>', html)  # 旧正文数值必须被保留并高亮。
         self.assertIn('class="ins">12</mark>', html)  # 新正文数值必须被保留并高亮。
-        self.assertIn("表格补充证据（变化与复核）", html)  # 表格截图和结构化变化/复核区也必须存在。
+        self.assertIn('class="similarity-review-appendix"', html)  # 同表配对分数 1.000 的事实仍可展开审查。
         self.assertIn("<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>", html)  # 表格摘要应像人工审查表。
         self.assertIn("Input jitter", html_text)  # 项目列应显示参数名，而不是内部“表格行”。
         self.assertIn("0.30 UI", html_text)  # 旧版列保留旧值；mark 标签不改变读者看到的连续文字。
@@ -7584,7 +7588,8 @@ class ProtocolDiffTests(unittest.TestCase):
             ["实质/符号变化", "实质/符号变化"],
             [change["change_type"] for change in row_changes],
         )
-        self.assertIn("表格修改 · 2 行", html)
+        self.assertIn('class="similarity-review-appendix"', html)
+        self.assertIn("共 2 条表格明细", html)
         self.assertNotIn(">99.9975% of the probability distribution) symbol<", html)
         self.assertNotIn(">the probability distribution) symbol<", html)
 
@@ -17399,6 +17404,8 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, report_dir, DiffOptions())
             for surface in ("html", "markdown", "text", "json", "csv"):
                 rendered = outputs[surface].read_text(encoding="utf-8")
+                if surface == "csv":
+                    rendered += outputs["similarity_review_csv"].read_text(encoding="utf-8")
                 with self.subTest(surface=surface):
                     self.assertIn("ALPHA", rendered)
                     self.assertIn("BETA", rendered)
@@ -17449,6 +17456,8 @@ class ProtocolDiffTests(unittest.TestCase):
             )
             for surface in ("html", "markdown", "text", "json", "csv"):
                 rendered = outputs[surface].read_text(encoding="utf-8")
+                if surface == "csv":
+                    rendered += outputs["similarity_review_csv"].read_text(encoding="utf-8")
                 with self.subTest(surface=surface):
                     self.assertIn("ALPHA", rendered)
                     self.assertIn("alpha", rendered)

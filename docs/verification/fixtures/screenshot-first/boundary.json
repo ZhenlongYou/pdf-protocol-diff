@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "id": "rounded",
+      "kind": "partition",
+      "score": 0.9996,
+      "main": 0,
+      "appendix": 1
+    },
+    {
+      "id": "below",
+      "kind": "partition",
+      "score": 0.9994,
+      "main": 1,
+      "appendix": 0
+    }
+  ]
+}

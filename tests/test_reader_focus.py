@@ -95,14 +95,14 @@ class ReaderFocusTests(unittest.TestCase):
             self.assertIn(term,text)
         self.assertNotIn('性能提升',text)
 
-    def test_focus_precedes_screenshots_and_audit_stays_available(self):
+    def test_screenshots_precede_folded_focus_and_audit_stays_available(self):
         old='Rail A during Startup: +1.50 mV';new='Rail A during Startup: -1.50 mV'
         change=SectionChange('modified',section(old),section(new,sid='n'),.95,replaced_snippets=[SnippetPair(old,new)])
         group=ProseSourceVisualGroup('modified','s','n',(source(old),),(source(new,14),))
         rendered=_render_change_html(1,change,prose_source_visual=group)
-        self.assertLess(rendered.index('class="reader-focus"'),rendered.index('class="prose-source-visual"'))
+        self.assertLess(rendered.index('class="prose-source-visual"'),rendered.index('class="reader-focus"'))
         self.assertIn('定位对应原文',rendered)
-        self.assertIn('查看文字识别明细',rendered)
+        self.assertIn('展开文字识别明细',rendered)
         self.assertEqual(1,len(change.replaced_snippets))
 
     def test_unique_physical_source_not_array_order(self):
@@ -134,7 +134,7 @@ class ReaderFocusTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(1,rendered.count(f'<td>{row.item}</td>'))
         self.assertIn('全部保留',rendered)
-        self.assertLess(rendered.index('class="table-row-summary"'),rendered.index('class="table-shot-grid"'))
+        self.assertLess(rendered.index('class="table-shot-grid"'),rendered.index('class="table-row-summary"'))
 
     def test_visual_targets_cover_distant_pixels_without_claiming_semantics(self):
         old=Image.new('RGB',(240,320),'white');new=old.copy();draw=ImageDraw.Draw(new)

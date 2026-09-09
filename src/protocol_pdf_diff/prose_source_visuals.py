@@ -12,7 +12,7 @@ import difflib
 import io
 import re
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +39,6 @@ from .monotonic_alignment import maximum_weight_monotonic_pairs
 from .pdf_extract import _looks_like_figure_caption, _looks_like_table_caption
 from .visual_watchdog import _render_page, _snapshot_pdf
 
-PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS = 500
-PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE = 3
 PROSE_SOURCE_VISUAL_RENDER_DPI = 120
 _MIN_BLOCK_TOKEN_OVERLAP = 0.45
 _MIN_MATCHED_BLOCK_TOKENS = 3
@@ -229,6 +227,7 @@ def _build_visual_groups(
         _section_heading_bboxes_by_page(new_pages),
     )
     groups: list[ProseSourceVisualGroup] = []
+    render_cache: dict[tuple[int, int], object] = {}
     for change in candidates:
         old_snippets = _change_highlights(change, side="old")
         new_snippets = _change_highlights(change, side="new")
@@ -240,6 +239,7 @@ def _build_visual_groups(
                 old_snippets,
                 side="old",
                 excluded_bboxes_by_page=old_prose_blockers,
+                render_cache=render_cache,
             )
             new_visuals, new_omitted_page_count = _build_side_visuals(
                 new_document,
@@ -248,6 +248,7 @@ def _build_visual_groups(
                 new_snippets,
                 side="new",
                 excluded_bboxes_by_page=new_prose_blockers,
+                render_cache=render_cache,
             )
         else:
             old_visuals, old_omitted_page_count = [], 0
@@ -375,7 +376,7 @@ def _is_wrapped_heading_continuation(block: DocumentBlock) -> bool:
 
 
 def _eligible_change(change: SectionChange) -> bool:
-    """Use screenshots only when text walls would materially hurt scanning."""
+    """Every technical body change is eligible, including a single word."""
 
     if change.role != "technical" or change.change_type == "unchanged":
         return False
@@ -384,13 +385,7 @@ def _eligible_change(change: SectionChange) -> bool:
         for section in (change.old_section, change.new_section)
     ):
         return False
-    changed_characters = sum(
-        len(value) for value in _change_snippets(change, side="old")
-    )
-    changed_characters += sum(
-        len(value) for value in _change_snippets(change, side="new")
-    )
-    return changed_characters >= PROSE_SOURCE_VISUAL_MIN_CHANGED_CHARACTERS
+    return True
 
 
 def _change_snippets(change: SectionChange, *, side: str) -> tuple[str, ...]:
@@ -653,13 +648,21 @@ def _build_side_visuals(
         int,
         tuple[tuple[float, float, float, float], ...],
     ] | None = None,
+    render_cache: dict[tuple[int, int], object] | None = None,
 ) -> tuple[list[ProseSourceVisual], int]:
-    if section is None or not snippets:
+    if section is None:
         return [], 0
     snippets_by_page = _assign_snippets_to_pages(section, snippets)
     page_body_by_number = dict(
         section.page_bodies or ((section.start_page, section.body),)
     )
+    # An unresolved location still has authoritative section source pages.
+    # Show those pages neutrally, rather than dropping the screenshot.
+    located_texts = {_snippet_text(s) for values in snippets_by_page.values() for s in values}
+    if not snippets_by_page or any(s.text not in located_texts for s in snippets):
+        for p in range(section.start_page, section.end_page + 1):
+            if p in pages:
+                snippets_by_page.setdefault(p, ())
     candidates: list[
         tuple[
             int,
@@ -674,6 +677,12 @@ def _build_side_visuals(
         if page is None or page.page_bbox is None:
             continue
         page_body = page_body_by_number.get(page_number, "")
+        body_tokens = " " + " ".join(_tokens(page_body)) + " "
+        page_snippets = tuple(
+            _SnippetHighlight(s.text, frozenset())
+            if len(re.findall("(?=" + re.escape(" " + " ".join(_tokens(s.text)) + " ") + ")", body_tokens)) > 1 else s
+            for s in page_snippets
+        )
         section_boundary_bboxes = _section_page_boundary_bboxes(
             page,
             section,
@@ -696,30 +705,9 @@ def _build_side_visuals(
             allowed_text=page_body,
             excluded_bboxes=owned_exclusions,
         )
-        context_boxes = _expand_boxes_to_complete_paragraph_lines(
-            page.blocks,
-            context_anchor_boxes,
-            allowed_text=page_body,
-            excluded_bboxes=owned_exclusions,
-            blocking_bboxes=(
-                *(excluded_bboxes_by_page or {}).get(page_number, ()),
-                *section_boundary_bboxes,
-            ),
-        )
-        if not context_boxes:
-            continue
-        crop_regions = _crop_regions(
-            page_bbox=page.page_bbox,
-            boxes=context_boxes,
-            blocking_bboxes=(
-                *(excluded_bboxes_by_page or {}).get(page_number, ()),
-                *section_boundary_bboxes,
-            ),
-            noise_bboxes=page.visual_noise_bboxes,
-            vector_graphic_bboxes=page.vector_graphic_bboxes,
-        )
-        if not crop_regions:
-            continue
+        # Display ownership is wider than highlight ownership: keeping the
+        # original page includes headings, all columns and surrounding prose.
+        crop_regions = (page.page_bbox,)
         matched_extent = sum(
             max(0.0, box[3] - box[1]) for box in highlight_boxes
         )
@@ -737,16 +725,24 @@ def _build_side_visuals(
             )
         )
     ranked = sorted(candidates, key=lambda item: (-item[1], item[0]))
-    selected = ranked[:PROSE_SOURCE_VISUAL_MAX_PAGES_PER_SIDE]
+    selected = ranked
     selected.sort(key=lambda item: item[0])
     visuals: list[ProseSourceVisual] = []
     for page_number, _score, boxes, crop_regions, matched_snippet_count in selected:
         page = pages[page_number]
-        image = _render_page(
-            document,
-            page_number,
-            dpi=PROSE_SOURCE_VISUAL_RENDER_DPI,
-        )
+        cache = render_cache if render_cache is not None else {}
+        key = (id(document), page_number)
+        image = cache.get(key)
+        if image is None:
+            image = _render_page(document, page_number, dpi=PROSE_SOURCE_VISUAL_RENDER_DPI)
+            # Bound decoded image memory within this one source-snapshot run.
+            if len(cache) >= 8:
+                del cache[next(iter(cache))]
+            cache[key] = image
+        raw_uri = image.info.get("protocol_raw_jpeg")
+        if raw_uri is None:
+            raw_uri = _jpeg_data_uri(image)
+            image.info["protocol_raw_jpeg"] = raw_uri
         for crop_index, crop_bbox in enumerate(crop_regions):
             crop_highlight_boxes = tuple(
                 box for box in boxes if _bboxes_overlap(box, crop_bbox)
@@ -763,18 +759,19 @@ def _build_side_visuals(
                     page_number=page_number,
                     crop_bbox=crop_bbox,
                     image_data_uri=_jpeg_data_uri(crop),
+                    raw_image_data_uri=raw_uri,
                     highlight_region_count=len(crop_highlight_boxes),
                     matched_snippet_count=(
                         matched_snippet_count if crop_index == 0 else 0
                     ),
-                    precision="source-coordinate-word-translucent-highlight",
+                    precision=("source-coordinate-word-translucent-highlight" if crop_highlight_boxes else "source-page-unlocalized"),
                     source_words=_owned_crop_words(
                         page, crop_bbox,
                         (*page.visual_noise_bboxes,
                          *(excluded_bboxes_by_page or {}).get(page_number, ()),
                          *_section_page_boundary_bboxes(page, section, page_number=page_number)),
                         page_body_by_number.get(page_number, ""),
-                    ),
+                    ) if crop_highlight_boxes else (),
                     source_view_box=_rounded_crop_view_box(page.page_bbox, crop_bbox, image.size),
                 )
             )
@@ -1531,6 +1528,14 @@ def _assign_snippets_to_pages(
         score, page_number = max(scored)
         if score < 0.20:
             continue
+        tied_pages = [p for value, p in scored if value == score]
+        if len(tied_pages) > 1:
+            # Repeated text does not prove which occurrence changed. Keep all
+            # candidate pages, with no asserted changed token positions.
+            neutral = _SnippetHighlight(_snippet_text(snippet), frozenset())
+            for p in tied_pages:
+                assigned[p].append(neutral)
+            continue
         assigned[page_number].append(snippet)
         # A sentence may cross a physical page.  Keep an adjacent page when it
         # contributes several otherwise missing words and materially improves
@@ -1577,6 +1582,7 @@ def _highlight_boxes(
         )
     )
     selected: dict[tuple[float, float, float, float], None] = {}
+    block_occurrences = Counter(tuple(_tokens(block.text)) for block in materialized)
     matched_snippets = 0
     for snippet in snippets:
         snippet_text = _snippet_text(snippet)
@@ -1591,6 +1597,8 @@ def _highlight_boxes(
         snippet_matched = False
         for block in materialized:
             ordered_block_tokens = _tokens(block.text)
+            if isinstance(snippet, _SnippetHighlight) and block_occurrences[tuple(ordered_block_tokens)] > 1:
+                continue  # A repeated physical line is not a unique changed occurrence.
             block_tokens = set(ordered_block_tokens)
             if not block_tokens:
                 continue
@@ -1613,7 +1621,7 @@ def _highlight_boxes(
                     matcher,
                     changed_indexes,
                 )
-                if not block.word_boxes:
+                if not block.word_boxes and isinstance(snippet, str):
                     changed_boxes = (block.bbox,)
                 visible_bboxes = tuple(
                     visible_bbox

@@ -130,15 +130,15 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
             self.assertNotIn('class="prose-source-details"', html)
             self.assertIn('class="prose-text-details"', html)
-            self.assertIn("查看文字识别明细", html)
+            self.assertIn("展开文字识别明细", html)
             self.assertIn("原文坐标浅色标注", html)
             self.assertLess(html.index('class="prose-source-visual-grid"'), html.index('class="prose-text-details"'))
 
             first_view = _FirstViewText()
             first_view.feed(html)
             first_view.close()
-            self.assertIn(old_steps[0], "".join(first_view.parts))
-            self.assertLess(html.index('class="reader-focus"'), html.index('class="prose-source-visual-grid"'))
+            self.assertNotIn(old_steps[0], "".join(first_view.parts))
+            self.assertLess(html.index('class="prose-source-visual-grid"'), html.index('class="reader-focus"'))
             self.assertIn("Calibration step 1 uses", html)
             self.assertIn("101", html)
 
@@ -150,7 +150,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             self.assertGreater(visuals[0]["new_highlight_region_count"], 0)
             self.assertNotIn("image_data_uri", json.dumps(visuals))
 
-    def test_short_change_keeps_compact_text_without_source_screenshot(self) -> None:
+    def test_short_change_shows_source_page_before_folded_text(self) -> None:
         """A small wording edit should not pay the visual weight of a PDF crop."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -169,11 +169,11 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-            self.assertNotIn('class="prose-source-visual-grid"', html)
+            self.assertIn('class="prose-source-visual-grid"', html)
             self.assertNotIn('class="prose-source-details"', html)
             self.assertIn("100", html)
             self.assertIn("120", html)
-            self.assertEqual([], payload["prose_source_visuals"])
+            self.assertEqual(1, len(payload["prose_source_visuals"]))
 
     def test_figure_only_change_renders_raw_images_without_text_comparison(self) -> None:
         """A Figure change remains visible as old/new raw images, never as label-wall diff."""
@@ -1542,7 +1542,8 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             )
 
             self.assertEqual([], warnings)
-            self.assertEqual([], visuals)
+            self.assertTrue(visuals)
+            self.assertTrue(all(v.highlight_region_count == 0 for g in visuals for v in (*g.old_visuals, *g.new_visuals)))
 
     def test_partial_table_overlap_is_subtracted_from_a_prose_highlight(self) -> None:
         """A text block crossing a table boundary must not tint the table-owned pixels."""

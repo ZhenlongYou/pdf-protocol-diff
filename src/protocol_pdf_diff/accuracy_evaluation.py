@@ -590,7 +590,7 @@ def _reader_scope_key(payload_item: dict[str, Any], *, fallback: str = "") -> st
     """Distinguish legacy payloads from explicitly suppressed reader cards."""
 
     if "reader_card_id" in payload_item:
-        value = payload_item.get("reader_card_id")
+        value = payload_item.get("reader_card_id") or payload_item.get("appendix_card_id")
         return str(value) if value else "__suppressed__"
     return fallback
 
@@ -845,6 +845,7 @@ class _VisibleHTMLTextParser(HTMLParser):
         self.hidden_tag_depth = 0
         self.closed_details_depth = 0
         self.summary_depth = 0
+        self._details_hidden: list[bool] = []
         self.blocks: list[tuple[str, list[str]]] = []
         self._active_blocks: list[int] = []
         self._tag_stack: list[tuple[str, int | None]] = []
@@ -855,7 +856,7 @@ class _VisibleHTMLTextParser(HTMLParser):
         element_id = attr_map.get("id") or ""
         opened_block: int | None = None
         if re.fullmatch(
-            r"(?:change|table-change|formula|visual-review)-\d+",
+            r"(?:(?:change|table-change)-(?:appendix-)?|(?:formula|visual-review)-)\d+",
             element_id,
         ):
             opened_block = len(self.blocks)
@@ -865,10 +866,12 @@ class _VisibleHTMLTextParser(HTMLParser):
             self._tag_stack.append((normalized, opened_block))
         if normalized in {"style", "script"}:
             self.hidden_tag_depth += 1
-        elif normalized == "details" and not any(
-            key.casefold() == "open" for key, _value in attrs
-        ):
-            self.closed_details_depth += 1
+        elif normalized == "details":
+            classes = set((attr_map.get("class") or "").split())
+            auditable = bool(classes & {"prose-text-details", "table-text-details", "similarity-review-appendix", "focus-more", "table-cell-detail", "snippet-detail"})
+            hidden = "open" not in attr_map and not auditable
+            self._details_hidden.append(hidden)
+            self.closed_details_depth += int(hidden)
         elif normalized == "summary":
             self.summary_depth += 1
         elif normalized == "sub" and self._is_visible():
@@ -887,8 +890,8 @@ class _VisibleHTMLTextParser(HTMLParser):
             self.hidden_tag_depth -= 1
         elif normalized == "summary" and self.summary_depth:
             self.summary_depth -= 1
-        elif normalized == "details" and self.closed_details_depth:
-            self.closed_details_depth -= 1
+        elif normalized == "details" and self._details_hidden:
+            self.closed_details_depth -= int(self._details_hidden.pop())
         if visible_before_close and normalized in self._BLOCK_TAGS:
             self._append_visible(" ")
         while self._tag_stack:
@@ -942,7 +945,7 @@ def _read_markdown_evidence(path: Path) -> _ReaderSurfaceEvidence:
     text = path.read_text(encoding="utf-8")
     return _ReaderSurfaceEvidence(
         full_text=text,
-        blocks=_split_reader_blocks(text, r"(?m)^### (?:T|F|V)?\d+\.\s"),
+        blocks=_split_reader_blocks(text, r"(?m)^### (?:A-[CT]|T|F|V)?\d+\.\s"),
     )
 
 
@@ -952,7 +955,7 @@ def _read_text_evidence(path: Path) -> _ReaderSurfaceEvidence:
     text = path.read_text(encoding="utf-8")
     return _ReaderSurfaceEvidence(
         full_text=text,
-        blocks=_split_reader_blocks(text, r"(?m)^(?:T|F|V)?\d+\.\s"),
+        blocks=_split_reader_blocks(text, r"(?m)^(?:A-[CT]|T|F|V)?\d+\.\s"),
     )
 
 
@@ -971,7 +974,7 @@ def _split_reader_blocks(
             end = match.end() + section_break.start()
         block = " ".join(text[match.start() : end].split())
         if block:
-            label_match = re.match(r"(?:###\s+)?((?:T|F|V)?\d+)\.", block)
+            label_match = re.match(r"(?:###\s+)?((?:A-[CT]|T|F|V)?\d+)\.", block)
             if label_match:
                 label = label_match.group(1)
                 key = f"C{label}" if label.isdigit() else label
@@ -986,6 +989,8 @@ def _html_reader_block_key(element_id: str) -> str:
     return {
         "change": f"C{number}",
         "table-change": f"T{number}",
+        "change-appendix": f"A-C{number}",
+        "table-change-appendix": f"A-T{number}",
         "formula": f"F{number}",
         "visual-review": f"V{number}",
     }[prefix]

@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-SCREENSHOT-FIRST-20260910
+    acceptance_id: REQ-SCREENSHOT-FIRST
+    user_symptom: "报告短差异仍是纯文字，相似度1.000占据主清单，表格截图过小无法理解。"
+    discovered_via: user_counterexample
+    failure_mechanism: "500字符截图门槛、文字优先布局、未分离显示分数附录及检测bbox与展示视口。"
+    red_green_pair_id: PAIR-SCREENSHOT-FIRST
+    regression_test_id: SCREENSHOT_FIRST_TEST
+    public_path_rerun_id: RUN-SCREENSHOT-REAL
+    state: verified
   - id: DEF-CONTENT-ONLY-20260909
     acceptance_id: REQ-CONTENT-ONLY
     user_symptom: "大小写、空格、作者、邮箱、目录与无实际内容变化的表格归属提示产生无价值差异。"

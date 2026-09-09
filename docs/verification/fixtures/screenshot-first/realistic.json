@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "short-real-pdf",
+      "kind": "short"
+    },
+    {
+      "id": "small-table",
+      "kind": "table"
+    }
+  ]
+}

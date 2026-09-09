@@ -3411,6 +3411,10 @@ def _extract_table_lines_and_visuals(
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
             source_text=_table_bbox_source_text(geometry_words, bbox),
+            context_words=tuple(
+                (str(w.get("text", "")), float(w["x0"]), float(w["top"]), float(w["x1"]), float(w["bottom"]))
+                for w in geometry_words if _layout_word_center_inside_box(w, bbox)
+            ),
         )  # 只为通过过滤的表格生成截图证据。
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
@@ -4369,6 +4373,7 @@ def _build_table_visual(
     row_alignment_reliable: bool = False,
     data_rows_fully_represented: bool = False,
     source_text: str = "",
+    context_words: tuple[tuple[str, float, float, float, float], ...] = (),
 ) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
@@ -4401,9 +4406,29 @@ def _build_table_visual(
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
             source_text=source_text,
+            context_image_data_uri=_table_context_image(page),
+            context_bbox=_table_page_bbox(page),
+            context_words=context_words,
         ),
         "",
     )
+
+
+def _table_context_image(page: object) -> str:
+    """Display a complete neutral page without changing table/OCR ownership.
+
+    pdfplumber's page lifetime bounds the cache; all tables on this page share
+    one encoded image. The small detector crop remains the OCR input.
+    """
+    cached = getattr(page, "_protocol_context_image", None)
+    if isinstance(cached, str):
+        return cached
+    try:
+        uri = _image_to_data_uri(page.to_image(resolution=_TABLE_SCREENSHOT_RESOLUTION).original.convert("RGB"))
+    except Exception:
+        return ""
+    page._protocol_context_image = uri
+    return uri
 
 
 def _table_bbox_source_text(

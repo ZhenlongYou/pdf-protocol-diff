@@ -224,6 +224,9 @@ class TableVisual:
     row_alignment_reliable: bool = False  # 多行单元格已取得可靠行对齐时为真；缺证据时禁止据此隐藏正文。
     data_rows_fully_represented: bool = False  # 允许多层表头留在正文，但每个输出数据行的源字符必须逐列守恒。
     source_text: str = field(default="", repr=False)  # bbox 内坐标词只供读者层去重，结构化行和 JSON 审计不依赖它。
+    context_image_data_uri: str = field(default="", repr=False)
+    context_bbox: tuple[float, float, float, float] | None = None
+    context_words: tuple[tuple[str, float, float, float, float], ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -513,6 +516,7 @@ class ProseSourceVisual:
     precision: str = "source-coordinate-region"
     source_words: tuple[tuple[float, float, float, float, str], ...] = ()  # 实际源词；空词标记被过滤/跨block的断点，禁止跨断点导航。
     source_view_box: tuple[float, float, float, float] | None = None  # 像素取整后截图实际对应的 PDF 区域。
+    raw_image_data_uri: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)

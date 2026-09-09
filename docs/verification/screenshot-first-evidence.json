@@ -1,0 +1,991 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "screenshot-first-20260910",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC---INIT--",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-ACCURACY-EVALUATION",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "ab04d71dc6f9baaebc395a3f7608f1852ba8c970b0def4b060bd4fd57b597d2c",
+          "size_bytes": 43864
+        },
+        {
+          "id": "SRC-CATALOG-EVIDENCE",
+          "path": "src/protocol_pdf_diff/catalog_evidence.py",
+          "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
+          "size_bytes": 1808
+        },
+        {
+          "id": "SRC-COMPARE",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "d44760994addc79917a18a49002d72327292ecf931fbdb75853a2ec448a212f6",
+          "size_bytes": 269767
+        },
+        {
+          "id": "SRC-COMPARISON-JOB",
+          "path": "src/protocol_pdf_diff/comparison_job.py",
+          "sha256": "deaa0699c4beb3cc70d91a0d0bf2a9bff73939c2e1cc0846a2b038da289ab784",
+          "size_bytes": 11848
+        },
+        {
+          "id": "SRC-COMPARISON-SESSION",
+          "path": "src/protocol_pdf_diff/comparison_session.py",
+          "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+          "size_bytes": 1338
+        },
+        {
+          "id": "SRC-CONTENT-EQUIVALENCE",
+          "path": "src/protocol_pdf_diff/content_equivalence.py",
+          "sha256": "7d3430dba873d35b3dc54f7cedaad018209fd81b5a99ff20ca994a4f1ea1f9ef",
+          "size_bytes": 3045
+        },
+        {
+          "id": "SRC-DESKTOP-GUI",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
+          "size_bytes": 65405
+        },
+        {
+          "id": "SRC-DESKTOP-VISUALS",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-EVIDENCE-ALIGNMENT",
+          "path": "src/protocol_pdf_diff/evidence_alignment.py",
+          "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+          "size_bytes": 15836
+        },
+        {
+          "id": "SRC-EXACT-MATCH",
+          "path": "src/protocol_pdf_diff/exact_match.py",
+          "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+          "size_bytes": 4055
+        },
+        {
+          "id": "SRC-FIGURE-FILTERS",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "527bfb8ea9b8c1e7784b864789fe0dbcd31d964c9cda648507fc54e982268f49",
+          "size_bytes": 17164
+        },
+        {
+          "id": "SRC-FORMULA-VISUALS",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-GLYPH-EVIDENCE",
+          "path": "src/protocol_pdf_diff/glyph_evidence.py",
+          "sha256": "7bf776b4991c964581d8bd8a47992555edb900d47e97b2f2cba8286cc4a2c5f5",
+          "size_bytes": 6535
+        },
+        {
+          "id": "SRC-HEADING-EVIDENCE",
+          "path": "src/protocol_pdf_diff/heading_evidence.py",
+          "sha256": "4d0a0d572679a01683b2f5ef66b68ed90e076bea2ff1f7a4d0fdae3aba78e2e2",
+          "size_bytes": 8563
+        },
+        {
+          "id": "SRC-LAYOUT-BACKEND",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-LAYOUT-BLOCKS",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "a5d90d28d4e403227a1d4e9120bb40f5304078aa807d72e04ef1f54e47de8626",
+          "size_bytes": 17605
+        },
+        {
+          "id": "SRC-MODELS",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "954cabdaab0d90cc6701eafb029dae2bb53b1605cba5d30b1e30c6e439573094",
+          "size_bytes": 28364
+        },
+        {
+          "id": "SRC-MONOTONIC-ALIGNMENT",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-PAGE-FURNITURE",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-PAGE-OCR",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-PARSING-BENCHMARK",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-PDF-EXTRACT",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "4ea492ad3e67ff7140e9f6e8c0e24b7596321eb7e89162685b0f55acf9546061",
+          "size_bytes": 331301
+        },
+        {
+          "id": "SRC-PROGRESS",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+          "size_bytes": 2087
+        },
+        {
+          "id": "SRC-PROSE-SOURCE-VISUALS",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "8c0e69af959f422952bb43ea14a102b8e72bd3cdca65c78e35bc99ae2d27fef1",
+          "size_bytes": 84766
+        },
+        {
+          "id": "SRC-QUALITY",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
+          "size_bytes": 28701
+        },
+        {
+          "id": "SRC-READER-FOCUS",
+          "path": "src/protocol_pdf_diff/reader_focus.py",
+          "sha256": "d08985139e9835011cffef1454f574e3d67085f0fbc014b52b8a9dbcae11eaa4",
+          "size_bytes": 15601
+        },
+        {
+          "id": "SRC-REPORTING",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "32fd0b3c35825e7ec74e0f60532007cecf93b9861c0a4d5d1ec518aea5aaeefd",
+          "size_bytes": 526030
+        },
+        {
+          "id": "SRC-SAMPLE-DATA",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-SCREENSHOT-PRESENTATION",
+          "path": "src/protocol_pdf_diff/screenshot_presentation.py",
+          "sha256": "2d218efc631df850fd34f2524250441150c9b41fd8a6d124cb96234ce51a37a8",
+          "size_bytes": 3888
+        },
+        {
+          "id": "SRC-SECTIONING",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "658c1b056fe52dfa04d8a043736adbbec427ed67283391ef8d6a77e904961083",
+          "size_bytes": 150435
+        },
+        {
+          "id": "SRC-SOURCE-REGIONS",
+          "path": "src/protocol_pdf_diff/source_regions.py",
+          "sha256": "e3efb796a44ba8e607052ccf08cbb003ed06bf0d4fdd67171cfeb45cc2163423",
+          "size_bytes": 5422
+        },
+        {
+          "id": "SRC-TABLE-CODEC",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-TEXT-UTILS",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "695ba8fad442c6281a3f2ec622e78f8bcaea730863e36d44fad0b72d77b199e9",
+          "size_bytes": 40594
+        },
+        {
+          "id": "SRC-UI-SHARED",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
+          "size_bytes": 4116
+        },
+        {
+          "id": "SRC-VENV-BOOTSTRAP",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-VISUAL-PREVIEW",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
+        },
+        {
+          "id": "SRC-VISUAL-WATCHDOG",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "a2c27298cc630375fe1efda4d030040b293084b828a578be535e593ddd65e622",
+          "size_bytes": 33821
+        },
+        {
+          "id": "SRC-WEBVIEW-GUI",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
+          "size_bytes": 23963
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-SCREENSHOT-FIRST",
+          "observable": "Show full source images before folded text; retain paired display-one facts in an end appendix excluded from main counts.",
+          "authority": {
+            "kind": "user",
+            "locator": "docs/verification/screenshot-first-20260910.md; current task user three screenshot requirements"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "all frozen screenshot-preservation and exclusion assertions",
+            "unit": "report facts",
+            "locator": "fixture expect objects"
+          },
+          "oracle_ids": [
+            "ORACLE-SCREENSHOT"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-SCREENSHOT-NOMINAL"
+            ],
+            "boundary": [
+              "IN-SCREENSHOT-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-SCREENSHOT-INVALID"
+            ],
+            "adversarial": [
+              "IN-SCREENSHOT-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-SCREENSHOT-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-SCREENSHOT-KNOWN-FAILURE"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-SCREENSHOT-NOMINAL",
+          "path": "docs/verification/fixtures/screenshot-first/nominal.json",
+          "sha256": "be8d43fc5bf6424d8f46efcaa9c65d85a04895e32fc2f191d4733d25ea6cf390",
+          "size_bytes": 141,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        },
+        {
+          "id": "IN-SCREENSHOT-BOUNDARY",
+          "path": "docs/verification/fixtures/screenshot-first/boundary.json",
+          "sha256": "133918a71af49ba89b2247053e80937034de3ba8541857baa8987ef063da720f",
+          "size_bytes": 264,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        },
+        {
+          "id": "IN-SCREENSHOT-INVALID",
+          "path": "docs/verification/fixtures/screenshot-first/invalid.json",
+          "sha256": "dff87d919738f989e4969ba30915be20279e4ab13fd5b8103c76e794bf5c120b",
+          "size_bytes": 81,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        },
+        {
+          "id": "IN-SCREENSHOT-ADVERSARIAL",
+          "path": "docs/verification/fixtures/screenshot-first/adversarial.json",
+          "sha256": "65087822412153be0568f4b59a87367ac8f089bd9bdc51dc8c8c1a42269d796c",
+          "size_bytes": 159,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        },
+        {
+          "id": "IN-SCREENSHOT-REALISTIC",
+          "path": "docs/verification/fixtures/screenshot-first/realistic.json",
+          "sha256": "f3e489210b715762be4b56ba63ebc1d706c3b46ed27cf8f80c05bcb5d1e99a7b",
+          "size_bytes": 147,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        },
+        {
+          "id": "IN-SCREENSHOT-KNOWN-FAILURE",
+          "path": "docs/verification/fixtures/screenshot-first/known-failure.json",
+          "sha256": "fa74d45d6777717a9ea5b11d8a3cfb05b1ae04609975846f94dd52bf4291b6bb",
+          "size_bytes": 268,
+          "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-SCREENSHOT",
+          "path": "docs/verification/screenshot_first_probe.py",
+          "sha256": "74e5d39ac59a9d3c064c20e5cce2299135f99f0b4f41db58a683dc73ca1b36eb",
+          "size_bytes": 4270
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-SCREENSHOT",
+          "path": "docs/verification/screenshot_first_oracle.py",
+          "sha256": "8f775de18e43a02d46a73d9ee7a0e8b9f31335e418f2e236392b0d4393593435",
+          "size_bytes": 2035,
+          "kind": "independent_reference",
+          "independence_basis": "Display partitions and complete source page dimensions are hand specified. Oracle imports no production module and rejects missing images, lost raw facts and missing source warnings.",
+          "production_source_ids": [
+            "SRC---INIT--",
+            "SRC-ACCURACY-EVALUATION",
+            "SRC-CATALOG-EVIDENCE",
+            "SRC-COMPARE",
+            "SRC-COMPARISON-JOB",
+            "SRC-COMPARISON-SESSION",
+            "SRC-CONTENT-EQUIVALENCE",
+            "SRC-DESKTOP-GUI",
+            "SRC-DESKTOP-VISUALS",
+            "SRC-EVIDENCE-ALIGNMENT",
+            "SRC-EXACT-MATCH",
+            "SRC-FIGURE-FILTERS",
+            "SRC-FORMULA-VISUALS",
+            "SRC-GLYPH-EVIDENCE",
+            "SRC-HEADING-EVIDENCE",
+            "SRC-LAYOUT-BACKEND",
+            "SRC-LAYOUT-BLOCKS",
+            "SRC-MODELS",
+            "SRC-MONOTONIC-ALIGNMENT",
+            "SRC-PAGE-FURNITURE",
+            "SRC-PAGE-OCR",
+            "SRC-PARSING-BENCHMARK",
+            "SRC-PDF-EXTRACT",
+            "SRC-PROGRESS",
+            "SRC-PROSE-SOURCE-VISUALS",
+            "SRC-QUALITY",
+            "SRC-READER-FOCUS",
+            "SRC-REPORTING",
+            "SRC-SAMPLE-DATA",
+            "SRC-SCREENSHOT-PRESENTATION",
+            "SRC-SECTIONING",
+            "SRC-SOURCE-REGIONS",
+            "SRC-TABLE-CODEC",
+            "SRC-TEXT-UTILS",
+            "SRC-UI-SHARED",
+            "SRC-VENV-BOOTSTRAP",
+            "SRC-VISUAL-PREVIEW",
+            "SRC-VISUAL-WATCHDOG",
+            "SRC-WEBVIEW-GUI"
+          ],
+          "validator_run_ids": [
+            "RUN-SCREENSHOT-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-REPORTING",
+          "path": "work/screenshot-first-gate/baseline-reporting.py",
+          "sha256": "f55aee3bb3fce53581c4e5eb36e68b61293ac99d64b56a3c61375da6a85e71ec",
+          "size_bytes": 519815,
+          "target_source_id": "SRC-REPORTING"
+        },
+        {
+          "id": "MUT-PROSE_SOURCE_VISUALS",
+          "path": "work/screenshot-first-gate/baseline-prose_source_visuals.py",
+          "sha256": "e6ba6b96a9a7954bf6a52d5d6d89349c4499f9be1206c33c034165027c079bd2",
+          "size_bytes": 83512,
+          "target_source_id": "SRC-PROSE-SOURCE-VISUALS"
+        },
+        {
+          "id": "MUT-PDF_EXTRACT",
+          "path": "work/screenshot-first-gate/baseline-pdf_extract.py",
+          "sha256": "3d410cdde48fe5a63171aeb0366c053b962256d8e5e919e373817c4ac8f4a7eb",
+          "size_bytes": 330217,
+          "target_source_id": "SRC-PDF-EXTRACT"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-SCREENSHOT-REAL",
+          "path": "work/screenshot-first-gate/real-artifact.json",
+          "producer_run_id": "RUN-SCREENSHOT-REAL",
+          "required": true,
+          "min_size_bytes": 30
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-SCREENSHOT-REPORT-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-REPORTING"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-REPORT-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-SOURCE-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-PROSE_SOURCE_VISUALS"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-SOURCE-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-TABLE-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-PDF_EXTRACT"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-TABLE-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/realistic.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [],
+          "input_ids": [
+            "IN-SCREENSHOT-NOMINAL",
+            "IN-SCREENSHOT-BOUNDARY",
+            "IN-SCREENSHOT-INVALID",
+            "IN-SCREENSHOT-ADVERSARIAL",
+            "IN-SCREENSHOT-REALISTIC",
+            "IN-SCREENSHOT-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_oracle.py",
+            "docs/verification/fixtures/screenshot-first/nominal.json",
+            "docs/verification/fixtures/screenshot-first/boundary.json",
+            "docs/verification/fixtures/screenshot-first/invalid.json",
+            "docs/verification/fixtures/screenshot-first/adversarial.json",
+            "docs/verification/fixtures/screenshot-first/realistic.json",
+            "docs/verification/fixtures/screenshot-first/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_ORACLE_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "oracle_ids": [
+            "ORACLE-SCREENSHOT"
+          ]
+        },
+        {
+          "id": "RUN-SCREENSHOT-SUITE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-NOMINAL",
+            "IN-SCREENSHOT-BOUNDARY",
+            "IN-SCREENSHOT-INVALID",
+            "IN-SCREENSHOT-ADVERSARIAL",
+            "IN-SCREENSHOT-REALISTIC",
+            "IN-SCREENSHOT-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/nominal.json",
+            "docs/verification/fixtures/screenshot-first/boundary.json",
+            "docs/verification/fixtures/screenshot-first/invalid.json",
+            "docs/verification/fixtures/screenshot-first/adversarial.json",
+            "docs/verification/fixtures/screenshot-first/realistic.json",
+            "docs/verification/fixtures/screenshot-first/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SCREENSHOT-REAL",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-SCREENSHOT"
+          ],
+          "input_ids": [
+            "IN-SCREENSHOT-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/screenshot_first_probe.py",
+            "docs/verification/fixtures/screenshot-first/realistic.json",
+            "--artifact",
+            "work/screenshot-first-gate/real-artifact.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "SCREENSHOT_FIRST_TEST",
+                "SCREENSHOT_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "interface": "report",
+          "observable": "Independently drawn PDF pages pass through run_diff and write_reports; source-page context, short-change images and folded text are checked.",
+          "produces_artifact_ids": [
+            "ART-SCREENSHOT-REAL"
+          ]
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-SCREENSHOT-FIRST",
+          "requirement_id": "REQ-SCREENSHOT-FIRST",
+          "defect_id": "DEF-SCREENSHOT-FIRST-20260910",
+          "test_id": "SCREENSHOT_FIRST_TEST",
+          "failure_signature": "SCREENSHOT_CONTRACT_FAIL",
+          "red_run_id": "RUN-SCREENSHOT-REPORT-RED",
+          "green_run_id": "RUN-SCREENSHOT-REPORT-GREEN"
+        },
+        {
+          "id": "PAIR-SCREENSHOT-SOURCE",
+          "requirement_id": "REQ-SCREENSHOT-FIRST",
+          "defect_id": "DEF-SCREENSHOT-FIRST-20260910",
+          "test_id": "SCREENSHOT_FIRST_TEST",
+          "failure_signature": "SCREENSHOT_CONTRACT_FAIL",
+          "red_run_id": "RUN-SCREENSHOT-SOURCE-RED",
+          "green_run_id": "RUN-SCREENSHOT-SOURCE-GREEN"
+        },
+        {
+          "id": "PAIR-SCREENSHOT-TABLE",
+          "requirement_id": "REQ-SCREENSHOT-FIRST",
+          "defect_id": "DEF-SCREENSHOT-FIRST-20260910",
+          "test_id": "SCREENSHOT_FIRST_TEST",
+          "failure_signature": "SCREENSHOT_CONTRACT_FAIL",
+          "red_run_id": "RUN-SCREENSHOT-TABLE-RED",
+          "green_run_id": "RUN-SCREENSHOT-TABLE-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-SCREENSHOT",
+          "requirement_ids": [
+            "REQ-SCREENSHOT-FIRST"
+          ],
+          "unit": "hand-authored case, no parameter selection",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-SCREENSHOT-NOMINAL",
+            "IN-SCREENSHOT-BOUNDARY",
+            "IN-SCREENSHOT-INVALID",
+            "IN-SCREENSHOT-ADVERSARIAL",
+            "IN-SCREENSHOT-REALISTIC",
+            "IN-SCREENSHOT-KNOWN-FAILURE"
+          ]
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-SCREENSHOT",
+          "path": "work/screenshot-first-gate/escaped-defects.yaml",
+          "sha256": "e633020bf91222e07a7030e5587c512fc67e14b80007bbbcbd548880aa259402",
+          "size_bytes": 602
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-SCREENSHOT-FIRST"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-SCREENSHOT-FIRST",
+          "PAIR-SCREENSHOT-SOURCE",
+          "PAIR-SCREENSHOT-TABLE"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-SCREENSHOT"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-SCREENSHOT-FIRST",
+          "PAIR-SCREENSHOT-SOURCE",
+          "PAIR-SCREENSHOT-TABLE"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-SCREENSHOT"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-SCREENSHOT-FIRST"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-SCREENSHOT"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-SCREENSHOT-REAL"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-SCREENSHOT-REPORT-RED",
+          "RUN-SCREENSHOT-REPORT-GREEN",
+          "RUN-SCREENSHOT-SOURCE-RED",
+          "RUN-SCREENSHOT-SOURCE-GREEN",
+          "RUN-SCREENSHOT-TABLE-RED",
+          "RUN-SCREENSHOT-TABLE-GREEN",
+          "RUN-SCREENSHOT-ORACLE",
+          "RUN-SCREENSHOT-SUITE",
+          "RUN-SCREENSHOT-REAL"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

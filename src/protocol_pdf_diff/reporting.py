@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .comparison_session import comparison_session
+from .screenshot_presentation import IMAGE_VIEWER, table_context_image
 
 import csv
 import difflib
@@ -422,6 +423,19 @@ def write_reports(
         new_sections=result.new_sections,
         full_document_selected=_full_document_selected_for_reader_cleanup(result),
     )
+    # This is a reader-selected display threshold, not semantic equality.
+    similarity_review_changes = [c for c in reader_changes if _displayed_similarity_one(c)]
+    similarity_review_tables = [c for c in reader_table_changes if _displayed_similarity_one(c)]
+    reader_changes = [c for c in reader_changes if not _displayed_similarity_one(c)]
+    reader_table_changes = [c for c in reader_table_changes if not _displayed_similarity_one(c)]
+    appendix_change_ids = {
+        _section_change_reader_identity(c): f"A-C{i}"
+        for i, c in enumerate(similarity_review_changes, 1)
+    }
+    appendix_table_ids = {
+        _table_change_reader_identity(c): f"A-T{i}"
+        for i, c in enumerate(similarity_review_tables, 1)
+    }
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
         for index, change in enumerate(
@@ -431,7 +445,7 @@ def write_reports(
     }
     reader_changes_by_identity = {
         _section_change_reader_identity(change): change
-        for change in reader_changes
+        for change in [*reader_changes, *similarity_review_changes]
     }
     reader_table_card_ids = {
         _table_change_reader_identity(change): f"T{index}"
@@ -442,11 +456,21 @@ def write_reports(
         changes=reader_changes,
     )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 的 raw 字段继续保存原始比较事实。
     markdown = _render_markdown(reader_result, options, reader_table_changes)
+    if similarity_review_changes or similarity_review_tables:
+        appendix_lines = ["", '<details><summary>相似度 1.000：按偏好不计入差异，可展开审查</summary>', "",
+                          "显示分数经过三位小数舍入；以下保留原始比较事实，未计入上方汇总。", ""]
+        _append_markdown_changes(appendix_lines, similarity_review_changes, start_index=1)
+        _append_markdown_table_changes(appendix_lines, similarity_review_tables)
+        appendix_lines = [re.sub(r"^### (T?)(\d+)\.", lambda m: "### A-" + ("T" if m[1] else "C") + m[2] + ".", line) for line in appendix_lines]
+        markdown += "\n".join([*appendix_lines, "</details>", ""])
+        markdown = markdown.replace(_empty_report_message(reader_result), "主差异清单为空；相似度 1.000 的配对证据收在末尾附录。")
     html = _render_html(
         reader_result,
         options,
         reader_table_changes,
         prose_source_visuals=result.prose_source_visuals,
+        similarity_review_changes=similarity_review_changes,
+        similarity_review_tables=similarity_review_tables,
     )
     text = _markdown_to_plain_text(markdown)
     csv_rows = _rows_for_csv(reader_changes)
@@ -455,6 +479,8 @@ def write_reports(
         "comparison_focus": "substantive_content",
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
+        "similarity_review_changes": [_change_to_dict(c) for c in similarity_review_changes],
+        "similarity_review_table_changes": [_table_change_to_dict(c) for c in similarity_review_tables],
         "old_pdf": str(result.old_pdf),
         "new_pdf": str(result.new_pdf),
         "old_total_pages": _source_page_count(result, "old"),
@@ -482,6 +508,7 @@ def write_reports(
                 "reader_card_id": reader_change_card_ids.get(
                     _section_change_reader_identity(change)
                 ),
+                "appendix_card_id": appendix_change_ids.get(_section_change_reader_identity(change)),
             }
             for change in result.changes
         ],
@@ -491,6 +518,7 @@ def write_reports(
                 "reader_card_id": reader_table_card_ids.get(
                     _table_change_reader_identity(change)
                 ),
+                "appendix_card_id": appendix_table_ids.get(_table_change_reader_identity(change)),
             }
             for change in table_changes
         ],
@@ -575,6 +603,17 @@ def write_reports(
         writer.writerows(table_csv_rows)
     json_path.write_text(json.dumps(sections_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    for original, name, rows in (
+        (csv_path, "similarity_review_changes.csv", _rows_for_csv(similarity_review_changes)),
+        (table_csv_path, "similarity_review_table_changes.csv", _rows_for_table_csv(similarity_review_tables)),
+    ):
+        with original.open(encoding="utf-8-sig", newline="") as handle:
+            fields = next(csv.reader(handle))
+        with (report_dir / name).open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+
     return {
         "report_dir": report_dir,
         "markdown": md_path,
@@ -582,8 +621,18 @@ def write_reports(
         "text": txt_path,
         "csv": csv_path,
         "table_csv": table_csv_path,
+        "similarity_review_csv": report_dir / "similarity_review_changes.csv",
+        "similarity_review_table_csv": report_dir / "similarity_review_table_changes.csv",
         "json": json_path,
     }
+
+
+def _displayed_similarity_one(change: SectionChange | TableChange) -> bool:
+    """Only paired items have a meaningful displayed similarity score."""
+    paired = (bool(change.old_section and change.new_section)
+              if isinstance(change, SectionChange)
+              else bool(change.old_tables and change.new_tables))
+    return paired and format(change.similarity, ".3f") == "1.000"
 
 
 def _section_change_reader_identity(change: SectionChange) -> tuple[int, int, str]:
@@ -869,7 +918,7 @@ def _markdown_to_plain_text(markdown: str) -> str:
 
     lines: list[str] = []
     for raw_line in markdown.splitlines():
-        line = raw_line.rstrip()
+        line = re.sub(r"</?(?:details|summary)(?:\s[^>]*)?>", "", raw_line.rstrip())
         stripped = line.strip()
         if not stripped:
             lines.append("")
@@ -902,6 +951,8 @@ def _render_html(
     table_changes: list[TableChange],
     *,
     prose_source_visuals: Iterable[ProseSourceVisualGroup] = (),
+    similarity_review_changes: Iterable[SectionChange] = (),
+    similarity_review_tables: Iterable[TableChange] = (),
 ) -> str:
     """Render an easy-to-scan standalone HTML review report."""
 
@@ -928,6 +979,21 @@ def _render_html(
         for group in materialized_source_visuals
         if group.old_visuals or group.new_visuals
     }
+    # Reader classification can become review after source images were built.
+    # Bind by stable source sections and use genuinely unannotated pixels.
+    for change in [*technical_changes, *similarity_review_changes]:
+        key = _section_change_visual_identity(change)
+        if key in prose_visual_lookup:
+            continue
+        candidates = [g for g in materialized_source_visuals
+                      if (g.old_section_id, g.new_section_id) == key[1:] and (g.old_visuals or g.new_visuals)]
+        if len(candidates) == 1 and change.change_type == "review":
+            group = candidates[0]
+            def neutral(visuals):
+                return tuple(replace(v, image_data_uri=v.raw_image_data_uri, highlight_region_count=0,
+                                     precision="source-page-unlocalized", source_words=())
+                             for v in visuals if v.raw_image_data_uri)
+            prose_visual_lookup[key] = replace(group, change_type="review", old_visuals=neutral(group.old_visuals), new_visuals=neutral(group.new_visuals))
     figure_source_visuals = tuple(
         group
         for group in materialized_source_visuals
@@ -964,6 +1030,8 @@ def _render_html(
     nav_items = "\n".join(nav_parts)
     if not nav_items:
         nav_items = f'<div class="empty-nav">{_escape(_empty_report_message(result))}</div>'
+        if similarity_review_changes or similarity_review_tables:
+            nav_items = '<div class="empty-nav">主差异清单为空；配对证据收在末尾附录。</div>'
 
     technical_cards = "\n".join(
         _render_change_html(
@@ -984,6 +1052,18 @@ def _render_html(
         technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
     table_visual_html = _render_table_changes_html(table_changes)
     figure_visual_html = _render_figure_source_visual_groups(figure_source_visuals)
+    appendix_cards = "".join(
+        _render_change_html(f"appendix-{i}", c, prose_source_visual=prose_visual_lookup.get(_section_change_visual_identity(c)))
+        for i, c in enumerate(similarity_review_changes, 1)
+    ) + "".join(_render_table_change_html(f"appendix-{i}", c) for i, c in enumerate(similarity_review_tables, 1))
+    appendix_html = (
+        '<details class="similarity-review-appendix" id="similarity-review-appendix">'
+        '<summary>相似度 1.000：按偏好不计入差异，可展开审查</summary>'
+        '<p>这些条目未计入上方汇总。显示分数经过三位小数舍入，原始比较事实保留如下。</p>'
+        + appendix_cards + '</details>' if appendix_cards else ""
+    )
+    if appendix_cards and not technical_changes and not table_changes:
+        technical_cards = '<section class="empty-state">主差异清单为空；相似度 1.000 的配对证据收在末尾附录。</section>'
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
@@ -1432,7 +1512,7 @@ def _render_html(
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
-      <p class="reader-guide">阅读顺序：先看变化明细，再按需定位原文。标为“需复核”的内容、像素变化及补充原图不等于已确认的技术变化；无法可靠核对的范围仍在顶部清单中保留。</p>
+      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。文字明细默认折叠，相似度显示为 1.000 的条目收在报告末尾。</p>
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -1450,9 +1530,11 @@ def _render_html(
       {technical_cards}
       {visual_review_html}
       {figure_visual_html}
+      {appendix_html}
     </main>
   </div>
 {FOCUS_SCRIPT}
+{IMAGE_VIEWER}
 </body>
 </html>
 """
@@ -1503,19 +1585,12 @@ def _render_change_html(
         if prose_source_visual is not None
         else ""
     )
-    if source_visual_html:
-        text_detail = (
-            '<details class="prose-text-details"><summary>查看文字识别明细</summary>'
-            '<div class="prose-text-details-body">完整片段已在上方逐条保留；'
-            '<a href="protocol_diff_data.json">查看全部审计数据及来源</a>。</div></details>'
-            if text_body
-            else ""
-        )
-        focus = render_change_focus(change, prose_source_visual, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
-        body = focus + source_visual_html + text_detail
-    else:
-        focus = render_change_focus(change, None, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
-        body = focus if focus else text_body
+    focus = render_change_focus(change, prose_source_visual, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
+    text_detail = (
+        '<details class="prose-text-details"><summary>展开文字识别明细</summary>'
+        + (focus or text_body) + '</details>' if text_body or focus else ""
+    )
+    body = (source_visual_html or '<p class="prose-source-empty">原页截图暂不可用；可展开文字明细核对。</p>') + text_detail
     if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
     return f"""
@@ -1647,7 +1722,7 @@ def _render_prose_source_visual_side(
             + (f' id="{_escape(source_prefix)}-{visual_index}"' if source_prefix else '')
             +
             f' data-source-view="{_escape(json.dumps(visual.source_view_box))}">'
-            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label)}</figcaption>'
+            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label if visual.highlight_region_count else "原页上下文，未标色")} · 点击放大</figcaption>'
             f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
             f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
             '</figure>'
@@ -4073,8 +4148,8 @@ def _render_table_change_html(
     """Render one changed logical table with auditable pairing metadata."""
 
     title = _table_change_title(change)
-    old_shot = _render_table_shot_group("旧版截图", change.old_tables)
-    new_shot = _render_table_shot_group("新版截图", change.new_tables)
+    old_shot = _render_table_shot_group("旧版截图", change.old_tables, change=change, side="old")
+    new_shot = _render_table_shot_group("新版截图", change.new_tables, change=change, side="new")
     rows_html = _render_table_row_summary(change)
     label = _CHANGE_LABELS.get(change.change_type, change.change_type)
     similarity = (
@@ -4087,9 +4162,8 @@ def _render_table_change_html(
           <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
           <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
           新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
-          <h4 class="table-focus-heading">先看具体变化</h4>
-          {rows_html}
           <div class="table-shot-grid">{old_shot}{new_shot}</div>
+          <details class="table-text-details"><summary>展开表格文字明细</summary>{rows_html}</details>
         </div>
     """
 
@@ -4117,17 +4191,17 @@ def _table_side_description(tables: tuple[TableVisual, ...]) -> str:
     return f"{title_text}（页 {pages}）"
 
 
-def _render_table_shot_group(label: str, tables: tuple[TableVisual, ...]) -> str:
+def _render_table_shot_group(label: str, tables: tuple[TableVisual, ...], *, change: TableChange | None = None, side: str = "old") -> str:
     """Render one side of a table screenshot group."""
 
     if not tables:
         return f'<div class="table-shot"><h4>{_escape(label)}</h4><div class="snippet">无对应表格截图</div></div>'
     heading = f"{label} · {len(tables)} 页" if len(tables) > 1 else f"{label} · 页 {tables[0].page_number} · 表格 {tables[0].table_number}"
-    pages = "".join(_render_one_table_shot_page(table) for table in tables)
+    pages = "".join(_render_one_table_shot_page(table, change=change, side=side) for table in tables)
     return f'<div class="table-shot"><h4>{_escape(heading)}</h4>{pages}</div>'
 
 
-def _render_one_table_shot_page(table: TableVisual) -> str:
+def _render_one_table_shot_page(table: TableVisual, *, change: TableChange | None = None, side: str = "old") -> str:
     """Render one table screenshot page inside a screenshot group."""
 
     caption = f"页 {table.page_number} · 表格 {table.table_number}"
@@ -4146,10 +4220,14 @@ def _render_one_table_shot_page(table: TableVisual) -> str:
             else '<div class="snippet">无截图：仅使用结构化表格行摘要</div>'
         )
     )  # 文字表格兜底没有截图，避免渲染空图片。
+    context_uri, highlighted = table_context_image(table, change, side)
+    if context_uri:
+        image_html = f'<img alt="{_escape(caption)} · 完整原页" src="{context_uri}">'
+        caption += " · 完整原页 · " + ("浅色差异标注" if highlighted else "未标色，供上下文核对") + " · 点击放大"
     return (
         f'<div class="table-shot-page"><div class="table-shot-page-label">{_escape(caption)}</div>'
         f"{image_html}"
-        f'<div class="snippet">{_escape(grid_summary)}</div></div>'
+        f'<details class="table-image-diagnostics"><summary>截图识别信息</summary><div class="snippet">{_escape(grid_summary)}</div></details></div>'
     )
 
 
@@ -13329,6 +13407,8 @@ def _table_visual_to_dict(table: TableVisual) -> dict[str, object]:
         "ocr_status": table.ocr_status,
         "ocr_text_preview": truncate(compact_inline(table.ocr_text), 500),
         "has_embedded_image": bool(table.image_data_uri),
+        "has_context_image": bool(table.context_image_data_uri),
+        "context_bbox": list(table.context_bbox) if table.context_bbox else None,
         "is_continuation": table.is_continuation,
         "content_fully_represented": table.content_fully_represented,
         "row_alignment_reliable": table.row_alignment_reliable,

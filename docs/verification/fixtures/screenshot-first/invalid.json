@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "id": "tampered",
+      "kind": "invalid"
+    }
+  ]
+}

@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：原页截图优先（2026-09-10）
+
+- task_id: `pdf-screenshot-first-20260910`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `219a794f3c725e80c2d3f2c4d7126e735a670d7f`。
+- status: in_progress。已实现原页优先、折叠文字、显示1.000末尾附录、完整表格上下文；正在全套回归、独立审查及STRICT真实报告验收。
+- 验收和恢复入口：`docs/verification/screenshot-first-20260910.md`；证据根 `/Users/mac/Documents/ProtocolPdfDiffReports/screenshot_first_20260910`。原始用户报告不覆盖。
+
 ## 当前任务：只报告实质内容变化（2026-09-09）
 
 - task_id: `pdf-content-only-20260909`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `8becb689f32edaa30d9a7c6f37afdf6bbca32f3d`。

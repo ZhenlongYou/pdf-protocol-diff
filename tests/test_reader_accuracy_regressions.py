@@ -2680,8 +2680,9 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual("modified", mixed_payload["change_type"])
         self.assertEqual(1, mixed_payload["row_change_count"])
         self.assertEqual(1, mixed_payload["review_count"])
-        self.assertIn("<strong>1</strong><span>变化表格</span>", mixed_html)
-        self.assertIn("<strong>1</strong><span>表格复核项</span>", mixed_html)
+        self.assertIn("<strong>0</strong><span>变化表格</span>", mixed_html)
+        self.assertIn('class="similarity-review-appendix"', mixed_html)
+        self.assertIn("<strong>0</strong><span>表格复核项</span>", mixed_html)
 
         conditional_old = [
             *old_rows,
@@ -3220,6 +3221,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             }
             audit = json.loads(paths["json"].read_text(encoding="utf-8"))
             csv_text = paths["table_csv"].read_text(encoding="utf-8")
+            csv_text += paths["similarity_review_table_csv"].read_text(encoding="utf-8")
 
         for kind, reader_output in reader_outputs.items():
             self.assertIn("γ0", reader_output)
