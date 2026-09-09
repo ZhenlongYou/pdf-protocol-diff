@@ -307,8 +307,8 @@
         {
           "id": "IN-ADVERSARIAL",
           "path": "docs/verification/fixtures/plot-axis/adversarial.json",
-          "sha256": "33a9cdf951c2c6c6f2c7d7d3efce46170997737dfe1963c354a724a35bcef6e2",
-          "size_bytes": 416,
+          "sha256": "968dc48a2e258fcc4da34f6701805609f303751db409e1139fd55c0af12939b0",
+          "size_bytes": 532,
           "provenance": "Hand-specified scene and expected real-table inventory, including the user axis-grid failure."
         },
         {
@@ -330,16 +330,16 @@
         {
           "id": "PROBE-PLOT",
           "path": "docs/verification/plot_axis_probe.py",
-          "sha256": "739a52f87c26e15c247add965f4ad27b82251390d21f9cdbd738889291b329bb",
-          "size_bytes": 4430
+          "sha256": "5e79cef9a7a82a55cc78c59f20b8f64994c380722e0775a46b0648a847c2953e",
+          "size_bytes": 4495
         }
       ],
       "oracles": [
         {
           "id": "ORACLE-PLOT",
           "path": "docs/verification/plot_axis_oracle.py",
-          "sha256": "f75a47912a5cd3456da17074fa5c6211f6d677df41456d4b9f38e53a4ad67ba0",
-          "size_bytes": 1434,
+          "sha256": "2768ab59137324beb8959e2e819e40f485e59204379b9fe82cdb4e786bba1c79",
+          "size_bytes": 1609,
           "kind": "independent_reference",
           "independence_basis": "Human-defined inventory assertions; imports no production module, no geometric classifier, and validates missing real data plus extra spurious tables.",
           "production_source_ids": [
@@ -408,6 +408,13 @@
           "path": "work/plot-axis-gate/unsplit-only.py",
           "sha256": "1c4061cb2751b0266a5ef4d92724a8265dcfb0f25e2a12eb43bb1f50b8b3508d",
           "size_bytes": 337783,
+          "target_source_id": "SRC-PDF_EXTRACT"
+        },
+        {
+          "id": "MUT-SYMBOL",
+          "path": "work/plot-axis-gate/semantic-symbols.py",
+          "sha256": "de9e0051d4eb95b0f45743d4d59e6c453cbdecc77651fb60ec2d642f8cc51c68",
+          "size_bytes": 337239,
           "target_source_id": "SRC-PDF_EXTRACT"
         }
       ],
@@ -870,6 +877,100 @@
               ]
             }
           }
+        },
+        {
+          "id": "RUN-SYMBOL-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-PLOT-AXIS"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-SYMBOL"
+          },
+          "probe_ids": [
+            "PROBE-PLOT"
+          ],
+          "input_ids": [
+            "IN-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/plot_axis_probe.py",
+            "docs/verification/fixtures/plot-axis/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "PLOT_AXIS_TEST",
+                "PLOT_AXIS_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SYMBOL-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-PLOT-AXIS"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-PLOT"
+          ],
+          "input_ids": [
+            "IN-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/plot_axis_probe.py",
+            "docs/verification/fixtures/plot-axis/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PLOT_AXIS_TEST",
+                "PLOT_AXIS_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
         }
       ],
       "red_green_pairs": [
@@ -899,6 +1000,15 @@
           "failure_signature": "PLOT_AXIS_CONTRACT_FAIL",
           "red_run_id": "RUN-SPLIT-RED",
           "green_run_id": "RUN-SPLIT-GREEN"
+        },
+        {
+          "id": "PAIR-PLOT-SYMBOL",
+          "requirement_id": "REQ-PLOT-AXIS",
+          "defect_id": "DEF-PLOT-AXIS-20260910",
+          "test_id": "PLOT_AXIS_TEST",
+          "failure_signature": "PLOT_AXIS_CONTRACT_FAIL",
+          "red_run_id": "RUN-SYMBOL-RED",
+          "green_run_id": "RUN-SYMBOL-GREEN"
         }
       ],
       "isolation_contracts": [
@@ -938,7 +1048,8 @@
         "pair_ids": [
           "PAIR-PLOT-AXIS",
           "PAIR-PLOT-SEPARATOR",
-          "PAIR-PLOT-SPLIT"
+          "PAIR-PLOT-SPLIT",
+          "PAIR-PLOT-SYMBOL"
         ]
       },
       "independent_oracle": {
@@ -950,7 +1061,8 @@
         "pair_ids": [
           "PAIR-PLOT-AXIS",
           "PAIR-PLOT-SEPARATOR",
-          "PAIR-PLOT-SPLIT"
+          "PAIR-PLOT-SPLIT",
+          "PAIR-PLOT-SYMBOL"
         ],
         "survivor_ids": [],
         "defect_ledger_ids": [
@@ -982,7 +1094,9 @@
           "RUN-SUITE",
           "RUN-PLOT-REAL",
           "RUN-SPLIT-RED",
-          "RUN-SPLIT-GREEN"
+          "RUN-SPLIT-GREEN",
+          "RUN-SYMBOL-RED",
+          "RUN-SYMBOL-GREEN"
         ]
       }
     },

@@ -1,5 +1,13 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：坐标轴伪表格（2026-09-10）
+
+- task_id: `pdf-axis-fragments-20260910`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `b7b75780c1932daf2b8ad04c3147d920a1035bc4`。
+- status: ready；recorded_commit: `3874077964540f82ea94582d3cb6c790f3711971`。最终行为后完整1336项测试、206.937秒、1条件skip，无失败（`full-final.log`）。修复大型曲线图横轴字体碎片被当作续表；允许对应未闭合括号的闭括号碎片跨格，保留独立字段、符号及异常坐标候选。独立审查发现的跨栏图题、图后已有轴名/短正文、非有限bbox、符号字段误删均已闭环。
+- 证据根 `/Users/mac/Documents/ProtocolPdfDiffReports/axis_fragments_20260910`；`strict-release.json`执行11次、4组RED/GREEN负控，八行通过，仅`verified_scope_only`；`release-original/original-public.json`绑定两本真实PDF及最终报告SHA。真实291–293↔295–297、348–350↔352–354页窗均无表格变化；291/292/349的坐标轴伪表消失，Table13-8的10行和Figure图题/曲线/双轴保留。
+- `native-release/layout.json`：4图无损坏，默认折叠关闭，实际展开Figure区，点击原图放大同源，520px窄窗无溢出；root与独立审查目检完整曲线图。`native-core.log`通过真实GUI核心流程；入口smoke通过。整本636/685页时间/内存未复测；页窗其他未决/页眉项目不属于本轮轴碎片准确性结论。旧静态HTML不会自动更新，需重启工具后重比。
+- 恢复/验收说明：`docs/verification/plot-axis-20260910.md`。最终full-final.log、官方exact-OID review及main/远端交付状态以最终记录和delivery receipt为准。
+
 ## 当前任务：原页截图优先（2026-09-10）
 
 - task_id: `pdf-screenshot-first-20260910`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `219a794f3c725e80c2d3f2c4d7126e735a670d7f`。

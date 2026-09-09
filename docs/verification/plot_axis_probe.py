@@ -36,10 +36,10 @@ def draw(path, case, value):
     for y in (382,387,402):p.draw_line((220,y),(325,y),width=.35)
     for x in (220,325):p.draw_line((x,382),(x,402),width=.35)
     label=case.get('label','Horizontal (unit)')
-    if case.get('split_tail'):
+    if case.get('split_tail') or case.get('aux'):
         p.draw_line((317,382),(317,402),width=.35)
-        p.insert_text((224,398),label[:-1],fontsize=9)
-        p.insert_text((319,398),label[-1],fontsize=9)
+        p.insert_text((224,398),label if case.get('aux') else label[:-1],fontsize=9)
+        p.insert_text((319,398),case.get('aux',label[-1]),fontsize=9)
     else:
         p.insert_text((224,398),label,fontsize=9)
     if case.get('table_title'):

@@ -17,6 +17,12 @@
       "table_title": true,
       "label": "Enabled",
       "expected_tables": 2
+    },
+    {
+      "id": "semantic-symbol",
+      "label": "Polarity",
+      "aux": "+",
+      "expected_tables": 2
     }
   ]
 }
