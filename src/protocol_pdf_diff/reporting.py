@@ -9598,7 +9598,7 @@ def _reader_table_changes(
             )
             and not (
                 change.old_tables and change.new_tables
-                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True, context=row.item)
+                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True, context=' '.join([row.item, *(table.title for table in (*change.old_tables, *change.new_tables))]))
             )
         )
         reference_only_suppressed = bool(row_changes) and not reference_filtered_rows

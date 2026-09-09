@@ -171,8 +171,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "cc5d19b1e67bda33ec80419ab4fabe5e46742d366ffbba615e826698149e723a",
-          "size_bytes": 519733
+          "sha256": "f55aee3bb3fce53581c4e5eb36e68b61293ac99d64b56a3c61375da6a85e71ec",
+          "size_bytes": 519815
         },
         {
           "id": "SRC-SAMPLE-DATA",
@@ -183,8 +183,8 @@
         {
           "id": "SRC-SECTIONING",
           "path": "src/protocol_pdf_diff/sectioning.py",
-          "sha256": "050b54344261763634ec7a0f850f3e528ea6e320dc395706b37255a636304e6e",
-          "size_bytes": 149686
+          "sha256": "658c1b056fe52dfa04d8a043736adbbec427ed67283391ef8d6a77e904961083",
+          "size_bytes": 150435
         },
         {
           "id": "SRC-SOURCE-REGIONS",
@@ -301,8 +301,8 @@
         {
           "id": "IN-CONTENT-ADVERSARIAL",
           "path": "docs/verification/fixtures/content-only/adversarial.json",
-          "sha256": "02c33a6839a5fcdc9f9ee905c8803305e5c9f3e2d95a5d4f92248c8166e61745",
-          "size_bytes": 5103,
+          "sha256": "8f7f62587b3f1d95bafdf4776f38e4846cf949de42966d9375d5af18c3a8d955",
+          "size_bytes": 10691,
           "provenance": "Hand-authored user contract cases; expected facts do not call production normalization."
         },
         {
@@ -324,8 +324,8 @@
         {
           "id": "PROBE-CONTENT",
           "path": "docs/verification/content_only_probe.py",
-          "sha256": "50ebca79959db38522f86ee71e1a2ed4cae80edd808b9f93f25d67eb8bed83f2",
-          "size_bytes": 4089
+          "sha256": "0e0c25f3ea58decc670226052fba1d632f3115f3962ba5d22848abaff0244e27",
+          "size_bytes": 4110
         }
       ],
       "oracles": [

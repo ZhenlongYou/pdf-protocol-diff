@@ -177,6 +177,8 @@
         ],
         [
           "ABSTRACT: The receiver supports 10 mV.",
+          "Notice: Copyright policy.",
+          "© 2022 Example Forum",
           "0.1 Revision History",
           "Initial publication",
           "0.3 List of companies belonging to the forum",
@@ -198,6 +200,138 @@
         ],
         [
           "ABSTRACT: The receiver supports 12 mV.",
+          "Notice: Copyright policy.",
+          "© 2025 Example Forum",
+          "0.1 Revision History",
+          "New publication",
+          "0.3 List of companies belonging to the forum",
+          "Example New Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ],
+        "not_contains": [
+          "Alice Example",
+          "Other Author",
+          "Example Old Company",
+          "Example New Company",
+          "© 2022",
+          "© 2025"
+        ]
+      }
+    },
+    {
+      "id": "publication-abstract-without-colon",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Alice Example",
+          "alice@example.test",
+          "02.0 Bob Example",
+          "bob@example.test"
+        ],
+        [
+          "Abstract",
+          "The receiver supports 10 mV.",
+          "Notice: Copyright policy.",
+          "© 2022 Example Forum",
+          "0.1 Revision History",
+          "Initial publication",
+          "0.3 List of companies belonging to the forum",
+          "Example Old Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Other Author",
+          "other@example.test",
+          "02.0 Next Author",
+          "next@example.test"
+        ],
+        [
+          "Abstract",
+          "The receiver supports 12 mV.",
+          "Notice: Copyright policy.",
+          "© 2025 Example Forum",
+          "0.1 Revision History",
+          "New publication",
+          "0.3 List of companies belonging to the forum",
+          "Example New Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ],
+        "not_contains": [
+          "Alice Example",
+          "Other Author",
+          "Example Old Company",
+          "Example New Company",
+          "© 2022",
+          "© 2025"
+        ]
+      }
+    },
+    {
+      "id": "publication-should-boundary",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Alice Example",
+          "alice@example.test",
+          "02.0 Bob Example",
+          "bob@example.test"
+        ],
+        [
+          "The receiver should support 10 mV.",
+          "Notice: Copyright policy.",
+          "© 2022 Example Forum",
+          "0.1 Revision History",
+          "Initial publication",
+          "0.3 List of companies belonging to the forum",
+          "Example Old Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Other Author",
+          "other@example.test",
+          "02.0 Next Author",
+          "next@example.test"
+        ],
+        [
+          "The receiver should support 12 mV.",
+          "Notice: Copyright policy.",
+          "© 2025 Example Forum",
           "0.1 Revision History",
           "New publication",
           "0.3 List of companies belonging to the forum",
@@ -216,6 +350,86 @@
           "Other Author",
           "Example Old Company",
           "Example New Company"
+        ]
+      }
+    },
+    {
+      "id": "state-caption-case-preserved",
+      "kind": "table",
+      "item": "Reset",
+      "caption": "Table 1. State encoding",
+      "old": "IDLE",
+      "new": "idle",
+      "reliable": true,
+      "expect": {
+        "table_cards": true,
+        "contains": [
+          "IDLE",
+          "idle"
+        ]
+      }
+    },
+    {
+      "id": "publication-version-without-leading-zero",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "1.0 Alice Example",
+          "alice@example.test",
+          "2.0 Bob Example",
+          "bob@example.test"
+        ],
+        [
+          "ABSTRACT: The receiver supports 10 mV.",
+          "Notice: Copyright policy.",
+          "© 2022 Example Forum",
+          "0.1 Revision History",
+          "Initial publication",
+          "0.3 List of companies belonging to the forum",
+          "Example Old Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "1.0 Other Author",
+          "other@example.test",
+          "2.0 Next Author",
+          "next@example.test"
+        ],
+        [
+          "ABSTRACT: The receiver supports 12 mV.",
+          "Notice: Copyright policy.",
+          "© 2025 Example Forum",
+          "0.1 Revision History",
+          "New publication",
+          "0.3 List of companies belonging to the forum",
+          "Example New Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ],
+        "not_contains": [
+          "Alice Example",
+          "Other Author",
+          "Example Old Company",
+          "Example New Company",
+          "© 2022",
+          "© 2025"
         ]
       }
     }

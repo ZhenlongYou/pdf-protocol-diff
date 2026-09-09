@@ -50,7 +50,7 @@ def run_case(case, root):
         def table(value):
             rows = ['表格行: T1 | Parameter='+case.get('item', 'Limit')+' | '+encode_table_field('Value' if case.get('item') else 'Description', value),
                     '表格行: T1 | Parameter=Other | Value=2']
-            return TableVisual(1, 1, 'Table 1. Limits', (0,0,100,100), '', rows, 'grid',
+            return TableVisual(1, 1, case.get('caption', 'Table 1. Limits'), (0,0,100,100), '', rows, 'grid',
                                content_fully_represented=True, row_alignment_reliable=case['reliable'])
         result = DiffResult(root/'old.pdf', root/'new.pdf', [], [], [], [],
                             old_table_visuals=[table(case['old'])], new_table_visuals=[table(case['new'])])

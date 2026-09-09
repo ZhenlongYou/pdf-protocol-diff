@@ -434,13 +434,24 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 and current and current.heading == "文档开头"
                 and re.search(r"(?i)working\s+group\s*[:：]", '\n'.join(current.lines))
             )
+            if (current and current.title in {"Abstract", "Notice", "Copyright"}
+                    and re.match(r"(?i)^(?:notice\s*:|copyright\b|©\s*\d{4})", line)):
+                title = "Notice" if line.lower().startswith("notice") else "Copyright"
+                heading_candidate = title
+                heading = HeadingInfo(title, "", title, 1)
             if author_start:
                 inside_publication_authors = True
                 heading = HeadingInfo(line, "", "Authors", 1)
             elif inside_publication_authors:
-                boundary = re.match(r"(?i)^(abstract|notice|copyright)\s*[:：]", line)
-                normative = re.search(r"(?i)\b(?:shall|must)\b|必须|不得", line)
-                real_heading = bool(heading and not re.match(r"^0\d+\.", heading.number))
+                boundary = re.match(r"(?i)^(abstract|notice|copyright)(?:\s*[:：]|\s*$)", line)
+                normative = re.search(r"(?i)\b(?:shall|must|should)\b|必须|不得|应当", line)
+                next_line = next((part.strip() for part in page_lines[line_index + 1:] if part.strip()), "")
+                roster_version = bool(heading and (
+                    re.match(r"^0\d+\.", heading.number)
+                    or (re.fullmatch(r"\d+\.\d+", heading.number)
+                        and re.fullmatch(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", next_line))
+                ))
+                real_heading = bool(heading and not roster_version)
                 if boundary or normative or real_heading:
                     inside_publication_authors = False
                     if boundary or normative:
