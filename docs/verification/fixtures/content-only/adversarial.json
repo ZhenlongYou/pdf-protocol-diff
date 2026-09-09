@@ -1,0 +1,223 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "adversarial",
+  "cases": [
+    {
+      "id": "state-case",
+      "kind": "prose",
+      "old": "1 Requirements\nThe state is IDLE.",
+      "new": "1 Requirements\nThe state is idle.",
+      "expect": {
+        "contains": [
+          "IDLE",
+          "idle"
+        ]
+      }
+    },
+    {
+      "id": "negation",
+      "kind": "prose",
+      "old": "1 Requirements\nThe receiver shall enable output.",
+      "new": "1 Requirements\nThe receiver shall not enable output.",
+      "expect": {
+        "contains": [
+          "shall enable",
+          "shall not enable"
+        ]
+      }
+    },
+    {
+      "id": "numeric-lines",
+      "kind": "table",
+      "old": "10\n20",
+      "new": "10 20",
+      "reliable": true,
+      "expect": {
+        "table_cards": true
+      }
+    },
+    {
+      "id": "contacts-technical",
+      "kind": "prose",
+      "old": "3 Contacts\nThe contact resistance shall be 10 mOhm.",
+      "new": "3 Contacts\nThe contact resistance shall be 12 mOhm.",
+      "expect": {
+        "contains": [
+          "10 mOhm",
+          "12 mOhm"
+        ]
+      }
+    },
+    {
+      "id": "state-heading",
+      "kind": "prose",
+      "old": "1 State\nThe receiver shall enter IDLE.",
+      "new": "1 State\nThe receiver shall enter idle.",
+      "expect": {
+        "contains": [
+          "IDLE",
+          "idle"
+        ]
+      }
+    },
+    {
+      "id": "continued-toc",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Contents",
+          "1 Scope",
+          "2 Limits"
+        ],
+        [
+          "Contents (continued)",
+          "3 Compliance",
+          "4 Annexes"
+        ],
+        [
+          "1 Scope",
+          "The voltage shall be 10 mV.",
+          "2 Limits",
+          "The clock shall be 20 MHz."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Contents",
+          "1 Scope",
+          "2 Limits"
+        ],
+        [
+          "Contents (continued)",
+          "3 Compliance",
+          "4 Annexes"
+        ],
+        [
+          "1 Scope",
+          "The voltage shall be 12 mV.",
+          "2 Limits",
+          "The clock shall be 20 MHz."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ]
+      }
+    },
+    {
+      "id": "wrapped-toc",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Contents",
+          "1 Scope ...... 5",
+          "2 Requirements for modes"
+        ],
+        [
+          "10G and 20G ...... 6",
+          "1 Scope",
+          "The voltage shall be 10 mV."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Contents",
+          "1 Scope ...... 5",
+          "2 Requirements for modes"
+        ],
+        [
+          "10G and 20G ...... 8",
+          "1 Scope",
+          "The voltage shall be 10 mV."
+        ]
+      ],
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "mixed-toc-locators",
+      "kind": "prose",
+      "old": "Contents\n1 Scope ...... 5\n2 Limits 6\n3 Compliance ...... 7\n1 Scope\nThe voltage shall be 10 mV.",
+      "new": "Contents\n1 Scope ...... 5\n2 Limits 8\n3 Compliance ...... 7\n1 Scope\nThe voltage shall be 10 mV.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "state-table",
+      "kind": "table",
+      "item": "State",
+      "old": "IDLE",
+      "new": "idle",
+      "reliable": true,
+      "expect": {
+        "contains": [
+          "IDLE",
+          "idle"
+        ],
+        "table_cards": true
+      }
+    },
+    {
+      "id": "publication-version-roster",
+      "kind": "pages",
+      "old_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Alice Example",
+          "alice@example.test",
+          "02.0 Bob Example",
+          "bob@example.test"
+        ],
+        [
+          "ABSTRACT: The receiver supports 10 mV.",
+          "0.1 Revision History",
+          "Initial publication",
+          "0.3 List of companies belonging to the forum",
+          "Example Old Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "new_pages": [
+        [
+          "Implementation Agreement",
+          "Working Group:",
+          "Physical Layer",
+          "Source:",
+          "01.0 Other Author",
+          "other@example.test",
+          "02.0 Next Author",
+          "next@example.test"
+        ],
+        [
+          "ABSTRACT: The receiver supports 12 mV.",
+          "0.1 Revision History",
+          "New publication",
+          "0.3 List of companies belonging to the forum",
+          "Example New Company",
+          "1 Scope",
+          "The receiver shall support testing."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ],
+        "not_contains": [
+          "Alice Example",
+          "Other Author",
+          "Example Old Company",
+          "Example New Company"
+        ]
+      }
+    }
+  ]
+}

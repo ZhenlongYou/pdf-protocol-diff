@@ -727,7 +727,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertNotIn("旧“（无）”", html)
         self.assertIn("仅线性提取顺序不同", markdown)
         self.assertIn("仅线性提取顺序不同", text_report)
-        self.assertIn("修改", changes_csv)
+        self.assertIn("需复核", changes_csv)
         self.assertIn("Parameter Symbol Value Units", changes_csv)
         self.assertIn("Value Units Parameter Symbol", changes_csv)
         self.assertEqual("modified", payload["changes"][0]["change_type"])
@@ -5118,12 +5118,12 @@ class ProtocolDiffTests(unittest.TestCase):
         for rendered in (html_text, markdown):
             self.assertNotIn("Condition=See 31.3.13", rendered)
             self.assertNotIn("Condition=See 31.3.14", rendered)
-        # JSON/CSV 保留条件引用的旧值和新值，确保过滤可审计、可回放。
+        # JSON 保留原始条件引用，CSV 按用户内容比较范围隐藏纯引用改号。
         row_payload = payload["table_changes"][0]["row_changes"][0]
         self.assertIn("Condition=See 31.3.13", row_payload["old_value"])
         self.assertIn("Condition=See 31.3.14", row_payload["new_value"])
-        self.assertIn("Condition=See 31.3.13", table_csv)
-        self.assertIn("Condition=See 31.3.14", table_csv)
+        self.assertNotIn("Condition=See 31.3.13", table_csv)
+        self.assertNotIn("Condition=See 31.3.14", table_csv)
 
     def test_reader_keeps_table_value_change_when_condition_reference_also_shifts(self) -> None:
         """Condition 引用顺延不能遮住同一行的 UI 数值变化。"""
@@ -8492,7 +8492,7 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("旧/新页数", report_html)
             self.assertIn("4 / 5", report_html)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_html)
-            self.assertIn("主要比较 PDF 中可抽取文字", report_html)
+            self.assertIn("只报告正文和表格的实质内容差异", report_html)
             self.assertIn("协议 PDF 差异报告", report_text)
             self.assertIn("- 旧/新页数: 4 / 5", report_text)
             self.assertIn("按章节编号、标题和正文相似度匹配", report_text)
@@ -9452,10 +9452,10 @@ class ProtocolDiffTests(unittest.TestCase):
                 _visible_html_text(paths["html"].read_text(encoding="utf-8")),
                 paths["markdown"].read_text(encoding="utf-8"),
                 paths["text"].read_text(encoding="utf-8"),
+                paths["csv"].read_text(encoding="utf-8"),
             )
             audit_reports = (
                 paths["json"].read_text(encoding="utf-8"),
-                paths["csv"].read_text(encoding="utf-8"),
             )
         for rendered in reader_reports:
             self.assertNotIn(old_sentence, rendered)
@@ -23165,8 +23165,8 @@ class ReportRoleSerializationTests(unittest.TestCase):
         # 机器审计继续保留修订历史表的角色和每一行事实。
         self.assertEqual("document_metadata", payload["table_changes"][0]["role"])
         self.assertEqual(2, payload["table_changes"][0]["row_change_count"])
-        self.assertIn("document_metadata", table_csv)
-        self.assertIn("Initial publication", table_csv)
+        self.assertNotIn("document_metadata", table_csv)
+        self.assertNotIn("Initial publication", table_csv)
         # 读者报告不再显示修订历史表卡或其中的出版记录。
         for reader_report in reader_reports:
             self.assertNotIn("Initial publication", reader_report)
@@ -23296,7 +23296,7 @@ class ReportRoleSerializationTests(unittest.TestCase):
             self.assertNotIn("Copyright 2026 Example Organization", reader_report)
         # JSON/CSV 是无损审计面，必须继续输出 document_metadata 事实。
         self.assertTrue(any(change["role"] == "document_metadata" for change in payload["changes"]))
-        self.assertTrue(any(row["role"] == "document_metadata" for row in prose_rows))
+        self.assertFalse(any(row["role"] == "document_metadata" for row in prose_rows))
         self.assertIn("<span>核心技术变化</span>", html)
 
 

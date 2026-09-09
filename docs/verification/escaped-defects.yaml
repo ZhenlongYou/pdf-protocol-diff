@@ -9,7 +9,7 @@ escaped_defects:
     red_green_pair_id: PAIR-CONTENT-ONLY
     regression_test_id: CONTENT_ONLY_TEST
     public_path_rerun_id: RUN-CONTENT-REAL
-    state: fixed_unverified
+    state: verified
   - id: DEF-VISUAL-MASK-001
     acceptance_id: REQ-VISUAL-MASK-001
     user_symptom: "A page with distant color changes was shown with one large red rectangle spanning unchanged table content."

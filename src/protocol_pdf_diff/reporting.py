@@ -388,7 +388,7 @@ def write_reports(
         return tuple(dict.fromkeys(observed))
 
     for change in result.changes:
-        # 作者、邮箱、版权和修订记录只保留在 JSON/CSV 审计面，不再进入三种读者报告。
+        # 作者、邮箱、版权和修订记录只保留在原始 JSON 审计面。
         if change.role == "document_metadata":
             continue
         old_figure_sources = figure_sources_for_section(
@@ -9598,7 +9598,7 @@ def _reader_table_changes(
             )
             and not (
                 change.old_tables and change.new_tables
-                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True)
+                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True, context=row.item)
             )
         )
         reference_only_suppressed = bool(row_changes) and not reference_filtered_rows
@@ -9767,7 +9767,8 @@ def _reader_section_change(
     if change is None:
         return None
     change = _reader_change_without_replaced_pairs(
-        change, lambda pair: cosmetic_content_equal(pair.old, pair.new)
+        change, lambda pair: cosmetic_content_equal(pair.old, pair.new, context=' '.join(
+            section.location for section in (change.old_section, change.new_section) if section is not None))
     )
     if change is None:
         return None

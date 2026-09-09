@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 _LITERAL_CONTEXT = re.compile(
-    r"(?i)\b(?:symbol|units?|identifier|register|state|mode|enum|pin|signal|"
+    r"(?i)\b(?:symbol|units?|id|identifier|register|state|mode|enum|pin|signal|"
     r"regex|regexp|pattern|path|address|opcode|code|literal|variable)\b|"
     r"[\"`]|\b\w+_\w+\b"
 )
@@ -34,7 +34,7 @@ def neutral_email_text(value: str) -> str:
     return _EMAIL.sub('[邮箱]', value)
 
 
-def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False) -> bool:
+def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False, context: str = '') -> bool:
     """Compare cosmetic text without changing technical-token spelling.
 
     Whitespace width is irrelevant. A cell soft wrap is ignored only between
@@ -55,7 +55,7 @@ def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False) -> bo
     left, right = compact(old), compact(new)
     if left == right:
         return True
-    if left.casefold() != right.casefold() or _LITERAL_CONTEXT.search(left + ' ' + right):
+    if left.casefold() != right.casefold() or _LITERAL_CONTEXT.search(context + ' ' + left + ' ' + right):
         return False
     old_tokens, new_tokens = list(_WORD.finditer(left)), list(_WORD.finditer(right))
     if len(old_tokens) != len(new_tokens):

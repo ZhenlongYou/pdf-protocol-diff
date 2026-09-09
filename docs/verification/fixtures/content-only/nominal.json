@@ -1,0 +1,27 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "nominal",
+  "cases": [
+    {
+      "id": "identical",
+      "kind": "prose",
+      "old": "1 Requirements\nThe output voltage is specified.",
+      "new": "1 Requirements\nThe output voltage is specified.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "numeric",
+      "kind": "prose",
+      "old": "1 Requirements\nThe voltage shall be 10 mV.",
+      "new": "1 Requirements\nThe voltage shall be 12 mV.",
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ]
+      }
+    }
+  ]
+}

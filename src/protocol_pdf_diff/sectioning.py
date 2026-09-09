@@ -41,10 +41,10 @@ _DOCUMENT_METADATA_TITLE_RE = re.compile(
     r"\b(?:change|release)\s+(?:log|record)\b|"
     r"\brecord\s+of\s+(?:revisions|amendments)\b|"
     r"\bdocument\s+control\b|\bapproval\s+(?:record|history)\b|"
-    r"\bdistribution\s+list\b|"
+    r"\bdistribution\s+list\b|^list\s+of\s+(?:member\s+)?companies\b|"
     r"修订历史|版本历史|变更历史|变更日志|修订记录|发布记录|"
     r"文件控制|文档控制|批准记录|审批记录|分发清单|"
-    r"^(?:authors?|editors?|contributors?|contacts?|contact\s+information|"
+    r"^(?:authors?|editors?|contributors?|contact\s+information|"
     r"author\s+information|作者|编者|编辑|贡献者|联系人|联系方式|作者信息)$)"
 )
 
@@ -172,8 +172,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     prose_list_expected_count: int | None = None
     prose_list_item_open = False
     saw_heading = False
+    inside_publication_authors = False
     dense_review_number_prefixes: set[str] = set()
     opening_label = _opening_section_label(extraction)
+    contents_lines = [line for page in cleaned_pages for line in page.text.splitlines()]
+    contents_line_offset = 0
 
     for page_index, page in enumerate(cleaned_pages):
         page_lines = page.text.splitlines()
@@ -190,10 +193,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
             if contents_title:
                 heading = (replace(heading, title=contents_title) if heading
                            else HeadingInfo(heading_candidate, "", contents_title, 1))
+                if not inside_contents:
+                    contents_has_locators = False
+                    contents_heading_stack.clear()
+                    contents_heading_paths.clear()
                 inside_contents = True
-                contents_has_locators = False
-                contents_heading_stack.clear()
-                contents_heading_paths.clear()
             source_heading_is_strong = strong_heading_style(page, heading_candidate) if re.match(r"\d", heading_candidate) else False
             if heading is None and source_heading_is_strong:
                 heading = detect_heading(heading_candidate, source_proves_non_table=True)
@@ -272,11 +276,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     for item in candidate_contents_stack
                     if item.number
                 )
-                has_locator = _contents_entry_has_locator(page_lines, line_index)
+                has_locator = _contents_entry_has_locator(contents_lines, contents_line_offset + line_index)
                 if (not has_locator and re.match(r"(?i)^(?:part|annex|appendix)\b", heading.number)
                         and line_index + 1 < len(page_lines)
                         and detect_heading(normalize_line(page_lines[line_index + 1]))):
-                    has_locator = _contents_entry_has_locator(page_lines, line_index + 1)
+                    has_locator = _contents_entry_has_locator(contents_lines, contents_line_offset + line_index + 1)
                 if not has_locator and (source_heading_is_strong or contents_path in contents_heading_paths or contents_has_locators):
                     # 正文通常从目录已经列过的首个编号重新开始；同页和跨页均以
                     # 第一次完整层级路径重复作为目录结束信号，并保留真实正文标题。
@@ -422,6 +426,29 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                     heading = _contextualize_heading(heading, heading_stack)
                 else:
                     heading = None
+            # Publication source rosters often contain version numbers which resemble
+            # chapter headings. Require explicit front-matter context; never infer an
+            # author block from an email address or an arbitrary technical Source.
+            author_start = bool(
+                re.fullmatch(r"(?i)source\s*[:：]", line)
+                and current and current.heading == "文档开头"
+                and re.search(r"(?i)working\s+group\s*[:：]", '\n'.join(current.lines))
+            )
+            if author_start:
+                inside_publication_authors = True
+                heading = HeadingInfo(line, "", "Authors", 1)
+            elif inside_publication_authors:
+                boundary = re.match(r"(?i)^(abstract|notice|copyright)\s*[:：]", line)
+                normative = re.search(r"(?i)\b(?:shall|must)\b|必须|不得", line)
+                real_heading = bool(heading and not re.match(r"^0\d+\.", heading.number))
+                if boundary or normative or real_heading:
+                    inside_publication_authors = False
+                    if boundary or normative:
+                        title = boundary.group(1).title() if boundary else "Technical content"
+                        heading_candidate = title
+                        heading = HeadingInfo(title, "", title, 1)
+                else:
+                    heading = None
             if heading:
                 saw_heading = True
                 procedure_step_numbers.clear()  # 新章节结束上一个 Procedure 的局部步骤序列。
@@ -511,6 +538,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 current.proven_numbered_heading_candidates.append(candidate)
             current.lines.append(line)
             current.page_lines.setdefault(page.page_number, []).append(line)
+        contents_line_offset += len(page_lines)
 
     if current:
         sections.append(_close_section(current, len(sections) + 1))
@@ -550,6 +578,12 @@ def _contents_title(line: str) -> str:
 def _contents_entry_has_locator(lines: list[str], index: int) -> bool:
     """Include wrapped entry continuations, but never the next numbered entry."""
 
+    first = normalize_line(lines[index])
+    following = next((normalize_line(line) for line in lines[index + 1:] if line.strip()), '')
+    if (re.search(r"\s\d+\s*$", first)
+            and detect_heading(first)
+            and (not following or detect_heading(following) or CAPTION.match(following) or _contents_title(following))):
+        return True  # 已进入目录且下一项仍为条目时，末尾页码无需引导点。
     parts = []
     # A source subscript can add extra physical lines inside one title. Scan
     # until the next heading/body boundary rather than assuming a line count.
@@ -1283,6 +1317,12 @@ def _section_role(open_section: _OpenSection) -> str:
         return "technical"
     if open_section.heading == "文档开头":
         return "document_metadata"
+    if re.fullmatch(r"(?i)contacts?", open_section.title.strip()):
+        body = '\n'.join(open_section.lines)
+        if (re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", body)
+                and not re.search(r"(?i)\b(?:shall|must|should|resistance|current|voltage)\b|必须|不得|电阻|电流|电压", body)):
+            return "document_metadata"
+        return "technical"  # Contacts 也可能指连接器触点；标题本身不能授权删除技术正文。
     if _DOCUMENT_METADATA_TITLE_RE.search(open_section.title):
         return "document_metadata"
     return "technical"

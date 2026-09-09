@@ -1,0 +1,53 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "known-failure",
+  "cases": [
+    {
+      "id": "authors",
+      "kind": "prose",
+      "old": "0.2 Authors\nAlice\nEmail: alice@example.test\n1 Scope\nThe receiver shall operate.",
+      "new": "0.2 Authors\nBob\nEmail: bob@example.test\n1 Scope\nThe receiver shall operate.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "toc",
+      "kind": "prose",
+      "old": "0.4 Contents\n1 Scope ........ 5\n2 Limits ........ 6\n1 Scope\nThe receiver shall operate.",
+      "new": "0.4 Contents\n2 Scope ........ 8\n3 Limits ........ 9\n1 Scope\nThe receiver shall operate.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "uppercase",
+      "kind": "prose",
+      "old": "1 Requirements\nThe MAXIMUM VALUE is specified.",
+      "new": "1 Requirements\nThe Maximum Value is specified.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "cell-wrap",
+      "kind": "table",
+      "old": "Output\nvoltage",
+      "new": "Output voltage",
+      "reliable": true,
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "table-quality-only",
+      "kind": "table",
+      "old": "Output voltage",
+      "new": "Output voltage",
+      "reliable": false,
+      "expect": {
+        "no_cards": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "invalid",
+  "cases": [
+    {
+      "id": "invalid-threshold",
+      "kind": "invalid",
+      "threshold": 0,
+      "expect": {
+        "reject": true
+      }
+    },
+    {
+      "id": "invalid-nan",
+      "kind": "invalid",
+      "threshold": "nan",
+      "expect": {
+        "reject": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "realistic",
+  "cases": [
+    {
+      "id": "pdf-publication",
+      "kind": "pdf",
+      "old_pages": [
+        [
+          "0.2 Authors",
+          "Alice",
+          "Email: alice@example.test"
+        ],
+        [
+          "0.4 Contents",
+          "1 Requirements ........ 3",
+          "2 Measurement ........ 4"
+        ],
+        [
+          "1 Requirements",
+          "The MAXIMUM VALUE is specified.",
+          "The output voltage shall be 10 mV."
+        ],
+        [
+          "2 Measurement",
+          "The sample interval shall remain fixed."
+        ]
+      ],
+      "new_pages": [
+        [
+          "0.2 Authors",
+          "Bob",
+          "Email: bob@example.test"
+        ],
+        [
+          "0.4 Contents",
+          "3 Requirements ........ 3",
+          "4 Measurement ........ 4"
+        ],
+        [
+          "3 Requirements",
+          "The Maximum Value is specified.",
+          "The output voltage shall be 12 mV."
+        ],
+        [
+          "4 Measurement",
+          "The sample interval shall remain fixed."
+        ]
+      ],
+      "expect": {
+        "contains": [
+          "10 mV",
+          "12 mV"
+        ],
+        "not_contains": [
+          "@example.test",
+          "........",
+          "Alice",
+          "Bob",
+          "MAXIMUM VALUE"
+        ]
+      }
+    }
+  ]
+}

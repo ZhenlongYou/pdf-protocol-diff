@@ -1,0 +1,42 @@
+{
+  "authority": "User content-only request 2026-09-09, including global email exclusion",
+  "partition": "boundary",
+  "cases": [
+    {
+      "id": "unit-case",
+      "kind": "prose",
+      "old": "1 Requirements\nThe voltage shall be 10 mV.",
+      "new": "1 Requirements\nThe voltage shall be 10 MV.",
+      "expect": {
+        "contains": [
+          "10 mV",
+          "10 MV"
+        ]
+      }
+    },
+    {
+      "id": "email-only",
+      "kind": "prose",
+      "old": "1 Requirements\nNotify first@example.test.",
+      "new": "1 Requirements\nNotify second@example.test.",
+      "expect": {
+        "no_cards": true
+      }
+    },
+    {
+      "id": "email-numeric",
+      "kind": "prose",
+      "old": "1 Requirements\nNotify first@example.test within 5 seconds.",
+      "new": "1 Requirements\nNotify second@example.test within 8 seconds.",
+      "expect": {
+        "contains": [
+          "5 seconds",
+          "8 seconds"
+        ],
+        "not_contains": [
+          "@example.test"
+        ]
+      }
+    }
+  ]
+}

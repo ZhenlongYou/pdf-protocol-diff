@@ -4747,7 +4747,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertNotIn("9 Unchanged Coordinate Table", report)
         self.assertEqual("modified", payload["changes"][0]["change_type"])
-        self.assertIn("9 Unchanged Coordinate Table", csv_text)
+        self.assertNotIn("9 Unchanged Coordinate Table", csv_text)
 
     def test_reader_completeness_flag_requires_lossless_structured_rows(self) -> None:
         """Exact bbox characters cannot authorize dedup when final rows lost a NOTE."""
