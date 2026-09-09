@@ -141,8 +141,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "de9e0051d4eb95b0f45743d4d59e6c453cbdecc77651fb60ec2d642f8cc51c68",
-          "size_bytes": 337239
+          "sha256": "c942cea78b33371ce1ece352ccff6a8773d3fb08d97bcf399ca14fdb00aa62bd",
+          "size_bytes": 337788
         },
         {
           "id": "SRC-PROGRESS",
@@ -399,15 +399,15 @@
         {
           "id": "MUT-SEPARATOR",
           "path": "work/plot-axis-gate/missing-separator.py",
-          "sha256": "f931198889c1e9c98385e0b921a9d486c9a2d347590b26df364b28953ec388ad",
-          "size_bytes": 337249,
+          "sha256": "02a85b626fd6cbe7090396ca36051232ad865ab8c0958364ace4dbb8022785b4",
+          "size_bytes": 337798,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
           "id": "MUT-SPLIT",
           "path": "work/plot-axis-gate/unsplit-only.py",
-          "sha256": "6eade4d0805802f9fc43988b06de7bef2e480036ee16bc8032729646af768070",
-          "size_bytes": 337196,
+          "sha256": "1c4061cb2751b0266a5ef4d92724a8265dcfb0f25e2a12eb43bb1f50b8b3508d",
+          "size_bytes": 337783,
           "target_source_id": "SRC-PDF_EXTRACT"
         }
       ],

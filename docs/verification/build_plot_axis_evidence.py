@@ -28,7 +28,7 @@ def main():
     mutant=WORK/'missing-separator.py';mutant.write_text(current.replace(marker,'False and '+marker))
     mutations=[identity(str(p.relative_to(ROOT)),mid,target_source_id=source_id) for p,mid in [(baseline,'MUT-BASELINE'),(mutant,'MUT-SEPARATOR')]]
     split=WORK/'unsplit-only.py'
-    split_marker=r'if sum(bool(re.search(r"\w", value)) for value in payloads) != 1:'
+    split_marker='if len(word_payloads) != 1:'
     assert current.count(split_marker)==1
     split.write_text(current.replace(split_marker,'if len(payloads) != 1:'))
     mutations.append(identity(str(split.relative_to(ROOT)),'MUT-SPLIT',target_source_id=source_id))

@@ -4089,8 +4089,16 @@ def _table_bbox_is_plot_axis_label(
                 if (field := split_table_field(cell)) is not None]
     # A glyph outline may split the closing parenthesis into a second cell.
     # Independent words/numbers in another cell remain real table evidence.
-    if sum(bool(re.search(r"\w", value)) for value in payloads) != 1:
+    word_payloads = [value for value in payloads if re.search(r"\w", value)]
+    if len(word_payloads) != 1:
         return False
+    tail = "".join(value for value in payloads if value and value != word_payloads[0])
+    if tail:
+        if any(char not in ")]}" for char in tail):
+            return False  # Signs, check marks and mathematical operators are independent data.
+        if any(tail.count(close) > word_payloads[0].count(opening) - word_payloads[0].count(close)
+               for opening, close in (("(", ")"), ("[", "]"), ("{", "}"))):
+            return False  # Only restore a physically split unmatched closing bracket.
     payload = " ".join(payloads)
     if not re.search(r"[^\W\d_]", payload) or len(payload.split()) > 8:
         return False  # A numeric row is data, not an axis label.

@@ -30,6 +30,8 @@ class PlotAxisTablesTests(unittest.TestCase):
         self.check(True,lines=['表格行: T2 | Column 1=Axis (unit) | Column 2='])
         self.check(False,lines=['表格行: T2 | Column 1=Frequency | Column 2=40'])
         self.check(False,lines=['表格行: T2 | Column 1=Frequency | Column 2=Nominal'])
+        for symbol in ['+', '−', '✓', '×', '≤', ')', '{}']:
+            self.check(False,lines=['表格行: T2 | Column 1=Polarity | Column 2='+symbol])
 
     def test_missing_geometry_and_numeric_data_remain(self):
         self.check(False, words=[])
