@@ -32,6 +32,13 @@ class PlotAxisTablesTests(unittest.TestCase):
         self.check(False, lines=['表格行: T2 | Column 1=100'])
         self.check(False, words=[w for w in geometry() if w['x0']!=75])
 
+    def test_invalid_candidate_and_plot_boxes_never_suppress_tables(self):
+        for box in [(200,325,300,320), (200,325,300,float('nan')),
+                    (200,325,300,float('-inf')), (200,325,200,345)]:
+            self.check(False,bbox=box)
+        for box in [(100,300,400,100), (100,100,float('inf'),300)]:
+            self.check(False,grids=(box,))
+
     def test_explicit_table_and_technical_schema_remain(self):
         self.check(False, title='Table 3. Frequency limits')
         self.check(False, lines=['表格行: T2 | Parameter=Frequency | Nominal=40 GHz'])

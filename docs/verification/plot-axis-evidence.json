@@ -141,8 +141,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "a103c861f31994d14e5decd11092b8168d66108b3470b3b3443dc231d6da979c",
-          "size_bytes": 336787
+          "sha256": "79ac980fd83f603a46201aac82633a33587c4db835158de2ebe5847a93d93711",
+          "size_bytes": 336937
         },
         {
           "id": "SRC-PROGRESS",
@@ -321,8 +321,8 @@
         {
           "id": "IN-KNOWN-FAILURE",
           "path": "docs/verification/fixtures/plot-axis/known-failure.json",
-          "sha256": "4708fc5968407531a65a6fab3d27a061e5570b37cbda4bef3b07659b3abf474e",
-          "size_bytes": 127,
+          "sha256": "d8d5e75a746615fe90e2456f386a9d462b708f9453d8a440d5e746273a96bcf6",
+          "size_bytes": 125,
           "provenance": "Hand-specified scene and expected real-table inventory, including the user axis-grid failure."
         }
       ],
@@ -399,8 +399,8 @@
         {
           "id": "MUT-SEPARATOR",
           "path": "work/plot-axis-gate/missing-separator.py",
-          "sha256": "6492b2aae60f557f07bc71d24aa4fffce0992d975f566a0b6b74764849e0fb91",
-          "size_bytes": 336797,
+          "sha256": "c0fc46ca930f7e3ec955f6bbb2c776744d5bce913823785cd217dde0cf9c6198",
+          "size_bytes": 336947,
           "target_source_id": "SRC-PDF_EXTRACT"
         }
       ],

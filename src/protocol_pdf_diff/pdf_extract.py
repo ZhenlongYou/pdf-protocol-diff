@@ -4076,6 +4076,7 @@ def _table_bbox_is_plot_axis_label(
     """
     if (
         bbox is None or len(table_lines) != 1 or not geometry_words
+        or not _finite_positive_layout_box(bbox[0], bbox[2], bbox[1], bbox[3])
         or any(not _word_has_finite_positive_geometry(w) for w in geometry_words)
         or _looks_like_table_caption(title)
         or _looks_like_table_context_caption(title)
@@ -4109,7 +4110,7 @@ def _table_bbox_is_plot_axis_label(
         )
 
     for grid in grid_bboxes:
-        if grid is None:
+        if grid is None or not _finite_positive_layout_box(grid[0], grid[2], grid[1], grid[3]):
             continue
         left, top, right, bottom = grid
         width, height = right - left, bottom - top

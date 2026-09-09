@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "font-outline-axis",
-      "label": "Frequency (GHz)",
+      "label": "equency (GHz)",
       "expected_tables": 1
     }
   ]
