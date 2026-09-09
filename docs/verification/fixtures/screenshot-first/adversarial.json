@@ -6,6 +6,18 @@
       "score": 1.0,
       "main": 0,
       "appendix": 1
+    },
+    {
+      "id": "near-duplicate-lines",
+      "kind": "similar"
+    },
+    {
+      "id": "unknown-glyph-appendix",
+      "kind": "partition",
+      "score": 1.0,
+      "main": 0,
+      "appendix": 1,
+      "glyph": true
     }
   ]
 }

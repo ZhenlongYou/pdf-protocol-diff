@@ -463,6 +463,7 @@ def write_reports(
         _append_markdown_table_changes(appendix_lines, similarity_review_tables)
         appendix_lines = [re.sub(r"^### (T?)(\d+)\.", lambda m: "### A-" + ("T" if m[1] else "C") + m[2] + ".", line) for line in appendix_lines]
         markdown += "\n".join([*appendix_lines, "</details>", ""])
+        markdown = reader_safe_glyphs(markdown)
         markdown = markdown.replace(_empty_report_message(reader_result), "主差异清单为空；相似度 1.000 的配对证据收在末尾附录。")
     html = _render_html(
         reader_result,

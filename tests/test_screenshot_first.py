@@ -25,6 +25,33 @@ def section(sid, body):
     return Section(sid,'1 Receiver','Receiver',1,('1 Receiver',),('1',),1,1,body)
 
 class ScreenshotFirstTests(unittest.TestCase):
+    def test_similar_unchanged_mode_does_not_receive_changed_mode_highlight(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            for side,value in [('old','100'),('new','120')]:
+                doc=fitz.open();page=doc.new_page(width=400,height=300)
+                page.insert_text((20,30),'1 Receiver',fontsize=12)
+                page.insert_text((20,60),f'The receiver limit is {value} mV in mode A.',fontsize=11)
+                page.insert_text((20,90),'The receiver limit is 100 mV in mode B.',fontsize=11)
+                doc.save(root/(side+'.pdf'));doc.close()
+            result=run_diff(root/'old.pdf',root/'new.pdf',DiffOptions(visual_watchdog=False))
+            old=next(g.old_visuals[0] for g in result.prose_source_visuals if g.old_visuals)
+            self.assertEqual(1,old.highlight_region_count)
+            raster=Image.open(io.BytesIO(base64.b64decode(old.image_data_uri.split(',')[1])))
+            with fitz.open(root/'old.pdf') as doc:
+                values=[w for w in doc[0].get_text('words') if w[4]=='100']
+            for i,word in enumerate(values):
+                box=tuple(round(v*raster.size[j%2]/(400 if j%2==0 else 300)) for j,v in enumerate(word[:4]))
+                red=max(r-g for r,g,b in raster.crop(box).convert('RGB').getdata())
+                self.assertGreater(red,10) if i==0 else self.assertLess(red,5)
+    def test_appendix_unknown_glyph_is_disclosed_in_reader_formats(self):
+        with tempfile.TemporaryDirectory() as d:
+            a,b=section('a','Custom glyph \ue123 in mode A.'),section('b','Custom glyph \ue123 in mode B.')
+            c=SectionChange('modified',a,b,1.,replaced_snippets=[SnippetPair(a.body,b.body)])
+            out=write_reports(DiffResult(Path('o'),Path('n'),[a],[b],[c],[]),d,DiffOptions())
+            for key in ('html','markdown','text'):
+                value=out[key].read_text();self.assertNotIn('\ue123',value);self.assertIn('U+E123',value)
+            self.assertIn('\ue123',out['json'].read_text())
     def test_appendix_scopes_are_reviewable_in_all_formats_without_losing_values(self):
         with tempfile.TemporaryDirectory() as d:
             a,b=section('a','Limit 10 mV.'),section('b','Limit 12 mV.')

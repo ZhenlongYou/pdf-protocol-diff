@@ -1595,6 +1595,7 @@ def _highlight_boxes(
             token_count=len(ordered_snippet_tokens),
         )
         snippet_matched = False
+        word_candidates: dict[int, list[tuple[tuple[float, int], tuple]]] = defaultdict(list)
         for block in materialized:
             ordered_block_tokens = _tokens(block.text)
             if isinstance(snippet, _SnippetHighlight) and block_occurrences[tuple(ordered_block_tokens)] > 1:
@@ -1616,6 +1617,16 @@ def _highlight_boxes(
                 ordered_overlap >= required
                 and ordered_overlap / len(block_tokens) >= _MIN_BLOCK_TOKEN_OVERLAP
             ):
+                if isinstance(snippet, _SnippetHighlight):
+                    # Score each changed token's physical candidates against
+                    # its complete snippet context. A similar unchanged line
+                    # must not inherit a different line's changed token index.
+                    score = (ordered_overlap / len(ordered_block_tokens), ordered_overlap)
+                    for index in changed_indexes:
+                        boxes = _changed_word_boxes(block, matcher, frozenset({index}))
+                        if boxes:
+                            word_candidates[index].append((score, boxes))
+                    continue
                 changed_boxes = _changed_word_boxes(
                     block,
                     matcher,
@@ -1637,6 +1648,16 @@ def _highlight_boxes(
                     ):
                         selected[visible_bbox] = None
                     snippet_matched = True
+        for candidates in word_candidates.values():
+            best_score = max(score for score, _ in candidates)
+            winners = {boxes for score, boxes in candidates if score == best_score}
+            if len(winners) != 1:
+                continue  # Equal evidence at distinct positions is ambiguous.
+            visible = tuple(part for box in next(iter(winners))
+                            for part in _subtract_excluded_regions(box, excluded_bboxes))
+            for box in _merge_inline_highlight_boxes(visible):
+                selected[box] = None
+                snippet_matched = True
         if snippet_matched:
             matched_snippets += 1
     return tuple(sorted(selected, key=lambda box: (box[1], box[0]))), matched_snippets

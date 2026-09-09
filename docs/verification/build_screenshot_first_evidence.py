@@ -68,8 +68,12 @@ def main():
         dest=WORK/('baseline-'+name)
         dest.write_bytes(subprocess.check_output(['git','show',f'{BASE}:src/protocol_pdf_diff/{name}'],cwd=ROOT))
         mutations.append(identity(dest,'MUT-'+name.removesuffix('.py').upper(),target_source_id=source_ids[name]))
+    for name, target in [('CONTEXT','prose_source_visuals.py'),('GLYPHS','reporting.py')]:
+        dest=WORK/('review-'+name+'.py')
+        dest.write_bytes(subprocess.check_output(['git','show','238e2f79c1acc6edac24dbdb63b0eecf2bcee804:src/protocol_pdf_diff/'+target],cwd=ROOT))
+        mutations.append(identity(dest,'MUT-'+name,target_source_id=source_ids[target]))
     runs=[];pairs=[]
-    for suffix,mut,fixture_index in [('REPORT','MUT-REPORTING',3),('SOURCE','MUT-PROSE_SOURCE_VISUALS',4),('TABLE','MUT-PDF_EXTRACT',4)]:
+    for suffix,mut,fixture_index in [('REPORT','MUT-REPORTING',3),('SOURCE','MUT-PROSE_SOURCE_VISUALS',4),('TABLE','MUT-PDF_EXTRACT',4),('CONTEXT','MUT-CONTEXT',3),('GLYPHS','MUT-GLYPHS',3)]:
         red='RUN-SCREENSHOT-'+suffix+'-RED';green='RUN-SCREENSHOT-'+suffix+'-GREEN'
         args=['docs/verification/screenshot_first_probe.py',fixture_paths[fixture_index]]
         runs.extend([run(red,'target_red',args,[input_ids[fixture_index]],mutation=mut,fail=True),
