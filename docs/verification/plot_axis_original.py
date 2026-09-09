@@ -21,6 +21,7 @@ def main():
         newtables=[v for v in r.new_table_visuals if v.page_number==b]
         assert len(oldtables)==(1 if a==292 else 0),[(v.title,v.row_texts) for v in oldtables]
         assert len(newtables)==(1 if a==292 else 0)
+        if a==292:assert not [v for v in r.old_table_visuals if v.page_number==291]
         for tables in (oldtables,newtables):
             if a==292:
                 assert 'Table 13-8.' in tables[0].title and len(tables[0].row_texts)==10
@@ -30,6 +31,7 @@ def main():
         visuals=[v for g in r.prose_source_visuals for v in (*g.old_visuals,*g.new_visuals,*g.old_figure_visuals,*g.new_figure_visuals)]
         image_pages=sorted({v.page_number for v in visuals})
         assert a in image_pages and b in image_pages,image_pages
+        assert not data['table_changes'],data['table_changes']
         row=dict(pages=[a,b],seconds=time.perf_counter()-t,old_tables=[v.title for v in oldtables],new_tables=[v.title for v in newtables],html=str(paths['html']),html_sha256=hashlib.sha256(paths['html'].read_bytes()).hexdigest(),source_visual_pages=image_pages,table_changes=len(data['table_changes']));rows.append(row);print(json.dumps(row,ensure_ascii=False),flush=True)
     (root/'original-public.json').write_text(json.dumps(dict(sources={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [old,new]},runs=rows),ensure_ascii=False,indent=2))
     print('PLOT_ORIGINAL_PUBLIC_OK')

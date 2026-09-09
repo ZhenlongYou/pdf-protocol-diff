@@ -25,6 +25,12 @@ class PlotAxisTablesTests(unittest.TestCase):
         self.check(True)
         self.check(True, words=[dict(w, upright=False) for w in geometry()])
 
+    def test_split_punctuation_and_empty_cells_do_not_make_a_real_column(self):
+        self.check(True,lines=['表格行: T2 | Column 1=FFrreeqquueennccyy ( G(GHHzz) | Column 2=)'])
+        self.check(True,lines=['表格行: T2 | Column 1=Axis (unit) | Column 2='])
+        self.check(False,lines=['表格行: T2 | Column 1=Frequency | Column 2=40'])
+        self.check(False,lines=['表格行: T2 | Column 1=Frequency | Column 2=Nominal'])
+
     def test_missing_geometry_and_numeric_data_remain(self):
         self.check(False, words=[])
         self.check(False, bbox=None)

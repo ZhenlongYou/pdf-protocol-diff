@@ -141,8 +141,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "79ac980fd83f603a46201aac82633a33587c4db835158de2ebe5847a93d93711",
-          "size_bytes": 336937
+          "sha256": "de9e0051d4eb95b0f45743d4d59e6c453cbdecc77651fb60ec2d642f8cc51c68",
+          "size_bytes": 337239
         },
         {
           "id": "SRC-PROGRESS",
@@ -321,8 +321,8 @@
         {
           "id": "IN-KNOWN-FAILURE",
           "path": "docs/verification/fixtures/plot-axis/known-failure.json",
-          "sha256": "d8d5e75a746615fe90e2456f386a9d462b708f9453d8a440d5e746273a96bcf6",
-          "size_bytes": 125,
+          "sha256": "c9a280a182a8ed315351afbbcf20578ef6d4f271afd0a6b10d6cc6b29873524a",
+          "size_bytes": 256,
           "provenance": "Hand-specified scene and expected real-table inventory, including the user axis-grid failure."
         }
       ],
@@ -330,16 +330,16 @@
         {
           "id": "PROBE-PLOT",
           "path": "docs/verification/plot_axis_probe.py",
-          "sha256": "459e412720fc82f23bf3bea4e4b3c06ed6683cbbe603f60f84f8eb7cd436d198",
-          "size_bytes": 4209
+          "sha256": "739a52f87c26e15c247add965f4ad27b82251390d21f9cdbd738889291b329bb",
+          "size_bytes": 4430
         }
       ],
       "oracles": [
         {
           "id": "ORACLE-PLOT",
           "path": "docs/verification/plot_axis_oracle.py",
-          "sha256": "5cbaca4d075cfdc1e859cced215b29c056cba3ace0febfd146317b18b9d4be8c",
-          "size_bytes": 1242,
+          "sha256": "f75a47912a5cd3456da17074fa5c6211f6d677df41456d4b9f38e53a4ad67ba0",
+          "size_bytes": 1434,
           "kind": "independent_reference",
           "independence_basis": "Human-defined inventory assertions; imports no production module, no geometric classifier, and validates missing real data plus extra spurious tables.",
           "production_source_ids": [
@@ -399,8 +399,15 @@
         {
           "id": "MUT-SEPARATOR",
           "path": "work/plot-axis-gate/missing-separator.py",
-          "sha256": "c0fc46ca930f7e3ec955f6bbb2c776744d5bce913823785cd217dde0cf9c6198",
-          "size_bytes": 336947,
+          "sha256": "f931198889c1e9c98385e0b921a9d486c9a2d347590b26df364b28953ec388ad",
+          "size_bytes": 337249,
+          "target_source_id": "SRC-PDF_EXTRACT"
+        },
+        {
+          "id": "MUT-SPLIT",
+          "path": "work/plot-axis-gate/unsplit-only.py",
+          "sha256": "6eade4d0805802f9fc43988b06de7bef2e480036ee16bc8032729646af768070",
+          "size_bytes": 337196,
           "target_source_id": "SRC-PDF_EXTRACT"
         }
       ],
@@ -769,6 +776,100 @@
           "produces_artifact_ids": [
             "ART-PLOT"
           ]
+        },
+        {
+          "id": "RUN-SPLIT-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-PLOT-AXIS"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-SPLIT"
+          },
+          "probe_ids": [
+            "PROBE-PLOT"
+          ],
+          "input_ids": [
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/plot_axis_probe.py",
+            "docs/verification/fixtures/plot-axis/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "PLOT_AXIS_TEST",
+                "PLOT_AXIS_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SPLIT-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-PLOT-AXIS"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-PLOT"
+          ],
+          "input_ids": [
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/plot_axis_probe.py",
+            "docs/verification/fixtures/plot-axis/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PLOT_AXIS_TEST",
+                "PLOT_AXIS_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
         }
       ],
       "red_green_pairs": [
@@ -789,6 +890,15 @@
           "failure_signature": "PLOT_AXIS_CONTRACT_FAIL",
           "red_run_id": "RUN-SEPARATOR-RED",
           "green_run_id": "RUN-SEPARATOR-GREEN"
+        },
+        {
+          "id": "PAIR-PLOT-SPLIT",
+          "requirement_id": "REQ-PLOT-AXIS",
+          "defect_id": "DEF-PLOT-AXIS-20260910",
+          "test_id": "PLOT_AXIS_TEST",
+          "failure_signature": "PLOT_AXIS_CONTRACT_FAIL",
+          "red_run_id": "RUN-SPLIT-RED",
+          "green_run_id": "RUN-SPLIT-GREEN"
         }
       ],
       "isolation_contracts": [
@@ -827,7 +937,8 @@
       "target_red": {
         "pair_ids": [
           "PAIR-PLOT-AXIS",
-          "PAIR-PLOT-SEPARATOR"
+          "PAIR-PLOT-SEPARATOR",
+          "PAIR-PLOT-SPLIT"
         ]
       },
       "independent_oracle": {
@@ -838,7 +949,8 @@
       "fault_detection": {
         "pair_ids": [
           "PAIR-PLOT-AXIS",
-          "PAIR-PLOT-SEPARATOR"
+          "PAIR-PLOT-SEPARATOR",
+          "PAIR-PLOT-SPLIT"
         ],
         "survivor_ids": [],
         "defect_ledger_ids": [
@@ -868,7 +980,9 @@
           "RUN-SEPARATOR-GREEN",
           "RUN-ORACLE",
           "RUN-SUITE",
-          "RUN-PLOT-REAL"
+          "RUN-PLOT-REAL",
+          "RUN-SPLIT-RED",
+          "RUN-SPLIT-GREEN"
         ]
       }
     },

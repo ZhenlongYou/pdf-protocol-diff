@@ -10,12 +10,14 @@ def check(case, observed):
     assert observed['changes']>0 and '10 mV' in observed['body'],observed
     if case['expected_tables']==1:
         assert all(case.get('label','Horizontal (unit)') not in s for s in observed['table_payloads']),observed
+    else:
+        assert any(case.get('label','Horizontal (unit)') in s for s in observed['table_payloads']),observed
 
 
 def main():
     for file in sys.argv[1:]:
         for case in json.load(open(file))['cases']:
-            good=dict(table_count=case['expected_tables'],real_rows=['Frequency (GHz) | 40'],has_images=True,full_table_pages=True,changes=1,body='10 mV',table_payloads=[])
+            good=dict(table_count=case['expected_tables'],real_rows=['Frequency (GHz) | 40'],has_images=True,full_table_pages=True,changes=1,body='10 mV',table_payloads=[case.get('label','Horizontal (unit)')] if case['expected_tables']>1 else [])
             check(case,good)
             for key in ('table_count','has_images','changes','real_rows'):
                 bad=dict(good);bad[key]=None

@@ -4,6 +4,12 @@
       "id": "font-outline-axis",
       "label": "equency (GHz)",
       "expected_tables": 1
+    },
+    {
+      "id": "split-parenthesis",
+      "label": "equency (GHz)",
+      "split_tail": true,
+      "expected_tables": 1
     }
   ]
 }

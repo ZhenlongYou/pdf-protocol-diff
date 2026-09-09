@@ -27,6 +27,11 @@ def main():
     assert current.count(marker)==1
     mutant=WORK/'missing-separator.py';mutant.write_text(current.replace(marker,'False and '+marker))
     mutations=[identity(str(p.relative_to(ROOT)),mid,target_source_id=source_id) for p,mid in [(baseline,'MUT-BASELINE'),(mutant,'MUT-SEPARATOR')]]
+    split=WORK/'unsplit-only.py'
+    split_marker=r'if sum(bool(re.search(r"\w", value)) for value in payloads) != 1:'
+    assert current.count(split_marker)==1
+    split.write_text(current.replace(split_marker,'if len(payloads) != 1:'))
+    mutations.append(identity(str(split.relative_to(ROOT)),'MUT-SPLIT',target_source_id=source_id))
     exe=Path(os.path.realpath(PYTHON));raw=exe.read_bytes();exe_info=dict(path=str(exe),sha256=hashlib.sha256(raw).hexdigest(),size_bytes=len(raw))
     def run(name,role,selected,mutation=None,artifact=False):
         is_oracle=role=='oracle';args=['docs/verification/plot_axis_oracle.py' if is_oracle else 'docs/verification/plot_axis_probe.py',*[paths[i] for i in selected]]
@@ -37,7 +42,8 @@ def main():
         if artifact:row['produces_artifact_ids']=['ART-PLOT']
         return row
     runs=[run('RUN-BASELINE-RED','target_red',[5],'MUT-BASELINE'),run('RUN-BASELINE-GREEN','target_green',[5]),run('RUN-SEPARATOR-RED','target_red',[3],'MUT-SEPARATOR'),run('RUN-SEPARATOR-GREEN','target_green',[3]),run('RUN-ORACLE','oracle',list(range(6))),run('RUN-SUITE','suite',list(range(6))),run('RUN-PLOT-REAL','real_path',[4],artifact=True)]
-    pairs=[dict(id='PAIR-PLOT-AXIS' if s=='BASELINE' else 'PAIR-PLOT-SEPARATOR',requirement_id=REQ,defect_id='DEF-PLOT-AXIS-20260910',test_id='PLOT_AXIS_TEST',failure_signature='PLOT_AXIS_CONTRACT_FAIL',red_run_id=f'RUN-{s}-RED',green_run_id=f'RUN-{s}-GREEN') for s in ['BASELINE','SEPARATOR']]
+    runs.extend([run('RUN-SPLIT-RED','target_red',[5],'MUT-SPLIT'),run('RUN-SPLIT-GREEN','target_green',[5])])
+    pairs=[dict(id='PAIR-PLOT-AXIS' if s=='BASELINE' else 'PAIR-PLOT-'+s,requirement_id=REQ,defect_id='DEF-PLOT-AXIS-20260910',test_id='PLOT_AXIS_TEST',failure_signature='PLOT_AXIS_CONTRACT_FAIL',red_run_id=f'RUN-{s}-RED',green_run_id=f'RUN-{s}-GREEN') for s in ['BASELINE','SEPARATOR','SPLIT']]
     ledger_all=yaml.safe_load((ROOT/'docs/verification/escaped-defects.yaml').read_text())
     rows=[d for d in ledger_all['escaped_defects'] if d['id']=='DEF-PLOT-AXIS-20260910'];assert len(rows)==1
     ledger_path=WORK/'escaped-defects.yaml';ledger_path.write_text(yaml.safe_dump(dict(schema_version=1,scope_statement='Plot axis fragments falsely classified as tables',escaped_defects=rows),allow_unicode=True))

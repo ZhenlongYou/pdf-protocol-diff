@@ -4082,11 +4082,16 @@ def _table_bbox_is_plot_axis_label(
         or _looks_like_table_context_caption(title)
         or _table_rows_begin_with_explicit_caption(table_lines)
         or _table_rows_have_explicit_technical_schema(table_lines)
-        or len(re.findall(r"\|\s*[^|=]+=", table_lines[0])) != 1
         or bbox[3] - bbox[1] > 32.0
     ):
         return False
-    payload = table_lines[0].split("=", 1)[-1].strip()
+    payloads = [field[1].strip() for cell in split_table_cells(table_lines[0])
+                if (field := split_table_field(cell)) is not None]
+    # A glyph outline may split the closing parenthesis into a second cell.
+    # Independent words/numbers in another cell remain real table evidence.
+    if sum(bool(re.search(r"\w", value)) for value in payloads) != 1:
+        return False
+    payload = " ".join(payloads)
     if not re.search(r"[^\W\d_]", payload) or len(payload.split()) > 8:
         return False  # A numeric row is data, not an axis label.
     baselines = _word_line_records(geometry_words)

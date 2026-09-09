@@ -35,7 +35,13 @@ def draw(path, case, value):
     # detector shape seen on the reported axes, without copying source pages.
     for y in (382,387,402):p.draw_line((220,y),(325,y),width=.35)
     for x in (220,325):p.draw_line((x,382),(x,402),width=.35)
-    p.insert_text((224,398),case.get('label','Horizontal (unit)'),fontsize=9)
+    label=case.get('label','Horizontal (unit)')
+    if case.get('split_tail'):
+        p.draw_line((317,382),(317,402),width=.35)
+        p.insert_text((224,398),label[:-1],fontsize=9)
+        p.insert_text((319,398),label[-1],fontsize=9)
+    else:
+        p.insert_text((224,398),label,fontsize=9)
     if case.get('table_title'):
         p.insert_text((210,379),'Table 2. Operating state',fontsize=8)
     # A real table containing Frequency must survive in every case.
