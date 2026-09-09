@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-PLOT-AXIS-20260910
+    acceptance_id: REQ-PLOT-AXIS
+    user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"
+    discovered_via: user_counterexample
+    failure_mechanism: "字体边框形成伪网格，既有图形过滤依赖文字连接，未识别大绘图区与双轴刻度归属。"
+    red_green_pair_id: PAIR-PLOT-AXIS
+    regression_test_id: PLOT_AXIS_TEST
+    public_path_rerun_id: RUN-PLOT-REAL
+    state: verified
   - id: DEF-SCREENSHOT-FIRST-20260910
     acceptance_id: REQ-SCREENSHOT-FIRST
     user_symptom: "报告短差异仍是纯文字，相似度1.000占据主清单，表格截图过小无法理解。"

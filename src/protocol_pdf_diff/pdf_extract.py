@@ -3316,6 +3316,7 @@ def _extract_table_lines_and_visuals(
     warnings: list[str] = []  # 单页表格截图和 OCR 相关的非致命问题。
     fully_covered_bboxes: list[tuple[float, float, float, float]] = []
     geometry_words = geometry_words or []  # 复用页面唯一一次坐标观测，禁止表格路径再次调用 extract_words。
+    grid_bboxes = tuple(_table_bbox(candidate) for candidate in table_objects)
     for table_number, table in enumerate(table_objects, start=1):
         bbox = _table_bbox(table)  # 先取边界框，用表题和位置判断它是不是真表格。
         try:
@@ -3360,6 +3361,9 @@ def _extract_table_lines_and_visuals(
             geometry_words,
             title=title,
             page_characters=getattr(page, "chars", ()) or (),
+        ) or _table_bbox_is_plot_axis_label(
+            bbox, table_lines, geometry_words, title=title,
+            grid_bboxes=grid_bboxes,
         ):
             continue  # Figure/plot 或空伪表格不进入正文 diff，也不进入表格截图区。
         lines.extend(table_lines)  # 表格行保留在抽取文本中，后续有截图表格区时正文 diff 会自动去重隐藏。
@@ -4053,6 +4057,122 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     if not table_lines and not _looks_like_table_caption(cleaned_title) and not _looks_like_table_context_caption(cleaned_title):
         return True  # 没有结构化行也没有表格语义时，通常是 OpenCV/pdfplumber 误检。
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
+
+
+def _table_bbox_is_plot_axis_label(
+    bbox: tuple[float, float, float, float] | None,
+    table_lines: list[str],
+    geometry_words: list[dict[str, object]],
+    *,
+    title: str = "",
+    grid_bboxes: tuple[tuple[float, float, float, float] | None, ...] = (),
+) -> bool:
+    """Recognize a spurious one-cell grid at the horizontal axis of a plot.
+
+    Font outlines can form tiny detected cells, sometimes clipping or doubling
+    the label text. Ownership therefore uses a captioned large grid and numeric
+    scales on BOTH axes, never the spelling of the label. Missing geometry or
+    independent table evidence leaves the candidate available for comparison.
+    """
+    if (
+        bbox is None or len(table_lines) != 1 or not geometry_words
+        or any(not _word_has_finite_positive_geometry(w) for w in geometry_words)
+        or _looks_like_table_caption(title)
+        or _looks_like_table_context_caption(title)
+        or _table_rows_begin_with_explicit_caption(table_lines)
+        or _table_rows_have_explicit_technical_schema(table_lines)
+        or len(re.findall(r"\|\s*[^|=]+=", table_lines[0])) != 1
+        or bbox[3] - bbox[1] > 32.0
+    ):
+        return False
+    payload = table_lines[0].split("=", 1)[-1].strip()
+    if not re.search(r"[^\W\d_]", payload) or len(payload.split()) > 8:
+        return False  # A numeric row is data, not an axis label.
+    baselines = _word_line_records(geometry_words)
+    records = []
+    for _, _, _, words in baselines:
+        for cluster in _figure_safe_horizontal_word_clusters(words, bbox=bbox):
+            records.append((min(float(w["top"]) for w in cluster),
+                            max(float(w["bottom"]) for w in cluster),
+                            _word_cluster_text(cluster), cluster))
+
+    def numeric(word: dict[str, object]) -> float | None:
+        text = str(word.get("text", "")).replace("−", "-")
+        if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
+            return None
+        value = float(text)
+        return value if math.isfinite(value) else None
+
+    def monotonic(values: list[float]) -> bool:
+        return all(a < b for a, b in zip(values, values[1:])) or all(
+            a > b for a, b in zip(values, values[1:])
+        )
+
+    for grid in grid_bboxes:
+        if grid is None:
+            continue
+        left, top, right, bottom = grid
+        width, height = right - left, bottom - top
+        if not (
+            width >= 120 and height >= 80
+            and width >= 2 * (bbox[2] - bbox[0])
+            and left <= bbox[0] < bbox[2] <= right
+            and 0 <= bbox[1] - bottom <= 45
+        ):
+            continue
+        captions = [r for r in records if 0 <= top - r[1] <= 100
+                    and _looks_like_figure_caption(r[2])
+                    and _horizontal_span_belongs_to_bbox(_word_span_horizontal_bounds(r[3]), grid)]
+        if not captions:
+            continue
+        caption = max(captions, key=lambda r: r[1])
+        if any(
+            caption[1] < r[0] < bbox[3]
+            and _horizontal_span_belongs_to_bbox(_word_span_horizontal_bounds(r[3]), grid)
+            and (_looks_like_table_caption(r[2]) or _looks_like_table_context_caption(r[2])
+                 or re.search(r"(?i)\b(?:shall|must|should|required|specified)\b", r[2])
+                 or len(r[2]) > 100)
+            for r in records
+        ):
+            continue
+        # Use physical word centers, including rotated tick labels. A log scale
+        # is monotonic but intentionally not equally spaced in value.
+        horizontal_scale = False
+        # Tick spacing is wider than words in a sentence: use the original
+        # baseline here, but clipped to this grid. Captions stay column-local.
+        for r in baselines:
+            if not (bottom - 2 <= r[0] and r[1] <= bbox[1] + 4):
+                continue
+            ticks = sorted(
+                ((float(w["x0"]) + float(w["x1"])) / 2, numeric(w))
+                for w in r[3]
+                if left - 8 <= (float(w["x0"]) + float(w["x1"])) / 2 <= right + 8
+                and numeric(w) is not None
+            )
+            if len(ticks) >= 4 and ticks[-1][0] - ticks[0][0] >= .75 * width and monotonic([v for _, v in ticks]):
+                if any(
+                    r[1] - 1 <= float(w["top"]) < bbox[1] - 1
+                    and left <= (float(w["x0"]) + float(w["x1"])) / 2 <= right
+                    and numeric(w) is None
+                    for w in geometry_words
+                ):
+                    continue  # An existing axis label or prose separates a later real box.
+                horizontal_scale = True
+                break
+        if not horizontal_scale:
+            continue
+        vertical_ticks = sorted(
+            ((float(w["top"]) + float(w["bottom"])) / 2, numeric(w))
+            for w in geometry_words
+            if 0 <= left - float(w["x1"]) <= 24
+            and top - 8 <= (float(w["top"]) + float(w["bottom"])) / 2 <= bottom + 8
+            and numeric(w) is not None
+        )
+        if (len(vertical_ticks) >= 3
+            and vertical_ticks[-1][0] - vertical_ticks[0][0] >= .6 * height
+            and monotonic([v for _, v in vertical_ticks])):
+            return True
+    return False
 
 
 def _table_bbox_belongs_to_captioned_figure(

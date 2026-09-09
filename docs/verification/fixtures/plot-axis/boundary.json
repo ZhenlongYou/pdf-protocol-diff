@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "id": "linear-scale",
+      "ticks": [
+        "0",
+        "2",
+        "4",
+        "6"
+      ],
+      "expected_tables": 1
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "existing-axis",
+      "separator": "Time (s)",
+      "label": "Enabled",
+      "expected_tables": 2
+    },
+    {
+      "id": "short-prose",
+      "separator": "The options are listed below.",
+      "label": "Enabled",
+      "expected_tables": 2
+    },
+    {
+      "id": "real-small-table",
+      "table_title": true,
+      "label": "Enabled",
+      "expected_tables": 2
+    }
+  ]
+}

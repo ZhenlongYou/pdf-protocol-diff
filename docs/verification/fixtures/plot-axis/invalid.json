@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "id": "no-figure-evidence",
+      "plot": false,
+      "label": "Enabled",
+      "expected_tables": 2
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "id": "ordinary-axis",
+      "expected_tables": 1
+    }
+  ]
+}

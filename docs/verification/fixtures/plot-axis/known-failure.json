@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "id": "font-outline-axis",
+      "label": "Frequency (GHz)",
+      "expected_tables": 1
+    }
+  ]
+}
