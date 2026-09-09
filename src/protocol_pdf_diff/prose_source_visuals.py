@@ -1595,7 +1595,7 @@ def _highlight_boxes(
             token_count=len(ordered_snippet_tokens),
         )
         snippet_matched = False
-        word_candidates: dict[int, list[tuple[tuple[float, int], tuple]]] = defaultdict(list)
+        word_candidates: dict[int, list[tuple[tuple[int, float], tuple]]] = defaultdict(list)
         for block in materialized:
             ordered_block_tokens = _tokens(block.text)
             if isinstance(snippet, _SnippetHighlight) and block_occurrences[tuple(ordered_block_tokens)] > 1:
@@ -1621,7 +1621,7 @@ def _highlight_boxes(
                     # Score each changed token's physical candidates against
                     # its complete snippet context. A similar unchanged line
                     # must not inherit a different line's changed token index.
-                    score = (ordered_overlap / len(ordered_block_tokens), ordered_overlap)
+                    score = (ordered_overlap, ordered_overlap / len(ordered_block_tokens))
                     for index in changed_indexes:
                         boxes = _changed_word_boxes(block, matcher, frozenset({index}))
                         if boxes:

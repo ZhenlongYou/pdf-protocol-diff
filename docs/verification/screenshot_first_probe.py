@@ -1,5 +1,6 @@
 """Exercise public PDF/report APIs with independent drawings and display oracle."""
-import argparse,json,re,sys,tempfile
+import argparse,base64,io,json,re,sys,tempfile
+from PIL import Image
 from pathlib import Path
 from dataclasses import replace
 import fitz
@@ -34,10 +35,10 @@ def run(case,root):
         result=DiffResult(old,new,[a],[b],[SectionChange('modified',a,b,case['score'],replaced_snippets=[SnippetPair(a.body,b.body)])],[])
     elif case['kind']=='similar':
         for path,value in [(old,'100'),(new,'120')]:
-            path.unlink();doc=fitz.open();page=doc.new_page(width=400,height=300)
+            path.unlink();doc=fitz.open();page=doc.new_page(width=600,height=300)
             page.insert_text((20,30),'1 Receiver',fontsize=12)
-            page.insert_text((20,60),'The receiver limit is '+value+' mV in mode A.',fontsize=11)
-            page.insert_text((20,90),'The receiver limit is 100 mV in mode B.',fontsize=11)
+            page.insert_text((20,60),'The receiver limit is '+value+' mV in mode A.'+(' Additional operating conditions apply.' if case.get('isolated') else ''),fontsize=11)
+            page.insert_text((20,90),'100 mV' if case.get('isolated') else 'The receiver limit is 100 mV in mode B.',fontsize=11)
             doc.save(path);doc.close()
         result=run_diff(old,new,DiffOptions(visual_watchdog=False))
     else:result=run_diff(old,new,DiffOptions(visual_watchdog=False))
@@ -50,7 +51,15 @@ def run(case,root):
     if case['kind']=='partition':
         return dict(main=len(data['content_changes']),appendix=len(data.get('similarity_review_changes',[])),raw=len(data['changes']),reviewable_text=re.sub('<[^>]+>','',html),reader_safe=all(not re.search('[\ue000-\uf8ff]',files[k].read_text()) for k in ('html','markdown','text')))
     if case['kind']=='similar':
-        return dict(old_regions=[v.highlight_region_count for g in result.prose_source_visuals for v in g.old_visuals],new_regions=[v.highlight_region_count for g in result.prose_source_visuals for v in g.new_visuals])
+        visual=next(v for g in result.prose_source_visuals for v in g.old_visuals)
+        image=Image.open(io.BytesIO(base64.b64decode(visual.image_data_uri.split(',')[1])))
+        reds=[]
+        with fitz.open(old) as doc:
+            for word in [w for w in doc[0].get_text('words') if w[4]=='100']:
+                box=tuple(round(v*image.size[j%2]/(600 if j%2==0 else 300)) for j,v in enumerate(word[:4]))
+                pixels=image.crop(box).convert('RGB')
+                reds.append(max(pixels.getpixel((x,y))[0]-pixels.getpixel((x,y))[1] for x in range(pixels.width) for y in range(pixels.height)))
+        return dict(old_red=reds,old_regions=[v.highlight_region_count for g in result.prose_source_visuals for v in g.old_visuals],new_regions=[v.highlight_region_count for g in result.prose_source_visuals for v in g.new_visuals])
     if case['kind']=='short':
         visuals=[v for g in result.prose_source_visuals for v in (*g.old_visuals,*g.new_visuals)]
         return dict(images=len(visuals),full_pages=bool(visuals) and all(v.crop_bbox==(0.,0.,300.,400.) for v in visuals),highlighted=bool(visuals) and all(v.highlight_region_count>0 for v in visuals),image_before_text=('class="prose-source-visual"' in html and html.index('class="prose-source-visual"')<html.index('class="prose-text-details"')),folded='<details class="prose-text-details">' in html)

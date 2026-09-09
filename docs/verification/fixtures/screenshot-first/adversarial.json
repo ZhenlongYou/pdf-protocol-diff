@@ -18,6 +18,11 @@
       "main": 0,
       "appendix": 1,
       "glyph": true
+    },
+    {
+      "id": "isolated-unchanged-value",
+      "kind": "similar",
+      "isolated": true
     }
   ]
 }

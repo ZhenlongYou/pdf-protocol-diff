@@ -72,8 +72,11 @@ def main():
         dest=WORK/('review-'+name+'.py')
         dest.write_bytes(subprocess.check_output(['git','show','238e2f79c1acc6edac24dbdb63b0eecf2bcee804:src/protocol_pdf_diff/'+target],cwd=ROOT))
         mutations.append(identity(dest,'MUT-'+name,target_source_id=source_ids[target]))
+    dest=WORK/'review-RANK.py'
+    dest.write_bytes(subprocess.check_output(['git','show','1629e53234ffbcb6aaee406497f33937c07dd782:src/protocol_pdf_diff/prose_source_visuals.py'],cwd=ROOT))
+    mutations.append(identity(dest,'MUT-RANK',target_source_id=source_ids['prose_source_visuals.py']))
     runs=[];pairs=[]
-    for suffix,mut,fixture_index in [('REPORT','MUT-REPORTING',3),('SOURCE','MUT-PROSE_SOURCE_VISUALS',4),('TABLE','MUT-PDF_EXTRACT',4),('CONTEXT','MUT-CONTEXT',3),('GLYPHS','MUT-GLYPHS',3)]:
+    for suffix,mut,fixture_index in [('REPORT','MUT-REPORTING',3),('SOURCE','MUT-PROSE_SOURCE_VISUALS',4),('TABLE','MUT-PDF_EXTRACT',4),('CONTEXT','MUT-CONTEXT',3),('GLYPHS','MUT-GLYPHS',3),('RANK','MUT-RANK',3)]:
         red='RUN-SCREENSHOT-'+suffix+'-RED';green='RUN-SCREENSHOT-'+suffix+'-GREEN'
         args=['docs/verification/screenshot_first_probe.py',fixture_paths[fixture_index]]
         runs.extend([run(red,'target_red',args,[input_ids[fixture_index]],mutation=mut,fail=True),

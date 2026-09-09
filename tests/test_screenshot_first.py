@@ -25,6 +25,25 @@ def section(sid, body):
     return Section(sid,'1 Receiver','Receiver',1,('1 Receiver',),('1',),1,1,body)
 
 class ScreenshotFirstTests(unittest.TestCase):
+    def test_isolated_unchanged_number_cannot_outrank_complete_sentence_context(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            for side,value in [('old','100'),('new','120')]:
+                doc=fitz.open();page=doc.new_page(width=600,height=300)
+                page.insert_text((20,30),'1 Receiver',fontsize=12)
+                page.insert_text((20,60),f'The receiver limit is {value} mV in mode A. Additional operating conditions apply.',fontsize=11)
+                page.insert_text((20,90),'100 mV',fontsize=11)
+                doc.save(root/(side+'.pdf'));doc.close()
+            result=run_diff(root/'old.pdf',root/'new.pdf',DiffOptions(visual_watchdog=False))
+            old=next(g.old_visuals[0] for g in result.prose_source_visuals if g.old_visuals)
+            raster=Image.open(io.BytesIO(base64.b64decode(old.image_data_uri.split(',')[1])))
+            with fitz.open(root/'old.pdf') as doc:
+                values=[w for w in doc[0].get_text('words') if w[4]=='100']
+            for i,word in enumerate(values):
+                box=tuple(round(v*raster.size[j%2]/(600 if j%2==0 else 300)) for j,v in enumerate(word[:4]))
+                pixels=raster.crop(box).convert('RGB')
+                red=max(pixels.getpixel((x,y))[0]-pixels.getpixel((x,y))[1] for x in range(pixels.width) for y in range(pixels.height))
+                self.assertGreater(red,10) if i==0 else self.assertLess(red,5)
     def test_similar_unchanged_mode_does_not_receive_changed_mode_highlight(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)

@@ -9,6 +9,7 @@ def check(case, observed):
         assert '12 mV' in observed['reviewable_text'],observed
         assert observed['raw']==1 and observed['reader_safe'],observed
     elif kind=='similar':
+        assert len(observed['old_red'])==2 and observed['old_red'][0]>10 and observed['old_red'][1]<5,observed
         assert observed['old_regions']==[1] and observed['new_regions']==[1],observed
     elif kind=='short':
         assert observed['images']>=2,observed
