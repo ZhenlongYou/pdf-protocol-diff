@@ -341,6 +341,10 @@ def write_reports(
         *table_changes,
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
+    from .physical_table_rows import render_physical_appendix, authorized_spans, write_physical_csv, physical_text_export
+    physical_html, physical_payload, physical_receipts = render_physical_appendix(table_groups)
+    physical_csv_path = report_dir / 'physical_table_records.csv'
+    physical_receipts &= write_physical_csv(physical_payload, physical_csv_path)
     reader_changes: list[SectionChange] = []
     old_figure_texts_by_owner: dict[str, list[str]] = {}
     new_figure_texts_by_owner: dict[str, list[str]] = {}
@@ -414,7 +418,7 @@ def write_reports(
                 new_figure_sources,
             ),
             figure_visual_pages=(old_figure_texts_by_page, new_figure_texts_by_page),
-            visual_owned_spans=tuple(result.visual_owned_spans.get(side + ':' + section.section_id, {}) if section else {}
+            visual_owned_spans=tuple(authorized_spans(result.visual_owned_spans, side, section.section_id, physical_receipts) if section else {}
                                      for side, section in (('old', change.old_section), ('new', change.new_section))),
         )
         if reader_change is not None:
@@ -499,12 +503,20 @@ def write_reports(
         html = html.replace("</main>", appendix + "</main>") if "</main>" in html else html.replace("</body>", appendix + "</body>")
         markdown += "\n\n<details><summary>" + heading + "</summary>\n\n" + "\n".join(
             f"- 旧版：{row['old']}；新版：{row['new']}。{row['reason']}" for row in uncertainty_rows) + "\n\n</details>\n"
+    if physical_html:
+        if '</main>' not in html and '</body>' not in html:
+            raise ValueError('Physical row receipt cannot be emitted without a report insertion point')
+        html = html.replace('</main>', physical_html + '</main>') if '</main>' in html else html.replace('</body>', physical_html + '</body>')
     text = _markdown_to_plain_text(markdown)
+    markdown += physical_text_export(physical_payload, markdown=True)
+    text += physical_text_export(physical_payload)
     csv_rows = _rows_for_csv(reader_changes)
     table_csv_rows = _rows_for_table_csv(reader_table_changes)
     sections_payload = {
         "comparison_focus": "substantive_content",
         "uncertain_table_correspondences": uncertainty_rows,
+        "physical_table_receipts": physical_payload,
+        "physical_table_dedup_authorizations": sorted(physical_receipts),
         "visual_owned_spans": result.visual_owned_spans,
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
@@ -650,6 +662,7 @@ def write_reports(
         "text": txt_path,
         "csv": csv_path,
         "table_csv": table_csv_path,
+        "physical_table_csv": physical_csv_path,
         "similarity_review_csv": report_dir / "similarity_review_changes.csv",
         "similarity_review_table_csv": report_dir / "similarity_review_table_changes.csv",
         "json": json_path,

@@ -2,12 +2,12 @@
 from pathlib import Path
 import unittest
 from protocol_pdf_diff.models import (DiffResult, DocumentBlock, DocumentBlockKind,
-    ExtractionResult, PageText, Section, SectionChange, ProseSourceVisual, ProseSourceVisualGroup)
+    ExtractionResult, PageText, Section, SectionChange, SnippetPair, ProseSourceVisual, ProseSourceVisualGroup)
 from protocol_pdf_diff.visual_ownership import build_visual_owned_spans, apply_owned_spans
 from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
 
 
-def fixture(value, lines, *, crop=(0.,0.,500.,50.)):
+def fixture(value, lines, *, crop=(0.,0.,500.,50.), unilateral=False):
     blocks = []
     for index, (text, top) in enumerate(lines):
         x, words = 10., []
@@ -24,7 +24,15 @@ def fixture(value, lines, *, crop=(0.,0.,500.,50.)):
     result = DiffResult(Path('old.pdf'), Path('new.pdf'), [], [section], [change], [])
     visual = ProseSourceVisual(1, crop, '', 0, 0)
     groups = [ProseSourceVisualGroup('added', None, 'new', new_figure_visuals=(visual,), new_figure_captions=('Figure 1.',))]
-    spans = build_visual_owned_spans(result, ExtractionResult(Path('old.pdf'), []),
+    old_pages = []
+    if not unilateral:
+        from dataclasses import replace
+        old = replace(section, section_id='old')
+        change = SectionChange('modified', old, section, 1., replaced_snippets=[SnippetPair(value, value)])
+        result = DiffResult(Path('old.pdf'), Path('new.pdf'), [old], [section], [change], [])
+        groups = [ProseSourceVisualGroup('modified', 'old', 'new', old_figure_visuals=(visual,), new_figure_visuals=(visual,), old_figure_captions=('Figure 1.',), new_figure_captions=('Figure 1.',))]
+        old_pages = [page]
+    spans = build_visual_owned_spans(result, ExtractionResult(Path('old.pdf'), old_pages),
                                     ExtractionResult(Path('new.pdf'), [page]), groups)
     return spans.get('new:new', {}).get(value, [])
 
@@ -37,6 +45,10 @@ class OwnershipTests(unittest.TestCase):
     def test_unique_outside_figure_is_not_owned(self):
         value = 'Maximum differential voltage: 800 mV'
         self.assertEqual([], fixture(value, [(value,100.)]))
+
+    def test_unilateral_figure_label_is_preserved(self):
+        value = 'Gain versus frequency'
+        self.assertEqual([], fixture(value, [(value,10.)], unilateral=True))
 
     def test_unique_inside_figure_is_owned(self):
         value = 'Gain versus frequency'

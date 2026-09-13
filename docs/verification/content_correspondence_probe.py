@@ -65,7 +65,7 @@ def run(case, root):
         return json.dumps(list(reporting._table_visual_indexes_by_caption_key(tables).values()))
     if kind == 'ownership':
         from protocol_pdf_diff.models import (DiffResult, DocumentBlock, DocumentBlockKind,
-            ExtractionResult, PageText, Section, SectionChange, ProseSourceVisual, ProseSourceVisualGroup)
+            ExtractionResult, PageText, Section, SectionChange, SnippetPair, ProseSourceVisual, ProseSourceVisualGroup)
         from protocol_pdf_diff.visual_ownership import build_visual_owned_spans, apply_owned_spans
         blocks = []
         for index, line in enumerate(case['lines']):
@@ -83,11 +83,19 @@ def run(case, root):
         result = DiffResult(Path('old.pdf'), Path('new.pdf'), [], [section], [change], [])
         visual = ProseSourceVisual(1, tuple(case.get('crop', (0.,0.,500.,50.))), '', 0, 0)
         groups = [ProseSourceVisualGroup('added', None, 'new', new_figure_visuals=(visual,), new_figure_captions=('Figure 1.',))]
+        old_pages = []
+        if not case.get('unilateral'):
+            from dataclasses import replace
+            old_section = replace(section, section_id='old')
+            change = SectionChange('modified', old_section, section, 1., replaced_snippets=[SnippetPair(value, value)])
+            result = DiffResult(Path('old.pdf'), Path('new.pdf'), [old_section], [section], [change], [])
+            groups = [ProseSourceVisualGroup('modified', 'old', 'new', old_figure_visuals=(visual,), new_figure_visuals=(visual,), old_figure_captions=('Figure 1.',), new_figure_captions=('Figure 1.',))]
+            old_pages = [page]
         if case.get('uncertain_table'):
             from protocol_pdf_diff.models import TableVisual
             result.new_table_visuals.append(TableVisual(1,1,'Table 1', (0,0,500,50), '', [], '', content_fully_represented=False, row_alignment_reliable=False))
             groups = []
-        spans = build_visual_owned_spans(result, ExtractionResult(Path('old.pdf'), []),
+        spans = build_visual_owned_spans(result, ExtractionResult(Path('old.pdf'), old_pages),
             ExtractionResult(Path('new.pdf'), [page]), groups)
         return apply_owned_spans(value, spans.get('new:new', {}).get(value, []))
     if kind == 'limit':

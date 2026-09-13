@@ -70,6 +70,19 @@
       ],
       "uncertain_table": true,
       "equals": "Maximum differential voltage: 800 mV"
+    },
+    {
+      "id": "single-sided-figure-label-is-content",
+      "kind": "ownership",
+      "value": "Voltage 800 mV",
+      "lines": [
+        {
+          "text": "Voltage 800 mV",
+          "top": 10
+        }
+      ],
+      "unilateral": true,
+      "equals": "Voltage 800 mV"
     }
   ]
 }

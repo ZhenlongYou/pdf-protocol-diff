@@ -2319,14 +2319,15 @@ def _match_sections(
         new_index = new_leaf_indexes[leaf]
         new_section = new_sections[new_index]
         body = _review_unit_key(old_section.body)
+        leaf_similarity = _section_similarity(old_section.comparable_text, new_section.comparable_text)
         if (new_index not in matched_new and len(body) >= 80
+                and leaf_similarity >= options.min_section_match_similarity
                 and _review_unit_key(old_section.title) == _review_unit_key(new_section.title)
                 and body == _review_unit_key(new_section.body)
                 and (len(old_section.number_path) == 1 or len(new_section.number_path) == 1)):
             matched_old.add(old_index)
             matched_new.add(new_index)
-            matches.append((old_index, new_index,
-                            _section_similarity(old_section.comparable_text, new_section.comparable_text),
+            matches.append((old_index, new_index, leaf_similarity,
                             "structural_leaf_body_anchor"))
 
     old_table_unit_keys = suppressed_old_table_unit_keys or set()

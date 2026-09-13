@@ -122,6 +122,8 @@ class PageText:
     running_footer_values: tuple[str, ...] = ()  # 仅按已证明页码词的来源身份去除 folio，保留版本和技术数值。
     running_footer_texts: tuple[str, ...] = ()  # 原文页脚独立保留，避免混入正文但仍可审计比较。
 
+    source_char_map: tuple[tuple[str, float, float, float, float, int], ...] = ()
+
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
 
@@ -206,6 +208,17 @@ def snapshot_page_extraction_audit(
 
 
 @dataclass(frozen=True)
+class PhysicalTableRow:
+    """Original physical cells, with no asserted logical subrow mapping."""
+
+    row_id: str
+    cells: tuple[str, str, str, str]
+    bbox: tuple[float, float, float, float]
+    cell_bboxes: tuple[tuple[float, float, float, float], ...]
+    cell_words: tuple[tuple[tuple[str, float, float, float, float], ...], ...]
+
+
+@dataclass(frozen=True)
 class TableVisual:
     """One table-like visual region extracted from a PDF page."""
 
@@ -227,6 +240,7 @@ class TableVisual:
     context_image_data_uri: str = field(default="", repr=False)
     context_bbox: tuple[float, float, float, float] | None = None
     context_words: tuple[tuple[str, float, float, float, float], ...] = field(default=(), repr=False)
+    physical_rows: tuple[PhysicalTableRow, ...] = ()
 
 
 @dataclass(frozen=True)

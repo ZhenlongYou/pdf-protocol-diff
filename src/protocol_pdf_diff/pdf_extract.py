@@ -374,6 +374,13 @@ def _extract_pdf_text_with_pdfplumber(
                     vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                     source_blank_glyphs=blank_glyph_proof,
                     formula_bboxes=tuple(formula.bbox for formula in page_formulas),
+                    source_char_map=_source_char_map_for_final_text(text, _filtered_layout_page(
+                        page, coordinate_words=coordinate_evidence[index][0],
+                        gutter_boxes=gutter_boxes_by_page.get(index, ()),
+                        footer_boxes=(*_proven_running_footer_boxes(page, words=coordinate_evidence[index][0]),
+                                      *footer_evidence_by_page.get(index, ((), (), ()))[0]),
+                        header_boxes=header_boxes_by_page.get(index, ()))) if not ocr_used and any(
+                        _looks_like_figure_caption(_strip_caption_line_noise(line)) for line in text.splitlines()) else (),
                 )
             )  # 保留页码、图像/OCR 独立事实和互斥路由，供质量层与报告审计判断。
             notify_progress(
@@ -3535,6 +3542,11 @@ def _extract_table_lines_and_visuals(
         if visual_warning:
             warnings.append(f"{pdf_name}: 第 {page_number} 页第 {table_number} 个表格截图生成失败: {visual_warning}")
         if visual is not None:
+            from dataclasses import replace
+            from .physical_table_rows import capture_physical_rows
+            visual = replace(visual, physical_rows=capture_physical_rows(
+                page, table, source_rows, source_cell_word_rows,
+                geometry_words, page_number, table_number))
             visuals.append(visual)
     return lines, visuals, warnings, tuple(fully_covered_bboxes)
 
@@ -8586,3 +8598,11 @@ def _resolve_page_range(
             f"{pdf_name}: 页码范围无效，起始页 {selected_start} 不能大于终止页 {selected_end}。"
         )
     return selected_start, selected_end
+
+
+def _source_char_map_for_final_text(text, page):
+    from .source_char_evidence import source_char_map_for_final_text
+    try:
+        return source_char_map_for_final_text(text, page.get_textmap(x_tolerance=1, y_tolerance=3))
+    except Exception:
+        return ()

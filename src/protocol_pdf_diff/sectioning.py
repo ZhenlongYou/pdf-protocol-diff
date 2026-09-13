@@ -160,12 +160,15 @@ def _merge_source_split_heading_lines(pages: list[PageText]) -> list[PageText]:
             signature = ''.join(text.split())
             occurrences = []
             for start, line in enumerate(lines):
-                if not line.strip() or not signature.startswith(''.join(line.split())):
-                    continue
+                if (not line.strip() or not signature.startswith(''.join(line.split()))
+                        or strong_heading_style(page, line)):
+                    continue  # A complete physical heading must not consume its following title.
                 observed = ''
                 for end in range(start, len(lines)):
-                    if not lines[end].strip():
-                        break
+                    if (not lines[end].strip()
+                            or (end > start and detect_heading(lines[end]) is not None
+                                and strong_heading_style(page, lines[end]))):
+                        break  # An independently proven heading is a section boundary.
                     observed += ''.join(lines[end].split())
                     if not signature.startswith(observed):
                         break
