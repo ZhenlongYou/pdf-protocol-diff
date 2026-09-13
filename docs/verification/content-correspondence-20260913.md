@@ -6,9 +6,9 @@
 - 第十二完整501原ID、191当前正文卡（170主卡+21附录）、44表卡（25主卡+19附录）全部裁决，见 `complete-twelfth-audit.json`。新增闭环C36/C68/C93/C95/C119及C123，完整原句/数值/URL源证据保留；C102仍为附录空格噪声。17既有+28增量整本检查通过。剩54原正文噪声（47主卡+7附录），19几何/26数学未决，不作整份准确性验收。
 - GUI摘要163正文候选排除了7纯review卡，23变化表格排除了2纯review表卡；与JSON数量差异是既有统计口径，不是丢卡（count-reconciliation.json）。H55八原行、CSV/native索引及Step0假替换继续通过；T49原671重读13参数2完整说明通过。632源表、68未知结构、44表卡事实与第十一完全相同。
 - HTML1202图无损坏，实际目视顶部、正文、物理表、窄屏，默认折叠/原图缩放通过。82原视觉项保留；21新增源页对像素完全相同复用已审证据，新增496/500源页对已实际目视，图形/曲线不认证数学等价。
-- 当前未提交：C58直接原生TextMap字符身份绑定（最终patch2bf3414858b7256392ed29be948a05a0c3c3c0217eb37be3104aca5792933cdd），独立13反例+9永久测试、107相关与真实两页/原whole-record重放通过；当前C58组合完整1661项测试259.279秒通过（1条件skip；thirteenth-native-preflight-tests.log），此证据不覆盖后续新unknown候选。仅处理重复物理基行，不按出现次数授权；两页最终source_char_map仍为空，与84b原状一致，未假造重排后映射。
+- 当前已提交 `0223d059d8dbcc03becfb80da10f174867535ba6`：C58直接原生TextMap字符身份绑定（最终patch2bf3414858b7256392ed29be948a05a0c3c3c0217eb37be3104aca5792933cdd），独立13反例+9永久测试、107相关与真实两页/原whole-record重放通过；当前C58组合完整1661项测试259.279秒通过（1条件skip；thirteenth-native-preflight-tests.log），此证据不覆盖后续新unknown候选。仅处理重复物理基行，不按出现次数授权；两页最终source_char_map仍为空，与84b原状一致，未假造重排后映射。
 - 拒绝候选：C58最初按全部出现计数的版本会借unstyled行补计数，已拒。C59只核改动词坐标会漏掉未变关系词移动，已拒；159字形仅65完整框exact，不能用容差判整片段相同。C37公式等价版本被rise/分数线范围反例否证；修正后仍缺旧字体程序，最终显式拒绝等价及缓存消费。三者失败历史均留在外部review目录。
-- 外部工作：独立的FormulaSourceReview未知来源承接候选（保留两版公式原图/原文/待核实计数，不判相同、不认证公式修复）；package三行正文伪删除来源缺口诊断。均未合入。下一次冻结须最终全套、真实整本和全审。`DEF-CONTENT-CORRESPONDENCE-20260913`仍open，未push/main/正式STRICT/attest。外部恢复状态 `repair_20260913/continuation-state.json`。
+- 外部工作：独立的FormulaSourceReview未知来源承接候选（保留两版公式原图/原文/待核实计数，不判相同、不认证公式修复）；package三行正文伪删除逐行producer试验有效，但最终图片/CSV缺失时不能恢复原比较，正在评估完整双视图回退。公式候选独立审查发现三项来源绑定漏洞及GUI待核实计数缺口，已退回修正。均未合入。下一次冻结须最终全套、真实整本和全审。`DEF-CONTENT-CORRESPONDENCE-20260913`仍open，未push/main/正式STRICT/attest。外部恢复状态 `repair_20260913/continuation-state.json`。
 
 ## 最新状态（第十轮冻结前）
 
