@@ -6,6 +6,27 @@ from protocol_pdf_diff.models import TableVisual
 
 
 class CompleteReportFollowupTests(unittest.TestCase):
+    def test_paired_visual_projection_is_atomic_in_display_and_audit(self):
+        from protocol_pdf_diff.models import Section,SectionChange,SnippetPair
+        old='Mezzanine component edge or Board to Board component edge'
+        new='Board to Board component edge or Mezzanine component edge'
+        def section(identity,text):
+            return Section(identity,'1 Reference Model','Reference Model',1,('1 Reference Model',),('1',),1,1,text)
+        change=SectionChange('modified',section('old',old),section('new',new),.8,
+                             replaced_snippets=[SnippetPair(old,new)],audit_replaced_snippets=[SnippetPair(old,new)])
+        for spans in [({}, {new:[(0,len(new))]}),({old:[(0,len(old)+1)]},{new:[(0,len(new))]})]:
+            result=reporting._reader_section_change(change,visual_owned_spans=spans)
+            self.assertIsNotNone(result)
+            self.assertEqual([],result.removed_snippets)
+            self.assertEqual([],result.added_snippets)
+            self.assertEqual([SnippetPair(old,new)],result.replaced_snippets)
+            self.assertEqual([SnippetPair(old,new)],result.audit_replaced_snippets)
+        direct=SectionChange('modified',section('old',old),section('new',new),.8,
+                             removed_snippets=[old],added_snippets=[new])
+        result=reporting._reader_section_change(direct,visual_owned_spans=({old:[(0,len(old))]},{new:[(0,len(new))]}))
+        self.assertEqual([old],result.removed_snippets)
+        self.assertEqual([new],result.added_snippets)
+
     def test_short_prose_after_equation_is_never_joined_into_math(self):
         for prose in ('Avoid clipping.', 'Increase bandwidth.', 'Keep Vmax.', 'Avoid clipping',
                       'SET X=1', 'Use Vmax.', 'Do not clip.', 'RLM >= 0.95', 'V <= 800',

@@ -9891,11 +9891,17 @@ def _reader_section_change(
         def owned(value, side):
             return apply_owned_spans(value, visual_owned_spans[side].get(compact_inline(value), ()))
         def clean_lists(removed_values, added_values, replaced_values):
-            removed = [cleaned for value in removed_values if (cleaned := owned(value, 0))]
-            added = [cleaned for value in added_values if (cleaned := owned(value, 1))]
+            paired_section = change.old_section is not None and change.new_section is not None
+            # Source ownership of one occurrence does not prove correspondence
+            # to the other document. Never manufacture a one-sided difference
+            # by cleaning just one side of a paired section.
+            removed = list(removed_values) if paired_section else [cleaned for value in removed_values if (cleaned := owned(value, 0))]
+            added = list(added_values) if paired_section else [cleaned for value in added_values if (cleaned := owned(value, 1))]
             pairs = []
             for pair in replaced_values:
                 old, new = owned(pair.old, 0), owned(pair.new, 1)
+                if paired_section and (old == compact_inline(pair.old) or new == compact_inline(pair.new)):
+                    old, new = compact_inline(pair.old), compact_inline(pair.new)
                 if old and new:
                     if old != new:
                         pairs.append(SnippetPair(old, new))

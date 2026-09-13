@@ -177,8 +177,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "156c3be97c13e8f033ce83b3e36c5655c6b8b45a77f32d0187a74037cd167cfd",
-          "size_bytes": 537248
+          "sha256": "4ddd0d120ad6363693a7d4cad1b4577a74c4d0859bb30006db3cc5cd735e89f7",
+          "size_bytes": 537837
         },
         {
           "id": "SRC-SAMPLE_DATA",
@@ -406,8 +406,8 @@
         {
           "id": "MUT-LIMIT",
           "path": "work/content-correspondence-gate/limit.py",
-          "sha256": "b0298c1ecead56dc7140adf9d5b981cc0ba1cf595930383dddfa9b0c367eef9f",
-          "size_bytes": 537258,
+          "sha256": "8d22a5a2266d7e6fb3796edf1b78042972494d6edb48fae95295a974907f3567",
+          "size_bytes": 537847,
           "target_source_id": "SRC-REPORTING"
         },
         {
@@ -441,8 +441,8 @@
         {
           "id": "MUT-UNITS",
           "path": "work/content-correspondence-gate/units.py",
-          "sha256": "32fcaec1af9611f1e140522d57f488c6f937bc9a39bf9fdf6b4909a132f718e6",
-          "size_bytes": 537258,
+          "sha256": "d7537c43673d1d50972b69015cda711c39745c70f867d05bceb44b6e3393cfbb",
+          "size_bytes": 537847,
           "target_source_id": "SRC-REPORTING"
         },
         {
@@ -455,8 +455,8 @@
         {
           "id": "MUT-GROUP",
           "path": "work/content-correspondence-gate/group.py",
-          "sha256": "cff4d39811ed72eaa955f8512a41bed89ce07ab41fde5d9a2cfdde308c022de9",
-          "size_bytes": 537226,
+          "sha256": "4867a6f006ba613a5860cc705661d5679e943ec8b7abd9b4c931140337bf0413",
+          "size_bytes": 537815,
           "target_source_id": "SRC-REPORTING"
         },
         {
