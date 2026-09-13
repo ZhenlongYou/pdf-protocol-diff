@@ -2,6 +2,14 @@
   "partition": "realistic",
   "cases": [
     {
+      "id": "context-crop-is-not-physical-figure",
+      "kind": "ownership",
+      "crop": [0, 0, 500, 200],
+      "lines": [{"top": 100, "text": "Maximum differential voltage: 800 mV"}],
+      "value": "Maximum differential voltage: 800 mV",
+      "contains": ["Maximum differential voltage: 800 mV"]
+    },
+    {
       "id": "public-limit-change",
       "kind": "public",
       "contains": [

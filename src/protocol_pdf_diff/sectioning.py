@@ -143,6 +143,49 @@ class _OpenSection:
     inherited_heading_provenance: bool
 
 
+def _merge_source_split_heading_lines(pages: list[PageText]) -> list[PageText]:
+    """Rejoin a unique raw span only when the complete physical heading is proven."""
+    from .heading_evidence import _page_word_index
+
+    output = []
+    for page in pages:
+        lines = page.text.splitlines()
+        candidates = []
+        for text in _page_word_index(page)[0]:
+            if (not re.match(r'^\d+(?:\.\d+)+\s', text)
+                    or detect_heading(text) is None
+                    or not strong_heading_style(page, text)
+                    or source_region_role(page, text)):
+                continue
+            signature = ''.join(text.split())
+            occurrences = []
+            for start, line in enumerate(lines):
+                if not line.strip() or not signature.startswith(''.join(line.split())):
+                    continue
+                observed = ''
+                for end in range(start, len(lines)):
+                    if not lines[end].strip():
+                        break
+                    observed += ''.join(lines[end].split())
+                    if not signature.startswith(observed):
+                        break
+                    if observed == signature:
+                        occurrences.append((start, end + 1))
+                        break
+            if len(occurrences) == 1 and occurrences[0][1] - occurrences[0][0] > 1:
+                candidates.append((*occurrences[0], text))
+        accepted = []
+        for start, end, text in candidates:
+            if any((a, b, t) != (start, end, text) and max(a, start) < min(b, end)
+                   for a, b, t in candidates):
+                continue
+            accepted.append((start, end, text))
+        for start, end, text in sorted(accepted, reverse=True):
+            lines[start:end] = [text]
+        output.append(replace(page, text='\n'.join(lines)) if accepted else page)
+    return output
+
+
 def section_document(extraction: ExtractionResult) -> list[Section]:
     """Split extracted pages into logical protocol sections.
 
@@ -157,7 +200,9 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     source_pages = [replace(page, formula_bboxes=tuple(formula_boxes.get(page.page_number, ())))
                     for page in extraction.pages]
     cleaned_pages = _merge_standalone_heading_lines(
-        _remove_repeating_page_furniture(_remove_proven_margin_noise(source_pages))
+        _merge_source_split_heading_lines(
+            _remove_repeating_page_furniture(_remove_proven_margin_noise(source_pages))
+        )
     )
     sections: list[Section] = []
     current: _OpenSection | None = None

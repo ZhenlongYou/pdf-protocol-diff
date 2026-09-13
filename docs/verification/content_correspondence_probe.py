@@ -81,7 +81,7 @@ def run(case, root):
         section = Section('new', '1 Requirements', 'Requirements', 1, ('1',), ('1',), 1, 1, value)
         change = SectionChange('added', None, section, 0., added_snippets=[value])
         result = DiffResult(Path('old.pdf'), Path('new.pdf'), [], [section], [change], [])
-        visual = ProseSourceVisual(1, (0.,0.,500.,50.), '', 0, 0)
+        visual = ProseSourceVisual(1, tuple(case.get('crop', (0.,0.,500.,50.))), '', 0, 0)
         groups = [ProseSourceVisualGroup('added', None, 'new', new_figure_visuals=(visual,), new_figure_captions=('Figure 1.',))]
         if case.get('uncertain_table'):
             from protocol_pdf_diff.models import TableVisual

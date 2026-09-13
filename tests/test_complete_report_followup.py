@@ -23,9 +23,9 @@ class CompleteReportFollowupTests(unittest.TestCase):
             self.assertEqual([SnippetPair(old,new)],result.audit_replaced_snippets)
         direct=SectionChange('modified',section('old',old),section('new',new),.8,
                              removed_snippets=[old],added_snippets=[new])
-        result=reporting._reader_section_change(direct,visual_owned_spans=({old:[(0,len(old))]},{new:[(0,len(new))]}))
+        result=reporting._reader_section_change(direct,visual_owned_spans=({}, {new:[(0,len(new))]}))
         self.assertEqual([old],result.removed_snippets)
-        self.assertEqual([new],result.added_snippets)
+        self.assertEqual([],result.added_snippets)
 
     def test_short_prose_after_equation_is_never_joined_into_math(self):
         for prose in ('Avoid clipping.', 'Increase bandwidth.', 'Keep Vmax.', 'Avoid clipping',
