@@ -443,7 +443,7 @@ def normalize_for_similarity(text: str) -> str:
 def compact_inline(text: str) -> str:
     """Make a short single-line snippet for reports and CSV fields."""
 
-    return _WHITESPACE_RE.sub(" ", " ".join(text.split())).strip()
+    return " ".join(text.split())
 
 
 def readable_symbol_font_glyphs(text: str) -> str:

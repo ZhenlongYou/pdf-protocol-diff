@@ -382,6 +382,7 @@ def compare_extractions(
         warnings.append(f"{old_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     if not new_sections:
         warnings.append(f"{new_extraction.pdf_path.name}: 未识别到可比较文本段落。")
+    from .url_literal_evidence import extraction_url_receipts
     from .source_typography import source_superscript_receipts
     return DiffResult(
         old_pdf=old_extraction.pdf_path,
@@ -406,6 +407,8 @@ def compare_extractions(
         assessment=assessment,
         provenance=provenance,
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
+        old_url_literal_receipts=extraction_url_receipts(old_extraction),
+        new_url_literal_receipts=extraction_url_receipts(new_extraction),
         old_superscript_receipts=source_superscript_receipts(old_extraction),
         new_superscript_receipts=source_superscript_receipts(new_extraction),
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。

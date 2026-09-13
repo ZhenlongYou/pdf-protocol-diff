@@ -430,6 +430,8 @@ def write_reports(
         new_sections=result.new_sections,
         full_document_selected=_full_document_selected_for_reader_cleanup(result),
     )
+    from .url_literal_evidence import project_url_change
+    reader_changes = [p for c in reader_changes if (p := project_url_change(c, result.old_url_literal_receipts, result.new_url_literal_receipts)) is not None]
     from .source_typography import restore_change_typography
     reader_changes = [restore_change_typography(
         c, result.old_superscript_receipts, result.new_superscript_receipts
@@ -526,6 +528,7 @@ def write_reports(
         "physical_table_receipts": physical_payload,
         "physical_table_dedup_authorizations": sorted(physical_receipts),
         "visual_owned_spans": result.visual_owned_spans,
+        "url_literal_source_receipts": {"old": result.old_url_literal_receipts, "new": result.new_url_literal_receipts},
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
         "similarity_review_changes": [_change_to_dict(c) for c in similarity_review_changes],

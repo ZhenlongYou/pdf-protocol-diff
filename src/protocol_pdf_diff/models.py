@@ -122,6 +122,8 @@ class PageText:
     running_footer_values: tuple[str, ...] = ()  # 仅按已证明页码词的来源身份去除 folio，保留版本和技术数值。
     running_footer_texts: tuple[str, ...] = ()  # 原文页脚独立保留，避免混入正文但仍可审计比较。
 
+    url_literal_receipts: tuple[dict, ...] = ()
+
     source_char_map: tuple[tuple[str, float, float, float, float, int], ...] = ()
 
     def __post_init__(self) -> None:
@@ -598,6 +600,8 @@ class DiffResult:
     new_total_pages_known: bool = False  # 测试或局部页面推断出的数值不能授权全篇消噪。
     prose_source_visuals: list[ProseSourceVisualGroup] = field(default_factory=list)  # 长正文变化的旧/新原文区域截图；仅用于读者核对，不改写语义事实。
     visual_owned_spans: dict[str, dict[str, list[tuple[int, int]]]] = field(default_factory=dict, repr=False)
+    old_url_literal_receipts: tuple = ()
+    new_url_literal_receipts: tuple = ()
     old_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()  # 仅供读者恢复原生上标排印，不影响比较。
     new_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()
 

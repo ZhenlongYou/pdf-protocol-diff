@@ -354,6 +354,7 @@ def _extract_pdf_text_with_pdfplumber(
             from .physical_native_evidence import native_page_evidence
             physical_native_text = native_page_evidence(page)[0] if not ocr_used else None
             page._physical_native_evidence = (physical_native_text, ())  # Row receipts retained only their own glyphs.
+            from .url_literal_evidence import capture_url_receipts
             pages.append(
                 PageText(
                     page_number=index,
@@ -380,6 +381,12 @@ def _extract_pdf_text_with_pdfplumber(
                     vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                     source_blank_glyphs=blank_glyph_proof,
                     formula_bboxes=tuple(formula.bbox for formula in page_formulas),
+                    url_literal_receipts=capture_url_receipts(_filtered_layout_page(
+                        page, coordinate_words=coordinate_evidence[index][0],
+                        gutter_boxes=gutter_boxes_by_page.get(index, ()),
+                        footer_boxes=(*_proven_running_footer_boxes(page, words=coordinate_evidence[index][0]),
+                                      *footer_evidence_by_page.get(index, ((), (), ()))[0]),
+                        header_boxes=header_boxes_by_page.get(index, ())), getattr(page, "hyperlinks", ())) if not ocr_used else (),
                     source_char_map=_source_char_map_for_final_text(text, _filtered_layout_page(
                         page, coordinate_words=coordinate_evidence[index][0],
                         gutter_boxes=gutter_boxes_by_page.get(index, ()),
@@ -906,6 +913,8 @@ def _repair_body_visual_subscript_order(
             continue
         edges_by_line_pair.setdefault((base_line, suffix_line), []).append(edge)
     for (base_line, suffix_line), edges in edges_by_line_pair.items():
+        if len(coordinate_occurrences.get(_character_signature(coordinate_line_texts[base_line]), [])) != 1:
+            continue  # An unstyled repeated base remains an occurrence blocker.
         combined_indexes = sorted(
             [*indexed_lines[base_line], *indexed_lines[suffix_line]],
             key=lambda index: (
@@ -925,7 +934,7 @@ def _repair_body_visual_subscript_order(
         # extractor. Bind only a complete, unique, ordered contiguous source.
         for start in range(len(raw_lines)):
             joined = _character_signature(raw_lines[start])
-            for end in range(start + 1, min(start + 5, len(raw_lines))):
+            for end in range(start + 1, len(raw_lines)):
                 joined += _character_signature(raw_lines[end])
                 if joined == combined_signature:
                     raw_spans.append((start, end + 1))
@@ -952,6 +961,12 @@ def _repair_body_visual_subscript_order(
         # A repeated physical composite row cannot borrow one raw occurrence.
         composite_count = 0
         for other_line in range(len(indexed_lines) - 1):
+            other_edges = edges_by_line_pair.get((other_line, other_line + 1), [])
+            if not other_edges or (raw_end > raw_index + 1 and any(
+                i not in {suffix for _base, suffix in other_edges}
+                for i in indexed_lines[other_line + 1]
+            )):
+                continue  # Only complete lowered-suffix geometry defines a competing composite.
             other_indexes = sorted(
                 [*indexed_lines[other_line], *indexed_lines[other_line + 1]],
                 key=lambda i: (float(observed_words[i]["x0"]),
@@ -6895,6 +6910,9 @@ def _looks_like_body_technical_subscript_pair(base: str, suffix: str) -> bool:
     latin_prose_pair = (base, suffix) in {
         ("t", "x"), ("p", "max"), ("MDNEXT", "loss"),
         ("f", "n"), ("f", "r"), ("f", "t"),
+        ("f", "ILmin"), ("f", "ILmax"), ("IL", "TC"),
+        ("m", "TC"), ("b", "TC"), ("FOM", "ILD"),
+        ("T", "E"), ("T", "I"), ("T", "fx"), ("N", "bx"),
     }
     known_engineering_pair = (
         is_known_engineering_symbol_letter_suffix(base, suffix)
