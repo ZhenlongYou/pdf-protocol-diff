@@ -726,7 +726,7 @@ class ProtocolDiffTests(unittest.TestCase):
             changes_csv = outputs["csv"].read_text(encoding="utf-8-sig")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-        self.assertIn("正文字符复核项", html)
+        self.assertIn("正文待核实项（未分类）", html)
         self.assertIn("仅线性提取顺序不同", html)
         self.assertNotIn("旧“（无）”", html)
         self.assertIn("仅线性提取顺序不同", markdown)
@@ -9176,8 +9176,8 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertIn("Jitter 31.3.18.2.1 Host", rendered)
             self.assertIn("Sinusoidal Interface", rendered)
             self.assertIn("TP4a", rendered)
-        self.assertIn("1核心技术变化", rendered_reports[0])
-        self.assertIn("2正文字符复核项", rendered_reports[0])
+        self.assertIn("1正文差异候选（章节）", rendered_reports[0])
+        self.assertIn("2正文待核实项（未分类）", rendered_reports[0])
         # JSON 继续保存全部原始引用与子条款标题；物理行结构不再伪造
         # ``Jitter + 编号`` 的合并审计事实。
         self.assertIn("specified in Table 31-2", audit)
@@ -23311,7 +23311,11 @@ class ReportRoleSerializationTests(unittest.TestCase):
         # JSON/CSV 是无损审计面，必须继续输出 document_metadata 事实。
         self.assertTrue(any(change["role"] == "document_metadata" for change in payload["changes"]))
         self.assertFalse(any(row["role"] == "document_metadata" for row in prose_rows))
-        self.assertIn("<span>核心技术变化</span>", html)
+        self.assertIn("<span>正文差异候选（章节）</span>", html)
+        for reader_report in (html, markdown, text):
+            self.assertIn("不代表已确认技术含义发生变化", reader_report)
+            self.assertIn("正文待核实项（未分类）", reader_report)
+            self.assertNotIn("核心技术变化", reader_report)
 
 
 if __name__ == "__main__":

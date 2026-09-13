@@ -42,7 +42,8 @@ def main():
                 if state['type'] in ('success', 'error', 'cancelled'):
                     break
                 if time.monotonic() >= next_log:
-                    print('RUNNING', round(time.monotonic() - started), flush=True)
+                    print('RUNNING', round(time.monotonic() - started), json.dumps(state, ensure_ascii=False), flush=True)
+                    (output / 'last-state.json').write_text(json.dumps(state, ensure_ascii=False, indent=2))
                     next_log = time.monotonic() + 60
                 time.sleep(1)
             assert state['type'] == 'success', state

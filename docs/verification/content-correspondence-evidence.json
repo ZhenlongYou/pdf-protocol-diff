@@ -183,8 +183,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "e1f4bd498f2ba20a7ac3dd77763343b09594483c5c027505a83144b80f0ab63b",
-          "size_bytes": 538819
+          "sha256": "2c38d582578c28b104d95cf2c700565cf53c05c484b63d0b368a9b03e09b0471",
+          "size_bytes": 539388
         },
         {
           "id": "SRC-SAMPLE_DATA",
@@ -231,8 +231,8 @@
         {
           "id": "SRC-UI_SHARED",
           "path": "src/protocol_pdf_diff/ui_shared.py",
-          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
-          "size_bytes": 4116
+          "sha256": "81f05fdf5a19260bbc5a853375d00e3c8e006110baa5f6103835869bf614c97b",
+          "size_bytes": 4270
         },
         {
           "id": "SRC-VENV_BOOTSTRAP",
@@ -420,8 +420,8 @@
         {
           "id": "MUT-LIMIT",
           "path": "work/content-correspondence-gate/limit.py",
-          "sha256": "9e3f70bd37eab9df32b490faa573e63d5336b063fda7939c0fd97f722ac28695",
-          "size_bytes": 538829,
+          "sha256": "ee2f2afae72bd6745dd15f45251e1a504f04942e89c041195291161a199be160",
+          "size_bytes": 539398,
           "target_source_id": "SRC-REPORTING"
         },
         {
@@ -455,8 +455,8 @@
         {
           "id": "MUT-UNITS",
           "path": "work/content-correspondence-gate/units.py",
-          "sha256": "84916182833b85039f3cfd81c48acd21a356fe631879e87002ff48b4e54dd4f1",
-          "size_bytes": 538829,
+          "sha256": "817c623478153415dc1b2f78b303bb7f8c64bbe5a35de401ec8ff264d5036749",
+          "size_bytes": 539398,
           "target_source_id": "SRC-REPORTING"
         },
         {
@@ -469,8 +469,8 @@
         {
           "id": "MUT-GROUP",
           "path": "work/content-correspondence-gate/group.py",
-          "sha256": "f8e776eab4ebf3436d1c59a0b2b316a971c04f3fbb0c6957add0cb6f0518bcc2",
-          "size_bytes": 538797,
+          "sha256": "1010efba5cea1055b6f8cb49b18ee7f6d8c7a034a5d33d05ebfb2691a1a09df0",
+          "size_bytes": 539366,
           "target_source_id": "SRC-REPORTING"
         },
         {

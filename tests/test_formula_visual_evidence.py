@@ -235,7 +235,7 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
         # 禁比规则在报告边界再次失败关闭，不能依赖比较器永远传入空列表。
         self.assertNotIn('id="formula-index"', html)
         self.assertNotIn("公式主体文字一致，公式编号发生顺延或调整", markdown)
-        self.assertIn("<strong>0</strong><span>核心技术变化</span>", html)
+        self.assertIn("<strong>0</strong><span>正文差异候选（章节）</span>", html)
         self.assertEqual([], payload["formula_changes"])
 
     def test_html_never_embeds_injected_formula_evidence(self) -> None:

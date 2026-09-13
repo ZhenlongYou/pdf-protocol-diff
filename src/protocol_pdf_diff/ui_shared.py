@@ -117,7 +117,11 @@ def reported_reader_summary(
             for value in values["章节修改 / 新增 / 删除"].split("/")
         )
         summary = ReaderReportSummary(
-            body_changes=int(values["核心技术变化"]),
+            body_changes=int(
+                values["正文差异候选（章节）"]
+                if "正文差异候选（章节）" in values
+                else values["核心技术变化"]
+            ),
             modified=modified,
             added=added,
             deleted=deleted,

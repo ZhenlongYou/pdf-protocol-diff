@@ -749,10 +749,12 @@ def _render_markdown(
         "",
         "## 汇总",
         "",
+        "正文差异候选按章节统计，不代表已确认技术含义发生变化。待核实项尚未分类，按片段对或整节计数，可能与候选章节重叠；请结合各项原因、识别可信度及核对范围阅读。",
+        "",
         "| 类型 | 数量 |",
         "|---|---:|",
-        f"| 核心技术变化 | {material_technical_count} |",
-        f"| 正文字符复核项 | {technical_review_count} |",
+        f"| 正文差异候选（章节） | {material_technical_count} |",
+        f"| 正文待核实项（未分类） | {technical_review_count} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
         "| 公式自动对比项（已关闭） | 0 |",
         f"| 视觉漏检核对项 | {len(result.visual_review_items)} |",
@@ -1545,9 +1547,10 @@ def _render_html(
       {nav_items}
     </aside>
     <main>
+      <p class="reader-guide">正文差异候选按章节统计，不代表已确认技术含义发生变化。待核实项尚未分类，按片段对或整节计数，可能与候选章节重叠；请结合各项原因、识别可信度及核对范围阅读。</p>
       <section class="summary">
-        <div class="metric"><strong>{material_technical_count}</strong><span>核心技术变化</span></div>
-        <div class="metric"><strong>{technical_review_count}</strong><span>正文字符复核项</span></div>
+        <div class="metric"><strong>{material_technical_count}</strong><span>正文差异候选（章节）</span></div>
+        <div class="metric"><strong>{technical_review_count}</strong><span>正文待核实项（未分类）</span></div>
         <div class="metric"><strong>0</strong><span>公式自动对比（已关闭）</span></div>
         <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉漏检核对</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
