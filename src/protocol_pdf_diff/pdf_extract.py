@@ -912,13 +912,32 @@ def _repair_body_visual_subscript_order(
         combined_text = _words_to_visual_line(
             [observed_words[index] for index in combined_indexes]
         )
-        raw_indexes = raw_occurrences.get(_character_signature(combined_text), [])
-        if len(raw_indexes) != 1 or raw_indexes[0] in inline_replacements:
+        combined_signature = _character_signature(combined_text)
+        raw_indexes = raw_occurrences.get(combined_signature, [])
+        raw_spans = [(i, i + 1) for i in raw_indexes]
+        # A physical line can be split at each lowered span by the native
+        # extractor. Bind only a complete, unique, ordered contiguous source.
+        for start in range(len(raw_lines)):
+            joined = _character_signature(raw_lines[start])
+            for end in range(start + 1, min(start + 5, len(raw_lines))):
+                joined += _character_signature(raw_lines[end])
+                if joined == combined_signature:
+                    raw_spans.append((start, end + 1))
+                if len(joined) >= len(combined_signature):
+                    break
+        if len(raw_spans) != 1:
             continue
-        # Bind each source character to this unique raw line in the exact
-        # observed word order. Never rebuild unmatched words by x position.
-        raw_index = raw_indexes[0]
-        raw = raw_lines[raw_index]
+        raw_index, raw_end = raw_spans[0]
+        if raw_end > raw_index + 1 and any(
+            index not in {suffix for _base, suffix in edges}
+            for index in indexed_lines[suffix_line]
+        ):
+            continue  # 多行合并不能让未证明归属的较低词穿过其它下标。
+        if any(i in inline_replacements for i in range(raw_index, raw_end)):
+            continue
+        # Exact ordered characters bind the source; the only rewrite moves
+        # one-to-one lowered suffixes next to their demonstrated base symbols.
+        raw = "\n".join(raw_lines[raw_index:raw_end])
         positions = [i for i, char in enumerate(raw) if not char.isspace()]
         ordered = "".join(_character_signature(str(observed_words[i]["text"]))
                           for i in combined_indexes)
@@ -962,7 +981,11 @@ def _repair_body_visual_subscript_order(
                           for i, char in enumerate(raw))
         if _non_whitespace_character_counts(rebuilt) != _non_whitespace_character_counts(raw):
             continue
-        inline_replacements[raw_index] = normalize_line(rebuilt)
+        inline_replacements[raw_index] = (
+            normalize_line(rebuilt) if raw_end == raw_index + 1 else compact_inline(rebuilt)
+        )
+        for consumed in range(raw_index + 1, raw_end):
+            inline_replacements[consumed] = ""
         inline_edges.update(edges)
 
     accepted_edges: list[tuple[int, int]] = []
@@ -3533,6 +3556,8 @@ def _extract_table_lines_and_visuals(
             ),
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
+            raw_source_cells=tuple(tuple(cell for cell in row) for row in source_rows),
+            raw_cell_bounds=tuple(tuple(getattr(row, 'cells', ())) for row in getattr(table, 'rows', ())),
             source_text=_table_bbox_source_text(geometry_words, bbox),
             context_words=tuple(
                 (str(w.get("text", "")), float(w["x0"]), float(w["top"]), float(w["x1"]), float(w["bottom"]))
@@ -4811,6 +4836,8 @@ def _build_table_visual(
     data_rows_fully_represented: bool = False,
     source_text: str = "",
     context_words: tuple[tuple[str, float, float, float, float], ...] = (),
+    raw_source_cells: tuple = (),
+    raw_cell_bounds: tuple = (),
 ) -> tuple[TableVisual | None, str]:
     """Build one screenshot-backed table visual record."""
 
@@ -4843,6 +4870,8 @@ def _build_table_visual(
             row_alignment_reliable=row_alignment_reliable,
             data_rows_fully_represented=data_rows_fully_represented,
             source_text=source_text,
+            raw_source_cells=raw_source_cells,
+            raw_cell_bounds=raw_cell_bounds,
             context_image_data_uri=_table_context_image(page),
             context_bbox=_table_page_bbox(page),
             context_words=context_words,
@@ -5592,6 +5621,84 @@ def _table_lines_from_rows_with_evidence(
     return lines, content_lossless, alignment_reliable
 
 
+def _valid_merged_table_geometry(rows, bounds, words):
+    """Reject malformed/nonfinite geometry before any ownership indexing."""
+    import math
+
+    def valid_box(box):
+        try:
+            if len(box) != 4 or any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in box):
+                return False
+            x0, top, x1, bottom = (float(value) for value in box)
+            return all(math.isfinite(v) for v in (x0, top, x1, bottom)) and x0 < x1 and top < bottom
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    try:
+        if not rows or not bounds or not words or len(rows) != len(bounds) or len(rows) != len(words):
+            return False
+        width = len(rows[0])
+        if not width or any(len(r) != width for r in rows + bounds + words):
+            return False
+        for boxes, word_cells in zip(bounds, words, strict=True):
+            for box, cell_words in zip(boxes, word_cells, strict=True):
+                if box is not None and not valid_box(box):
+                    return False
+                for word in cell_words:
+                    if not isinstance(word, dict) or not isinstance(word.get('text'), str):
+                        return False
+                    if not valid_box(tuple(word.get(key) for key in ('x0', 'top', 'x1', 'bottom'))):
+                        return False
+        return True
+    except (TypeError, ValueError, KeyError, IndexError):
+        return False
+
+
+def _merged_cell_display_owners(rows, bounds, words):
+    """Unique source-cell owners of absent cells; never infer from empty text."""
+    if not _valid_merged_table_geometry(rows, bounds, words):
+        return {}
+    width = len(rows[0])
+    if any(len(r) != width for r in rows + bounds + words):
+        return {}
+    allowed = {i for i, value in enumerate(rows[0])
+               if _clean_table_cell(value).casefold().rstrip('.')
+               in {'characteristic', 'parameter', 'symbol', 'condition', 'conditions'}}
+    owners = {}
+    for ri in range(1, len(rows)):
+        visible = [box for box in bounds[ri] if box]
+        if not visible:
+            continue
+        top = max(box[1] for box in visible)
+        bottom = min(box[3] for box in visible)
+        if bottom <= top:
+            continue
+        for ci in allowed:
+            column = bounds[0][ci]
+            if rows[ri][ci] is not None or bounds[ri][ci] is not None or words[ri][ci] or not column:
+                continue
+            candidates = []
+            for oi in range(1, ri):
+                box = bounds[oi][ci]
+                if not box or not rows[oi][ci]:
+                    continue
+                if not (abs(box[0]-column[0]) < 1e-6 and abs(box[2]-column[2]) < 1e-6
+                        and box[1] < top and box[3] >= bottom):
+                    continue
+                observed = [_table_cell_lines(rows[oi][ci])]
+                cell_words = words[oi][ci]
+                if not _source_cells_match_observed_geometry(observed, [cell_words]):
+                    continue
+                if not all(box[0] <= float(w['x0']) <= float(w['x1']) <= box[2]
+                           and box[1] <= float(w['top']) <= float(w['bottom']) <= box[3]
+                           for w in cell_words):
+                    continue
+                candidates.append(oi)
+            if len(candidates) == 1:
+                owners[(ri, ci)] = candidates[0]
+    return owners
+
+
 def _table_lines_from_rows_with_data_evidence(
     rows: list[list[object]],
     table_number: int,
@@ -5601,6 +5708,7 @@ def _table_lines_from_rows_with_data_evidence(
 ) -> tuple[list[str], bool, bool, bool]:
     """Also expose whether every emitted data-row character stayed in its column."""
 
+    merged_owners = _merged_cell_display_owners(rows, cell_bounds_rows, cell_word_rows)
     observed_source_rows = [
         [_table_cell_lines(cell) for cell in row]
         for row in rows
@@ -5625,6 +5733,36 @@ def _table_lines_from_rows_with_data_evidence(
         return [], False, False, False
 
     header_index = _find_table_header_row(raw_rows)  # 在表格前几行扫描表头，处理标题行/空白行插在表头前的情况。
+    if (header_index is None and len(rows) == len(raw_rows)
+            and _geometry_proven_single_header(rows, cell_word_rows, cell_bounds_rows)):
+        header_index = 0
+    if (header_index is None and len(rows) == len(raw_rows) and len(rows) >= 3
+            and _valid_merged_table_geometry(rows, cell_bounds_rows, cell_word_rows)):
+        leaves = [_clean_table_cell(value).casefold() for value in rows[1] if value]
+        parent_labels = [_clean_table_cell(value) for value in rows[0] if value]
+        if leaves == ['min (%)', 'max (%)'] and len(parent_labels) >= 2 and all(
+            re.search(r'[A-Za-z]', label) and not re.search(r'\d', label)
+            for label in parent_labels
+        ) and cell_bounds_rows and cell_word_rows and len(cell_bounds_rows) == len(rows) and len(cell_word_rows) == len(rows) and all(
+            len(cell_bounds_rows[ri]) == len(rows[ri]) == len(cell_word_rows[ri])
+            for ri in (0, 1)
+        ) and all(
+            not cell or (cell_bounds_rows[ri][ci] is not None and all(
+                cell_bounds_rows[ri][ci][0] <= float(w['x0']) <= float(w['x1']) <= cell_bounds_rows[ri][ci][2]
+                and cell_bounds_rows[ri][ci][1] <= float(w['top']) <= float(w['bottom']) <= cell_bounds_rows[ri][ci][3]
+                for w in cell_word_rows[ri][ci]
+            ))
+            for ri in (0, 1) for ci, cell in enumerate(rows[ri])
+        ) and all(
+            any(parent is not None and abs(parent[3]-leaf[1]) < 1e-6
+                and parent[0] <= leaf[0] and parent[2] >= leaf[2]
+                for parent in cell_bounds_rows[0])
+            for leaf in cell_bounds_rows[1] if leaf is not None
+        ) and all(
+            _source_cells_match_observed_geometry(observed_source_rows[i], cell_word_rows[i])
+            for i in (0, 1)
+        ) and _geometry_proven_grouped_header(rows, 1, cell_bounds_rows) is not None:
+            header_index = 1
     if header_index is None:
         header = _default_header_for_table(raw_rows)  # 续页缺失表头时，用常见协议表宽恢复列含义。
         data_rows = raw_rows  # 没有真实表头时，所有行都作为数据行输出。
@@ -5643,12 +5781,12 @@ def _table_lines_from_rows_with_data_evidence(
     data_rows_lossless = True
     alignment_reliable = True
     lines: list[str] = []  # 输出给比较器的结构化表格行。
-    for row, observed_source_row, cell_word_row in zip(
+    for data_index, (row, observed_source_row, cell_word_row) in enumerate(zip(
         data_rows,
         observed_data_rows,
         data_word_rows,
         strict=True,
-    ):
+    )):
         expanded_rows, expansion_alignment_reliable = _expand_table_row_with_evidence(
             row,
             header,
@@ -5677,7 +5815,14 @@ def _table_lines_from_rows_with_data_evidence(
             )
         )
         for expanded_row in expanded_rows:  # 一个物理表格行可能包含多条参数记录。
-            line = _format_table_row(expanded_row, header, table_number)
+            display_row = list(expanded_row)
+            source_index = data_index + (header_index + 1 if header_index is not None else 0)
+            if len(rows) == len(raw_rows) and len(expanded_rows) == 1:
+                for ci in range(len(display_row)):
+                    owner = merged_owners.get((source_index, ci))
+                    if owner is not None and not display_row[ci]:
+                        display_row[ci] = _clean_table_cell_lines(raw_rows[owner][ci])
+            line = _format_table_row(display_row, header, table_number)
             if line:
                 lines.append(line)
     has_lines = bool(lines)
@@ -6691,7 +6836,10 @@ def _looks_like_body_technical_subscript_pair(base: str, suffix: str) -> bool:
     voltage_threshold_pair = bool(
         base == "V" and _SIGNED_RATIONAL_SUBSCRIPT_RE.fullmatch(suffix)
     )  # OIF threshold prose使用 V_{-1}, V_{-1/3}, V_{1/3}, V_1；仍需外层完整几何与字符守恒。
-    known_engineering_pair = is_known_engineering_symbol_letter_suffix(base, suffix)
+    known_engineering_pair = (
+        is_known_engineering_symbol_letter_suffix(base, suffix)
+        or (base == "R" and suffix == "I")
+    )
     return (
         (technical_base and technical_suffix)
         or formula_pair
@@ -6757,6 +6905,108 @@ def _find_table_header_row(rows: list[list[list[str]]]) -> int | None:
         if _looks_like_table_header(cleaned_row):
             return index
     return None
+
+
+def _geometry_proven_single_header(rows, cell_word_rows, cell_bounds_rows):
+    """Recognize a complete bold dimension header over regular data cells.
+
+    Font contrast alone is not header evidence. Require an observed unit label,
+    full nonmerged column ownership, alphabetic headings, and two regular data
+    rows with a common numeric column. Keep every heading glyph, including notes.
+    """
+    if (len(rows) < 3 or not cell_word_rows or not cell_bounds_rows
+            or len(cell_word_rows) < 3 or len(cell_bounds_rows) < 3):
+        return False
+    width = len(rows[0])
+    if width < 2 or any(len(r) != width for r in rows[:3]):
+        return False
+    if any(len(r) != width for r in cell_word_rows[:3] + cell_bounds_rows[:3]):
+        return False
+    # Reject malformed observations before any indexing or geometry arithmetic.
+    # NaN comparisons are false, so downstream tolerance checks cannot validate them.
+    for observed_boxes, observed_words in zip(cell_bounds_rows[:3], cell_word_rows[:3]):
+        for box, words in zip(observed_boxes, observed_words):
+            try:
+                if (box is None or len(box) != 4
+                        or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                   and math.isfinite(v) for v in box)
+                        or not (float(box[0]) < float(box[2]) and float(box[1]) < float(box[3]))):
+                    return False
+                for word in words:
+                    coords = [word[key] for key in ("x0", "top", "x1", "bottom")]
+                    if (not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                    and math.isfinite(v) for v in coords)
+                            or not (coords[0] < coords[2] and coords[1] < coords[3])):
+                        return False
+            except (TypeError, ValueError, KeyError, OverflowError):
+                return False
+    labels = [_clean_table_cell(c) for c in rows[0]]
+    def dimension(label):
+        if label.casefold() in {"unit", "units"}:
+            return True
+        return any(all(_looks_like_known_atomic_unit(v) and v not in {"-", "—"}
+                       for v in unit.split("/"))
+                   for unit in re.findall(r"\(([^()]+)\)", label))
+    if not any(dimension(label) for label in labels):
+        return False
+    if any(not re.search(r"[^\W\d_]", label) or len(label) > 100 for label in labels):
+        return False
+    for i, label in enumerate(labels):
+        box = cell_bounds_rows[0][i]
+        if (box is None or not _finite_positive_layout_box(box[0], box[2], box[1], box[3])
+                or abs(box[1] - cell_bounds_rows[0][0][1]) > 1
+                or abs(box[3] - cell_bounds_rows[0][0][3]) > 1
+                or (i and cell_bounds_rows[0][i-1][2] > box[0] + 1)):
+            return False
+        words = cell_word_rows[0][i]
+        if (not words or re.sub(r"\s+", "", label)
+                != re.sub(r"\s+", "", "".join(str(w.get("text", "")) for w in words))):
+            return False
+        if any(not _layout_word_center_inside_box(w, box) for w in words):
+            return False
+        letter_words = [w for w in words if any(c.isalpha() for c in str(w.get("text", "")))]
+        if not letter_words or any("bold" not in str(w.get("fontname", "")).casefold()
+                                   for w in letter_words):
+            return False
+        for j in (1, 2):
+            data_box = cell_bounds_rows[j][i]
+            if (data_box is None or abs(data_box[0]-box[0]) > 1
+                    or abs(data_box[2]-box[2]) > 1 or data_box[1] < box[3]-1):
+                return False
+    numeric_columns = []
+    for i in range(width):
+        if all(re.search(r"\d", _clean_table_cell(rows[j][i])) for j in (1, 2)):
+            numeric_columns.append(i)
+    if not numeric_columns:
+        return False
+    separate_unit_column = any(label.casefold() in {"unit", "units"} for label in labels)
+    if not separate_unit_column and any(not dimension(labels[i]) for i in numeric_columns):
+        return False  # A unit on a record-name column cannot turn outcome cells into headings.
+    for i, label in enumerate(labels):
+        # Numerical conditions in a dimension heading are distinct from actual
+        # measured payloads. Preserve Note references and observed footnote words.
+        scrubbed = re.sub(r"(?i)\bNote\s*\d+\b", "", label)
+        if dimension(label) and re.search(r"\([^()]+\)\s*$", label):
+            scrubbed = re.sub(r"(?i)\bat\s+[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*"
+                              + _ENGINEERING_UNIT_ABBREVIATION_PATTERN + r"(?=\s|\(|$)", "", scrubbed)
+        for word in cell_word_rows[0][i]:
+            marker = str(word.get("text", ""))
+            if (marker.isdigit() and len(marker) <= 2
+                    and re.fullmatch(r"[A-Za-z][A-Za-z ]*\s+" + re.escape(marker), label)
+                    and "bold" not in str(word.get("fontname", "")).casefold()):
+                scrubbed = re.sub(r"(?<!\w)" + re.escape(marker) + r"(?!\w)", "", scrubbed)
+        if re.search(r"(?<!\w)[+-]?(?:\d+(?:\.\d+)?|\.\d+)", scrubbed):
+            return False  # 800 mV, -800 mV and Typical 800 mV remain data records.
+    for j in (1, 2):
+        for i in range(width):
+            if not _clean_table_cell(rows[j][i]):
+                continue
+            words = cell_word_rows[j][i]
+            if not words or any(not str(w.get("fontname", ""))
+                                or "bold" in str(w.get("fontname", "")).casefold()
+                                for w in words):
+                return False
+    return True
 
 
 def _geometry_proven_grouped_header(rows, header_index, cell_bounds_rows):
@@ -8400,6 +8650,14 @@ def _looks_like_symbol_fragments(lines: list[str]) -> bool:
 def _looks_like_table_header(row: list[str]) -> bool:
     """Return True when a row contains common table column labels."""
 
+    # Whole ordered schemas only: do not make arbitrary records containing
+    # "minimum", numbers or units look like headers.  Keep original labels.
+    ordered_labels = tuple(" ".join(cell.casefold().split()).rstrip(".") for cell in row)
+    if ordered_labels in {
+        ("parameter", "min value", "max value"),
+        ("tap position", "min value", "max value"),
+    }:
+        return True
     labels = {cell.casefold().rstrip(".") for cell in row if cell}  # 统一大小写并去掉表头句点。
     common_labels = {
         "parameter",

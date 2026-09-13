@@ -241,6 +241,8 @@ class TableVisual:
     context_bbox: tuple[float, float, float, float] | None = None
     context_words: tuple[tuple[str, float, float, float, float], ...] = field(default=(), repr=False)
     physical_rows: tuple[PhysicalTableRow, ...] = ()
+    raw_source_cells: tuple = ()
+    raw_cell_bounds: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -590,6 +592,8 @@ class DiffResult:
     new_total_pages_known: bool = False  # 测试或局部页面推断出的数值不能授权全篇消噪。
     prose_source_visuals: list[ProseSourceVisualGroup] = field(default_factory=list)  # 长正文变化的旧/新原文区域截图；仅用于读者核对，不改写语义事实。
     visual_owned_spans: dict[str, dict[str, list[tuple[int, int]]]] = field(default_factory=dict, repr=False)
+    old_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()  # 仅供读者恢复原生上标排印，不影响比较。
+    new_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()
 
 
 def _normalize_key(value: str) -> str:

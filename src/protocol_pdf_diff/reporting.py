@@ -430,6 +430,10 @@ def write_reports(
         new_sections=result.new_sections,
         full_document_selected=_full_document_selected_for_reader_cleanup(result),
     )
+    from .source_typography import restore_change_typography
+    reader_changes = [restore_change_typography(
+        c, result.old_superscript_receipts, result.new_superscript_receipts
+    ) for c in reader_changes]
     # This is a reader-selected display threshold, not semantic equality.
     similarity_review_changes = [c for c in reader_changes if _displayed_similarity_one(c)]
     similarity_review_tables = [c for c in reader_table_changes if _displayed_similarity_one(c)]
@@ -6063,11 +6067,27 @@ def _resolve_duplicate_primary_table_rows(
         )
     ]
     changes: list[TableRowChange] = []
+    # Only cancel complete records at their original positions.  Comparing
+    # projected identityless lists would let unrelated anchored runs borrow
+    # positions from each other.  A changed skeleton therefore cancels nothing.
+    same_position_equal = set()
+    if len(old_rows) == len(new_rows) and old_primary == new_primary:
+        same_position_equal = {
+            index
+            for index, (old_row, new_row, identity) in enumerate(
+                zip(old_rows, new_rows, old_primary, strict=True)
+            )
+            if not identity
+            and tuple(_table_row_cells_for_display(old_row))
+            == tuple(_table_row_cells_for_display(new_row))
+        }
     identityless_old = [
-        row for row, identity in zip(old_rows, old_primary, strict=True) if not identity
+        row for index, (row, identity) in enumerate(zip(old_rows, old_primary, strict=True))
+        if not identity and index not in same_position_equal
     ]
     identityless_new = [
-        row for row, identity in zip(new_rows, new_primary, strict=True) if not identity
+        row for index, (row, identity) in enumerate(zip(new_rows, new_primary, strict=True))
+        if not identity and index not in same_position_equal
     ]
     if [
         _table_row_display_key(row) for row in identityless_old
@@ -13577,6 +13597,7 @@ def _section_to_dict(section: Section) -> dict[str, object]:
         "number_path": list(section.number_path),
         "page_range": section.page_range,
         "body_preview": truncate(compact_inline(section.body), 500),
+        "body_text": section.body,  # 完整比较视图正文，仅供 JSON 来源审计；保留所有换行。
         "role": section.role,
     }
 
@@ -13591,6 +13612,8 @@ def _table_visual_to_dict(table: TableVisual) -> dict[str, object]:
         "bbox": list(table.bbox),
         "page_bbox": list(table.page_bbox) if table.page_bbox is not None else None,
         "row_texts": list(table.row_texts),
+        "raw_source_cells": table.raw_source_cells,
+        "raw_cell_bounds": table.raw_cell_bounds,
         "grid_summary": table.grid_summary,
         "ocr_status": table.ocr_status,
         "ocr_text_preview": truncate(compact_inline(table.ocr_text), 500),

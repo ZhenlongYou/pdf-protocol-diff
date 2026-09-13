@@ -27,8 +27,8 @@
         {
           "id": "SRC-COMPARE",
           "path": "src/protocol_pdf_diff/compare.py",
-          "sha256": "1d3194f773845a9d175f40bb4c22b5aa303d9e56893d9577c25dfed531168a0d",
-          "size_bytes": 276988
+          "sha256": "c4c8b812be129c32f0fd4202c77b55188f202b8b0cae338d85ba3b1ffe886aef",
+          "size_bytes": 278497
         },
         {
           "id": "SRC-COMPARISON_JOB",
@@ -117,8 +117,8 @@
         {
           "id": "SRC-MODELS",
           "path": "src/protocol_pdf_diff/models.py",
-          "sha256": "b3643e285c2e103bdf3814fb3f04e02f4255bdb1fce80a98462097574c5192c1",
-          "size_bytes": 28976
+          "sha256": "6e2bc18ea1433ef5b61caccc81394ba9e331cb88ff8bc732a869cd48705e7891",
+          "size_bytes": 29286
         },
         {
           "id": "SRC-MONOTONIC_ALIGNMENT",
@@ -147,8 +147,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "0bac44979a90ed288de73ec9d8f69b6405bbe1a62181da40c9d674a13b07ac3d",
-          "size_bytes": 360022
+          "sha256": "4018d3a7beb4d3888d72a16725b16aaa26e66ecc597f76a48c16ac7a55cbfedc",
+          "size_bytes": 373668
         },
         {
           "id": "SRC-PHYSICAL_TABLE_ROWS",
@@ -183,8 +183,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "2c38d582578c28b104d95cf2c700565cf53c05c484b63d0b368a9b03e09b0471",
-          "size_bytes": 539388
+          "sha256": "c5cab0c6c5203c587dc2b2807701ab86503dfd9a210ed59e35e3a686810a820f",
+          "size_bytes": 540639
         },
         {
           "id": "SRC-SAMPLE_DATA",
@@ -215,6 +215,12 @@
           "path": "src/protocol_pdf_diff/source_regions.py",
           "sha256": "25408141b2c25bcadfe341e57f1de2d1861c261392ee19ba12d4d673fb23c1e6",
           "size_bytes": 6040
+        },
+        {
+          "id": "SRC-SOURCE_TYPOGRAPHY",
+          "path": "src/protocol_pdf_diff/source_typography.py",
+          "sha256": "48d0e3243ceb0b8d9315b22e21dd33dfbae21b6b302d9b2a2d81bcb72e43dbd3",
+          "size_bytes": 4626
         },
         {
           "id": "SRC-TABLE_CODEC",
@@ -402,6 +408,7 @@
             "SRC-SECTIONING",
             "SRC-SOURCE_CHAR_EVIDENCE",
             "SRC-SOURCE_REGIONS",
+            "SRC-SOURCE_TYPOGRAPHY",
             "SRC-TABLE_CODEC",
             "SRC-TEXT_UTILS",
             "SRC-UI_SHARED",
@@ -420,15 +427,15 @@
         {
           "id": "MUT-LIMIT",
           "path": "work/content-correspondence-gate/limit.py",
-          "sha256": "ee2f2afae72bd6745dd15f45251e1a504f04942e89c041195291161a199be160",
-          "size_bytes": 539398,
+          "sha256": "2f6e321591f388bc5dba1f350a139f993b3647ee56ccf73afd0dd5c37fe2b3f0",
+          "size_bytes": 540649,
           "target_source_id": "SRC-REPORTING"
         },
         {
           "id": "MUT-FORMULA",
           "path": "work/content-correspondence-gate/formula.py",
-          "sha256": "2b1243d3e0784e860803d8ee1f1cfc495075fc1878a573d525709fb2e5d5f5c5",
-          "size_bytes": 277018,
+          "sha256": "12c87a3ce3b89b84e356ed8ae4e20530398f019b4f4ea44138210ae5987c6735",
+          "size_bytes": 278527,
           "target_source_id": "SRC-COMPARE"
         },
         {
@@ -455,22 +462,22 @@
         {
           "id": "MUT-UNITS",
           "path": "work/content-correspondence-gate/units.py",
-          "sha256": "817c623478153415dc1b2f78b303bb7f8c64bbe5a35de401ec8ff264d5036749",
-          "size_bytes": 539398,
+          "sha256": "93a40e3a061a5a714f2bc52d5eb61e4972af84ca2f75222c32d9028dec677686",
+          "size_bytes": 540649,
           "target_source_id": "SRC-REPORTING"
         },
         {
           "id": "MUT-HEADER",
           "path": "work/content-correspondence-gate/header.py",
-          "sha256": "610c822757700a88df37249fe512df53b708a6a26d789cc505ef38479e442619",
-          "size_bytes": 360030,
+          "sha256": "b645580b757266e216dd2f849aa2137ee7b4731babc97a9d4b94ce470ebbf4d5",
+          "size_bytes": 373676,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
           "id": "MUT-GROUP",
           "path": "work/content-correspondence-gate/group.py",
-          "sha256": "1010efba5cea1055b6f8cb49b18ee7f6d8c7a034a5d33d05ebfb2691a1a09df0",
-          "size_bytes": 539366,
+          "sha256": "f6bfb8f096cdd2c4e2de8ee1fca19f0e4763656f7a85f2912c28e782b543129f",
+          "size_bytes": 540617,
           "target_source_id": "SRC-REPORTING"
         },
         {

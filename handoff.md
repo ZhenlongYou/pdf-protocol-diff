@@ -2,6 +2,17 @@
 
 ## 当前任务：整份报告内容对应修复（2026-09-13）
 
+- 第九修正后完整1517项测试240.561秒通过（1条件skip，ninth-release-tests.log），20内容保全案例与10定向错误注入均通过；原3fail/3error保留日志且原用例复验。准备冻结候选提交、启动full-native-ninth；整本验收/STRICT正式回执/最终交付仍未完成。
+
+- 第九首次最终全套1511项出现3fail/3error（ninth-final-tests.log），尚未启动整本：已修缺table.rows兼容与多行下标未归属词越过问题，原反例通过；剩余Table31-13可见表头序列化与既有text-backed适配回归正在修复。不得引用此前全绿作当前最终验收。
+
+- 第九候选已合入上标、完整JSON正文、连续行下标、相噪原位置同格消噪、几何合并条件/双层表头及单层物理表头；独立集成复核0重要问题，69项局部测试通过。完整ninth-final-tests.log执行中；后续必须冻结提交再跑full-native-ninth并复核501项，当前未最终验收。
+
+- 最新整本：源 `5edc350f18a9065838a7e0eb07e317c2a40c6041` 的第八次原生 GUI 于 1598.603 秒完成，636/685 页；`repair_20260913/full-native-eighth/native-result.json` 绑定输入与产物。完整 1442 项测试通过（1 条件 skip），但整本验收尚未通过。
+- 第八轮 501 个原审计 ID 已全部有裁决，见 `repair_20260913/complete-eighth-audit.json`；全部 219 当前正文卡、44 表格卡、82 原视觉项及 18 新视觉页对已复查。HTML 1217 图片无损坏、折叠/缩放/窄屏检查通过；这些不等于内容全正确。
+- 尚存：81 原正文噪声、64 因正文预览截断未闭环、26 数学/结构不确定；C140/C175 的上标20/12平铺造成阅读语义损坏；A-T6/7/9 同文相噪行误报、新增表头数据化及条件归属/H55 噪声仍待修。不得以候选标签或单元格保存替代内容验收。逃逸缺陷继续 open，未 push/main integration。
+- 正在合入有界原生上标排印投影（只改显示，不回流比较/图去重）及完整 JSON body_text 审计字段；独立负控与两页公开路径通过，最终全套和后续整本尚未运行。表格、剩余下标读序候选由只读评审在外部生成，root 是唯一 canonical 写入者。
+
 - task_id: `pdf-content-correspondence-20260913`；owner: `01a09983-9268-7c20-94c1-83e2272ddff7`；baseline: `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；branch: `project/pdf-protocol-diff`；status: active。
 - 用户授权按整体方案实施，保护真实新增，修复错配、文字误删及字段关系损坏；验收原OIF-CEI5.1/5.3两本完整PDF。
 - 诊断及501条审计：`/Users/mac/Documents/ProtocolPdfDiffReports/audit_20260913_132844/`；本轮证据：`/Users/mac/Documents/ProtocolPdfDiffReports/repair_20260913/`。

@@ -382,6 +382,7 @@ def compare_extractions(
         warnings.append(f"{old_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     if not new_sections:
         warnings.append(f"{new_extraction.pdf_path.name}: 未识别到可比较文本段落。")
+    from .source_typography import source_superscript_receipts
     return DiffResult(
         old_pdf=old_extraction.pdf_path,
         new_pdf=new_extraction.pdf_path,
@@ -405,6 +406,8 @@ def compare_extractions(
         assessment=assessment,
         provenance=provenance,
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
+        old_superscript_receipts=source_superscript_receipts(old_extraction),
+        new_superscript_receipts=source_superscript_receipts(new_extraction),
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
     )
 
@@ -1360,11 +1363,33 @@ def _table_serialization_candidates(title: str, rows: list[str]) -> list[str]:
                 with_visible_header,
                 transposed_multiline,
                 generated_header_numeric_records,
+                _serialize_explicit_header_numeric_records(title_text, rows),
                 revision_history,
             )
             if candidate
         )
     )
+
+
+def _serialize_explicit_header_numeric_records(title: str, rows: list[str]) -> str:
+    """Use the same record proof before and after a physical header is inherited.
+
+    This adapter preserves every ordered field label and value, and delegates
+    to the existing categorical/numeric grammar. It gives no row-geometry proof.
+    """
+    parsed = [_parsed_table_row_fields(row) for row in rows]
+    if not parsed or any(fields is None for fields in parsed):
+        return ""
+    concrete = [fields for fields in parsed if fields is not None]
+    labels = [compact_inline(label) for label, _ in concrete[0]]
+    if (len(labels) < 3 or any(not label for label in labels)
+            or any(re.fullmatch(r"(?:column|col|列)\s*\d+", label, flags=re.I) for label in labels)
+            or any([compact_inline(label) for label, _ in fields] != labels for fields in concrete)):
+        return ""
+    values = [labels, *[[value for _, value in fields] for fields in concrete]]
+    generic_rows = [" | ".join(encode_table_field(f"Column {index+1}", value)
+                              for index, value in enumerate(row)) for row in values]
+    return _serialize_generated_header_numeric_records(title, generic_rows)
 
 
 def _serialize_generated_header_numeric_records(title: str, rows: list[str]) -> str:
