@@ -11,6 +11,7 @@ from collections import defaultdict
 
 from .text_utils import compact_inline
 from .models import DocumentBlockKind
+from .source_char_evidence import has_unproven_private_use
 
 
 def _tokens(text):
@@ -216,7 +217,9 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
                             figure_span_owners[(key, span)].update(
                                 owner for owner in owners
                                 if owner[1 if side == 'old' else 2] == section.section_id)
-                spans = [(a, b) for a, b in spans if not re.search(
+                spans = [(a, b) for a, b in spans
+                         if not has_unproven_private_use(compact_inline(value)[a:b])
+                         and not re.search(
                     r"(?i)\b(?:shall|should|must|required|prohibited)\b", compact_inline(value)[a:b])]
                 if spans:
                     figure_intervals[(side, section.section_id, compact_inline(value))] = [p for p in generated_figure_spans if p in spans]
@@ -294,6 +297,9 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
                         _physical=(side, table.page_number, row.bbox))
                     for key, value in candidates.items():
                         output['physical:' + row.row_id + ':' + key] = value
+    if _physical is None:
+        from .physical_native_evidence import native_owned_candidates
+        output.update(native_owned_candidates(result, old_extraction, new_extraction))
     return output
 
 
@@ -306,6 +312,8 @@ def apply_owned_spans(value, spans):
     if any(not isinstance(a, int) or not isinstance(b, int) or not 0 <= a < b <= len(value)
            for a, b in intervals):
         return value
+    if any(has_unproven_private_use(value[a:b]) for a, b in intervals):
+        return value  # Reject stale or external intervals without glyph provenance.
     kept, cursor = [], 0
     for start, end in intervals:
         if start > cursor:

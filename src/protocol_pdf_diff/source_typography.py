@@ -6,24 +6,35 @@ import re
 _SUPER = str.maketrans('0123456789+-−', '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁻')
 
 
+
+def _source_line_parts(block, page):
+    """Remove only extractor-proven furniture, keeping native word/style indices."""
+    words, styles = block.word_boxes, block.word_styles
+    if ''.join(''.join(w[0].split()) for w in words) != ''.join(block.text.split()):
+        return (), ()
+    boxes = getattr(page, 'visual_noise_bboxes', ())
+    kept = [i for i, word in enumerate(words) if not any(
+        len(box) == 4 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
+        and box[0] <= word[1] < word[3] <= box[2]
+        and box[1] <= word[2] < word[4] <= box[3] for box in boxes)]
+    return (tuple(words[i] for i in kept),
+            tuple(styles[i] for i in kept) if len(styles) == len(words) else ())
+
+
 def source_superscript_receipts(extraction):
     """Keep complete native-line evidence; offsets refer to nonspace characters."""
     receipts = []
-    page_keys = tuple("".join(p.text.split()) for p in extraction.pages)
-    from collections import Counter
-    source_counts = Counter(
-        "".join(b.text.split()) for p in extraction.pages for b in p.blocks
-    )
+    from collections import Counter, defaultdict
     for page in extraction.pages:
         if page.ocr_used:
             continue
         page_key = ''.join(page.text.split())
         for block in page.blocks:
-            words, styles = block.word_boxes, block.word_styles
+            words, styles = _source_line_parts(block, page)
             if len(words) != len(styles) or len(words) < 2:
                 continue
             key = ''.join(''.join(w[0].split()) for w in words)
-            if len(key) < 20 or key != ''.join(block.text.split()) or page_key.count(key) != 1:
+            if len(key) < 20 or page_key.count(key) != 1:
                 continue
             if len({tuple(w[1:]) for w in words}) != len(words):
                 continue
@@ -53,9 +64,27 @@ def source_superscript_receipts(extraction):
                 offset += length
             if spans:
                 receipts.append((page.page_number, key, tuple(spans)))
-    # Repeated source lines cannot bind a display occurrence uniquely.
-    return tuple(r for r in receipts if source_counts[r[1]] == 1
-                 and sum(key.count(r[1]) for key in page_keys) == 1)
+    # Do not discard valid lines because another chapter repeats them. Keep
+    # page-local evidence, including explicit blockers for unstyled or repeated
+    # occurrences; only the caller knows the current section's page scope.
+    proven = defaultdict(list)
+    for page_number, key, spans in receipts:
+        proven[(page_number, key)].append(spans)
+    keys = {key for _, key, _ in receipts}
+    scoped = []
+    for page in extraction.pages:
+        page_key = ''.join(page.text.split())
+        block_counts = Counter(''.join(''.join(w[0].split()) for w in _source_line_parts(b, page)[0])
+                               for b in page.blocks)
+        for key in sorted(keys):
+            count = page_key.count(key)
+            if not count and not block_counts[key]:
+                continue
+            matches = proven[(page.page_number, key)]
+            spans = (matches[0] if count == block_counts[key] == len(matches) == 1
+                     and not page.ocr_used else ())
+            scoped.append((page.page_number, key, spans))
+    return tuple(scoped)
 
 
 def restore_superscript_display(value, section, receipts):
@@ -64,9 +93,15 @@ def restore_superscript_display(value, section, receipts):
     positions = [i for i, char in enumerate(value) if not char.isspace()]
     key = ''.join(value[i] for i in positions)
     replacements = {}
+    from collections import defaultdict
+    scoped = defaultdict(list)
     for page, source, spans in receipts:
-        if not section.start_page <= page <= section.end_page:
-            continue
+        if section.start_page <= page <= section.end_page:
+            scoped[source].append(spans)
+    for source, proofs in scoped.items():
+        if len(proofs) != 1 or not proofs[0]:
+            continue  # A second occurrence in this section cannot borrow styles.
+        spans = proofs[0]
         occurrences = [m.start() for m in re.finditer('(?=' + re.escape(source) + ')', key)]
         if len(occurrences) != 1:
             continue

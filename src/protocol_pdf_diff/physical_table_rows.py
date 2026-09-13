@@ -30,7 +30,12 @@ def capture_physical_rows(
             isinstance(cell, str) and cell.strip() for cell in raw
         ):
             continue
-        if min(len(raw[c].splitlines()) for c in (1, 2, 3)) < 3:
+        line_counts = tuple(len(cell.splitlines()) for cell in raw)
+        # A single Symbol can head a complete physical record containing
+        # minimum/maximum/step lines. Preserve all four cells as one record;
+        # this grants no logical subrow pairing or Symbol-to-value inference.
+        if not (min(line_counts[c] for c in (1, 2, 3)) >= 3
+                or line_counts == (4, 1, 3, 3)):
             continue
         bounds = tuple(geometry.cells)
         if len(bounds) != 4 or any(b is None for b in bounds):
@@ -63,7 +68,8 @@ def capture_physical_rows(
         identity = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False).encode()
         ).hexdigest()
-        result.append(PhysicalTableRow(identity, tuple(raw), box, bounds, cell_words))
+        from .physical_native_evidence import capture_native_row
+        result.append(capture_native_row(PhysicalTableRow(identity, tuple(raw), box, bounds, cell_words), page))
     return tuple(result)
 
 
@@ -226,6 +232,9 @@ def authorized_spans(candidates, side, section_id, receipts):
         key = "physical:" + row_id + ":" + normal_key
         for text, spans in candidates.get(key, {}).items():
             output.setdefault(text, []).extend(spans)
+    from .physical_native_evidence import authorized_native_spans
+    for text, spans in authorized_native_spans(candidates, side, section_id, receipts).items():
+        output.setdefault(text, []).extend(spans)
     return output
 
 
@@ -243,6 +252,7 @@ def write_physical_csv(payload, path):
         "cell_bboxes",
         "cell_words",
         "image_sha256",
+        "native_chars",
     ]
     expected = []
     for pair in payload:
@@ -258,6 +268,7 @@ def write_physical_csv(payload, path):
                     json.dumps(row["cell_bboxes"]),
                     json.dumps(row["cell_words"], ensure_ascii=False),
                     row["image_sha256"],
+                    json.dumps(row.get("native_chars", ()), ensure_ascii=False),
                 ]
             )
     with path.open("w", encoding="utf-8-sig", newline="") as stream:

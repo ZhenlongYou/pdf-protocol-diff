@@ -117,8 +117,8 @@
         {
           "id": "SRC-MODELS",
           "path": "src/protocol_pdf_diff/models.py",
-          "sha256": "6e2bc18ea1433ef5b61caccc81394ba9e331cb88ff8bc732a869cd48705e7891",
-          "size_bytes": 29286
+          "sha256": "f6bb38a626075eb132447006e6d86997a8cfad9eda7252b3631ca810d5f2eb7f",
+          "size_bytes": 29494
         },
         {
           "id": "SRC-MONOTONIC_ALIGNMENT",
@@ -147,14 +147,20 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "4018d3a7beb4d3888d72a16725b16aaa26e66ecc597f76a48c16ac7a55cbfedc",
-          "size_bytes": 373668
+          "sha256": "094d8c8bcc8323a081dd13b54d5f5d408b134242499b5c825b679f934d34819c",
+          "size_bytes": 376979
+        },
+        {
+          "id": "SRC-PHYSICAL_NATIVE_EVIDENCE",
+          "path": "src/protocol_pdf_diff/physical_native_evidence.py",
+          "sha256": "9da1778888e7883b668a40be88561f3ef16660eed8daf3ba8932363be5602eb7",
+          "size_bytes": 7951
         },
         {
           "id": "SRC-PHYSICAL_TABLE_ROWS",
           "path": "src/protocol_pdf_diff/physical_table_rows.py",
-          "sha256": "21f1514a8fed6b4e92a8162af824ba59edc9b471ebd9660591702ff6eb62cec5",
-          "size_bytes": 10007
+          "sha256": "3c1f68dc6aa7e909214bea52d855a3cfbef6f8dc968dac1234d6a013a9f98eb2",
+          "size_bytes": 10755
         },
         {
           "id": "SRC-PROGRESS",
@@ -207,8 +213,8 @@
         {
           "id": "SRC-SOURCE_CHAR_EVIDENCE",
           "path": "src/protocol_pdf_diff/source_char_evidence.py",
-          "sha256": "8b74b7ec34819f8c2b6a71ba58bc8529a84638f05fc0ac630201a85330e28d39",
-          "size_bytes": 6215
+          "sha256": "20ef9f2088b4f5ccc1a41f5eb0367861f86ac355afd2ffd2ac35e26989e35f34",
+          "size_bytes": 6842
         },
         {
           "id": "SRC-SOURCE_REGIONS",
@@ -219,8 +225,8 @@
         {
           "id": "SRC-SOURCE_TYPOGRAPHY",
           "path": "src/protocol_pdf_diff/source_typography.py",
-          "sha256": "48d0e3243ceb0b8d9315b22e21dd33dfbae21b6b302d9b2a2d81bcb72e43dbd3",
-          "size_bytes": 4626
+          "sha256": "3ae741f7b86247842873b19efa0afb72fb26c804e5e1b02114dab845086a3a83",
+          "size_bytes": 6298
         },
         {
           "id": "SRC-TABLE_CODEC",
@@ -249,8 +255,8 @@
         {
           "id": "SRC-VISUAL_OWNERSHIP",
           "path": "src/protocol_pdf_diff/visual_ownership.py",
-          "sha256": "5a931dd25c80ad21cf257b2791efb66601cd76c976de47169e09599f126753d6",
-          "size_bytes": 18213
+          "sha256": "5034b60e7016c201bdc0cc28e00bb927bab2026b775057f93bfccb0038c0f761",
+          "size_bytes": 18723
         },
         {
           "id": "SRC-VISUAL_PREVIEW",
@@ -397,6 +403,7 @@
             "SRC-PAGE_OCR",
             "SRC-PARSING_BENCHMARK",
             "SRC-PDF_EXTRACT",
+            "SRC-PHYSICAL_NATIVE_EVIDENCE",
             "SRC-PHYSICAL_TABLE_ROWS",
             "SRC-PROGRESS",
             "SRC-PROSE_SOURCE_VISUALS",
@@ -441,22 +448,22 @@
         {
           "id": "MUT-SIGN",
           "path": "work/content-correspondence-gate/sign.py",
-          "sha256": "e5c6766cabdba3d5ac193dfb59681f5c6958e6344febb56850a97541ffe442e3",
-          "size_bytes": 18223,
+          "sha256": "a06ddf4f0ed1c58c8969ebf37b8e16e1b74d451a8d14bf70301d5682f8564546",
+          "size_bytes": 18733,
           "target_source_id": "SRC-VISUAL_OWNERSHIP"
         },
         {
           "id": "MUT-UNIQUE",
           "path": "work/content-correspondence-gate/unique.py",
-          "sha256": "1ddfa04692f913a0489059ecc59b9fc21af34b9374f2964143726b8936c64570",
-          "size_bytes": 18207,
+          "sha256": "e26c6e002c92d8713e9636f1108b0faf819ecb3fc0d78c21e9ca61a5b4b38653",
+          "size_bytes": 18717,
           "target_source_id": "SRC-VISUAL_OWNERSHIP"
         },
         {
           "id": "MUT-COVERAGE",
           "path": "work/content-correspondence-gate/coverage.py",
-          "sha256": "bfe562fe3e94a72f88a58a0dc57b5e320690aab648bf57c09fbbf477ebc952b5",
-          "size_bytes": 18233,
+          "sha256": "618b25031c4daaafb1878bdffc49f0f2717a66189bca6a817613c817b75c626e",
+          "size_bytes": 18743,
           "target_source_id": "SRC-VISUAL_OWNERSHIP"
         },
         {
@@ -469,8 +476,8 @@
         {
           "id": "MUT-HEADER",
           "path": "work/content-correspondence-gate/header.py",
-          "sha256": "b645580b757266e216dd2f849aa2137ee7b4731babc97a9d4b94ce470ebbf4d5",
-          "size_bytes": 373676,
+          "sha256": "f1588c8dd5c608d01972cb54adbf8f3049053133625bf992c5eb8eefcffecabd",
+          "size_bytes": 376987,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
@@ -483,15 +490,15 @@
         {
           "id": "MUT-CROP",
           "path": "work/content-correspondence-gate/crop.py",
-          "sha256": "e66da16ae251a2144ca33c0f22043f56692dd9e296c9acb9499d0e4e16888318",
-          "size_bytes": 18226,
+          "sha256": "bd3e796ebf6c0d0da00997702a68a0b50eb7916c176b8b5b4b3704e8757a26d7",
+          "size_bytes": 18736,
           "target_source_id": "SRC-VISUAL_OWNERSHIP"
         },
         {
           "id": "MUT-TABLE",
           "path": "work/content-correspondence-gate/table.py",
-          "sha256": "0ef3c6500ec960f405d948f672a5c95b0a89365d0ba0811663e3eb3c71c61d85",
-          "size_bytes": 18064,
+          "sha256": "d250b24aab675fdda9cd33c816292a740798ed9449f47c87ce29d29d24fd9ec0",
+          "size_bytes": 18574,
           "target_source_id": "SRC-VISUAL_OWNERSHIP"
         }
       ],

@@ -138,6 +138,8 @@ class PageText:
         if self.parser_route != derived_route:
             object.__setattr__(self, "parser_route", derived_route)
 
+    physical_native_text: str | None = None  # Native page order for complete-section physical ownership counts.
+
 
 @dataclass(frozen=True)
 class PageExtractionAudit:
@@ -216,6 +218,7 @@ class PhysicalTableRow:
     bbox: tuple[float, float, float, float]
     cell_bboxes: tuple[tuple[float, float, float, float], ...]
     cell_words: tuple[tuple[tuple[str, float, float, float, float], ...], ...]
+    native_chars: tuple = ()  # Original TextMap indexes/glyphs, no reconstructed word order.
 
 
 @dataclass(frozen=True)

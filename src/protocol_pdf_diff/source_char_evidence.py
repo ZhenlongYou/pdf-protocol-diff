@@ -1,8 +1,18 @@
 """Fail-closed extraction character identity for unchanged native page order."""
 
 import math, re
+import unicodedata
 from collections import Counter, defaultdict
 from .text_utils import compact_inline
+
+
+def has_unproven_private_use(value):
+    """Private-use codepoints have no glyph identity without a source-font receipt.
+
+    Neither existing word nor character ownership records carry that receipt.
+    Include supplementary private-use planes, not only legacy Symbol BMP codes.
+    """
+    return any(unicodedata.category(char) == "Co" for char in value)
 
 
 def source_char_map_for_final_text(text, textmap):
@@ -42,6 +52,8 @@ def inside(char, box):
 
 def char_owned_candidate(value, section, pages, boxes):
     value = compact_inline(value)
+    if has_unproven_private_use(value):
+        return None
     found = []
     for page in pages:
         if not section.start_page <= page.page_number <= section.end_page:
@@ -144,6 +156,9 @@ def char_owned_candidate(value, section, pages, boxes):
 
 
 def equivalent_char_ownership(a, b):
+    if any(has_unproven_private_use(char[0])
+           for proof in (a, b) for char in proof["chars"]):
+        return False  # Equal PUA values and coordinates do not prove equal glyphs.
     if (
         not a.get("visual_group")
         or a["visual_group"] != b.get("visual_group")

@@ -349,10 +349,14 @@ def _extract_pdf_text_with_pdfplumber(
                 blank_glyph_proof = ()
                 layout_risk = True
                 warnings.append(f"第 {index} 页空白字形来源审计不可用，保留已提取内容并需复核。")
+            from .physical_native_evidence import native_page_evidence
+            physical_native_text = native_page_evidence(page)[0] if not ocr_used else None
+            page._physical_native_evidence = (physical_native_text, ())  # Row receipts retained only their own glyphs.
             pages.append(
                 PageText(
                     page_number=index,
                     text=text,
+                    physical_native_text=physical_native_text,
                     layout_risk=layout_risk,
                     ocr_used=ocr_used,
                     blocks=blocks,
@@ -5663,7 +5667,7 @@ def _merged_cell_display_owners(rows, bounds, words):
         return {}
     allowed = {i for i, value in enumerate(rows[0])
                if _clean_table_cell(value).casefold().rstrip('.')
-               in {'characteristic', 'parameter', 'symbol', 'condition', 'conditions'}}
+               in {'characteristic', 'parameter', 'symbol', 'condition', 'conditions', 'unit', 'units'}}
     owners = {}
     for ri in range(1, len(rows)):
         visible = [box for box in bounds[ri] if box]
@@ -5675,6 +5679,13 @@ def _merged_cell_display_owners(rows, bounds, words):
             continue
         for ci in allowed:
             column = bounds[0][ci]
+            if _clean_table_cell(rows[0][ci]).casefold().rstrip('.') in {'unit', 'units'}:
+                if (not column or not _source_cells_match_observed_geometry(
+                        [_table_cell_lines(rows[0][ci])], [words[0][ci]])
+                        or not all(column[0] <= float(w['x0']) < float(w['x1']) <= column[2]
+                                   and column[1] <= float(w['top']) < float(w['bottom']) <= column[3]
+                                   for w in words[0][ci])):
+                    continue  # Unit labels must be proven in this exact source column.
             if rows[ri][ci] is not None or bounds[ri][ci] is not None or words[ri][ci] or not column:
                 continue
             candidates = []
@@ -6054,6 +6065,9 @@ def _rejoin_table_cell_subscript_lines(
             return "\n".join(compound_lines)
     if len(lines) < 2 or len(words) < 2:
         return cell
+    dimension_repair = _rebuild_dimension_symbol_cell(lines, words)
+    if dimension_repair is not None:
+        return dimension_repair
     inline_repair = _rebuild_table_inline_subscript_lines(lines, words)
     if inline_repair is not None:
         return inline_repair
@@ -6083,6 +6097,43 @@ def _rejoin_table_cell_subscript_lines(
         repaired.append(lines[index])
         index += 1
     return "\n".join(repaired)
+
+
+def _rebuild_dimension_symbol_cell(lines, words):
+    """Bind a two-baseline symbol/unit cell without inferring its meaning."""
+    if len(lines) != 2 or len(words) != 3:
+        return None
+    try:
+        if any(not all(isinstance(w[k], (int, float)) and not isinstance(w[k], bool)
+                       and math.isfinite(w[k]) for k in ("x0", "x1", "top", "bottom", "size"))
+               or w["x0"] >= w["x1"] or w["top"] >= w["bottom"] or w["size"] <= 0
+               for w in words):
+            return None
+        base, suffix, unit = words
+        if not (base["x0"] < suffix["x0"] < unit["x0"]):
+            return None
+        if (not base.get("fontname") or any(w.get("fontname") != base["fontname"] for w in words)):
+            return None
+        symbol = str(base["text"])
+        sub = str(suffix["text"])
+        unit_text = str(unit["text"])
+        match = re.fullmatch(r"\(([^()]+)\)", unit_text)
+        if (not re.fullmatch(r"[^\W\d_]", symbol) or not re.fullmatch(r"[A-Za-z0-9]{1,4}", sub)
+                or match is None or not _looks_like_known_atomic_unit(match.group(1))):
+            return None
+        if (re.sub(r"\s+", "", lines[0]) != symbol + unit_text
+                or re.sub(r"\s+", "", lines[1]) != sub):
+            return None  # Match each complete raw baseline in its observed order.
+        if not _words_form_visual_subscript(base, suffix, require_lowered_bottom=True):
+            return None
+        size = base["size"]
+        if (abs(unit["top"] - base["top"]) > size * .1
+                or abs(unit["bottom"] - base["bottom"]) > size * .1
+                or not 0 <= unit["x0"] - suffix["x1"] <= size * .6):
+            return None
+        return symbol + sub + " " + unit_text
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def _rebuild_table_inline_subscript_lines(
@@ -6836,6 +6887,13 @@ def _looks_like_body_technical_subscript_pair(base: str, suffix: str) -> bool:
     voltage_threshold_pair = bool(
         base == "V" and _SIGNED_RATIONAL_SUBSCRIPT_RE.fullmatch(suffix)
     )  # OIF threshold prose使用 V_{-1}, V_{-1/3}, V_{1/3}, V_1；仍需外层完整几何与字符守恒。
+    # These Latin prose symbols are source-observed families, not a text-only
+    # normalization rule. The caller still requires lowered one-to-one geometry,
+    # complete character coverage, and unique ordered source-line binding.
+    latin_prose_pair = (base, suffix) in {
+        ("t", "x"), ("p", "max"), ("MDNEXT", "loss"),
+        ("f", "n"), ("f", "r"), ("f", "t"),
+    }
     known_engineering_pair = (
         is_known_engineering_symbol_letter_suffix(base, suffix)
         or (base == "R" and suffix == "I")
@@ -6844,6 +6902,7 @@ def _looks_like_body_technical_subscript_pair(base: str, suffix: str) -> bool:
         (technical_base and technical_suffix)
         or formula_pair
         or voltage_threshold_pair
+        or latin_prose_pair
         or known_engineering_pair
         or (bool(re.fullmatch(r"[^\W\d_]", base, re.UNICODE))
             and bool(re.fullmatch(r"[A-Z]{1,4}\d{1,4}|[+−–-]\d{1,4}", suffix)))
