@@ -6,6 +6,13 @@ from protocol_pdf_diff.models import TableVisual
 
 
 class CompleteReportFollowupTests(unittest.TestCase):
+    def test_short_prose_after_equation_is_never_joined_into_math(self):
+        for prose in ('Avoid clipping.', 'Increase bandwidth.', 'Keep Vmax.', 'Avoid clipping',
+                      'SET X=1', 'Use Vmax.', 'Do not clip.', 'RLM >= 0.95', 'V <= 800',
+                      '0 <= V <= 800', 'BER <= 1e-12'):
+            units=compare._paragraph_review_units('y = log(x) + 1 (1-1) '+prose,suppressed_table_unit_keys=set())
+            self.assertIn(prose,units)
+
     def test_single_scalar_record_preserves_wrapped_condition_and_sign(self):
         import json,copy
         from pathlib import Path

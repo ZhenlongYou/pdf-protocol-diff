@@ -4765,8 +4765,10 @@ def _prose_outside_displayed_formula(unit: str) -> list[str]:
     # locator would itself manufacture a removal/replacement.
     joined_spans = []
     for span in spans:
-        if (joined_spans and not _starts_prose_sentence(span)
-                and not _starts_prose_sentence(joined_spans[-1])):
+        if (joined_spans and _is_math_continuation_fragment(span)
+                and _is_math_continuation_fragment(joined_spans[-1])
+                and (_retain_formula_adjacent_span(joined_spans[-1] + ' ' + span)
+                     or not any(_retain_formula_adjacent_span(s) for s in (joined_spans[-1], span)))):
             joined_spans[-1] = (joined_spans[-1] + ' ' + span).strip()
         else:
             joined_spans.append(span)
@@ -4777,15 +4779,34 @@ def _prose_outside_displayed_formula(unit: str) -> list[str]:
             continue
         # Keep scalar requirements and any prose-bearing mixed span intact.
         # Mathematical glyphs without prose can be omitted under formula-off.
-        words=re.findall(r'[^\W\d_]{2,}',span,flags=re.UNICODE)
-        scalar_expression = (bool(re.search(r'[^\W\d_]', span))
-                             and not re.search(r'(?i)\b(?:log|ln|sin|cos|tan|exp|sqrt)\s*\(|[∑∫∏]', span))
-        if (not _DISPLAYED_FORMULA_RELATION_RE.search(span)
-                and not re.search(r"[\ue000-\uf8ff]",span)
-                or scalar_expression or len(words)>=4 or re.search(r'(?i)\b(?:shall|should|must|where|note)\b',span)
-                or re.match(r'^[•●⚫]\s*',span)):
+        if _retain_formula_adjacent_span(span):
             kept.append(span)
     return kept
+
+
+def _retain_formula_adjacent_span(span: str) -> bool:
+    """A locator regrouping must never weaken a span's retention decision."""
+    words = re.findall(r'[^\W\d_]{2,}', span, flags=re.UNICODE)
+    scalar_expression = (bool(re.search(r'[^\W\d_]', span))
+                         and not re.search(r'(?i)\b(?:log|ln|sin|cos|tan|exp|sqrt)\s*\(|[∑∫∏]', span))
+    return bool((not _DISPLAYED_FORMULA_RELATION_RE.search(span)
+                 and not re.search(r'[\ue000-\uf8ff]', span))
+                or scalar_expression or len(words) >= 4
+                or re.search(r'(?i)\b(?:shall|should|must|where|note)\b', span)
+                or re.match(r'^[•●⚫]\s*', span))
+
+
+def _is_math_continuation_fragment(value: str) -> bool:
+    """Require positive math evidence; an unrecognized sentence is not math."""
+    if re.search(r'[.!?。！？]\s*$', value) or re.search(
+            r'(?i)\b(?:set|use|keep|add|let|try|run|put|get|see|read|note|must|shall|may|can)\b', value):
+        return False
+    words = re.findall(r'[^\W\d_]{2,}', value, flags=re.UNICODE)
+    if any(word not in {'log', 'ln', 'sin', 'cos', 'tan', 'exp', 'sqrt'}
+           and re.fullmatch(r'[A-Z]{2,4}', word) is None for word in words):
+        return False
+    return bool(re.search(r'[=<>≤≥∑∫∏\ue000-\uf8ff]|--', value)
+                or re.fullmatch(r'[\d\s+−–/.,-]+', value))
 
 
 def _is_displayed_formula_review_unit(value: str) -> bool:
