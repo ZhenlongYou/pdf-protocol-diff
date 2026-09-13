@@ -1,0 +1,14 @@
+{
+  "partition": "realistic",
+  "cases": [
+    {
+      "id": "public-limit-change",
+      "kind": "public",
+      "contains": [
+        "Max=1000",
+        "Max=1200",
+        "mV"
+      ]
+    }
+  ]
+}

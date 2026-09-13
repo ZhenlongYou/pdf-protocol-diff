@@ -1,0 +1,1178 @@
+{
+  "provenance": "User-supplied OIF PDF report; expected correspondence independently checked against physical source pages, audit_20260913_132844. Historic build unknown.",
+  "sections": {
+    "old": [
+      {
+        "section_id": "S0294",
+        "heading": "9.3.3.4 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "9 CEI-11G-LR/MR Long/Medium Reach Interface / 9.3 Electrical Characteristics, CEI-11G-LR and CEI-11G-MR / 9.3.3 CEI-11G-MR Receiver Characteristics / 9.3.3.4 Input Lane-to-Lane Skew",
+        "number_path": [
+          "9",
+          "9.3",
+          "9.3.3",
+          "9.3.3.4"
+        ],
+        "page_range": "220",
+        "body_preview": "Please refer to 3.2.8 220 Clause 9: CEI-11G-LR/MR Long/Medium Reach Interface - Optical Internetworking Forum",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0565",
+        "heading": "18.3.3.3 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "18.3.3 Receiver Characteristics / 18.3.3.3 Input Lane-to-Lane Skew",
+        "number_path": [
+          "18.3.3",
+          "18.3.3.3"
+        ],
+        "page_range": "390",
+        "body_preview": "Please refer to Section 3.2.8. 390 Clause 18: CEI-56G-USR-NRZ Ultra Short Reach Interface - Optical Internetworking Forum 表格行: T1 | Parameter=A0 | Value=-12 | Units=dB 表格行: T1 | Parameter=f0 | Value=100 | Units=MHz 表格行: T1 | Parameter=f1 | Value=0.1714 x R_Baud | Units=Hz 表格行: T1 | Parameter=f2 | Value=R_Baud | Units=Hz 表格行: T1 | Parameter=Slope | Value=12.0 | Units=dB/dec",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0599",
+        "heading": "19.3.3.3 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "19.3.3 Receiver Characteristics / 19.3.3.3 Input Lane-to-Lane Skew",
+        "number_path": [
+          "19.3.3",
+          "19.3.3.3"
+        ],
+        "page_range": "406",
+        "body_preview": "Please refer to Section 3.2.8. 406 Clause 19: CEI-56G-XSR-NRZ Extra Short Reach Interface - Optical Internetworking Forum 表格行: T1 | Parameter=A0 | Value=-12 | Units=dB 表格行: T1 | Parameter=f0 | Value=100 | Units=MHz 表格行: T1 | Parameter=f1 | Value=0.1714 x R_Baud | Units=Hz 表格行: T1 | Parameter=f2 | Value=R_Baud | Units=Hz 表格行: T1 | Parameter=Slope | Value=12.0 | Units=dB/dec",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0930",
+        "heading": "27.3 Electrical Characteristics",
+        "title": "Electrical Characteristics",
+        "level": 2,
+        "location": "27 CEI-112G-LR-PAM4 Long Reach Interface / 27.3 Electrical Characteristics",
+        "number_path": [
+          "27",
+          "27.3"
+        ],
+        "page_range": "624",
+        "body_preview": "The electrical signaling is based on high speed low voltage logic with a nominal differential impedance of 100 Ω.",
+        "role": "technical"
+      }
+    ],
+    "new": [
+      {
+        "section_id": "S0296",
+        "heading": "9.3.3.4 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "9 CEI-11G-LR/MR Long/Medium Reach Interface / 9.3 Electrical Characteristics, CEI-11G-LR and CEI-11G-MR / 9.3.3 CEI-11G-MR Receiver Characteristics / 9.3.3.4 Input Lane-to-Lane Skew",
+        "number_path": [
+          "9",
+          "9.3",
+          "9.3.3",
+          "9.3.3.4"
+        ],
+        "page_range": "224",
+        "body_preview": "Please refer to 3.2.8 224 Clause 9: CEI-11G-LR/MR Long/Medium Reach Interface - Optical Internetworking Forum",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0567",
+        "heading": "18.3.3.3 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "18.3.3 Receiver Characteristics / 18.3.3.3 Input Lane-to-Lane Skew",
+        "number_path": [
+          "18.3.3",
+          "18.3.3.3"
+        ],
+        "page_range": "394",
+        "body_preview": "Please refer to Section 3.2.8. 394 Clause 18: CEI-56G-USR-NRZ Ultra Short Reach Interface - Optical Internetworking Forum 表格行: T1 | Parameter=A0 | Value=-12 | Units=dB 表格行: T1 | Parameter=f0 | Value=100 | Units=MHz 表格行: T1 | Parameter=f1 | Value=0.1714 x R_Baud | Units=Hz 表格行: T1 | Parameter=f2 | Value=R_Baud | Units=Hz 表格行: T1 | Parameter=Slope | Value=12.0 | Units=dB/dec",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0601",
+        "heading": "19.3.3.3 Input Lane-to-Lane Skew",
+        "title": "Input Lane-to-Lane Skew",
+        "level": 4,
+        "location": "19.3.3 Receiver Characteristics / 19.3.3.3 Input Lane-to-Lane Skew",
+        "number_path": [
+          "19.3.3",
+          "19.3.3.3"
+        ],
+        "page_range": "410",
+        "body_preview": "Please refer to Section 3.2.8. 410 Clause 19: CEI-56G-XSR-NRZ Extra Short Reach Interface - Optical Internetworking Forum 表格行: T1 | Parameter=A0 | Value=-12 | Units=dB 表格行: T1 | Parameter=f0 | Value=100 | Units=MHz 表格行: T1 | Parameter=f1 | Value=0.1714 x R_Baud | Units=Hz 表格行: T1 | Parameter=f2 | Value=R_Baud | Units=Hz 表格行: T1 | Parameter=Slope | Value=12.0 | Units=dB/dec",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0933",
+        "heading": "27.3 Electrical Characteristics",
+        "title": "Electrical Characteristics",
+        "level": 2,
+        "location": "27.3 Electrical Characteristics",
+        "number_path": [
+          "27.3"
+        ],
+        "page_range": "628",
+        "body_preview": "The electrical signaling is based on high speed low voltage logic with a nominal differential impedance of 100 Ω.",
+        "role": "technical"
+      },
+      {
+        "section_id": "S0970",
+        "heading": "28.4 Electrical Characteristics",
+        "title": "Electrical Characteristics",
+        "level": 2,
+        "location": "28 CEI-112G-XSR+-PAM4 Extended Extra Short Reach / 28.4 Electrical Characteristics",
+        "number_path": [
+          "28",
+          "28.4"
+        ],
+        "page_range": "647",
+        "body_preview": "The electrical signaling is based on high-speed low-voltage logic with a nominal differential impedance of 100 Ω.",
+        "role": "technical"
+      }
+    ]
+  },
+  "tables": {
+    "old": [
+      {
+        "page_number": 586,
+        "table_number": 1,
+        "title": "",
+        "bbox": [
+          72.30000000000001,
+          75.00001000000003,
+          535.1000133333333,
+          711.659995
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Column 1=Enforce Causality | Column 2=When set to 1 causality is enforced for the FD to TD conversion.\\nIf set to zero a IFFT using extrapolated low and high frequency\\ndata is used to convert to time domain. Look at the SBR in figure\\n100. If a small amount of precursor exists set to 1.",
+          "表格行: T1 | Column 1=Enforce Causality DIFF_TOL | Column 2=Tolerance parameter for causality, Hard enforcement, 1e-4,Soft\\nenforcement, 1e-3",
+          "表格行: T1 | Column 1=Enforce Causality pulse start\\ntolerance | Column 2=Tolerance parameter for causality, Hard enforcement, 0.05, Soft\\nenforcement, 02",
+          "表格行: T1 | Column 1=Enforce Causality REL_TOL | Column 2=Tolerance parameter for causality, Hard enforcement, 1e-3, Soft\\nenforcement, 1e-2",
+          "表格行: T1 | Column 1=Error propagation COM margin | Column 2=Unsupported. Set to 0",
+          "表格行: T1 | Column 1=Force PDF bin size | Column 2=Normally set to 0. This forces a PDF bin size when set to 1.",
+          "表格行: T1 | Column 1=IDEAL_RX_TERM | Column 2=Normally set to 0. When set to 1 an ideal termination replaces\\nthe Tx package.",
+          "表格行: T1 | Column 1=IDEAL_TX_TERM | Column 2=Normally set to 0. When set to 1 an ideal termination replaces\\nthe Rx package.",
+          "表格行: T1 | Column 1=T_r | Column 2=Rise time of transmitter, converted to a TX filter per Equation\\n93A-46 if IDEAL_TX_TERM is true.",
+          "表格行: T1 | Column 1=INC_PACKAGE | Column 2=When set to 1 the package is added to the channel model. If the\\nchannel model contains a package set this to 0. When set to 0\\nC_d, z_p select, z_p (TX), z_p (NEXT), z_p (FEXT), z_p (RX),\\nC_p, R_0, and R_d are ignored.",
+          "表格行: T1 | Column 1=Include PCB | Column 2=This is normally set to 0. Set to 1 for CR4. When set to 1 a PCB\\nboard is concatenated on both sides of the tested channel as\\nspecified in 92.10.7.1.1.",
+          "表格行: T1 | Column 1=INCLUDE_CTLE | Column 2=Normally set to 1. When set to 0 the CTLE is omitted from\\nanalysis.",
+          "表格行: T1 | Column 1=INCLUDE_TX_RX_FILTER | Column 2=Normally set to 1. If set to 0 the Tx and Rx filter are omitted.\\nHowever Tx FFE and CTLE are no affect by this parameter.",
+          "表格行: T1 | Column 1=Max burst length calculated | Column 2=Used for calculation of probabilities of error bursts due to DFE\\nerror propagation.",
+          "表格行: T1 | Column 1=PDF bin size | Column 2=The value in volts which is the size of PDF voltage bins.\\nEssentially can be used a noise filter as any value lower than this\\nvoltage is considered as 0 V.",
+          "表格行: T1 | Column 1=Port Order | Column 2=Order for S-parameter ports [tx+, tx-, Rx+, Rx-]. Normally set to\\n[1 3 2 4]",
+          "表格行: T1 | Column 1=RESULT_DIR | Column 2=The name of the results directory. May use relative references. If\\ncontains the string {date} todays date replaces {date}",
+          "表格行: T1 | Column 1=RX_CALIBRATION | Column 2=Set to 0 for regular channel analysis. Set to 1 for calibrating the\\nnoise source in RX compliance test (Annex 93C.2).",
+          "表格行: T1 | Column 1=Sigma BBN step | Column 2=Initial step used for noise adjustment in Rx calibration.",
+          "表格行: T1 | Column 1=SAVE_FIGURE_to_CSV | Column 2=Set to one to save figure contents in csv files in RESULTS_DIR.",
+          "表格行: T1 | Column 1=SAVE_FIGURES | Column 2=Set to one to save fig files in RESULTS_DIR.",
+          "表格行: T1 | Column 1=COM_CONTRIBUTION | Column 2=When set to 1 a rough approximation of COM contributions chart\\nreplaces the bathtub curves.\\nWhen set to 0 the bathtub curves are displayed",
+          "表格行: T1 | Column 1=BREAD_CRUMBS | Column 2=When set to 1 then a mat file with the structures “params” and\\n“OP” is created in the results directory"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 24 条，竖线 3 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "When set to 1 causality is enforced for the FD to TD conversion. i if set to zero a IFFT using extrapolated low and high frequency Enforce Causality data is used to convert to time domain. Look at the SBR in figure 100. If a small amount of precursor exists set to 1. . Tolerance parameter for causality, Hard enforcement, 1e-4,Soft Enforce Causality DIFF_TOL enforcement, 1e-3 Enforce Causality pulse start Tolerance parameter for causality, Hard enforcement, 0.05, Soft tolerance enforcement, 02 .…",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": true,
+        "content_fully_represented": true,
+        "row_alignment_reliable": false,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 594,
+        "table_number": 1,
+        "title": "Table 25-21. Default die termination and parameter entries for CEI-112G-VSR COM",
+        "bbox": [
+          134.00571428571428,
+          473.64,
+          471.4699933333334,
+          711.38999
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Parameter=package_tl_gamma0_a1_a2 | Setting=[0 0.0009909 0.0002772] | Units=",
+          "表格行: T1 | Parameter=package_tl_tau | Setting=6.141E‐03 | Units=ns/mm",
+          "表格行: T1 | Parameter=package_Z_c | Setting=[87.5 87.5 ; 92.5 92.5 ] | Units=Ohm"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 21 条，竖线 11 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "[Parameter [Setting ‘| Units | information _| [-—~zpsetece [| _ faz) | ___[Trestcases to un poze xy Tf 30; 4.82.8) [mm | [testcases] | [Sp wee [foo | mm [fest cases | | eeerexn [ass asia [mm | testcoses | [a0 [eet | [od md boned sso ohm txexy ———Farameter Setting as [package tLgammadaiae | (oocdeescs oom fd",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": false,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": false
+      },
+      {
+        "page_number": 594,
+        "table_number": 2,
+        "title": "Table 25-21. Default die termination and parameter entries for CEI-112G-VSR COM",
+        "bbox": [
+          140.772004,
+          481.0000033333333,
+          463.41999333333337,
+          642.84
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T2 | Parameter=C_d | Setting= | 列3=[[11..02ee-‐44 00]] | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T2 | Parameter=L_s | Setting=[0.12, 0] | 列3= | 列4= | Units=nH | Information=[TX RX]",
+          "表格行: T2 | Parameter=C_b | Setting=[0.3e‐4 0] | 列3= | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T2 | Parameter=z_p select | Setting=[ 1 2 ] | 列3= | 列4= | Units= | Information=[test cases to run]",
+          "表格行: T2 | Parameter=z_p (TX) | Setting=[15 30; 1.8 1.8] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T2 | Parameter=z_p (NEXT) | Setting=[0 0; 0 0] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T2 | Parameter=z_p (FEXT) | Setting=[15 30; 1.8 1.8] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T2 | Parameter=z_p (RX) | Setting=[0 0; 0 0] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T2 | Parameter=C_p | Setting=[0.6e‐4 0] | 列3= | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T2 | Parameter=R_0 | Setting=50 | 列3= | 列4= | Units=Ohm | Information=",
+          "表格行: T2 | Parameter=R_d | Setting=[50 50] | 列3= | 列4= | Units=Ohm | Information=[TX RX]"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 14 条，竖线 5 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "(“Faremeter [Setting Units | Information | [apsetet ta] Ypres 0 poz fas30; aga} [mm | frestcases] | = Sb Nex [Toor 0) mm rst cases] re ee et eed me es 2) ot)",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": false,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": false
+      }
+    ],
+    "new": [
+      {
+        "page_number": 590,
+        "table_number": 1,
+        "title": "",
+        "bbox": [
+          72.2969,
+          74.99680000000001,
+          535.0784333333332,
+          711.6312
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Column 1=Enforce Causality | Column 2=When set to 1 causality is enforced for the FD to TD conversion.\\nIf set to zero a IFFT using extrapolated low and high frequency\\ndata is used to convert to time domain. Look at the SBR in figure\\n100. If a small amount of precursor exists set to 1.",
+          "表格行: T1 | Column 1=Enforce Causality DIFF_TOL | Column 2=Tolerance parameter for causality, Hard enforcement, 1e-4,Soft\\nenforcement, 1e-3",
+          "表格行: T1 | Column 1=Enforce Causality pulse start\\ntolerance | Column 2=Tolerance parameter for causality, Hard enforcement, 0.05, Soft\\nenforcement, 02",
+          "表格行: T1 | Column 1=Enforce Causality REL_TOL | Column 2=Tolerance parameter for causality, Hard enforcement, 1e-3, Soft\\nenforcement, 1e-2",
+          "表格行: T1 | Column 1=Error propagation COM margin | Column 2=Unsupported. Set to 0",
+          "表格行: T1 | Column 1=Force PDF bin size | Column 2=Normally set to 0. This forces a PDF bin size when set to 1.",
+          "表格行: T1 | Column 1=IDEAL_RX_TERM | Column 2=Normally set to 0. When set to 1 an ideal termination replaces\\nthe Tx package.",
+          "表格行: T1 | Column 1=IDEAL_TX_TERM | Column 2=Normally set to 0. When set to 1 an ideal termination replaces\\nthe Rx package.",
+          "表格行: T1 | Column 1=T_r | Column 2=Rise time of transmitter, converted to a TX filter per Equation\\n93A-46 if IDEAL_TX_TERM is true.",
+          "表格行: T1 | Column 1=INC_PACKAGE | Column 2=When set to 1 the package is added to the channel model. If the\\nchannel model contains a package set this to 0. When set to 0\\nC_d, z_p select, z_p (TX), z_p (NEXT), z_p (FEXT), z_p (RX),\\nC_p, R_0, and R_d are ignored.",
+          "表格行: T1 | Column 1=Include PCB | Column 2=This is normally set to 0. Set to 1 for CR4. When set to 1 a PCB\\nboard is concatenated on both sides of the tested channel as\\nspecified in 92.10.7.1.1.",
+          "表格行: T1 | Column 1=INCLUDE_CTLE | Column 2=Normally set to 1. When set to 0 the CTLE is omitted from\\nanalysis.",
+          "表格行: T1 | Column 1=INCLUDE_TX_RX_FILTER | Column 2=Normally set to 1. If set to 0 the Tx and Rx filter are omitted.\\nHowever Tx FFE and CTLE are no affect by this parameter.",
+          "表格行: T1 | Column 1=Max burst length calculated | Column 2=Used for calculation of probabilities of error bursts due to DFE\\nerror propagation.",
+          "表格行: T1 | Column 1=PDF bin size | Column 2=The value in volts which is the size of PDF voltage bins.\\nEssentially can be used a noise filter as any value lower than this\\nvoltage is considered as 0 V.",
+          "表格行: T1 | Column 1=Port Order | Column 2=Order for S-parameter ports [tx+, tx-, Rx+, Rx-]. Normally set to\\n[1 3 2 4]",
+          "表格行: T1 | Column 1=RESULT_DIR | Column 2=The name of the results directory. May use relative references. If\\ncontains the string {date} todays date replaces {date}",
+          "表格行: T1 | Column 1=RX_CALIBRATION | Column 2=Set to 0 for regular channel analysis. Set to 1 for calibrating the\\nnoise source in RX compliance test (Annex 93C.2).",
+          "表格行: T1 | Column 1=Sigma BBN step | Column 2=Initial step used for noise adjustment in Rx calibration.",
+          "表格行: T1 | Column 1=SAVE_FIGURE_to_CSV | Column 2=Set to one to save figure contents in csv files in RESULTS_DIR.",
+          "表格行: T1 | Column 1=SAVE_FIGURES | Column 2=Set to one to save fig files in RESULTS_DIR.",
+          "表格行: T1 | Column 1=COM_CONTRIBUTION | Column 2=When set to 1 a rough approximation of COM contributions chart\\nreplaces the bathtub curves.\\nWhen set to 0 the bathtub curves are displayed",
+          "表格行: T1 | Column 1=BREAD_CRUMBS | Column 2=When set to 1 then a mat file with the structures “params” and\\n“OP” is created in the results directory"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 24 条，竖线 3 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "When set to 1 causality is enforced for the FD to TD conversion. i if set to zero a IFFT using extrapolated low and high frequency Enforce Causality data is used to convert to time domain. Look at the SBR in figure 100. If a small amount of precursor exists set to 1. . Tolerance parameter for causality, Hard enforcement, 1e-4,Soft Enforce Causality DIFF_TOL enforcement, 1e-3 Enforce Causality pulse start Tolerance parameter for causality, Hard enforcement, 0.05, Soft tolerance enforcement, 02 .…",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": true,
+        "content_fully_represented": true,
+        "row_alignment_reliable": false,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 598,
+        "table_number": 1,
+        "title": "Table 25-21. Default die termination and parameter entries for CEI-112G-VSR COM",
+        "bbox": [
+          140.772,
+          481.0,
+          463.4168833333333,
+          642.1800000000001
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Parameter=C_d | Setting= | 列3=[[11..02ee--44 00]] | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T1 | Parameter=L_s | Setting=[0.12, 0] | 列3= | 列4= | Units=nH | Information=[TX RX]",
+          "表格行: T1 | Parameter=C_b | Setting=[0.3e-4 0] | 列3= | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T1 | Parameter=z_p select | Setting=[ 1 2 ] | 列3= | 列4= | Units= | Information=[test cases to run]",
+          "表格行: T1 | Parameter=z_p (TX) | Setting=[15 30; 1.8 1.8] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T1 | Parameter=z_p (NEXT) | Setting=[0 0; 0 0] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T1 | Parameter=z_p (FEXT) | Setting=[15 30; 1.8 1.8] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T1 | Parameter=z_p (RX) | Setting=[0 0; 0 0] | 列3= | 列4= | Units=mm | Information=[test cases]",
+          "表格行: T1 | Parameter=C_p | Setting=[0.6e-4 0] | 列3= | 列4= | Units=nF | Information=[TX RX]",
+          "表格行: T1 | Parameter=R_0 | Setting=50 | 列3= | 列4= | Units=Ohm | Information=",
+          "表格行: T1 | Parameter=R_d | Setting=[50 50] | 列3= | 列4= | Units=Ohm | Information=[TX RX]"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 14 条，竖线 5 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "(“Faremeter [Setting Units | Information | [apsetet ta] Ypres 0 poz fas30; aga} [mm | frestcases] | = Sb Nex [Toor 0) mm rst cases] re ee et eed me ford soy hm xr",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": false,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": false
+      },
+      {
+        "page_number": 598,
+        "table_number": 2,
+        "title": "",
+        "bbox": [
+          134.15908333333334,
+          645.82,
+          471.552,
+          711.39
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T2 | Parameter=package_tl_gamma0_a1_a2 | Setting=[0 0.0009909 0.0002772] | Units=",
+          "表格行: T2 | Parameter=package_tl_tau | Setting=6.141E-03 | Units=ns/mm",
+          "表格行: T2 | Parameter=package_Z_c | Setting=[87.5 87.5 ; 92.5 92.5 ] | Units=Ohm"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 6 条，竖线 6 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "[Parameter Setting os | [package tLgammadaiae | (oo.noceecs oom [|",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": true,
+        "content_fully_represented": false,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 648,
+        "table_number": 1,
+        "title": "Table 28-3. Transmitter Electrical Output Specification",
+        "bbox": [
+          69.1171,
+          90.95619999999997,
+          534.9983399999999,
+          367.0052
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Characteristic=Baud Rate | Symbol=T_Baud | Condition= | MIN=36 | MAX=58 | UNIT=Gsym/s",
+          "表格行: T1 | Characteristic=Output Differential Voltage | Symbol=T_Vdiff | Condition=See Note1, 2. | MIN= | MAX=1000 | UNIT=mVppd",
+          "表格行: T1 | Characteristic=Output AC Common-Mode Voltage | Symbol=T_VcmAC | Condition=See Note1, 2. | MIN= | MAX=15 | UNIT=mVrms",
+          "表格行: T1 | Characteristic=Single-ended Transmitter Output\\nVoltage | Symbol=T_Vse | Condition=See Note1, 2. | MIN=0.1 | MAX=1.2 | UNIT=V",
+          "表格行: T1 | Characteristic=Effective return loss (ERL) | Symbol=T_ERL | Condition=See\\nSection28.4.1.3 | MIN=11 | MAX= | UNIT=dB",
+          "表格行: T1 | Characteristic=Common-Mode Output Return Loss | Symbol=T_SCC22 | Condition=200 MHz to f /2\\nb | MIN= | MAX=-6 | UNIT=dB",
+          "表格行: T1 | Characteristic=Level Separation Mismatch Ratio | Symbol=T_RLM | Condition=See notes 1, 3 | MIN=0.95 | MAX= | UNIT=—",
+          "表格行: T1 | Characteristic=Steady-state Voltage | Symbol=T_Vf | Condition=See notes 1, 4 | MIN=0.4 | MAX=0.5 | UNIT=V",
+          "表格行: T1 | Characteristic=Linear Fit Pulse Peak | Symbol=T_Pk | Condition=See notes 1, 4 | MIN=0.85×T_Vf | MAX= | UNIT=V",
+          "表格行: T1 | Characteristic=Signal-to-Noise-and-Distortion-Ratio | Symbol=T_SNDR | Condition=See notes 1, 4 | MIN=32.5 | MAX= | UNIT=dB",
+          "表格行: T1 | Characteristic=NOTES:\\n1.Signals are specified as measured through a fourth-order Bessel-Thomson low-pass response with 43GHz 3dB bandwidth.\\nSampling oscilloscopes will not be able to pattern lock and may substitute the 40GHz bandwidth limit with compensation for\\nthe reduced bandwidth.\\n2.Measured as described in Section28.4.1.2. T_Vdiff min is set by the steady-state voltage T_Vf min.\\n3.T_RLM is defined in Appendix 16.C.4.3.\\n4.Measured as described in Section28.4.1.6. | Symbol= | Condition= | MIN= | MAX= | UNIT="
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 13 条，竖线 7 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "Output Differential Voltage T_Vditt See Note 1, 2 [| 1000 | mVppd Output AC Common-Mode Voltage T_VemAC See Note 1, 2 ee ee Single-ended Transmitter Output T Vse See Note 1, 2 O41 12 Vv Voltage - Effective return loss (ERL) T_ERL See \"1 - Section 28.4.1.3 Common-Mode Output Return Loss | T_SCC22 200 MHz to fy/2 ee ee ee Level Separation Mismatch Ratio T_RLM See notes 1,3 ; 99 | | — | Linear Fit Pulse Peak See notes 1, 4 0.85*T_VF fof ov Signal-to-Noise-and-Distortion-Ratio T_SNDR See notes 1,4…",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": true,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 648,
+        "table_number": 2,
+        "title": "Table 28-4. Transmitter Output Jitter Specification",
+        "bbox": [
+          69.1171,
+          410.9832,
+          534.9983399999999,
+          529.9585
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T2 | Characteristic=Uncorrelated Jitter (time interval from 0.0005%\\nto 99.9995% of the probability distribution) | Symbol=T_J5u | Condition=See Note1 | MIN= | MAX=0.128 | UNIT=UI",
+          "表格行: T2 | Characteristic=Uncorrelated jitter RMS (standard deviation of\\nthe probability distribution) | Symbol=T_JRMS | Condition= | MIN= | MAX=0.0224 | UNIT=UIrms",
+          "表格行: T2 | Characteristic=Even-Odd Jitter | Symbol=T_EOJ | Condition= | MIN= | MAX=0.025 | UNIT=UIpp",
+          "表格行: T2 | Characteristic=NOTES:\\n1.Measured as described in Section28.4.1.7. | Symbol= | Condition= | MIN= | MAX= | UNIT="
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 8 条，竖线 7 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "Characteristic Condltion | MIN, | max. | UNIT Uncorrelated Jitter (time interval from 0.0005% coe rom T_Jsu 0.128 ul to 99.9995% of the probability distribution) Uncorrelated jitter RMS (standard deviation of See Note 1 the probability distribution) Taos 0.0224 | Ulrms Even-Odd Jitter T_EOJ [| 0.025 Ulpp NOTES: 1. Measured as described in Section 28.4.1.7.",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": true,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 655,
+        "table_number": 1,
+        "title": "Table 28-9. Sinusoidal Jitter",
+        "bbox": [
+          192.0521,
+          515.9789000000001,
+          428.0227,
+          632.9744000000001
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | Column 1=Jitter Frequency | Column 2=Jitter Amplitude\\n(UI)",
+          "表格行: T1 | Column 1=f /100\\nCRU | Column 2=5",
+          "表格行: T1 | Column 1=f /3\\nCRU | Column 2=0.15",
+          "表格行: T1 | Column 1=fCR | Column 2=0.05",
+          "表格行: T1 | Column 1=3f\\nCRU | Column 2=0.05",
+          "表格行: T1 | Column 1=10f\\nCRU | Column 2=0.05"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 7 条，竖线 3 条",
+        "ocr_status": "OCR 未识别到可用文本；使用截图和 pdfplumber 表格行。",
+        "ocr_text_preview": "",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": true,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": true
+      },
+      {
+        "page_number": 678,
+        "table_number": 1,
+        "title": "Table 29-12. CTLE Gain Range",
+        "bbox": [
+          105.8956,
+          592.9558,
+          498.0398,
+          665.0131
+        ],
+        "page_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "row_texts": [
+          "表格行: T1 | min=0 | max=2 | step\\nsize=0.5 dB | min=0 | max=6 | step\\nsize=1.0 dB | 列7=TP1a, TP4"
+        ],
+        "grid_summary": "OpenCV 网格检测: 横线 4 条，竖线 8 条",
+        "ocr_status": "OCR 已执行。",
+        "ocr_text_preview": "i step A step jin | max] $22 | mn fmm | Se]",
+        "has_embedded_image": true,
+        "has_context_image": true,
+        "context_bbox": [
+          0.0,
+          0.0,
+          612.0,
+          792.0
+        ],
+        "is_continuation": false,
+        "content_fully_represented": false,
+        "row_alignment_reliable": true,
+        "data_rows_fully_represented": true
+      }
+    ]
+  },
+  "formulas": [
+    {
+      "pages": [
+        666,
+        668
+      ],
+      "section": "29.3.12 Electrical Eye Closure PAM4 (EECQ)",
+      "unit": "6) The following equation is used for EECQ in place of TDECQ (Equation 121-12): EECQ = 20log (VMAeecq /(6Q R)) (29-3) 10 t Where Q is 3.463 consistent with the BER of this specification.",
+      "suppressed_as_formula": true
+    },
+    {
+      "pages": [
+        654,
+        656
+      ],
+      "section": "28.4.2.4 Receiver Interference Tolerance",
+      "unit": "A =   - J --5---u- + Q Q 2 + 1  J 2 –  - J --5---u-  2    Q 2 + 1 (28-4) DD  2 5d 5d RMS  2   5d J  =  ---5---u- – A   Q (28-5) RJ  2 DD 5d where Q5d = 4.2649 NOTE 1—Q5d is an approximated solution of Q(Q5 ) = 1 × 10 –5 .",
+      "suppressed_as_formula": true
+    }
+  ],
+  "figure_cases": [
+    {
+      "page": 681,
+      "source_bbox": [
+        21.42,
+        67.88389999999993,
+        554.9874,
+        407.41049999999996
+      ],
+      "original": "Optical Internetworking Forum - Clause 29: CEI-112G-LINEAR-PAM4 681 OOANODOARWNH = The second recommended channel includes an extended reach host that consists of a majority of cable routing with an expected host cable reach of up to at least 350 mm. The channel consists of host PCB trace, module PCB trace, vias, AC coupling, two connectors and copper cable, not in this order. Note: The additional cable connector is considered part of the host channel budget. This full channel model is shown in Figure 29-16 below for Linear Pluggable Optical module (LPO) and Figure 29-17 for linear Near-Package Optics (NPO).",
+      "result": "The additional cable connector is considered part of the host channel budget. This full channel model is shown in Figure 29-16 below for Linear Pluggable Optical module (LPO) and Figure 29-17 for linear Near-Package Optics (NPO).",
+      "traces": [
+        {
+          "line": 201,
+          "result": "The additional cable connector is considered part of the host channel budget. This full channel model is shown in Figure 29-16 below for Linear Pluggable Optical module (LPO) and Figure 29-17 for linear Near-Package Optics (NPO).",
+          "prefix": "Optical Internetworking Forum - Clause 29: CEI-112G-LINEAR-PAM4 681 OOANODOARWNH = The second recommended channel includes an extended reach host that consists of a majority of cable routing with an expected host cable reach of up to at least 350 mm. The channel consists of host PCB trace, module PCB trace, vias, AC coupling, two connectors and copper cable, not in this order. Note: ",
+          "prefix_coverage": 0.9773462783171522,
+          "prose_start": 386
+        }
+      ]
+    },
+    {
+      "page": 681,
+      "source_bbox": [
+        21.42,
+        67.88389999999993,
+        554.9874,
+        407.41049999999996
+      ],
+      "original": "CEI-112G-LINEAR-PAM4 Cabled–Pluggable Module Channel Reference Model Figure 29-17. CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+      "result": "The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+      "traces": [
+        {
+          "line": 201,
+          "result": "The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+          "prefix": "CEI-112G-LINEAR-PAM4 Cabled–Pluggable Module Channel Reference Model Figure 29-17. CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. ",
+          "prefix_coverage": 0.9876543209876543,
+          "prose_start": 297
+        }
+      ]
+    },
+    {
+      "page": 682,
+      "source_bbox": [
+        59.97919999999999,
+        220.41049999999996,
+        590.58,
+        737.1504
+      ],
+      "original": "CEI-112G-LINEAR-PAM4 Cabled–Pluggable Module Channel Reference Model Figure 29-17. CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+      "result": "CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+      "traces": [
+        {
+          "line": 302,
+          "result": " CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+          "prefix": "CEI-112G-LINEAR-PAM4 Cabled–Pluggable Module Channel Reference Model Figure 29-17.",
+          "prefix_coverage": 0.9855072463768116,
+          "prose_start": 297
+        },
+        {
+          "line": 320,
+          "result": "CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model The third recommended channel includes a Co-Packaged Optics (CPO) host that consists of a optical IC mounted directly on a host IC package. The channel consists of package trace, module PCB trace and one connector, not in this order. This full channel model is shown in Figure 29-18 below for Co-Packaged Optical module (CPO). Note that the CPO reference model is not AC coupled.",
+          "prefix": "CEI-112G-LINEAR-PAM4 Cabled",
+          "prefix_coverage": 1.0,
+          "prose_start": 214
+        }
+      ]
+    },
+    {
+      "page": 681,
+      "source_bbox": [
+        21.42,
+        67.88389999999993,
+        554.9874,
+        407.41049999999996
+      ],
+      "original": "(see Section 29.3.9) )Bd( 12DDS Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+      "result": "Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+      "traces": [
+        {
+          "line": 302,
+          "result": " Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+          "prefix": "(see Section 29.3.9) )Bd( 12DDS",
+          "prefix_coverage": 1.0,
+          "prose_start": null
+        },
+        {
+          "line": 320,
+          "result": "Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+          "prefix": "",
+          "prefix_coverage": 0.7777777777777778,
+          "prose_start": null
+        }
+      ]
+    },
+    {
+      "page": 685,
+      "source_bbox": [
+        77.97710000000001,
+        182.41049999999996,
+        554.9874,
+        543.2217
+      ],
+      "original": "(see Section 29.3.9) )Bd( 12DDS Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+      "result": "10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+      "traces": [
+        {
+          "line": 302,
+          "result": "( 12DDS Frequency (GHz) SDD21 = – 0.01 – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+          "prefix": "(see Section 29.3.9) )Bd",
+          "prefix_coverage": 1.0,
+          "prose_start": null
+        },
+        {
+          "line": 302,
+          "result": " – 10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+          "prefix": "( 12DDS Frequency (GHz) SDD21 = – 0.01",
+          "prefix_coverage": 1.0,
+          "prose_start": null
+        },
+        {
+          "line": 320,
+          "result": "10.75 -- f -- – 10.78 -- f -- for f  f --b-- fb fb 2 SDD21 = –9.7  -- f --  – 32.6  -- f --  2 for - f -b--  f  0.85f  fb   fb  2 b",
+          "prefix": "",
+          "prefix_coverage": 0.75,
+          "prose_start": null
+        }
+      ]
+    }
+  ],
+  "footers": [
+    {
+      "pdf": "OIF-CEI-5.1.pdf",
+      "page": 212,
+      "size": [
+        612,
+        792
+      ],
+      "footer_boxes": [],
+      "bottom_rows": [
+        {
+          "text": "212 clause 9: cei-11g-lr/mr long/medium reach interface - optical internetworking forum",
+          "top": 744.828936,
+          "ratio": 0.9404405757575758,
+          "words": [
+            {
+              "text": "212",
+              "x0": 72.0,
+              "x1": 88.6539344,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Clause",
+              "x0": 104.88688160000001,
+              "x1": 135.9880592,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "9:",
+              "x0": 138.77535360000002,
+              "x1": 147.1272608,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "CEI-11G-LR/MR",
+              "x0": 149.8646752,
+              "x1": 222.4570344,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Long/Medium",
+              "x0": 225.286228,
+              "x1": 285.72083599999996,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Reach",
+              "x0": 288.494164,
+              "x1": 317.38066960000003,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Interface",
+              "x0": 320.1539976,
+              "x1": 359.07037360000004,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "-",
+              "x0": 361.8636536,
+              "x1": 365.1856616,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Optical",
+              "x0": 367.9370424,
+              "x1": 399.10406159999997,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Internetworking",
+              "x0": 401.92128399999996,
+              "x1": 470.207004,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Forum",
+              "x0": 473.0342024,
+              "x1": 501.89876080000005,
+              "top": 744.828936,
+              "bottom": 754.804936
+            }
+          ],
+          "folio": null
+        }
+      ]
+    },
+    {
+      "pdf": "OIF-CEI-5.1.pdf",
+      "page": 220,
+      "size": [
+        612,
+        792
+      ],
+      "footer_boxes": [],
+      "bottom_rows": [
+        {
+          "text": "220 clause 9: cei-11g-lr/mr long/medium reach interface - optical internetworking forum",
+          "top": 744.828936,
+          "ratio": 0.9404405757575758,
+          "words": [
+            {
+              "text": "220",
+              "x0": 72.0,
+              "x1": 88.6539344,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Clause",
+              "x0": 104.88688160000001,
+              "x1": 135.9880592,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "9:",
+              "x0": 138.77535360000002,
+              "x1": 147.1272608,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "CEI-11G-LR/MR",
+              "x0": 149.8646752,
+              "x1": 222.4570344,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Long/Medium",
+              "x0": 225.286228,
+              "x1": 285.72083599999996,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Reach",
+              "x0": 288.494164,
+              "x1": 317.38066960000003,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Interface",
+              "x0": 320.1539976,
+              "x1": 359.07037360000004,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "-",
+              "x0": 361.8636536,
+              "x1": 365.1856616,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Optical",
+              "x0": 367.9370424,
+              "x1": 399.10406159999997,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Internetworking",
+              "x0": 401.92128399999996,
+              "x1": 470.207004,
+              "top": 744.828936,
+              "bottom": 754.804936
+            },
+            {
+              "text": "Forum",
+              "x0": 473.0342024,
+              "x1": 501.89876080000005,
+              "top": 744.828936,
+              "bottom": 754.804936
+            }
+          ],
+          "folio": null
+        }
+      ]
+    },
+    {
+      "pdf": "OIF-CEI-05.3.pdf",
+      "page": 216,
+      "size": [
+        612.0,
+        792.0
+      ],
+      "footer_boxes": [],
+      "bottom_rows": [
+        {
+          "text": "216 clause 9: cei-11g-lr/mr long/medium reach interface - optical internetworking forum",
+          "top": 745.9004,
+          "ratio": 0.9417934343434343,
+          "words": [
+            {
+              "text": "216",
+              "x0": 71.9875,
+              "x1": 88.6465,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Clause",
+              "x0": 104.8775,
+              "x1": 135.9955,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "9:",
+              "x0": 138.7745,
+              "x1": 147.13449999999997,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "CEI-11G-LR/MR",
+              "x0": 149.8945,
+              "x1": 222.45150000000004,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Long/Medium",
+              "x0": 225.25150000000002,
+              "x1": 285.7795,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Reach",
+              "x0": 288.5485,
+              "x1": 317.44750000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Interface",
+              "x0": 320.2275,
+              "x1": 359.1455,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "-",
+              "x0": 361.92750000000007,
+              "x1": 365.25750000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Optical",
+              "x0": 367.9875,
+              "x1": 399.12550000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Internetworking",
+              "x0": 401.8855,
+              "x1": 470.20349999999974,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Forum",
+              "x0": 472.9824999999997,
+              "x1": 501.8914999999995,
+              "top": 745.9004,
+              "bottom": 755.9004
+            }
+          ],
+          "folio": null
+        }
+      ]
+    },
+    {
+      "pdf": "OIF-CEI-05.3.pdf",
+      "page": 224,
+      "size": [
+        612.0,
+        792.0
+      ],
+      "footer_boxes": [],
+      "bottom_rows": [
+        {
+          "text": "224 clause 9: cei-11g-lr/mr long/medium reach interface - optical internetworking forum",
+          "top": 745.9004,
+          "ratio": 0.9417934343434343,
+          "words": [
+            {
+              "text": "224",
+              "x0": 71.9875,
+              "x1": 88.6465,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Clause",
+              "x0": 104.8775,
+              "x1": 135.9955,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "9:",
+              "x0": 138.7745,
+              "x1": 147.13449999999997,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "CEI-11G-LR/MR",
+              "x0": 149.8945,
+              "x1": 222.45150000000004,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Long/Medium",
+              "x0": 225.25150000000002,
+              "x1": 285.7795,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Reach",
+              "x0": 288.5485,
+              "x1": 317.44750000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Interface",
+              "x0": 320.2275,
+              "x1": 359.1455,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "-",
+              "x0": 361.92750000000007,
+              "x1": 365.25750000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Optical",
+              "x0": 367.9875,
+              "x1": 399.12550000000005,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Internetworking",
+              "x0": 401.8855,
+              "x1": 470.20349999999974,
+              "top": 745.9004,
+              "bottom": 755.9004
+            },
+            {
+              "text": "Forum",
+              "x0": 472.9824999999997,
+              "x1": 501.8914999999995,
+              "top": 745.9004,
+              "bottom": 755.9004
+            }
+          ],
+          "folio": null
+        }
+      ]
+    }
+  ],
+  "figure_sources": [
+    {
+      "page": 681,
+      "bbox": [
+        21.42,
+        67.88389999999993,
+        554.9874,
+        407.41049999999996
+      ],
+      "text": "0D | -E Implementation Agreement OIF-CEI-5.3 Common Electrical I/O (CEI) Figure 29-14. CEI-112G-LINEAR-PAM4 PCB -— Pluggable Module Channel Reference Model Conn.up Module PCB + Host PCB up to 9 dB to2dB capupto2? dB = AC Connector Coupling Cap Module IC Line Card Host IC 13 dB channel loss at f=fb/2 Fiber Interconnect Conn.up Module PCB + Host PCB upto 9 dB to2dB capupto2 dB ——_ AC Connector Coupling Cap Module IC Line Card Host IC 13 dB channel loss at f=fb/2 Figure 29-15. CEI-112G-LINEAR-PAM4 PCB — Near-Package Optics Channel Reference Model Conn.up NPO PCB + to2dB capupto2dB — Connector Host IC to NPO upto 9dB NPO IC Line Card Host IC 13 dB channel loss at f=fb/? Fiber Interconnect Host IC to NPO Conn. up NPO PCB + upto 9dB to2dB capupto2 dB Connector NPO IC Line Card Host IC 13 dB channel loss at f=fb/? Optical Internetworking Forum - Clause 29: CEI-112G-LINEAR-PAM4 681 OOANODOARWNH = Figure 29-14. CEI-112G-LINEAR-PAM4 PCB – Pluggable Module Channel Reference Model"
+    },
+    {
+      "page": 681,
+      "bbox": [
+        21.42,
+        405.41049999999996,
+        554.9874,
+        737.1504
+      ],
+      "text": "Figure 29-15. CEI-112G-LINEAR-PAM4 PCB – Near-Package Optics Channel Reference Model"
+    },
+    {
+      "page": 682,
+      "bbox": [
+        59.97919999999999,
+        220.41049999999996,
+        590.58,
+        737.1504
+      ],
+      "text": "Figure 29-16. CEI-112G-LINEAR-PAM4 Cabled–Pluggable Module Channel Reference Model"
+    },
+    {
+      "page": 683,
+      "bbox": [
+        21.42,
+        67.88389999999993,
+        554.9874,
+        381.78789999999947
+      ],
+      "text": "Figure 29-17. CEI-112G-LINEAR-PAM4 Cabled – Near-Package Optics Channel Reference Model"
+    },
+    {
+      "page": 684,
+      "bbox": [
+        59.97919999999999,
+        67.88389999999993,
+        590.58,
+        415.984
+      ],
+      "text": "Figure 29-18. CEI-112G-LINEAR-PAM4 Co-Packaged Optics Channel Reference Model"
+    },
+    {
+      "page": 685,
+      "bbox": [
+        77.97710000000001,
+        182.41049999999996,
+        554.9874,
+        543.2217
+      ],
+      "text": "Figure 29-19. Recommended minimum SDD21 of the channel (for f = 56 GHz) b 0 -5 -10 -15 ) B d ( 12 -20 DD S -25 -30 -35 -40 0 10 20 30 40 50 Frequency (GHz)"
+    }
+  ]
+}

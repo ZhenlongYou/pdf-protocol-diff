@@ -1,0 +1,15 @@
+{
+  "partition": "nominal",
+  "cases": [
+    {
+      "id": "named-limits",
+      "kind": "limit",
+      "value": "Parameter=Gain | Min=1 | Max=2 | Unit=dB",
+      "contains": [
+        "Min=1",
+        "Max=2",
+        "dB"
+      ]
+    }
+  ]
+}

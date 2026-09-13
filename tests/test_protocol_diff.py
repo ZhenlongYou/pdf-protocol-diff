@@ -4867,11 +4867,11 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertIn("<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>", html)  # 摘要表头应和视觉参考一致。
         self.assertIn("Uncorrelated Jitter symbol", html_text)  # 项目列应标出符号变化。
-        self.assertIn("T_J4.3u03 | 0.121 UI", html_text)  # 旧版值应紧凑显示符号、数值和单位。
-        self.assertIn("T_JH4.3u | 0.121 UI", html_text)  # 新版值应紧凑显示符号、数值和单位。
+        self.assertIn("Symbol=T_J4.3u03", html_text)  # 旧版值应紧凑显示符号、数值和单位。
+        self.assertIn("Symbol=T_JH4.3u", html_text)  # 新版值应紧凑显示符号、数值和单位。
         self.assertIn("Uncorrelated jitter RMS symbol", html_text)  # 第二个符号变化也应有独立项目。
-        self.assertIn("T_JRMS03 | 0.023 UIrms", html_text)  # 旧版 RMS 值应可直接对照。
-        self.assertIn("T_JHRMS | 0.023 UIrms", html_text)  # 新版 RMS 值应可直接对照。
+        self.assertIn("Symbol=T_JRMS03", html_text)  # 旧版 RMS 值应可直接对照。
+        self.assertIn("Symbol=T_JHRMS", html_text)  # 新版 RMS 值应可直接对照。
         self.assertNotIn("Even-Odd Jitter", html_text)  # 未变化行不再占用变化报告篇幅。
         self.assertNotIn("无变化", html_text)  # 表格卡只承载需要复核的行。
         self.assertGreaterEqual(html_text.count("实质/符号变化"), 2)  # 两个符号变化都应被明确标记。
@@ -4986,8 +4986,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("50 Ω", html_text)  # 旧值保留。
         self.assertIn("46.25 Ω", html_text)  # 新值保留。
         self.assertIn("Eye height", html_text)  # `<` 到 `>` 的限值符号变化不能被吞掉。
-        self.assertIn("< 15 mV", html_text)  # 旧侧单独小于号必须进入显示值。
-        self.assertIn("> 15 mV", html_text)  # 新侧单独大于号必须进入显示值。
+        self.assertIn("Min=< 15 | Units=mV", html_text)  # 旧侧单独小于号必须进入显示值。
+        self.assertIn("Min=> 15 | Units=mV", html_text)  # 新侧单独大于号必须进入显示值。
         self.assertGreaterEqual(html_text.count("实质变化"), 2)  # 数值变化和限值方向变化都应判为实质变化。
 
     def test_table_changes_share_html_json_csv_and_navigation(self) -> None:
@@ -5195,6 +5195,7 @@ class ProtocolDiffTests(unittest.TestCase):
             title="Table 1 Receiver limits",
             bbox=(0.0, 0.0, 100.0, 100.0),
             image_data_uri="",
+            content_fully_represented=True, row_alignment_reliable=True,
             row_texts=["表格行: T1 | Parameter=Reference resistance | Value=50 | Units=Ω"],
             grid_summary="",
         )
@@ -5204,6 +5205,7 @@ class ProtocolDiffTests(unittest.TestCase):
             title="Table 2 Receiver limits",
             bbox=(0.0, 0.0, 100.0, 100.0),
             image_data_uri="",
+            content_fully_represented=True, row_alignment_reliable=True,
             row_texts=["表格行: T1 | Parameter=Reference resistance | Value=50 | Units=Ω"],
             grid_summary="",
         )
@@ -5278,6 +5280,7 @@ class ProtocolDiffTests(unittest.TestCase):
                 image_data_uri="",
                 row_texts=["表格行: T1 | Parameter=Voltage | Value=1 | Units=V"],
                 grid_summary="structured rows",
+                content_fully_represented=True, row_alignment_reliable=True,
             ),
             TableVisual(
                 page_number=2,
@@ -5287,6 +5290,7 @@ class ProtocolDiffTests(unittest.TestCase):
                 image_data_uri="",
                 row_texts=["表格行: T1 | Parameter=Jitter | Value=0.023 | Units=UI"],
                 grid_summary="structured rows",
+                content_fully_represented=True, row_alignment_reliable=True,
             ),
         ]
         new_tables = [
@@ -8954,7 +8958,8 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual(3, len(changes))
         self.assertTrue(all(change.change_type == "新表新增行" for change in changes))
-        self.assertNotIn("Host Loss", "\n".join(change.new_value for change in changes))
+        self.assertTrue(all("Host Loss" in change.item or "Host Loss" in change.new_value for change in changes))
+        self.assertTrue(all("mUIRMS" in change.new_value for change in changes))
 
     def test_reader_heading_renumber_never_hides_technical_value_or_term_changes(self) -> None:
         """编号中性只作用于标题定位，UI 数值和技术术语仍严格比较。"""

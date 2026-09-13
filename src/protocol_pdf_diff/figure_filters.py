@@ -22,7 +22,7 @@ _PROSE_OR_REQUIREMENT_VERB_RE = re.compile(
     r"(?i)\b(?:shall|should|must|may|can|is|are|was|were|be|being|been|"
     r"show(?:s|n|ed|ing)?|illustrates?|depicts?|describes?|"
     r"defin(?:e|es|ed|ing)|specifies?|contains?|"
-    r"lists?|measure(?:s|d)?|capture(?:s|d|ing)?|require(?:s|d)?|use(?:s|d)?|meet(?:s)?|"
+    r"includes?|consists?|lists?|measure(?:s|d)?|capture(?:s|d|ing)?|require(?:s|d)?|use(?:s|d)?|meet(?:s)?|"
     r"provide(?:s|d)?|preserve(?:s|d)?|apply|applies|applied)\b"
     r"|应|必须|不得|要求|规定|显示|说明|描述|定义"
 )
@@ -138,7 +138,7 @@ def strip_coordinate_owned_visual_fragment(
             break
         _removed_chars, remaining, source_index = max(candidates, key=lambda item: item[0])
         changed = True
-        remaining = remaining.strip(" \t\n,;:|/\\-–—")
+        remaining = remaining.strip()
         if not remaining:
             return ""
         if _coordinate_value_starts_with_prose(remaining):
@@ -153,201 +153,44 @@ def _strip_one_coordinate_figure_prefix(
     *,
     allow_interleaved_prefix: bool,
 ) -> str:
-    """Strip a whole value or one prefix using exactly one Figure crop."""
+    """Strip only a contiguous source-backed prefix, preserving symbols.
 
+    Character/word inventories are retrieval hints, not ownership evidence.
+    Interleaved glyphs need geometric reconstruction upstream; without it we
+    retain the fragment instead of deleting a possible requirement.
+    """
+    first = _figure_text_tokens(value)
+    if (_coordinate_value_starts_with_prose(value)
+            and (first and _PROSE_SENTENCE_OPENER_RE.fullmatch(first[0][0])
+                 or _coordinate_mixed_prose_start(value, first) is None)):
+        return value
     observed = _figure_text_tokens(value)
-    source = _figure_text_tokens(source_text)
-    if not observed or not source:
-        return value
-    source_canonical = _figure_text_canonical(source_text)
-    first_token = observed[0][0]
-    if (
-        _coordinate_value_starts_with_prose(value)
-        and (
-            bool(_PROSE_SENTENCE_OPENER_RE.fullmatch(first_token))
-            or bool(re.fullmatch(r"\d+[.)]?", first_token))
-        )
-    ):
-        return value  # 明确句首或编号步骤优先；后文与 Figure 重词不能裁掉真实主语。
-    # A Figure label wall can be followed by a complete sentence.  Prove and
-    # remove that coordinate-owned prefix before applying the whole-value
-    # sentence guard; otherwise the later verb in the sentence protects the
-    # labels too (for example ``Time Undershoot VMA 1 All ... are ...``).
-    prose_start = _coordinate_mixed_prose_start(value, observed) if allow_interleaved_prefix else None
-    if allow_interleaved_prefix and prose_start is not None:
-        # A bare numeric Figure label immediately before ``All ...`` can look
-        # like a numbered prose item.  Consume it only when the same crop owns
-        # that number; punctuation-bearing ``2. Capture ...`` remains prose.
-        numeric_label = re.match(r"(\d+)\s+(?=[A-Z])", value[prose_start:])
-        if numeric_label is not None:
-            candidate_start = prose_start + numeric_label.end()
-            candidate_prefix = value[:candidate_start]
-            candidate_canonical = _figure_text_canonical(candidate_prefix)
-            candidate_coverage = sum(
-                (Counter(candidate_canonical) & Counter(source_canonical)).values()
-            ) / max(len(candidate_canonical), 1)
-            if candidate_coverage >= 0.94:
-                prose_start = candidate_start
-        prefix = value[:prose_start]
-        prefix_canonical = _figure_text_canonical(prefix)
-        prefix_coverage = sum(
-            (Counter(prefix_canonical) & Counter(source_canonical)).values()
-        ) / max(len(prefix_canonical), 1)
-        if (
-            len(prefix_canonical) >= 8
-            and prefix_coverage >= 0.94
-            and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
-        ):
-            return value[prose_start:]
-    if _coordinate_value_starts_with_prose(value):
-        return value
-    observed_canonical = _figure_text_canonical(value)
-    if (
-        len(observed_canonical) >= 8
-        and observed_canonical in source_canonical
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-    character_coverage = sum(
-        (Counter(observed_canonical) & Counter(source_canonical)).values()
-    ) / max(len(observed_canonical), 1)
-    sequence_similarity = SequenceMatcher(
-        None,
-        observed_canonical,
-        source_canonical,
-        autojunk=False,
-    ).ratio()
-    observed_letters = "".join(
-        character for character in observed_canonical if character.isalpha()
-    )
-    source_letters = "".join(
-        character for character in source_canonical if character.isalpha()
-    )
-    if (
-        len(observed_canonical) >= 20
-        and character_coverage >= 0.94
-        and sequence_similarity >= 0.65
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-    if (
-        len(observed_letters) >= 6
-        and observed_letters in source_letters
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-
-    source_counts = Counter(token for token, _start, _end in source)
-    observed_counts = Counter(token for token, _start, _end in observed)
-    matched_count = sum(
-        min(count, source_counts[token])
-        for token, count in observed_counts.items()
-    )
-    if (
-        matched_count >= 3
-        and matched_count / len(observed) >= 0.86
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-
-    # Table headers and diagram labels may be emitted column-first while the
-    # bbox source is row-first (for example ``gDC2 gDC Location ...`` versus
-    # ``g g Location DC2 DC ...``).  Near-complete character ownership by one
-    # crop is sufficient only for a non-sentence fragment; raw audit data stays
-    # untouched even when the reader layer omits it.
-    if (
-        len(observed_canonical) >= 4
-        and character_coverage >= 0.98
-        and len(source_canonical) <= len(observed_canonical) * 8
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-
-    # A lone Figure/Table label such as ``TP1a`` or ``HCB`` is not a useful
-    # prose delta when an individual coordinate crop contains that exact token.
-    if (
-        len(observed) <= 2
-        and matched_count == len(observed)
-        and len(source) >= 5
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
-    ):
-        return ""
-
-    # PDF text layers may split a reversed axis label into single letters while
-    # the section assembler joins them again.  Whitespace-insensitive character
-    # containment restores that same-crop proof without protocol vocabulary.
-    for token_index in range(len(observed) - 1, -1, -1):
-        _token, _start, end = observed[token_index]
+    source = compact_inline(unicodedata.normalize("NFKC", source_text)).casefold()
+    source_compact = re.sub(r"\s+", "", source)
+    for count in range(len(observed), 0, -1):
+        end = observed[count - 1][2]
         prefix = value[:end]
-        prefix_canonical = _figure_text_canonical(prefix)
-        prefix_coverage = sum(
-            (
-                Counter(prefix_canonical)
-                & Counter(source_canonical)
-            ).values()
-        ) / max(len(prefix_canonical), 1)
-        if (
-            token_index + 1 < 3
-            or len(prefix_canonical) < 8
-            or (
-                prefix_canonical not in source_canonical
-                and (
-                    not allow_interleaved_prefix
-                    or prefix_coverage < 0.98
-                )
-            )
-            or _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
-        ):
+        key = compact_inline(unicodedata.normalize("NFKC", prefix)).casefold()
+        if len(key) < 4 or _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix):
             continue
-        return value[end:]
-
-    remaining = source_counts.copy()
-    prefix_count = 0
-    prefix_end = 0
-    for token, _start, end in observed:
-        if remaining[token] <= 0:
-            break
-        remaining[token] -= 1
-        prefix_count += 1
-        prefix_end = end
-    prefix = value[:prefix_end]
-    if (
-        prefix_count >= 5
-        and prefix_count / len(observed) >= 0.25
-        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(prefix)
-    ):
-        return value[prefix_end:]
+        # Word boundaries stop a short token from consuming part of a value.
+        if (re.search(r"(?<!\w)" + re.escape(key) + r"(?!\w)", source)
+                or (len(key) >= 8 and re.sub(r"\s+", "", key) in source_compact)):
+            return value[end:]
     return value
 
 
 @memoize_comparison(maxsize=256)
 def _strip_one_coordinate_visual_suffix(value: str, source_text: str) -> str:
-    """Strip a non-prose tail proven by one crop after a sentence boundary."""
-
-    observed = _figure_text_tokens(value)
-    source_canonical = _figure_text_canonical(source_text)
-    if len(observed) < 4 or not source_canonical:
-        return value
-    for token_index in range(1, len(observed) - 2):
-        _token, start, _end = observed[token_index]
-        prose_prefix = value[:start].rstrip()
-        if not prose_prefix.endswith((".", ":", ";")):
+    """Remove an exact source tail after a complete prose sentence."""
+    source = compact_inline(unicodedata.normalize("NFKC", source_text)).casefold()
+    for _token, start, _end in _figure_text_tokens(value):
+        prefix, tail = value[:start].rstrip(), value[start:]
+        if not prefix.endswith((".", ":", ";")) or _PROSE_OR_REQUIREMENT_VERB_RE.search(tail):
             continue
-        suffix = value[start:]
-        suffix_canonical = _figure_text_canonical(suffix)
-        if len(suffix_canonical) < 8 or _PROSE_OR_REQUIREMENT_VERB_RE.search(suffix):
-            continue
-        character_coverage = sum(
-            (Counter(suffix_canonical) & Counter(source_canonical)).values()
-        ) / max(len(suffix_canonical), 1)
-        if (
-            suffix_canonical in source_canonical
-            or (
-                character_coverage >= 0.98
-                and len(source_canonical) <= len(suffix_canonical) * 8
-            )
-        ):
-            return prose_prefix
+        key = compact_inline(unicodedata.normalize("NFKC", tail)).casefold()
+        if len(key) >= 8 and re.search(r"(?<!\w)" + re.escape(key) + r"(?!\w)", source):
+            return prefix
     return value
 
 

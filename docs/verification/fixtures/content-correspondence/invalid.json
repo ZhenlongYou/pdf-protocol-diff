@@ -1,0 +1,12 @@
+{
+  "partition": "invalid",
+  "cases": [
+    {
+      "id": "missing-evidence",
+      "kind": "fragment",
+      "value": "The maximum voltage is 350 mV.",
+      "sources": [],
+      "equals": "The maximum voltage is 350 mV."
+    }
+  ]
+}

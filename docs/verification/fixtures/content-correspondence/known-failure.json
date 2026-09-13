@@ -1,0 +1,14 @@
+{
+  "partition": "known-failure",
+  "cases": [
+    {
+      "id": "escaped-max-label",
+      "kind": "limit",
+      "value": "Parameter=Swing | Min= | Max=1000 | Unit=mVppd",
+      "contains": [
+        "Max=1000",
+        "mVppd"
+      ]
+    }
+  ]
+}

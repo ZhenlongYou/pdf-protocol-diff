@@ -1619,6 +1619,23 @@ def _document_proven_line_number_gutter_boxes(
             evidence_by_page[page_number] = page_evidence[0]
         # 同页出现多个同等强候选列时语义仍不唯一，保守地不给该页过滤权。
 
+    # Blank-row witnesses establish a document grid, not a requirement that
+    # every densely printed page must itself contain eight empty rows.
+    if len(evidence_by_page) >= _DOCUMENT_LINE_NUMBER_MIN_PAGES:
+        origin = median(item[1] for item in evidence_by_page.values())
+        pitch = median(item[2] for item in evidence_by_page.values())
+        for page_number, page in pages:
+            if page_number in evidence_by_page:
+                continue
+            issues = (coordinate_issues_by_page or {}).get(page_number, ([], None))
+            if not _coordinate_issues_preserve_line_number_grid_evidence(*issues):
+                continue
+            candidates = _page_printed_line_number_grid_evidence(
+                page, words=words_by_page.get(page_number, []), minimum_orphan_baselines=0)
+            if (len(candidates) == 1
+                    and abs(candidates[0][1] - origin) <= _DOCUMENT_LINE_NUMBER_GRID_ORIGIN_TOLERANCE
+                    and abs(candidates[0][2] - pitch) <= _DOCUMENT_LINE_NUMBER_GRID_PITCH_TOLERANCE):
+                evidence_by_page[page_number] = candidates[0]
     minimum_support = max(
         _DOCUMENT_LINE_NUMBER_MIN_PAGES,
         math.ceil(len(pages) * _DOCUMENT_LINE_NUMBER_MIN_PAGE_COVERAGE),
@@ -1661,6 +1678,7 @@ def _page_printed_line_number_grid_evidence(
     page: object,
     *,
     words: list[dict[str, object]],
+    minimum_orphan_baselines: int = _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES,
 ) -> list[
     tuple[tuple[tuple[float, float, float, float], ...], float, float]
 ]:
@@ -1687,6 +1705,7 @@ def _page_printed_line_number_grid_evidence(
             all_words=words,
             page_width=width,
             page_height=height,
+            minimum_orphan_baselines=minimum_orphan_baselines,
         )
         if metrics is None:
             continue
@@ -1701,6 +1720,7 @@ def _printed_line_number_grid_metrics(
     all_words: list[dict[str, object]],
     page_width: float,
     page_height: float,
+    minimum_orphan_baselines: int = _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES,
 ) -> tuple[tuple[tuple[float, float, float, float], ...], float, float] | None:
     """Validate a near-complete observed reset grid with numbered blank rows."""
 
@@ -1819,7 +1839,7 @@ def _printed_line_number_grid_metrics(
         )
         if not has_body_on_baseline:
             orphan_baselines += 1
-    if orphan_baselines < _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES:
+    if orphan_baselines < minimum_orphan_baselines:
         return None  # 每个数字都有同基线正文时，它仍可能是合法编号列表。
     split_fragment_boxes = _split_missing_grid_number_fragment_boxes(
         missing_values=set(range(1, values[-1] + 1))
@@ -3346,6 +3366,7 @@ def _extract_table_lines_and_visuals(
             rows,
             table_number,
             cell_word_rows=cell_word_rows,
+            cell_bounds_rows=[getattr(row, 'cells', ()) for row in getattr(table, 'rows', ())],
         )  # 有字号和坐标时先恢复视觉上下标；证据缺失则沿用纯文字保守路径。
         data_rows_fully_represented = (
             data_rows_fully_represented and source_data_geometry_complete
@@ -3364,6 +3385,8 @@ def _extract_table_lines_and_visuals(
         ) or _table_bbox_is_plot_axis_label(
             bbox, table_lines, geometry_words, title=title,
             grid_bboxes=grid_bboxes,
+        ) or _table_fragment_inside_figure_frame(
+            page, bbox, table_lines, geometry_words, title=title,
         ):
             continue  # Figure/plot 或空伪表格不进入正文 diff，也不进入表格截图区。
         lines.extend(table_lines)  # 表格行保留在抽取文本中，后续有截图表格区时正文 diff 会自动去重隐藏。
@@ -4059,6 +4082,51 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
 
 
+def _table_fragment_inside_figure_frame(page, bbox, table_lines, words, *, title=""):
+    """Recognize a split label grid enclosed by a captioned drawing frame.
+
+    Some false grids include long graph strokes, so their bounding boxes are
+    not short axis labels. Require the four observed frame edges and a nearby
+    Figure caption; table captions and explicit data schemas always win.
+    """
+    if (bbox is None or len(table_lines) != 1 or _looks_like_table_caption(title)
+            or _table_rows_have_explicit_technical_schema(table_lines)):
+        return False
+    values = [f[1].strip() for cell in split_table_cells(table_lines[0])
+              if (f := split_table_field(cell)) is not None]
+    if len([v for v in values if v]) < 2 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*\([A-Za-z][A-Za-z0-9_ /.-]*\)", "".join(values)):
+        return False
+    edges = getattr(page, 'edges', ()) or ()
+    horizontal = [e for e in edges if e.get('orientation') == 'h'
+                  and e['x0'] <= bbox[0] and e['x1'] >= bbox[2] and e['x1'] - e['x0'] >= 120]
+    vertical = [e for e in edges if e.get('orientation') == 'v']
+    lines = _word_line_records(words)
+    for top in horizontal:
+        if top['top'] > bbox[1]:
+            continue
+        for bottom in horizontal:
+            if bottom['top'] < bbox[3] or bottom['top'] - top['top'] < 80:
+                continue
+            if abs(top['x0'] - bottom['x0']) > 1 or abs(top['x1'] - bottom['x1']) > 1:
+                continue
+            if not all(any(abs(e['x0'] - x) <= 1 and e['top'] <= top['top'] + 1
+                               and e['bottom'] >= bottom['top'] - 1 for e in vertical)
+                       for x in (top['x0'], top['x1'])):
+                continue
+            captions = [line for line in lines if 0 <= top['top'] - line[1] <= 35
+                        and _looks_like_figure_caption(line[2])
+                        and (span := _word_span_horizontal_bounds(line[3])) is not None
+                        and min(span[1], top['x1']) - max(span[0], top['x0'])
+                            >= .8 * min(span[1] - span[0], top['x1'] - top['x0'])]
+            if not captions:
+                continue
+            if any(top['top'] <= line[0] <= bottom['top']
+                   and _looks_like_table_caption(line[2]) for line in lines):
+                continue
+            return True
+    return False
+
+
 def _table_bbox_is_plot_axis_label(
     bbox: tuple[float, float, float, float] | None,
     table_lines: list[str],
@@ -4090,9 +4158,12 @@ def _table_bbox_is_plot_axis_label(
     # A glyph outline may split the closing parenthesis into a second cell.
     # Independent words/numbers in another cell remain real table evidence.
     word_payloads = [value for value in payloads if re.search(r"\w", value)]
-    if len(word_payloads) != 1:
+    joined_payload = "".join(payloads)
+    split_identifier = bool(len(word_payloads) > 1 and re.fullmatch(
+        r"[A-Za-z][A-Za-z0-9_]*\([A-Za-z][A-Za-z0-9_ /.-]*\)", joined_payload))
+    if len(word_payloads) != 1 and not split_identifier:
         return False
-    tail = "".join(value for value in payloads if value and value != word_payloads[0])
+    tail = "" if split_identifier else "".join(value for value in payloads if value and value != word_payloads[0])
     if tail:
         if any(char not in ")]}" for char in tail):
             return False  # Signs, check marks and mathematical operators are independent data.
@@ -5294,6 +5365,7 @@ def _table_lines_from_rows_with_data_evidence(
     table_number: int,
     *,
     cell_word_rows: list[list[list[dict[str, object]]]] | None = None,
+    cell_bounds_rows: list | None = None,
 ) -> tuple[list[str], bool, bool, bool]:
     """Also expose whether every emitted data-row character stayed in its column."""
 
@@ -5328,6 +5400,10 @@ def _table_lines_from_rows_with_data_evidence(
         data_word_rows = raw_word_rows
     else:
         header = _clean_table_header(raw_rows[header_index])  # 清洗扫描到的表头，用于 Header=Value 片段。
+        grouped_header = (_geometry_proven_grouped_header(rows, header_index, cell_bounds_rows)
+                          if len(rows) == len(raw_rows) else None)
+        if grouped_header is not None:
+            header = grouped_header
         data_rows = raw_rows[header_index + 1 :]  # 有真实表头时跳过表头本身，只输出数据行。
         observed_data_rows = raw_observed_source_rows[header_index + 1 :]
         data_word_rows = raw_word_rows[header_index + 1 :]
@@ -6413,6 +6489,41 @@ def _find_table_header_row(rows: list[list[list[str]]]) -> int | None:
         if _looks_like_table_header(cleaned_row):
             return index
     return None
+
+
+def _geometry_proven_grouped_header(rows, header_index, cell_bounds_rows):
+    """Compose parent/leaf column names only from observed merged-cell bounds.
+
+    Empty cells alone do not prove a colspan. A parent must geometrically own
+    every leaf column it names; a caption spanning the whole table is not a
+    grouped header. Missing geometry leaves the existing uncertainty intact.
+    """
+    if not cell_bounds_rows or header_index != 1 or len(rows) < 3:
+        return None
+    upper, lower = rows[0], rows[1]
+    if len(upper) != len(lower) or len(cell_bounds_rows) < 3:
+        return None
+    parents = [(i, _clean_table_cell(value)) for i, value in enumerate(upper) if value]
+    if len(parents) < 2 or any(len(value) > 60 for _, value in parents):
+        return None
+    result = []
+    for i, value in enumerate(lower):
+        leaf = _clean_table_cell(value)
+        bounds = next((r[i] for r in cell_bounds_rows[1:]
+                       if i < len(r) and r[i] is not None), None)
+        if bounds is None:
+            return None
+        owners = []
+        for column, label in parents:
+            if column >= len(cell_bounds_rows[0]):
+                return None
+            box = cell_bounds_rows[0][column]
+            if box and box[0] <= bounds[0] + 1 and bounds[2] <= box[2] + 1:
+                owners.append(label)
+        if len(owners) != 1:
+            return None
+        result.append(_clean_header_label(f"{owners[0]} / {leaf}" if leaf else owners[0], i))
+    return result
 
 
 def _clean_table_header(row: list[list[str]]) -> list[str]:

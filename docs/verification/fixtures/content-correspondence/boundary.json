@@ -1,0 +1,14 @@
+{
+  "partition": "boundary",
+  "cases": [
+    {
+      "id": "negative-boundary",
+      "kind": "fragment",
+      "value": "Label Alpha Beta – 10.75 dB",
+      "sources": [
+        "Label Alpha Beta"
+      ],
+      "equals": "– 10.75 dB"
+    }
+  ]
+}

@@ -53,7 +53,16 @@ def running_footer_folio(words, page_bbox):
         glyph_height = median(w[4]-w[2] for w in words)
         outer = (folio[1] <= page_bbox[0]+width*.15 if at_start
                  else folio[3] >= page_bbox[0]+width*.85)
-        if (outer and normal_gaps and gap >= max(glyph_height*2, median(normal_gaps)*4)
+        # A wide publisher/clause footer supplies an independent signature;
+        # ordinary numeric sentence endings retain the stricter gap test.
+        publisher_footer = bool(
+            right - left >= width * .55
+            and not 1900 <= int(folio[0]) <= 2100  # a citation year is not a folio proof
+            and re.search(r'(?i)\b(?:clause|chapter|section|part)\s+\d', text)
+            and re.search(r'(?i)\s[-–—|]\s.*\b(?:forum|consortium|standard|institute|association)\b', text)
+        )
+        required_gap = max(glyph_height * (1.5 if publisher_footer else 2), median(normal_gaps) * 4) if normal_gaps else float('inf')
+        if (outer and normal_gaps and gap >= required_gap
                 and (FURNITURE.search(text) or gap >= width*.4)):
             return folio
     return None

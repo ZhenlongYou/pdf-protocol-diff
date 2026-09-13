@@ -1,0 +1,991 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "content-correspondence-20260913",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC-__INIT__",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-ACCURACY_EVALUATION",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "ab04d71dc6f9baaebc395a3f7608f1852ba8c970b0def4b060bd4fd57b597d2c",
+          "size_bytes": 43864
+        },
+        {
+          "id": "SRC-CATALOG_EVIDENCE",
+          "path": "src/protocol_pdf_diff/catalog_evidence.py",
+          "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
+          "size_bytes": 1808
+        },
+        {
+          "id": "SRC-COMPARE",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "aa10fac3298727defbf0bcd9e4346d902e4e22d7d98dfd23a4067abbc01af061",
+          "size_bytes": 273184
+        },
+        {
+          "id": "SRC-COMPARISON_JOB",
+          "path": "src/protocol_pdf_diff/comparison_job.py",
+          "sha256": "deaa0699c4beb3cc70d91a0d0bf2a9bff73939c2e1cc0846a2b038da289ab784",
+          "size_bytes": 11848
+        },
+        {
+          "id": "SRC-COMPARISON_SESSION",
+          "path": "src/protocol_pdf_diff/comparison_session.py",
+          "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+          "size_bytes": 1338
+        },
+        {
+          "id": "SRC-CONTENT_EQUIVALENCE",
+          "path": "src/protocol_pdf_diff/content_equivalence.py",
+          "sha256": "7d3430dba873d35b3dc54f7cedaad018209fd81b5a99ff20ca994a4f1ea1f9ef",
+          "size_bytes": 3045
+        },
+        {
+          "id": "SRC-DESKTOP_GUI",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
+          "size_bytes": 65405
+        },
+        {
+          "id": "SRC-DESKTOP_VISUALS",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-EVIDENCE_ALIGNMENT",
+          "path": "src/protocol_pdf_diff/evidence_alignment.py",
+          "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+          "size_bytes": 15836
+        },
+        {
+          "id": "SRC-EXACT_MATCH",
+          "path": "src/protocol_pdf_diff/exact_match.py",
+          "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+          "size_bytes": 4055
+        },
+        {
+          "id": "SRC-FIGURE_FILTERS",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "3a08dd5302497518aaaae6448410ee382a89e61ec457a6c87d2595a8cff63741",
+          "size_bytes": 11461
+        },
+        {
+          "id": "SRC-FORMULA_VISUALS",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-GLYPH_EVIDENCE",
+          "path": "src/protocol_pdf_diff/glyph_evidence.py",
+          "sha256": "7bf776b4991c964581d8bd8a47992555edb900d47e97b2f2cba8286cc4a2c5f5",
+          "size_bytes": 6535
+        },
+        {
+          "id": "SRC-HEADING_EVIDENCE",
+          "path": "src/protocol_pdf_diff/heading_evidence.py",
+          "sha256": "4d0a0d572679a01683b2f5ef66b68ed90e076bea2ff1f7a4d0fdae3aba78e2e2",
+          "size_bytes": 8563
+        },
+        {
+          "id": "SRC-LAYOUT_BACKEND",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-LAYOUT_BLOCKS",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "a5d90d28d4e403227a1d4e9120bb40f5304078aa807d72e04ef1f54e47de8626",
+          "size_bytes": 17605
+        },
+        {
+          "id": "SRC-MODELS",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "954cabdaab0d90cc6701eafb029dae2bb53b1605cba5d30b1e30c6e439573094",
+          "size_bytes": 28364
+        },
+        {
+          "id": "SRC-MONOTONIC_ALIGNMENT",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-PAGE_FURNITURE",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-PAGE_OCR",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-PARSING_BENCHMARK",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-PDF_EXTRACT",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "b87f0d9587a86f4006e428c36c2a0a06e2e2d682f38fea9f6eadb00e9c6cb30a",
+          "size_bytes": 343757
+        },
+        {
+          "id": "SRC-PROGRESS",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+          "size_bytes": 2087
+        },
+        {
+          "id": "SRC-PROSE_SOURCE_VISUALS",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "66022fd52e999b90978b617398eece29d56bcb7b2a07736d314e80efe87418ef",
+          "size_bytes": 86123
+        },
+        {
+          "id": "SRC-QUALITY",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "9aaaa36b97c3da755577a3dd7182e01b169ceb301c52c6165e08fbf3fe4dad74",
+          "size_bytes": 28701
+        },
+        {
+          "id": "SRC-READER_FOCUS",
+          "path": "src/protocol_pdf_diff/reader_focus.py",
+          "sha256": "d08985139e9835011cffef1454f574e3d67085f0fbc014b52b8a9dbcae11eaa4",
+          "size_bytes": 15601
+        },
+        {
+          "id": "SRC-REPORTING",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "e6a3ba2a48cd163e4c1488f08c0c1bc110ad00ca9e43be2ce38d73e2c68e979d",
+          "size_bytes": 532632
+        },
+        {
+          "id": "SRC-SAMPLE_DATA",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-SCREENSHOT_PRESENTATION",
+          "path": "src/protocol_pdf_diff/screenshot_presentation.py",
+          "sha256": "2d218efc631df850fd34f2524250441150c9b41fd8a6d124cb96234ce51a37a8",
+          "size_bytes": 3888
+        },
+        {
+          "id": "SRC-SECTIONING",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "3556c6a50234352835279efbb5c91fe995d58197d39f84d55970a777229e759e",
+          "size_bytes": 150721
+        },
+        {
+          "id": "SRC-SOURCE_REGIONS",
+          "path": "src/protocol_pdf_diff/source_regions.py",
+          "sha256": "25408141b2c25bcadfe341e57f1de2d1861c261392ee19ba12d4d673fb23c1e6",
+          "size_bytes": 6040
+        },
+        {
+          "id": "SRC-TABLE_CODEC",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-TEXT_UTILS",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "695ba8fad442c6281a3f2ec622e78f8bcaea730863e36d44fad0b72d77b199e9",
+          "size_bytes": 40594
+        },
+        {
+          "id": "SRC-UI_SHARED",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "8be85ee8dca702a6cd9dfcbdfd60094740d24db61d50f8e586d364a9da8b6acf",
+          "size_bytes": 4116
+        },
+        {
+          "id": "SRC-VENV_BOOTSTRAP",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-VISUAL_PREVIEW",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
+        },
+        {
+          "id": "SRC-VISUAL_WATCHDOG",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "a2c27298cc630375fe1efda4d030040b293084b828a578be535e593ddd65e622",
+          "size_bytes": 33821
+        },
+        {
+          "id": "SRC-WEBVIEW_GUI",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
+          "size_bytes": 23963
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-CONTENT-CORRESPONDENCE",
+          "observable": "Preserve actual normative text, signs, limits and units while separating uncertain correspondence from proved identity.",
+          "authority": {
+            "kind": "user",
+            "locator": "docs/verification/content-correspondence-20260913.md; original complete report audit"
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "expected semantic strings and retained source relations",
+            "unit": "reader facts",
+            "locator": "fixture equals and contains fields"
+          },
+          "oracle_ids": [
+            "ORACLE-CONTENT"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-NOMINAL"
+            ],
+            "boundary": [
+              "IN-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-INVALID"
+            ],
+            "adversarial": [
+              "IN-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-KNOWN-FAILURE"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-NOMINAL",
+          "path": "docs/verification/fixtures/content-correspondence/nominal.json",
+          "sha256": "7929224539b6c6d838addda1afa47008f119499cf88bf98b989e6250c567cce8",
+          "size_bytes": 244,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        },
+        {
+          "id": "IN-BOUNDARY",
+          "path": "docs/verification/fixtures/content-correspondence/boundary.json",
+          "sha256": "ae1a647a29ee2d58f570bd1c8b9c2f12e0c24cfa46bbdea5da9ecad8ab440ad0",
+          "size_bytes": 253,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        },
+        {
+          "id": "IN-INVALID",
+          "path": "docs/verification/fixtures/content-correspondence/invalid.json",
+          "sha256": "05bdc295ad2986ff4275f45c83524e3bb2326c05711d3ce8b0cadb794656d3f2",
+          "size_bytes": 236,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        },
+        {
+          "id": "IN-ADVERSARIAL",
+          "path": "docs/verification/fixtures/content-correspondence/adversarial.json",
+          "sha256": "20b61970e4e9b3b01d3821cacc614d5095929d42b5e80b06751b145bedbd2f8e",
+          "size_bytes": 636,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        },
+        {
+          "id": "IN-REALISTIC",
+          "path": "docs/verification/fixtures/content-correspondence/realistic.json",
+          "sha256": "802a860175221e451d79d8c4df000079938096c5ace327ef48cab6a1b4ce5486",
+          "size_bytes": 201,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        },
+        {
+          "id": "IN-KNOWN-FAILURE",
+          "path": "docs/verification/fixtures/content-correspondence/known-failure.json",
+          "sha256": "292b86630303393590fcf848f9e3d7e8c5b9c93f59acabc8fba654c0d63fc219",
+          "size_bytes": 250,
+          "provenance": "Hand-authored parameter relationships, normative language and exact text conservation, separate from production decisions."
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-CONTENT",
+          "path": "docs/verification/content_correspondence_probe.py",
+          "sha256": "c082e709ffca3f71df7afcee87341e82d56d003e1266af5d3a8f9ecdbad8855a",
+          "size_bytes": 3080
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-CONTENT",
+          "path": "docs/verification/content_correspondence_oracle.py",
+          "sha256": "2003e243553ff22c9cbd1cf37b1e59509de72c821a306604fc1230bd91c746b1",
+          "size_bytes": 1000,
+          "kind": "independent_reference",
+          "independence_basis": "No production imports; compares supplied human expectations with externally observed strings and rejects empty evidence.",
+          "production_source_ids": [
+            "SRC-__INIT__",
+            "SRC-ACCURACY_EVALUATION",
+            "SRC-CATALOG_EVIDENCE",
+            "SRC-COMPARE",
+            "SRC-COMPARISON_JOB",
+            "SRC-COMPARISON_SESSION",
+            "SRC-CONTENT_EQUIVALENCE",
+            "SRC-DESKTOP_GUI",
+            "SRC-DESKTOP_VISUALS",
+            "SRC-EVIDENCE_ALIGNMENT",
+            "SRC-EXACT_MATCH",
+            "SRC-FIGURE_FILTERS",
+            "SRC-FORMULA_VISUALS",
+            "SRC-GLYPH_EVIDENCE",
+            "SRC-HEADING_EVIDENCE",
+            "SRC-LAYOUT_BACKEND",
+            "SRC-LAYOUT_BLOCKS",
+            "SRC-MODELS",
+            "SRC-MONOTONIC_ALIGNMENT",
+            "SRC-PAGE_FURNITURE",
+            "SRC-PAGE_OCR",
+            "SRC-PARSING_BENCHMARK",
+            "SRC-PDF_EXTRACT",
+            "SRC-PROGRESS",
+            "SRC-PROSE_SOURCE_VISUALS",
+            "SRC-QUALITY",
+            "SRC-READER_FOCUS",
+            "SRC-REPORTING",
+            "SRC-SAMPLE_DATA",
+            "SRC-SCREENSHOT_PRESENTATION",
+            "SRC-SECTIONING",
+            "SRC-SOURCE_REGIONS",
+            "SRC-TABLE_CODEC",
+            "SRC-TEXT_UTILS",
+            "SRC-UI_SHARED",
+            "SRC-VENV_BOOTSTRAP",
+            "SRC-VISUAL_PREVIEW",
+            "SRC-VISUAL_WATCHDOG",
+            "SRC-WEBVIEW_GUI"
+          ],
+          "validator_run_ids": [
+            "RUN-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-LIMIT",
+          "path": "work/content-correspondence-gate/limit.py",
+          "sha256": "4b256fed48469ee82a0086bb91a1f3cbf171a06f7b27973510f2954c223bd872",
+          "size_bytes": 532642,
+          "target_source_id": "SRC-REPORTING"
+        },
+        {
+          "id": "MUT-FORMULA",
+          "path": "work/content-correspondence-gate/formula.py",
+          "sha256": "a8f2ab1c034001bb1a355c71c0067438377f2555863285ac0efe3d6ac0be69b9",
+          "size_bytes": 273210,
+          "target_source_id": "SRC-COMPARE"
+        },
+        {
+          "id": "MUT-SIGN",
+          "path": "work/content-correspondence-gate/sign.py",
+          "sha256": "e2ae422b29cfeff69befd35577962bda9c1442e62f4674c4ac27bf8ad9d2dd50",
+          "size_bytes": 11471,
+          "target_source_id": "SRC-FIGURE_FILTERS"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-CONTENT",
+          "path": "work/content-correspondence-gate/public-artifact.json",
+          "producer_run_id": "RUN-CORRESPONDENCE-REAL",
+          "required": true,
+          "min_size_bytes": 30
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [],
+          "input_ids": [
+            "IN-NOMINAL",
+            "IN-BOUNDARY",
+            "IN-INVALID",
+            "IN-ADVERSARIAL",
+            "IN-REALISTIC",
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_oracle.py",
+            "docs/verification/fixtures/content-correspondence/nominal.json",
+            "docs/verification/fixtures/content-correspondence/boundary.json",
+            "docs/verification/fixtures/content-correspondence/invalid.json",
+            "docs/verification/fixtures/content-correspondence/adversarial.json",
+            "docs/verification/fixtures/content-correspondence/realistic.json",
+            "docs/verification/fixtures/content-correspondence/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_ORACLE_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "oracle_ids": [
+            "ORACLE-CONTENT"
+          ]
+        },
+        {
+          "id": "RUN-SUITE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-NOMINAL",
+            "IN-BOUNDARY",
+            "IN-INVALID",
+            "IN-ADVERSARIAL",
+            "IN-REALISTIC",
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/nominal.json",
+            "docs/verification/fixtures/content-correspondence/boundary.json",
+            "docs/verification/fixtures/content-correspondence/invalid.json",
+            "docs/verification/fixtures/content-correspondence/adversarial.json",
+            "docs/verification/fixtures/content-correspondence/realistic.json",
+            "docs/verification/fixtures/content-correspondence/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-CORRESPONDENCE-REAL",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-REALISTIC"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/realistic.json",
+            "--artifact",
+            "work/content-correspondence-gate/public-artifact.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          },
+          "interface": "report",
+          "observable": "Generated PDFs pass through run_diff and write_reports; old/new Max values retain column labels in the reader facts or explicitly excluded similarity appendix.",
+          "produces_artifact_ids": [
+            "ART-CONTENT"
+          ]
+        },
+        {
+          "id": "RUN-LIMIT-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-LIMIT"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-LIMIT-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-KNOWN-FAILURE"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-FORMULA-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-FORMULA"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-FORMULA-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-ADVERSARIAL"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/adversarial.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SIGN-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-SIGN"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-BOUNDARY"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/boundary.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-SIGN-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-CONTENT"
+          ],
+          "input_ids": [
+            "IN-BOUNDARY"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/content_correspondence_probe.py",
+            "docs/verification/fixtures/content-correspondence/boundary.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 180,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "CONTENT_CORRESPONDENCE_TEST",
+                "CONTENT_CORRESPONDENCE_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-CONTENT-CORRESPONDENCE",
+          "requirement_id": "REQ-CONTENT-CORRESPONDENCE",
+          "defect_id": "DEF-CONTENT-CORRESPONDENCE-20260913",
+          "test_id": "CONTENT_CORRESPONDENCE_TEST",
+          "failure_signature": "CONTENT_CORRESPONDENCE_CONTRACT_FAIL",
+          "red_run_id": "RUN-LIMIT-RED",
+          "green_run_id": "RUN-LIMIT-GREEN"
+        },
+        {
+          "id": "PAIR-CONTENT-FORMULA",
+          "requirement_id": "REQ-CONTENT-CORRESPONDENCE",
+          "defect_id": "DEF-CONTENT-CORRESPONDENCE-20260913",
+          "test_id": "CONTENT_CORRESPONDENCE_TEST",
+          "failure_signature": "CONTENT_CORRESPONDENCE_CONTRACT_FAIL",
+          "red_run_id": "RUN-FORMULA-RED",
+          "green_run_id": "RUN-FORMULA-GREEN"
+        },
+        {
+          "id": "PAIR-CONTENT-SIGN",
+          "requirement_id": "REQ-CONTENT-CORRESPONDENCE",
+          "defect_id": "DEF-CONTENT-CORRESPONDENCE-20260913",
+          "test_id": "CONTENT_CORRESPONDENCE_TEST",
+          "failure_signature": "CONTENT_CORRESPONDENCE_CONTRACT_FAIL",
+          "red_run_id": "RUN-SIGN-RED",
+          "green_run_id": "RUN-SIGN-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-CONTENT",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "unit": "Hand-specified failure families; original complete PDFs are separately bound real-input validation, not independent generalization samples.",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-NOMINAL",
+            "IN-BOUNDARY",
+            "IN-INVALID",
+            "IN-ADVERSARIAL",
+            "IN-REALISTIC",
+            "IN-KNOWN-FAILURE"
+          ]
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-CONTENT",
+          "path": "work/content-correspondence-gate/escaped-defects.yaml",
+          "sha256": "df2d46f2f1a2784e5f0193a9fcb4fd903da5e6b1573acde6e27d08e4b0e1d319",
+          "size_bytes": 589
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-CONTENT-CORRESPONDENCE"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-CONTENT-CORRESPONDENCE",
+          "PAIR-CONTENT-FORMULA",
+          "PAIR-CONTENT-SIGN"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-CONTENT"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-CONTENT-CORRESPONDENCE",
+          "PAIR-CONTENT-FORMULA",
+          "PAIR-CONTENT-SIGN"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-CONTENT"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-CONTENT-CORRESPONDENCE"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-CONTENT"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-CORRESPONDENCE-REAL"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-ORACLE",
+          "RUN-SUITE",
+          "RUN-CORRESPONDENCE-REAL",
+          "RUN-LIMIT-RED",
+          "RUN-LIMIT-GREEN",
+          "RUN-FORMULA-RED",
+          "RUN-FORMULA-GREEN",
+          "RUN-SIGN-RED",
+          "RUN-SIGN-GREEN"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

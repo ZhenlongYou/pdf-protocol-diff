@@ -2293,6 +2293,31 @@ def _match_sections(
         matched_new.add(new_index)
         matches.append((old_index, new_index, similarity, "similarity_exact"))
 
+    # An incomplete ancestor stack must not let an unrelated chapter consume
+    # an existing leaf. This rescue requires unique full leaf numbers, matching
+    # titles and exact substantive body, never a repeated short reference.
+    old_leaves = Counter(s.number_path[-1] for s in old_sections if s.number_path)
+    new_leaves = Counter(s.number_path[-1] for s in new_sections if s.number_path)
+    new_leaf_indexes = {s.number_path[-1]: i for i, s in enumerate(new_sections) if s.number_path}
+    for old_index, old_section in enumerate(old_sections):
+        if old_index in matched_old or not old_section.number_path:
+            continue
+        leaf = old_section.number_path[-1]
+        if old_leaves[leaf] != 1 or new_leaves[leaf] != 1:
+            continue
+        new_index = new_leaf_indexes[leaf]
+        new_section = new_sections[new_index]
+        body = _review_unit_key(old_section.body)
+        if (new_index not in matched_new and len(body) >= 80
+                and _review_unit_key(old_section.title) == _review_unit_key(new_section.title)
+                and body == _review_unit_key(new_section.body)
+                and (len(old_section.number_path) == 1 or len(new_section.number_path) == 1)):
+            matched_old.add(old_index)
+            matched_new.add(new_index)
+            matches.append((old_index, new_index,
+                            _section_similarity(old_section.comparable_text, new_section.comparable_text),
+                            "structural_leaf_body_anchor"))
+
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
     old_title_counts = Counter(
@@ -2370,6 +2395,17 @@ def _match_sections(
                         continue  # 错误父层级只能由双侧唯一同题且强正文相似度越过，普通阈值不足以授权。
                     match_basis = "unique_title_body_fallback"
             candidate = (score, old_index, new_index, match_basis)
+            if (old_section.number_path and new_section.number_path
+                    and old_section.number_path[-1] != new_section.number_path[-1]
+                    and _review_unit_key(old_section.title) == _review_unit_key(new_section.title)
+                    and (old_title_counts[_review_unit_key(old_section.title)] > 1
+                         or new_title_counts[_review_unit_key(new_section.title)] > 1)):
+                same_leaf = new_leaf_indexes.get(old_section.number_path[-1])
+                if (same_leaf is not None and same_leaf not in matched_new
+                        and new_leaves[old_section.number_path[-1]] == 1
+                        and _section_similarity(old_section.body, new_sections[same_leaf].body)
+                        >= max(body_similarity, options.min_section_match_similarity)):
+                    continue  # 相同编号的更强正文候选被拒绝，不授权跨章重复短句抢占。
             if match_basis != "similarity_fallback":
                 late_fallback_candidates.append(candidate)
             else:
@@ -4687,17 +4723,40 @@ def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) 
             or _review_unit_key(raw_line) not in suppressed_table_unit_keys
         )
     )  # 必须先按原始结构化行整体过滤；否则 NOTES 单元格内的句号会先拆掉前缀，再冒充正文。
-    units = _split_units(prose_text)  # 表格由表格证据区承载，正文卡片只切分剩余文本。
+    units = [part for unit in _split_units(prose_text)
+             for part in _prose_outside_displayed_formula(unit)]
     return [
         unit
         for unit in units
         if not _is_table_review_unit(unit)
-        and not _is_displayed_formula_review_unit(unit)
         and (
             not suppressed_table_unit_keys
             or _review_unit_key(unit) not in suppressed_table_unit_keys
         )
     ]  # 结构化表格行及已由跨侧精确重建覆盖的原始整单元都不再进入正文卡片。
+
+
+def _prose_outside_displayed_formula(unit: str) -> list[str]:
+    """Retain introductions, variable definitions and notes beside equations.
+
+    PDF line joining can put prose and math in one unit. Apply the formula
+    veto to the mathematical span rather than deleting that whole unit.
+    """
+    if not _is_displayed_formula_review_unit(unit):
+        return [unit]
+    tail = re.search(r"(?i)\bwhere\b|\bNOTE\s*\d*\s*[—–:-]", unit)
+    math_part = unit[:tail.start()] if tail else unit
+    result = []
+    assignment = re.search(r"\b[A-Za-z][A-Za-z0-9_]*\s*=", math_part)
+    if assignment:
+        prefix = math_part[:assignment.start()].strip()
+        if (re.search(r"(?i)\b(?:shall|should|must|may|is|are|satisfy|defined|given)\b", prefix)
+                or (len(re.findall(r"[A-Za-z]{2,}", prefix)) >= 3
+                    and prefix.endswith((':', '：')))):
+            result.append(prefix)
+    if tail:
+        result.extend(_split_units(unit[tail.start():]))
+    return result
 
 
 def _is_displayed_formula_review_unit(value: str) -> bool:

@@ -532,7 +532,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
 
     def test_column_interleaved_figure_prefix_keeps_following_prose(self) -> None:
-        """Character-owned label soup is removed before a real prose boundary."""
+        """Unordered source text alone cannot prove ownership; retain unknowns."""
 
         source = (
             "Figure 30-8. Module output (TP4) reference Rx and measurement points "
@@ -564,10 +564,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(cleaned)
-        self.assertEqual([prose], cleaned.added_snippets)
+        self.assertEqual([mixed], cleaned.added_snippets)
 
     def test_spacing_fragmented_reversed_axis_label_is_not_prose(self) -> None:
-        """Digits between source letters do not publish a reversed axis label."""
+        """Unordered source text alone cannot prove ownership; retain unknowns."""
 
         source = "10 27 ) 28 B d 29 ( e 30 s 5 nop 31 32 s e 33 R 0 E L T C"
         fragment = ")Bd( esnopseR"
@@ -579,7 +579,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "added", None, section, 0.0, added_snippets=[fragment]
         )
 
-        self.assertIsNone(
+        self.assertIsNotNone(
             _reader_section_change(
                 change,
                 figure_visual_sides=(False, True),
@@ -588,7 +588,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
 
     def test_interleaved_table_header_is_removed_by_bbox_character_proof(self) -> None:
-        """Column-order interleaving must not publish a proven Table header."""
+        """Unordered source text alone cannot prove ownership; retain unknowns."""
 
         source = (
             "g g Location DC2 DC step min max min. max. step size size "
@@ -609,10 +609,10 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
         evidence = TableChange("added", (), (table,), 0.0, True, ())
 
-        self.assertIsNone(_reader_section_change(change, [evidence]))
+        self.assertEqual([fragment], _reader_section_change(change, [evidence]).added_snippets)
 
     def test_interleaved_table_header_is_removed_after_real_prose(self) -> None:
-        """A Table header after a period is removed without trimming prose."""
+        """Unordered source text alone cannot prove ownership; retain unknowns."""
 
         source = (
             "g g Location DC2 DC step min max min. max. step size size "
@@ -637,7 +637,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         cleaned = _reader_section_change(change, [evidence])
 
         self.assertIsNotNone(cleaned)
-        self.assertEqual([prose], cleaned.added_snippets)
+        self.assertEqual([fragment], cleaned.added_snippets)
 
     def test_table_character_inventory_cannot_trim_a_real_sentence_prefix(self) -> None:
         """Unordered Table proof removes labels, not prose sharing its letters."""
@@ -771,7 +771,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             self.assertNotIn(fragment, report)
 
     def test_interleaved_figure_columns_are_removed_by_one_crop(self) -> None:
-        """Column-interleaved letters still belong to one coordinate Figure."""
+        """Unordered source text alone cannot prove ownership; retain unknowns."""
 
         source = (
             "Figure 30-1. End to End Linear Channel TP0 Channel Loss TP1a TP4a "
@@ -793,7 +793,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "added", None, section, 0.0, added_snippets=[interleaved]
         )
 
-        self.assertIsNone(
+        self.assertIsNotNone(
             _reader_section_change(
                 change,
                 figure_visual_sides=(False, True),

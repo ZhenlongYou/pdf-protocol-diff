@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-CONTENT-CORRESPONDENCE-20260913
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "整份报告同文增删、跨章节串配、公式附近正文误删及表头关系丢失。"
+    discovered_via: user_counterexample
+    failure_mechanism: "身份门不一致、未匹配升级为缺失、字符袋误授权与有损报告投影。"
+    red_green_pair_id: PAIR-CONTENT-CORRESPONDENCE
+    regression_test_id: CONTENT_CORRESPONDENCE_TEST
+    public_path_rerun_id: RUN-CORRESPONDENCE-REAL
+    state: open
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"

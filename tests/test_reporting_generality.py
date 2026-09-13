@@ -1709,7 +1709,8 @@ class ReportingGeneralityTests(unittest.TestCase):
             old_sections=[section],
             new_sections=[section],
         )
-        self.assertEqual(2, len(generic_title_groups))
+        self.assertEqual(1, len(generic_title_groups))
+        self.assertTrue(generic_title_groups[0].old_tables and generic_title_groups[0].new_tables)
 
         old_singleton = replace(
             table(1, 1),

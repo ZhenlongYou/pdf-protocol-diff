@@ -49,7 +49,7 @@ from .quality import (
     ReliabilityState,
     provenance_inputs_are_identical,
 )
-from .table_codec import decode_table_cell, split_table_cells, split_table_field
+from .table_codec import decode_table_cell, encode_table_field, split_table_cells, split_table_field
 from .text_utils import (
     CHINESE_COUNT_UNIT_PATTERN,
     CHINESE_NUMBER_CHARS,
@@ -413,6 +413,7 @@ def write_reports(
                 old_figure_sources,
                 new_figure_sources,
             ),
+            figure_visual_pages=(old_figure_texts_by_page, new_figure_texts_by_page),
         )
         if reader_change is not None:
             reader_changes.append(reader_change)
@@ -473,11 +474,30 @@ def write_reports(
         similarity_review_changes=similarity_review_changes,
         similarity_review_tables=similarity_review_tables,
     )
+    uncertain_tables = [group for group in table_groups
+                        if any(not t.row_alignment_reliable or not t.content_fully_represented
+                               for t in (*group.old_tables, *group.new_tables))]
+    uncertainty_rows = []
+    for group in uncertain_tables:
+        def side_summary(tables):
+            return "; ".join(f"PDF {t.page_number}: {t.title or '未识别表题'}" for t in tables) or "尚未找到对应表"
+        uncertainty_rows.append({"old": side_summary(group.old_tables),
+                                 "new": side_summary(group.new_tables),
+                                 "reason": "文字对应或行列归属尚未完全验证；不能据此认定新增、删除或一致。"})
+    if uncertainty_rows:
+        heading = f"表格对应待核实（{len(uncertainty_rows)} 项，不计为已确认差异）"
+        appendix = "<details><summary>" + heading + "</summary><ul>" + "".join(
+            "<li>旧版：" + _escape(row['old']) + "；新版：" + _escape(row['new'])
+            + "。" + row['reason'] + "</li>" for row in uncertainty_rows) + "</ul></details>"
+        html = html.replace("</main>", appendix + "</main>") if "</main>" in html else html.replace("</body>", appendix + "</body>")
+        markdown += "\n\n<details><summary>" + heading + "</summary>\n\n" + "\n".join(
+            f"- 旧版：{row['old']}；新版：{row['new']}。{row['reason']}" for row in uncertainty_rows) + "\n\n</details>\n"
     text = _markdown_to_plain_text(markdown)
     csv_rows = _rows_for_csv(reader_changes)
     table_csv_rows = _rows_for_table_csv(reader_table_changes)
     sections_payload = {
         "comparison_focus": "substantive_content",
+        "uncertain_table_correspondences": uncertainty_rows,
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
         "similarity_review_changes": [_change_to_dict(c) for c in similarity_review_changes],
@@ -2234,6 +2254,7 @@ def _paired_table_visuals(
             if (
                 not supported_descriptive_renumbering
                 and not exact_rows_caption_supported
+                and not exact_visible_rows
                 and not all(
                     table.content_fully_represented
                     and table.row_alignment_reliable
@@ -3427,6 +3448,31 @@ def _unique_caption_table_runs(
     }  # 只有单侧唯一逻辑出现才能跨章节漂移配对，重复表题仍由上下文区分。
 
 
+def _same_page_logical_table_fragment(previous: TableVisual, current: TableVisual, *, caption_identity: str = "") -> bool:
+    """Group nested or tightly adjoining fragments of one explicit table.
+
+    This identifies an object for two-sided review; it does not certify row
+    alignment or authorize discarding the source text.
+    """
+    if previous.page_number != current.page_number or not (_table_visual_caption_key(previous) or caption_identity):
+        return False
+    if not (_table_visual_has_valid_bbox(previous) and _table_visual_has_valid_bbox(current)):
+        return False
+    a, b = previous.bbox, current.bbox
+    same_caption = _table_visual_caption_key(previous) == _table_visual_caption_key(current)
+    horizontal = min(a[2], b[2]) - max(a[0], b[0])
+    if horizontal < .9 * min(a[2] - a[0], b[2] - b[0]):
+        return False
+    if same_caption and min(a[3], b[3]) > max(a[1], b[1]):
+        return True  # 重叠检测框中的同题碎块，不是两个独立物理表。
+    if _table_visual_caption_key(current) or not current.is_continuation or not 0 <= b[1] - a[3] <= 12:
+        return False
+    def labels(table):
+        return {label for row in table.row_texts for _, _, label, _ in _table_row_field_entries(row)
+                if label in {"parameter", "setting", "unit", "units", "symbol", "characteristic", "value"}}
+    return len(labels(previous) & labels(current)) >= 2
+
+
 def _table_visual_indexes_by_caption_key(
     tables: list[TableVisual],
     sections: list[Section] | None = None,
@@ -3448,7 +3494,8 @@ def _table_visual_indexes_by_caption_key(
             continues_current = (
                 caption_key == current_caption
                 and index == current_index + 1
-                and current_page < table.page_number <= current_page + 1
+                and (current_page < table.page_number <= current_page + 1
+                     or _same_page_logical_table_fragment(tables[current_index], table, caption_identity=current_caption))
                 and _table_contexts_support_adjacent_continuation(
                     current_context,
                     context_key,
@@ -3461,6 +3508,11 @@ def _table_visual_indexes_by_caption_key(
             current_caption = caption_key
             current_context = context_key
             current_page = table.page_number
+        elif (table.is_continuation and current_group_key and index == current_index + 1
+              and current_page == table.page_number
+              and _table_contexts_support_adjacent_continuation(current_context, context_key)
+              and _same_page_logical_table_fragment(tables[current_index], table, caption_identity=current_caption)):
+            current_context = context_key or current_context
         elif (
             table.is_continuation
             and current_group_key
@@ -4481,7 +4533,17 @@ def _remove_one_sided_leading_schema_rows(
             remove_count = 2
     if remove_count >= len(rows) or not numeric_data(rows[remove_count]):
         return old_rows, new_rows
-    cleaned = rows[remove_count:]
+    names = [value for _column, _label, _normalized, value in first_entries]
+    if remove_count == 2:
+        names = [f"{name} {unit}".strip() for name, unit in zip(names, second_values)]
+    cleaned = []
+    for row in rows[remove_count:]:
+        row_entries = entries(row)
+        if len(row_entries) != len(names) or not all(names):
+            return old_rows, new_rows  # 无法继承列名时保留 schema，不能丢掉字段意义。
+        cleaned.append(" | ".join(encode_table_field(name, value)
+                                  for name, (_column, _label, _normalized, value)
+                                  in zip(names, row_entries)))
     return (cleaned, []) if old_rows else ([], cleaned)
 
 
@@ -7173,6 +7235,14 @@ def _table_row_value_display(
         return ""
     hidden_empty_fields = hidden_empty_fields or set()
     entries = _table_row_field_entries(row)
+    if any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}
+           for _index, _display, label, _value in entries):
+        identity_labels = {"parameter", "characteristic", "description", "label", "name"}
+        if sum(label in identity_labels for _, _, label, _ in entries) == 1:
+            # 项目名已有独立列；保留其余字段（尤其上下限）的全部标签。
+            row = " | ".join(encode_table_field(display, value)
+                             for _, display, label, value in entries if label not in identity_labels)
+        return _labeled_table_row_value_display(row, hidden_empty_fields=hidden_empty_fields)
     label_counts: dict[str, int] = {}
     for _column_index, _display_label, normalized_label, _value in entries:
         label_counts[normalized_label] = label_counts.get(normalized_label, 0) + 1
@@ -9740,7 +9810,8 @@ def _reader_table_structure_status(tables: tuple[TableVisual, ...]) -> str:
 
     if not tables:
         return "无对应表格"
-    flat_count = sum(table.ocr_status == "text_backed_exact_match" for table in tables)
+    flat_count = sum(table.ocr_status == "text_backed_exact_match" or not table.row_alignment_reliable
+                     or not table.content_fully_represented for table in tables)
     if flat_count == len(tables):
         return "行列边界未验证"
     if flat_count:
@@ -9770,6 +9841,7 @@ def _reader_section_change(
     *,
     figure_visual_sides: tuple[bool, bool] = (False, False),
     figure_visual_texts: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
+    figure_visual_pages: tuple[dict[int, list[str]], dict[int, list[str]]] | None = None,
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
@@ -9830,6 +9902,7 @@ def _reader_section_change(
         new_visual_available=figure_visual_sides[1],
         old_visual_texts=figure_visual_texts[0],
         new_visual_texts=figure_visual_texts[1],
+        visual_pages=figure_visual_pages,
     )
     if change is None:
         return None
@@ -9901,6 +9974,7 @@ def _reader_change_without_figure_visual_fragments(
     new_visual_available: bool,
     old_visual_texts: tuple[str, ...] = (),
     new_visual_texts: tuple[str, ...] = (),
+    visual_pages: tuple[dict[int, list[str]], dict[int, list[str]]] | None = None,
 ) -> SectionChange | None:
     """Hide Figure text only when the same side has coordinate-backed raw pixels."""
 
@@ -9908,6 +9982,7 @@ def _reader_change_without_figure_visual_fragments(
         change,
         old_source_texts=old_visual_texts if old_visual_available else (),
         new_source_texts=new_visual_texts if new_visual_available else (),
+        source_pages=visual_pages,
     )
     if change is None:
         return None
@@ -10082,6 +10157,11 @@ def _reader_change_without_coordinate_table_fragments(
         old_source_texts=old_sources,
         new_source_texts=new_sources,
         allow_interleaved_prefix=False,
+        source_pages=tuple({page: [table.source_text for table in
+            _reader_tables_for_change_side(change, table_evidence, side=side)
+            if table.page_number == page] for page in {table.page_number for table in
+            _reader_tables_for_change_side(change, table_evidence, side=side)}}
+            for side in ("old", "new")),
     )
 
 
@@ -10091,10 +10171,26 @@ def _reader_change_without_coordinate_owned_fragments(
     old_source_texts: tuple[str, ...],
     new_source_texts: tuple[str, ...],
     allow_interleaved_prefix: bool = True,
+    source_pages: tuple[dict[int, list[str]], dict[int, list[str]]] | None = None,
 ) -> SectionChange | None:
-    """Apply one coordinate-owned visual cleanup consistently to all deltas."""
+    """Apply only same-page, ordered visual evidence to each occurrence."""
 
-    def clean_value(value: str, source_texts: tuple[str, ...]) -> str:
+    def clean_value(value: str, source_texts: tuple[str, ...], side: int) -> str:
+        if source_pages is not None:
+            section = (change.old_section, change.new_section)[side]
+            pages = set()
+            if section is not None:
+                key = compact_inline(value)
+                pages = {page for page, body in section.page_bodies
+                         if key and key in compact_inline(body)}
+                if not pages and section.start_page == section.end_page:
+                    pages = {section.start_page}
+            # Ambiguous repeated occurrences and multi-page spans cannot borrow
+            # a crop from any page in their enclosing section.
+            if len(pages) != 1:
+                return value
+            permitted = source_pages[side].get(next(iter(pages)), ())
+            source_texts = tuple(text for text in source_texts if text in permitted)
         if not source_texts:
             return value
         if compact_inline(value).startswith("章节标题:"):
@@ -10113,17 +10209,17 @@ def _reader_change_without_coordinate_owned_fragments(
         removed = [
             cleaned
             for value in removed_values
-            if (cleaned := clean_value(value, old_source_texts))
+            if (cleaned := clean_value(value, old_source_texts, 0))
         ]
         added = [
             cleaned
             for value in added_values
-            if (cleaned := clean_value(value, new_source_texts))
+            if (cleaned := clean_value(value, new_source_texts, 1))
         ]
         replaced: list[SnippetPair] = []
         for pair in replaced_values:
-            old_value = clean_value(pair.old, old_source_texts)
-            new_value = clean_value(pair.new, new_source_texts)
+            old_value = clean_value(pair.old, old_source_texts, 0)
+            new_value = clean_value(pair.new, new_source_texts, 1)
             if old_value and new_value:
                 if compact_inline(old_value) != compact_inline(new_value):
                     replaced.append(SnippetPair(old_value, new_value))

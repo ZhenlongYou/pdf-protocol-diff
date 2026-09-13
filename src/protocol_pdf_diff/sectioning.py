@@ -2797,6 +2797,10 @@ def _looks_like_formula_or_table_value_heading(number: str, title: str) -> bool:
         return True
     if re.fullmatch(r"[A-Za-z]", title):
         return True  # 数字后只有一个符号字母时，更像表格值/公式残片，不是章节标题。
+    if (re.match(r"^[+−–—-]\s*\d+(?:\.\d+)?", title)
+            and re.search(r"[-–—]{3,}", title)
+            and len(re.findall(r"\d+(?:\.\d+)?", joined)) >= 3):
+        return True  # 小数、连续运算与分数横线共同证明公式，不能据此重置章节栈。
     if re.match(r"^[+−–—-]\s*[A-Za-z]", title) and len(
         re.findall(r"[+−–—\-/]", title)
     ) >= 3:

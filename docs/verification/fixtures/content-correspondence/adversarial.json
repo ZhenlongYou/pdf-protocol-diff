@@ -1,0 +1,23 @@
+{
+  "partition": "adversarial",
+  "cases": [
+    {
+      "id": "normative-prefix",
+      "kind": "formula",
+      "value": "The receiver shall satisfy x = a + b (1-1) where x is the output voltage.",
+      "contains": [
+        "receiver shall satisfy",
+        "where x is the output voltage"
+      ]
+    },
+    {
+      "id": "inventory-is-not-ownership",
+      "kind": "fragment",
+      "value": "The third recommended channel consists of a CPO module.",
+      "sources": [
+        "CPO channel recommended module third consists of The a"
+      ],
+      "equals": "The third recommended channel consists of a CPO module."
+    }
+  ]
+}

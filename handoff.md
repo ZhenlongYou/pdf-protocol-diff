@@ -1,5 +1,13 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：整份报告内容对应修复（2026-09-13）
+
+- task_id: `pdf-content-correspondence-20260913`；owner: `01a09983-9268-7c20-94c1-83e2272ddff7`；baseline: `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；branch: `project/pdf-protocol-diff`；status: active。
+- 用户授权按整体方案实施，保护真实新增，修复错配、文字误删及字段关系损坏；验收原OIF-CEI5.1/5.3两本完整PDF。
+- 诊断及501条审计：`/Users/mac/Documents/ProtocolPdfDiffReports/audit_20260913_132844/`；本轮证据：`/Users/mac/Documents/ProtocolPdfDiffReports/repair_20260913/`。
+- STRICT验证、公开入口全报告及两位独立复审尚未运行；不得声称已修复。
+
+
 ## 当前任务：坐标轴伪表格（2026-09-10）
 
 - task_id: `pdf-axis-fragments-20260910`；owner: `01a086af-c710-7b50-99f2-8fe0f3110b34`；持久分支 `project/pdf-protocol-diff`；基线 `b7b75780c1932daf2b8ad04c3147d920a1035bc4`。
