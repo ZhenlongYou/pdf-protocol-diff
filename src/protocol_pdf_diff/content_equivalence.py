@@ -45,6 +45,8 @@ def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False, conte
     """
     def compact(value: str) -> str:
         value = without_email_addresses(value)
+        # A written negative exponent keeps its sign under hyphen/minus glyph variants.
+        value = re.sub(r'(?<=\d)([eE])[‐‑−](?=\d)', r'\1-', value)
         if cell_wrap:
             value = re.sub(r"(?<=[A-Za-z])\s*(?:↵|\n)\s*(?=[A-Za-z])", " ", value)
         # Preserve unproven cell boundaries instead of flattening numeric lists.

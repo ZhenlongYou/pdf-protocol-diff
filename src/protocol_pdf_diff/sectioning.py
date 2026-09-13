@@ -647,6 +647,8 @@ def detect_heading(line: str, *, source_proves_non_table: bool = False) -> Headi
     candidate = compact_inline(line)
     if not candidate or len(candidate) > 140:
         return None
+    if re.match(r"^\d+(?:\.[A-Za-z0-9]+)+[,，;；]", candidate):
+        return None  # 引用编号后的逗号不得回退为更短的编号匹配。
     if _looks_like_table_row(candidate) and not source_proves_non_table:
         return None
 
@@ -660,6 +662,8 @@ def detect_heading(line: str, *, source_proves_non_table: bool = False) -> Headi
             if match.lastindex and match.lastindex >= 2
             else ""
         )
+        if title.startswith((",", "，", ";", "；")):
+            return None  # 编号后逗号是引用句续文，不是章节标题。
         if kind == "paren":
             number = f"({number})"
         if kind == "annex" and "." in number and not title:
@@ -1089,6 +1093,34 @@ def _furniture_fingerprint(line: str) -> str:
     return re.sub(r"\d+", "#", normalize_for_similarity(line))
 
 
+def _attach_raised_heading_markers(page: PageText, lines: list[str]) -> list[str]:
+    """Attach a unique raised small glyph to its adjacent physical heading.
+
+    This moves a source occurrence; it never removes a standalone body number.
+    The full page's original blocks and word geometry remain unchanged.
+    """
+    lines = list(lines)
+    all_words = [(w, style) for b in page.blocks for w, style in zip(b.word_boxes, b.word_styles)]
+    for index in range(len(lines)-1):
+        marker, title = normalize_line(lines[index]), normalize_line(lines[index+1])
+        if not marker.isdigit() or len(marker) > 2 or detect_heading(title) is None:
+            continue
+        if sum(normalize_line(line) == marker for line in lines) != 1:
+            continue
+        heading_words = line_word_evidence(page, title)
+        if not heading_words:
+            continue
+        last, style = max(heading_words, key=lambda item: item[0][3])
+        matches = [w for w, small in all_words if w[0] == marker and small[0] == style[0]
+                   and 0 < small[1] <= style[1]*.8
+                   and -.5 <= w[1]-last[3] <= style[1]*.2
+                   and style[1]*.15 < last[4]-w[4] < style[1]
+                   and w[4] > last[2]]
+        if len(matches) == 1:
+            lines[index], lines[index+1] = "", title + marker
+    return lines
+
+
 def _merge_standalone_heading_lines(pages: list[PageText]) -> list[PageText]:
     """Merge headings that PDF extraction split across two lines.
 
@@ -1108,7 +1140,7 @@ def _merge_standalone_heading_lines(pages: list[PageText]) -> list[PageText]:
         document_number_lines
     )  # 页脚清理可能从单页删掉少数数字；整份文本仍能证明“不要猜标题”，但不能授权删除。
     for page in pages:
-        raw_lines = page.text.splitlines()
+        raw_lines = _attach_raised_heading_markers(page, page.text.splitlines())
         ambiguous_number_run = document_has_ambiguous_number_run or _has_dense_line_number_gutter(
             [normalize_line(line) for line in raw_lines]
         )  # 无坐标的 1..N 既可能是行号也可能是正文列表，只用于阻止标题猜测，绝不删除。

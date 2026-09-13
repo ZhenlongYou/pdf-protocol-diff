@@ -440,6 +440,13 @@ def _running_footer_section(extraction: ExtractionResult) -> Section | None:
                    page_bodies=tuple(observed))
 
 
+def _publication_version_header(text: str) -> bool:
+    """Coordinate-proven publication mastheads are metadata, not requirements."""
+    return bool(re.match(r"(?i)^(?:implementation agreement|technical specification|user manual|reference manual)\b", text)
+                and re.search(r"(?i)(?:\b(?:rev(?:ision)?|version|edition)\s*[:.]?\s*|[A-Za-z]-)\d+(?:\.\d+)+", text)
+                and not re.search(r"(?i)\b(?:shall|must|should|required|prohibited|identifier|register|mode)\b", text))
+
+
 def _running_header_section(extraction: ExtractionResult) -> Section | None:
     """Build one auditable comparison unit from coordinate-proven headers."""
 
@@ -484,7 +491,8 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
         start_page=start_page,
         end_page=end_page,
         body="\n".join(text for _page_number, text in observed),
-        role="technical",
+        role=("document_metadata" if all(_publication_version_header(text) for _page, text in observed)
+              else "technical"),
         page_bodies=tuple((page_number, text) for page_number, text in observed),
     )
 
@@ -4740,26 +4748,33 @@ def _paragraph_review_units(text: str, *, suppressed_table_unit_keys: set[str]) 
 
 
 def _prose_outside_displayed_formula(unit: str) -> list[str]:
-    """Retain introductions, variable definitions and notes beside equations.
-
-    PDF line joining can put prose and math in one unit. Apply the formula
-    veto to the mathematical span rather than deleting that whole unit.
-    """
+    """Separate numbered math from adjacent prose without erasing scalar limits."""
     if not _is_displayed_formula_review_unit(unit):
         return [unit]
-    tail = re.search(r"(?i)\bwhere\b|\bNOTE\s*\d*\s*[—–:-]", unit)
-    math_part = unit[:tail.start()] if tail else unit
-    result = []
-    assignment = re.search(r"(?<!\w)[^\W\d]\w*\s*(?:<=|>=|=|≤|≥|<|>)", math_part)
-    if assignment:
-        prefix = math_part[:assignment.start()].strip()
-        if (re.search(r"(?i)\b(?:shall|should|must|may|is|are|satisfy|defined|given)\b", prefix)
-                or (len(re.findall(r"[A-Za-z]{2,}", prefix)) >= 3
-                    and prefix.endswith((':', '：')))):
-            result.append(prefix)
-    if tail:
-        result.extend(_split_units(unit[tail.start():]))
-    return result
+    # Equation numbering is a locator, never grounds to drop neighboring text.
+    labels=[m for m in _DISPLAYED_FORMULA_LABEL_RE.finditer(unit)
+            if re.search(r'(?i)\bEquation\s*$',unit[:m.start()]) is None]
+    edges=[0]
+    spans=[]
+    for label in labels:
+        spans.append(unit[edges[-1]:label.start()].strip())
+        edges.append(label.end())
+    spans.append(unit[edges[-1]:].strip())
+    kept=[]
+    for span in spans:
+        if not span:
+            continue
+        # Keep scalar requirements and any prose-bearing mixed span intact.
+        # Mathematical glyphs without prose can be omitted under formula-off.
+        words=re.findall(r'[^\W\d_]{2,}',span,flags=re.UNICODE)
+        scalar_expression = (bool(re.search(r'[^\W\d_]', span))
+                             and not re.search(r'(?i)\b(?:log|ln|sin|cos|tan|exp|sqrt)\s*\(|[∑∫∏]', span))
+        if (not _DISPLAYED_FORMULA_RELATION_RE.search(span)
+                and not re.search(r"[\ue000-\uf8ff]",span)
+                or scalar_expression or len(words)>=4 or re.search(r'(?i)\b(?:shall|should|must|where|note)\b',span)
+                or re.match(r'^[•●⚫]\s*',span)):
+            kept.append(span)
+    return kept
 
 
 def _is_displayed_formula_review_unit(value: str) -> bool:

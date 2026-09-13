@@ -93,6 +93,23 @@ def _cached_page_word_index(identity):
             for w, style in words:
                 if style[0] and style[1] > 0:
                     body[(style[0], round(style[1], 1))] += len(w[0])
+    # Raised footnote markers can precede the title in PDF extraction order.
+    # Bind the joined spelling to both original word occurrences across blocks.
+    all_physical_words = [item for row in physical_lines for item in row
+                          if item[0][0].isdigit() and len(item[0][0]) <= 2]
+    for row in physical_lines:
+        if len(row) < 2:
+            continue
+        last, style = max(row, key=lambda item: item[0][3])
+        candidates = [(w, small) for w, small in all_physical_words
+                      if w[0].isdigit() and len(w[0]) <= 2 and (w, small) not in row
+                      and small[0] == style[0] and 0 < small[1] <= style[1]*.8
+                      and -.5 <= w[1]-last[3] <= style[1]*.2
+                      and style[1]*.15 < last[4]-w[4] < style[1] and w[4] > last[2]]
+        if len(candidates) == 1:
+            text = compact_inline(' '.join(w[0] for w, _ in row))
+            lines[text + candidates[0][0][0]].append([*row, candidates[0]])
+            lines[text + ' ' + candidates[0][0][0]].append([*row, candidates[0]])
     # The sectioner may join a standalone number and its wrapped title. Preserve
     # exact adjacent source spans instead of accepting an arbitrary substring.
     for start in range(len(physical_lines)):

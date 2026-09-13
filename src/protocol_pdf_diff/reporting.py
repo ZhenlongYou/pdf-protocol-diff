@@ -2283,7 +2283,20 @@ def _paired_table_visuals(
                     for row in new_table.row_texts
                     if (identity := _table_row_relaxed_primary_identity(row))
                 )
-                if sum((old_identities & new_identities).values()) < 2:
+                unique_exact_continuation = (
+                    exact_visible_rows
+                    and old_table.is_continuation and new_table.is_continuation
+                    and not old_caption and not new_caption
+                    and all(t.content_fully_represented and t.row_alignment_reliable
+                            and t.data_rows_fully_represented for t in (old_table, new_table))
+                    and sum(tuple(compact_inline(row) for row in t.row_texts)
+                            == tuple(compact_inline(row) for row in old_table.row_texts)
+                            for t in old_tables) == 1
+                    and sum(tuple(compact_inline(row) for row in t.row_texts)
+                            == tuple(compact_inline(row) for row in new_table.row_texts)
+                            for t in new_tables) == 1
+                )
+                if sum((old_identities & new_identities).values()) < 2 and not unique_exact_continuation:
                     continue  # 无题或非严格表题只共享一个通用参数名，不能证明整表身份。
             score = _table_visual_similarity(old_table, new_table)
             if score >= _TABLE_PAIR_SIMILARITY_THRESHOLD:
@@ -5814,6 +5827,7 @@ def _table_group_has_order_independent_parameter_identity(
             }:
                 return False
             if not field_names & {
+                "setting",
                 "limit",
                 "max",
                 "maximum",

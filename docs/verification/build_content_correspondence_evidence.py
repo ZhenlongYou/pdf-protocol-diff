@@ -30,7 +30,7 @@ def main():
     mutations = []
     for name, source, transform in (
         ('LIMIT', 'reporting', lambda text: text.replace('if any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 'if False and any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 1)),
-        ('FORMULA', 'compare', lambda text: text.replace('            result.append(prefix)\n', '            pass  # injected loss of normative introduction\n', 1)),
+        ('FORMULA', 'compare', lambda text: text.replace('            kept.append(span)\n', '            pass  # injected loss of normative introduction\n', 1)),
         ('SIGN', 'visual_ownership', lambda text: text.replace("return ''.join(kept).strip()", "return ''.join(kept).strip(' –—-')", 1)),
         ('UNIQUE', 'visual_ownership', lambda text: text.replace('if len(matches) != 1 or matches[0] is None:', 'if not matches or matches[0] is None:', 1)),
         ('COVERAGE', 'visual_ownership', lambda text: text.replace('if set(keys) & unknown_tokens.get(page.page_number, set()):', 'if False and set(keys) & unknown_tokens.get(page.page_number, set()):', 1).replace('if text_count > len(matches) - before_count:', 'if False and text_count > len(matches) - before_count:', 1)),

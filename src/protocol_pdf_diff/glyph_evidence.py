@@ -73,11 +73,17 @@ def empty_truetype_glyphs(data: bytes) -> frozenset[int]:
 def _font_evidence(spec) -> EmptyGlyphFont | None:
     try:
         subtype = resolve1(spec.get("Subtype"))
-        if not isinstance(subtype, PSLiteral) or subtype.name != "CIDFontType2":
+        if not isinstance(subtype, PSLiteral) or subtype.name not in {"CIDFontType2", "CIDFontType0"}:
             return None
         descriptor = dict_value(spec.get("FontDescriptor"))
         stream = resolve1(descriptor.get("FontFile2"))
         mapping = resolve1(spec.get("CIDToGIDMap"))
+        if subtype.name == "CIDFontType0":
+            # Nonconforming producers sometimes embed SFNT under Type0. Do not
+            # infer its CID/GID mapping from subtype defaults or Unicode values.
+            if (not isinstance(mapping, PSLiteral) or mapping.name != "Identity"
+                    or any(key in descriptor for key in ("FontFile", "FontFile3"))):
+                return None
         if not isinstance(stream, PDFStream):
             return None
         # ISO 32000-1:2008, 9.7.4 Table 117: omitted CIDToGIDMap defaults to Identity.

@@ -5,7 +5,9 @@
 - task_id: `pdf-content-correspondence-20260913`；owner: `01a09983-9268-7c20-94c1-83e2272ddff7`；baseline: `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；branch: `project/pdf-protocol-diff`；status: active。
 - 用户授权按整体方案实施，保护真实新增，修复错配、文字误删及字段关系损坏；验收原OIF-CEI5.1/5.3两本完整PDF。
 - 诊断及501条审计：`/Users/mac/Documents/ProtocolPdfDiffReports/audit_20260913_132844/`；本轮证据：`/Users/mac/Documents/ProtocolPdfDiffReports/repair_20260913/`。
-- STRICT验证、公开入口全报告及两位独立复审尚未运行；不得声称已修复。
+- 首次完整GUI重比源 `c2544e0269c69908ba9a08cffe2eaa240bcea49d`，636/685页、1302.930秒完成；`full-native-release/native-result.json`绑定输入与源码。独立293正文＋126表格台账复查发现残余及31条隐藏噪声回归；该结果未验收，不得作为最终修复报告。
+- 后续补充出版页眉分类、跨页页脚递进证据、定义单元格、多行脚注归属、字体真实空glyph、完全同属性重绘去重、标量条件/公式边界、参数Setting身份、唯一F31续段和闭合Figure面板伪表分类。公开定义5页和脚注3页复测均0假正文/表变化；不替代整本。
+- `full-release.log`1364项通过仅对应c254源；`full-followup.log`1369项通过对应中间源；`full-followup-2.log`1373项有1个旧公式清理契约失败，已纠正其把标量限值/频段整体隐藏的预期。最终完整套件、第二次完整GUI、STRICT v2及正式exact-OID复审仍待完成。逃逸缺陷保持open。
 
 
 ## 当前任务：坐标轴伪表格（2026-09-10）

@@ -129,7 +129,10 @@
         "gDC2 / Max",
         "gDC / Min",
         "gDC / Max",
-        "Location"
+        "Location",
+        "gDC2 / Max=2",
+        "gDC / Max=10",
+        "Location=TP1a"
       ]
     },
     {

@@ -277,6 +277,8 @@ def _extract_pdf_text_with_pdfplumber(
             selected_pages,
             {index: evidence[0] for index, evidence in coordinate_evidence.items()},
         )  # 只分离跨页坐标已证明的运行页眉；文字另存后仍参与两个版本的结构化比较。
+        footer_evidence_by_page = _document_running_footer_evidence(
+            selected_pages, {index: evidence[0] for index, evidence in coordinate_evidence.items()})
         header_boxes_by_page = {
             page_number: evidence[0]
             for page_number, evidence in header_evidence_by_page.items()
@@ -309,6 +311,7 @@ def _extract_pdf_text_with_pdfplumber(
                         page,
                         words=coordinate_evidence[index][0],
                     ),
+                    *footer_evidence_by_page.get(index, ((), (), ()))[0],
                     *header_boxes_by_page.get(index, ()),
                 ]
             )  # 视觉层只屏蔽抽取层本次已删除的页脚和窄边区域；版本相关页眉始终参与比较。
@@ -328,6 +331,7 @@ def _extract_pdf_text_with_pdfplumber(
                 coordinate_evidence=coordinate_evidence[index],
                 gutter_boxes=gutter_boxes_by_page.get(index, ()),
                 header_boxes=header_boxes_by_page.get(index, ()),
+                document_footer_boxes=footer_evidence_by_page.get(index, ((), (), ()))[0],
             )
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
@@ -363,8 +367,10 @@ def _extract_pdf_text_with_pdfplumber(
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
                     running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
-                    running_footer_texts=_footer_source_texts(page, coordinate_evidence[index][0]),
-                    running_footer_values=_footer_source_texts(page, coordinate_evidence[index][0], omit_proven_folio=True),
+                    running_footer_texts=tuple(dict.fromkeys((*_footer_source_texts(page, coordinate_evidence[index][0]),
+                        *footer_evidence_by_page.get(index, ((), (), ()))[1]))),
+                    running_footer_values=tuple(dict.fromkeys((*_footer_source_texts(page, coordinate_evidence[index][0], omit_proven_folio=True),
+                        *footer_evidence_by_page.get(index, ((), (), ()))[2]))),
                     vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
                     source_blank_glyphs=blank_glyph_proof,
                     formula_bboxes=tuple(formula.bbox for formula in page_formulas),
@@ -444,6 +450,7 @@ def _extract_pdfplumber_page_text(
         str | None,
     ] | None = None,
     gutter_boxes: tuple[tuple[float, float, float, float], ...] | None = None,
+    document_footer_boxes: tuple[tuple[float, float, float, float], ...] = (),
     header_boxes: tuple[tuple[float, float, float, float], ...] | None = None,
 ) -> tuple[
     str,
@@ -468,7 +475,7 @@ def _extract_pdfplumber_page_text(
         _candidate_line_number_gutter_boxes(page, words=coordinate_words)
     )  # 只把行号状数字列作为风险证据，禁止据此删除可比较内容。
     gutter_boxes = gutter_boxes if gutter_boxes is not None else ()
-    footer_boxes = _proven_running_footer_boxes(page, words=coordinate_words)
+    footer_boxes = (*_proven_running_footer_boxes(page, words=coordinate_words), *document_footer_boxes)
     # A top-margin title can be cover/revision content on one page. Header
     # removal is authorized only by the document-wide proof built by the main
     # extraction entry point; independent single-page calls retain it.
@@ -1550,7 +1557,8 @@ def _filtered_layout_page(
 ) -> object:
     """Return a page view with only spatially proven gutters/watermarks removed."""
 
-    working_page = page
+    from .exact_glyph_view import exact_glyph_comparison_view
+    working_page = exact_glyph_comparison_view(page)
     watermark_keys = _draft_watermark_object_keys(working_page)
     gutter_boxes = gutter_boxes if gutter_boxes is not None else ()  # 单页局部几何无法排除合法长列表，默认必须保留。
     footer_boxes = footer_boxes if footer_boxes is not None else _proven_running_footer_boxes(
@@ -2028,6 +2036,45 @@ def _cluster_gutter_candidates(
         else:
             clusters.append([word])  # 与既有列距离过大时单独建组，正文数字不能共享序列证明。
     return clusters  # 调用方仍需对每组验证数量、连续值和垂直跨度。
+
+
+def _document_running_footer_evidence(pages, words_by_page):
+    """Prove ordinary-spaced folios by repeated position and page progression.
+
+    A single publisher-like sentence is insufficient. At least three physical
+    pages must share the exact remaining footer and the same printed-page offset.
+    """
+    groups = {}
+    for number, page in pages:
+        width, height = float(page.width), float(page.height)
+        words = [w for w in words_by_page.get(number, ()) if float(w['top']) >= height * .9]
+        for top, bottom, text, row in _word_line_records(words):
+            ordered = sorted(row, key=lambda w: float(w['x0']))
+            if (len(ordered) < 4 or bottom-top > height*.035
+                    or float(ordered[-1]['x1'])-float(ordered[0]['x0']) < width*.55
+                    or not _looks_like_running_footer_marker(text)
+                    or not re.search(r'(?i)\b(?:forum|consortium|standard|institute|association)\b', text)):
+                continue
+            for at_start in (True, False):
+                folio = ordered[0] if at_start else ordered[-1]
+                if not str(folio['text']).isdigit() or 1900 <= int(folio['text']) <= 2100:
+                    continue
+                if not (float(folio['x0']) <= width*.15 if at_start else float(folio['x1']) >= width*.85):
+                    continue
+                rest = ordered[1:] if at_start else ordered[:-1]
+                value = ' '.join(str(w['text']) for w in rest)
+                key = (value, at_start, int(folio['text'])-number,
+                       round(top/height*100), round(float(folio['x0'])/width*100))
+                groups.setdefault(key, []).append((number, page, ordered, text, value))
+    output = {}
+    for observations in groups.values():
+        if len({o[0] for o in observations}) < 3:
+            continue
+        for number, page, row, text, value in observations:
+            boxes, texts, values = output.setdefault(number, ([], [], []))
+            boxes.extend(_tight_word_bbox(w, width=float(page.width), height=float(page.height)) for w in row)
+            texts.append(text); values.append(value)
+    return {number: tuple(tuple(v) for v in record) for number, record in output.items()}
 
 
 def _proven_running_footer_boxes(
@@ -3385,6 +3432,8 @@ def _extract_table_lines_and_visuals(
         ) or _table_bbox_is_plot_axis_label(
             bbox, table_lines, geometry_words, title=title,
             grid_bboxes=grid_bboxes,
+        ) or _table_inside_captioned_drawing_panels(
+            page, bbox, table_lines, geometry_words, title=title,
         ) or _table_fragment_inside_figure_frame(
             page, bbox, table_lines, geometry_words, title=title,
         ):
@@ -3916,6 +3965,7 @@ def _table_row_replacement_flags(
                 row,
                 expanded_rows,
                 cell_word_row=cell_word_row,
+                header=header,
             )
             and any(
                 _format_table_row(expanded_row, header, table_number=1)
@@ -4080,6 +4130,58 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     if not table_lines and not _looks_like_table_caption(cleaned_title) and not _looks_like_table_context_caption(cleaned_title):
         return True  # 没有结构化行也没有表格语义时，通常是 OpenCV/pdfplumber 误检。
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
+
+
+def _table_inside_captioned_drawing_panels(page, bbox, table_lines, words, *, title=""):
+    """Recognize detected grids inside closed, caption-owned drawing panels.
+
+    Only table classification changes; this grants no body-text deletion.
+    Stacked frames must share their horizontal lane and remain close together.
+    Explicit table captions and technical schemas always veto this route.
+    """
+    if (bbox is None or not table_lines or _looks_like_table_caption(title)
+            or _looks_like_table_context_caption(title)
+            or _table_rows_begin_with_explicit_caption(table_lines)
+            or _table_rows_have_explicit_technical_schema(table_lines)):
+        return False
+    frames = []
+    for obj in getattr(page, 'rects', ()) or ():
+        box = (obj.get('x0'), obj.get('top'), obj.get('x1'), obj.get('bottom'))
+        if (all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
+                and box[2]-box[0] >= 100 and box[3]-box[1] >= 50):
+            frames.append(box)
+    # Keep outer physical frames; nested boxes are diagram components.
+    frames = [a for a in frames if not any(a != b and b[0] <= a[0]
+              and b[1] <= a[1] and a[2] <= b[2] and a[3] <= b[3] for b in frames)]
+    records = _word_line_records(words)
+    for frame in frames:
+        if not (frame[0]-2 <= bbox[0] and frame[1]-2 <= bbox[1]
+                and bbox[2] <= frame[2]+2 and bbox[3] <= frame[3]+2):
+            continue
+        ancestors = [frame]
+        current = frame
+        while True:
+            prior = [b for b in frames if 0 <= current[1]-b[3] <= .5*min(current[3]-current[1], b[3]-b[1])
+                     and min(b[2],current[2])-max(b[0],current[0])
+                     >= .8*min(b[2]-b[0],current[2]-current[0])]
+            if len(prior) != 1:
+                break
+            current = prior[0]
+            ancestors.append(current)
+        top = ancestors[-1]
+        captions = [line for line in records if 0 <= top[1]-line[1] <= 40
+                    and _looks_like_figure_caption(line[2])
+                    and (span := _word_span_horizontal_bounds(line[3])) is not None
+                    and min(span[1],top[2])-max(span[0],top[0])
+                    >= .8*min(span[1]-span[0],top[2]-top[0])]
+        if len(captions) != 1:
+            continue
+        if any(captions[0][1] < line[0] <= frame[3]
+               and (_looks_like_table_caption(line[2]) or _looks_like_table_context_caption(line[2])
+                    or _looks_like_figure_caption(line[2])) for line in records):
+            continue
+        return True
+    return False
 
 
 def _table_fragment_inside_figure_frame(page, bbox, table_lines, words, *, title=""):
@@ -5442,6 +5544,7 @@ def _table_lines_from_rows_with_data_evidence(
                 row,
                 expanded_rows,
                 cell_word_row=cell_word_row,
+                header=header,
             )
         )
         for expanded_row in expanded_rows:  # 一个物理表格行可能包含多条参数记录。
@@ -5514,6 +5617,7 @@ def _expanded_rows_preserve_source_alignment(
     expanded_rows: list[list[str]],
     *,
     cell_word_row: list[list[dict[str, object]]] | None = None,
+    header: list[str] | None = None,
 ) -> bool:
     """Reject bbox replacement when text or geometry cannot prove row pairing."""
 
@@ -5527,7 +5631,20 @@ def _expanded_rows_preserve_source_alignment(
         len([line for line in source_lines if normalize_line(line)]) > 1
         for source_lines in source_row
     )
-    return multiline_columns < 2
+    definition_schema = (header is not None and len(header) == len(source_row) and 2 <= len(header) <= 3
+                         and normalize_line(header[0]).casefold() in {"parameter", "term"}
+                         and normalize_line(header[-1]).casefold() == "description"
+                         and all(re.fullmatch(r"(?i)(?:列|column\s*)\d+", h) for h in header[1:-1]))
+    # A physical definition cell is a paragraph, not a list of aligned values.
+    # Both cells must have observed words; column character ownership is retained.
+    description_is_prose = (len(re.findall(r"[A-Za-z]{2,}", " ".join(source_row[-1]))) >= 6
+                            and bool(re.search(r"(?i)\b(?:is|are|was|were|defines?|describes?|shows?|refers?|means?|components?|difference|distribution)\b", " ".join(source_row[-1]))))
+    definition_cells = (definition_schema and description_is_prose and cell_word_row is not None
+                        and len(cell_word_row) == len(source_row)
+                        and all(words or not any(cell) for words, cell in zip(cell_word_row, source_row))
+                        and _source_cells_match_observed_geometry(source_row, cell_word_row)
+                        and _expanded_rows_preserve_source_cells(source_row, expanded_rows))
+    return multiline_columns < 2 or definition_cells
 
 
 def _expanded_rows_match_observed_baselines(

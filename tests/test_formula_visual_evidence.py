@@ -137,8 +137,8 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             any("公式自动对比已关闭" in warning for warning in result.warnings)
         )
 
-    def test_displayed_formula_body_is_not_republished_as_prose_delta(self) -> None:
-        """关闭公式对比后，公式墙也不能改名为正文替换重新进入机器结果。"""
+    def test_scalar_limits_survive_even_when_they_carry_equation_numbers(self) -> None:
+        """公式自动求值仍关闭；可读的标量限值与适用频段不能被公式编号吞掉。"""
 
         old_text = (
             "31.3.8 Conversion\n"
@@ -181,8 +181,9 @@ class FormulaVisualEvidenceTests(unittest.TestCase):
             ]
         )
         self.assertIn("The revised limit", published)
-        self.assertNotIn("0.05 GHz", published)
-        self.assertNotIn("fb/2 < f < fb", published)
+        self.assertIn("0.05 GHz", published)
+        self.assertIn("fb/2 < f < fb", published)
+        self.assertEqual([], result.formula_changes)
 
     def test_legacy_formula_change_is_not_published_by_reports(self) -> None:
         """旧调用方即使注入公式变化，报告也必须按禁比契约忽略。"""

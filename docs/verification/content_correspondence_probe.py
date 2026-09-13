@@ -54,7 +54,9 @@ def run(case, root):
         return '\n'.join(new)
     if kind == 'header':
         from protocol_pdf_diff.pdf_extract import _geometry_proven_grouped_header
-        return json.dumps(_geometry_proven_grouped_header(case['rows'], 1, case['bounds']), ensure_ascii=False)
+        headers = _geometry_proven_grouped_header(case['rows'], 1, case['bounds'])
+        projected = reporting._table_row_value_display(' | '.join(f'{label}={value}' for label, value in zip(headers, case['rows'][-1]))) if headers else ''
+        return json.dumps(headers, ensure_ascii=False) + '\n' + projected
     if kind == 'group':
         from protocol_pdf_diff.models import TableVisual
         tables = [TableVisual(1, i+1, 'Table 1 Limits' if i == 0 else '',
