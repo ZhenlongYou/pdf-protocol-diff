@@ -2,13 +2,14 @@
 
 ## 当前任务：整份报告内容对应修复（2026-09-13）
 
-- 最新完整运行：冻结 `84b48245dec0864be79341a7645de5025f7c003e` 的第十二原生 GUI 1308.892秒完成；证据 `repair_20260913/full-native-twelfth/native-result.json`。JSON SHA `edcfc3efd8b16c2d12672bbe0299626b9b5425f7d0df72598022b23d8ededb8e`，HTML SHA `e2182279dde838aa1064e30d3f08ec0e913c9f93b70099b00dfde972c56f33f3`。对应完整1652项测试257.211秒通过（1条件skip），20内容保全案例和10定向负控通过。
-- 第十二完整501原ID、191当前正文卡（170主卡+21附录）、44表卡（25主卡+19附录）全部裁决，见 `complete-twelfth-audit.json`。新增闭环C36/C68/C93/C95/C119及C123，完整原句/数值/URL源证据保留；C102仍为附录空格噪声。17既有+28增量整本检查通过。剩54原正文噪声（47主卡+7附录），19几何/26数学未决，不作整份准确性验收。
-- GUI摘要163正文候选排除了7纯review卡，23变化表格排除了2纯review表卡；与JSON数量差异是既有统计口径，不是丢卡（count-reconciliation.json）。H55八原行、CSV/native索引及Step0假替换继续通过；T49原671重读13参数2完整说明通过。632源表、68未知结构、44表卡事实与第十一完全相同。
-- HTML1202图无损坏，实际目视顶部、正文、物理表、窄屏，默认折叠/原图缩放通过。82原视觉项保留；21新增源页对像素完全相同复用已审证据，新增496/500源页对已实际目视，图形/曲线不认证数学等价。
-- 当前已提交 `0223d059d8dbcc03becfb80da10f174867535ba6`：C58直接原生TextMap字符身份绑定（最终patch2bf3414858b7256392ed29be948a05a0c3c3c0217eb37be3104aca5792933cdd），独立13反例+9永久测试、107相关与真实两页/原whole-record重放通过；当前C58组合完整1661项测试259.279秒通过（1条件skip；thirteenth-native-preflight-tests.log），此证据不覆盖后续新unknown候选。仅处理重复物理基行，不按出现次数授权；两页最终source_char_map仍为空，与84b原状一致，未假造重排后映射。
-- 拒绝候选：C58最初按全部出现计数的版本会借unstyled行补计数，已拒。C59只核改动词坐标会漏掉未变关系词移动，已拒；159字形仅65完整框exact，不能用容差判整片段相同。C37公式等价版本被rise/分数线范围反例否证；修正后仍缺旧字体程序，最终显式拒绝等价及缓存消费。三者失败历史均留在外部review目录。
-- 外部工作：独立的FormulaSourceReview未知来源承接候选（保留两版公式原图/原文/待核实计数，不判相同、不认证公式修复）；package三行正文伪删除逐行producer试验有效，但最终图片/CSV缺失时不能恢复原比较，正在评估完整双视图回退。公式候选独立审查发现三项来源绑定漏洞及GUI待核实计数缺口，已退回修正。均未合入。下一次冻结须最终全套、真实整本和全审。`DEF-CONTENT-CORRESPONDENCE-20260913`仍open，未push/main/正式STRICT/attest。外部恢复状态 `repair_20260913/continuation-state.json`。
+- 最新完整运行：冻结 `a242a1bcd822af8ef1212ea90c5d139cdda60cee`（C58行为源0223d05）的第十三原生 GUI 1330.942秒完成；`repair_20260913/full-native-thirteenth/native-result.json`。JSON SHA `bfd631463f5f54f6cbe07340093f11193b98c76280cfca406a8e60ee50e97466`，HTML SHA `3846fe4194c3682e620589606f0a8605c91e6b06bdb418eb9c6939d7b8be9e88`。冻结前完整1661项测试259.279秒通过（1条件skip）、20内容合同及10定向反例通过。
+- 第十三完整501原ID、190当前正文卡（169主卡=162material+7review，21附录）、44表卡全部重新绑定，见 `complete-thirteenth-audit.json`。C58两条input/output规范句与原331/335页核实，fb=29GHz完整；11项新增原句保全检查及17+28既有检查通过。23处完整body差分另行源核对，不能把C58名称当影响范围。剩53原正文噪声（46主卡+7附录），另17混合真实变化带噪声、19几何/26数学未决；未作整份准确性验收。
+- 全部632来源表矩阵/图片/几何、68未知对应、64物理侧及表格CSV与已源审第十二完全相同，限定复用126原表结论。104视觉项完整payload相同，复用原82及后22页对的实际源审结论，不认证曲线/公式等价。
+- 原生HTML1200图无损坏，默认折叠、缩放同源、窄窗无溢出；root实际目视顶部/正文/物理表/窄窗，见 `full-native-thirteenth/native-actual-review.json`。原报告未覆盖。
+- 第十四待整本组合：FormulaSourceReview f34c（仅显式UNKNOWN、完整原文/双侧实际原图/真实PageText桥接）、乘号空格451b、表格双视图V3 dc13及视觉后处理8c均已加入，三个真实三页公开窗口通过。表格候选重新构建公式凭证，视觉证据仅在全部实际输入严格相同后复用，否则重新扫描；保留候选自己的内容评估与警告。不能将小范围结果当作整本验收。
+- 表格V3已独立复核：错位置图借证回退、真实isolated CSV失败发布原结果、固定时刻既有目录保留、发布失败仅清理独占目录均通过。1411528/d8d899失败证据保留，未用于canonical。真实package窗口只消除gamma/Zc两行假正文，tau/Cd仍未决。
+- 组合首轮完整1717测试259.084秒有1项旧入口字符串断言错误（compare导入已改为table_view_transaction），启动顺序仍在venv引导之后；已更新断言并重跑完整套件，1717项266.313秒通过（1条件skip），fourteenth-full-tests-recheck.log。20内容合同与10定向负控通过；正式STRICT尚未运行。原失败日志fourteenth-full-tests.log保留。
+- 早期拒绝的C58计数授权、C59仅改动词坐标、C37公式等价字体/分数几何候选均未复活。所有失败历史留在外部review目录。`DEF-CONTENT-CORRESPONDENCE-20260913`仍open，未push/main/正式STRICT/最终attest。恢复状态 `repair_20260913/continuation-state.json`。
 
 以下为此前轮次记录（有冲突时以上述最新状态为准）：
 

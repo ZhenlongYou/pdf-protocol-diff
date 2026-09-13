@@ -39,14 +39,14 @@
         {
           "id": "SRC-COMPARE",
           "path": "src/protocol_pdf_diff/compare.py",
-          "sha256": "dd71140d336ee3010b6d400986080a126a12b3b4f38dee0eb7aac0941f66f9da",
-          "size_bytes": 278707
+          "sha256": "1097bc74c9cfff73662c8cd9b32294f310d00a050a86cbc5d3dc798986c2156b",
+          "size_bytes": 280798
         },
         {
           "id": "SRC-COMPARISON_JOB",
           "path": "src/protocol_pdf_diff/comparison_job.py",
-          "sha256": "deaa0699c4beb3cc70d91a0d0bf2a9bff73939c2e1cc0846a2b038da289ab784",
-          "size_bytes": 11848
+          "sha256": "ef6afe1e30254520c30cec6281e92b11661dc219559a1b11b891eeaeab066efb",
+          "size_bytes": 11997
         },
         {
           "id": "SRC-COMPARISON_SESSION",
@@ -63,8 +63,8 @@
         {
           "id": "SRC-DESKTOP_GUI",
           "path": "src/protocol_pdf_diff/desktop_gui.py",
-          "sha256": "5a5318e857d7ac96874456795aa15ed54734f4dcf828e4854bb897cb152294fb",
-          "size_bytes": 65405
+          "sha256": "1d51fc88b16876b170e59679569e66227c7fccb166e0f381da93fbaf09b6e13f",
+          "size_bytes": 65736
         },
         {
           "id": "SRC-DESKTOP_VISUALS",
@@ -95,6 +95,30 @@
           "path": "src/protocol_pdf_diff/figure_filters.py",
           "sha256": "67806d4dd95e2b6a1a33d9430409ce79aea2cce9bee0e3c3f16c83f2a8519144",
           "size_bytes": 4248
+        },
+        {
+          "id": "SRC-FORMULA_FORWARD_EVIDENCE",
+          "path": "src/protocol_pdf_diff/formula_forward_evidence.py",
+          "sha256": "20787f70d61281c6c0095deba623321c11cabb33b40a96365b2a220416c88072",
+          "size_bytes": 5007
+        },
+        {
+          "id": "SRC-FORMULA_SOURCE_BRIDGE",
+          "path": "src/protocol_pdf_diff/formula_source_bridge.py",
+          "sha256": "d0d9c5b0c4bea185594cd41c4ab1871f7f29b610c5a72e8a474349e0b35b360b",
+          "size_bytes": 5598
+        },
+        {
+          "id": "SRC-FORMULA_SOURCE_REVIEW",
+          "path": "src/protocol_pdf_diff/formula_source_review.py",
+          "sha256": "1727688fa94795699fe9c47585d465ac6fe117ef2348f0b1af7102adecad311b",
+          "size_bytes": 16702
+        },
+        {
+          "id": "SRC-FORMULA_SOURCE_REVIEW_EXPORT",
+          "path": "src/protocol_pdf_diff/formula_source_review_export.py",
+          "sha256": "6d5e416dbe468d9b84079f7fb11a1ef08a4a057ecc66770497ead858f24dbbad",
+          "size_bytes": 3155
         },
         {
           "id": "SRC-FORMULA_VISUALS",
@@ -129,8 +153,8 @@
         {
           "id": "SRC-MODELS",
           "path": "src/protocol_pdf_diff/models.py",
-          "sha256": "0256974faef086205ce1945c135218299148081293d57c30dc5966127a3ec4ba",
-          "size_bytes": 29878
+          "sha256": "5f725a3ad3b9a0b5dd92d0807979e70e9b2568619fbff2885c9ffc863acb8802",
+          "size_bytes": 30436
         },
         {
           "id": "SRC-MONOTONIC_ALIGNMENT",
@@ -165,8 +189,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "602fb654e4994fa8d6777441fc3cf079f045da7395c1e489d700a0170b27910f",
-          "size_bytes": 378622
+          "sha256": "99f9a5e8526d340c7fdf2997ac862163b87d919a7083d9d9d93f8e614a3da825",
+          "size_bytes": 379066
         },
         {
           "id": "SRC-PHYSICAL_NATIVE_EVIDENCE",
@@ -207,8 +231,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "6f58aed1d184509a092d676dc69bdbb6bdb38f6c87f832562d062e6ea336415c",
-          "size_bytes": 544805
+          "sha256": "f71b09f3498dd5045e4d7efe7d687a62672a57b7dd6ea5d790d9534ef56ed7b6",
+          "size_bytes": 546688
         },
         {
           "id": "SRC-SAMPLE_DATA",
@@ -259,6 +283,12 @@
           "size_bytes": 2329
         },
         {
+          "id": "SRC-TABLE_VIEW_TRANSACTION",
+          "path": "src/protocol_pdf_diff/table_view_transaction.py",
+          "sha256": "7688e7d9a207024e0d8357e500b6f165318868db1e9e192915f26947bc1dbcb6",
+          "size_bytes": 24737
+        },
+        {
           "id": "SRC-TEXT_UTILS",
           "path": "src/protocol_pdf_diff/text_utils.py",
           "sha256": "6c6233b0d29c902e7ff190cc2be4f960e9e96581fd58063cb0ace3e261e2a8e0",
@@ -267,8 +297,8 @@
         {
           "id": "SRC-UI_SHARED",
           "path": "src/protocol_pdf_diff/ui_shared.py",
-          "sha256": "81f05fdf5a19260bbc5a853375d00e3c8e006110baa5f6103835869bf614c97b",
-          "size_bytes": 4270
+          "sha256": "4d6485ddf965bb9d9b555fe8f5020867dbd55a9aa1e787482b7ab6f75505a230",
+          "size_bytes": 4490
         },
         {
           "id": "SRC-URL_LITERAL_EVIDENCE",
@@ -303,8 +333,8 @@
         {
           "id": "SRC-WEBVIEW_GUI",
           "path": "src/protocol_pdf_diff/webview_gui.py",
-          "sha256": "e2303bc7883abdeb3e1b5ac14277856f5888bdeca0b59f77f63159a2c268deb5",
-          "size_bytes": 23963
+          "sha256": "e5a5873e3a6f61970cb31e7f4085067a2a624ba4f26a8a5db575d65c9a3854ad",
+          "size_bytes": 24147
         }
       ]
     },
@@ -424,6 +454,10 @@
             "SRC-EXACT_GLYPH_VIEW",
             "SRC-EXACT_MATCH",
             "SRC-FIGURE_FILTERS",
+            "SRC-FORMULA_FORWARD_EVIDENCE",
+            "SRC-FORMULA_SOURCE_BRIDGE",
+            "SRC-FORMULA_SOURCE_REVIEW",
+            "SRC-FORMULA_SOURCE_REVIEW_EXPORT",
             "SRC-FORMULA_VISUALS",
             "SRC-GLYPH_EVIDENCE",
             "SRC-HEADING_EVIDENCE",
@@ -451,6 +485,7 @@
             "SRC-SOURCE_TYPOGRAPHY",
             "SRC-TABLE_ANNOTATIONS",
             "SRC-TABLE_CODEC",
+            "SRC-TABLE_VIEW_TRANSACTION",
             "SRC-TEXT_UTILS",
             "SRC-UI_SHARED",
             "SRC-URL_LITERAL_EVIDENCE",
@@ -469,15 +504,15 @@
         {
           "id": "MUT-LIMIT",
           "path": "work/content-correspondence-gate/limit.py",
-          "sha256": "d1e4ef8b60c7f712d613d2c44bb0d4ee42fc453aac58227ffd19a18e7aeef8eb",
-          "size_bytes": 544815,
+          "sha256": "c9c00635322ee2896e041105dc8009d0cdb1ff7ebfd62e089a267f390feadab1",
+          "size_bytes": 546698,
           "target_source_id": "SRC-REPORTING"
         },
         {
           "id": "MUT-FORMULA",
           "path": "work/content-correspondence-gate/formula.py",
-          "sha256": "34eae9e846a675cb0156d71a8a4f665b148f8406bb6a609c6735d2c5b2108da4",
-          "size_bytes": 278737,
+          "sha256": "493106a6bc2c12fabfdbd40171352738701354144114ec304fd4cdfc06afa03d",
+          "size_bytes": 280828,
           "target_source_id": "SRC-COMPARE"
         },
         {
@@ -504,22 +539,22 @@
         {
           "id": "MUT-UNITS",
           "path": "work/content-correspondence-gate/units.py",
-          "sha256": "a7f44efbf25da70c4443dd0cae8e181ecd88a344d1728257d43a6934a530da98",
-          "size_bytes": 544815,
+          "sha256": "1391bb2d9b603b031b12a0801158c1eab036b669378513dbbc46dac78ff84446",
+          "size_bytes": 546698,
           "target_source_id": "SRC-REPORTING"
         },
         {
           "id": "MUT-HEADER",
           "path": "work/content-correspondence-gate/header.py",
-          "sha256": "63483eab8ca954070c303e51207bc860e52919fa125a6e0f103e56b4f817dc72",
-          "size_bytes": 378630,
+          "sha256": "905144b587efeb4495dfdee8452b121fca366e28db2d8a81eec0ead75a48c0c5",
+          "size_bytes": 379074,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
           "id": "MUT-GROUP",
           "path": "work/content-correspondence-gate/group.py",
-          "sha256": "fc87654945e82d631dde3f4c2824b46eb63bbf5814a86b8dde59f7c100481396",
-          "size_bytes": 544783,
+          "sha256": "d739118f545a1c5ea7ff8c6c222a4df1b5e550e3c3a5ebda5d547144d0c00a9b",
+          "size_bytes": 546666,
           "target_source_id": "SRC-REPORTING"
         },
         {

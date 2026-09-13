@@ -224,7 +224,7 @@ class ProtocolDiffWebApi:
             self._emit({"type": "running", "stage": "read_old"})
             runner = self._run_diff
             if runner is None:
-                from .compare import run_diff as runner
+                from .table_view_transaction import run_diff_transaction as runner
 
             result = runner(
                 old_pdf,
@@ -237,7 +237,9 @@ class ProtocolDiffWebApi:
             if writer is None:
                 from .reporting import write_reports as writer
 
-            outputs = writer(result, output_dir, options)
+            from .table_view_transaction import report_outcome
+            outcome = report_outcome(result, output_dir, options, writer=writer)
+            result, outputs = outcome.selected_result, outcome.outputs
             self._last_outputs = {key: Path(value) for key, value in outputs.items()}
             payload = self._success_payload(result, self._last_outputs)
             if bool(config.get("auto_open")):

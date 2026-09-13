@@ -143,6 +143,9 @@ class PageText:
     physical_native_text: str | None = None  # Native page order for complete-section physical ownership counts.
 
 
+    caption_source_spans: tuple[tuple[int, int, int], ...] = ()
+    caption_removed_spans: tuple[tuple[int, int, str], ...] = ()
+
 @dataclass(frozen=True)
 class PageExtractionAudit:
     """报告层所需的逐页解析快照，不保留原文、坐标块或图片。"""
@@ -510,6 +513,7 @@ class SectionChange:
     )  # 读者层中性复核证据；不计入核心差异，JSON/CSV 原始审计仍使用 audit_* 字段。
     review_reason: str = ""
     context_review_records: list[dict[str, object]] = field(default_factory=list, compare=False, repr=False)
+    formula_review_records: list[dict[str, object]] = field(default_factory=list, compare=False, repr=False)
 
     @property
     def role(self) -> str:
@@ -592,6 +596,10 @@ class DiffResult:
     provenance: "DiffProvenance | None" = None
     old_extraction_audit: tuple[PageExtractionAudit, ...] = ()  # 旧版只保留无正文快照，完整 ExtractionResult 可在比较后释放。
     new_extraction_audit: tuple[PageExtractionAudit, ...] = ()  # 新版使用同样的轻量审计合同，避免长文档重复驻留内存。
+    formula_source_reviews: tuple[object, ...] = ()
+    formula_source_context: tuple[object, ...] = ()
+    old_formula_page_maps: tuple[object, ...] = ()
+    new_formula_page_maps: tuple[object, ...] = ()
     old_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新字段追加在旧位置参数之后，保存旧 PDF 编号公式。
     new_formula_visuals: list[FormulaVisual] = field(default_factory=list)  # 新 PDF 的编号显示公式证据。
     formula_changes: list[FormulaChange] = field(default_factory=list)  # 公式语义、编号或视觉复核项。
@@ -604,6 +612,7 @@ class DiffResult:
     new_url_literal_receipts: tuple = ()
     old_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()  # 仅供读者恢复原生上标排印，不影响比较。
     new_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()
+    visual_review_warnings: tuple[str, ...] = ()  # Explicit watchdog diagnostics, separate from prose warnings.
 
 
 def _normalize_key(value: str) -> str:

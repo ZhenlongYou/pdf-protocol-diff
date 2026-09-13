@@ -345,6 +345,8 @@ def write_reports(
     physical_html, physical_payload, physical_receipts = render_physical_appendix(table_groups)
     physical_csv_path = report_dir / 'physical_table_records.csv'
     physical_receipts &= write_physical_csv(physical_payload, physical_csv_path)
+    from .formula_source_review import prepare_formula_source_reviews, project_formula_source_review
+    formula_accepted = prepare_formula_source_reviews(result.formula_source_reviews, report_dir, result.formula_source_context)
     reader_changes: list[SectionChange] = []
     old_figure_texts_by_owner: dict[str, list[str]] = {}
     new_figure_texts_by_owner: dict[str, list[str]] = {}
@@ -422,6 +424,7 @@ def write_reports(
                                      for side, section in (('old', change.old_section), ('new', change.new_section))),
         )
         if reader_change is not None:
+            reader_change = project_formula_source_review(reader_change, formula_accepted)
             reader_changes.append(reader_change)
     # 底层 diff 可能把长引用列表改动拆成独立 added/deleted 卡；读者层在唯一严格配对后共同移除。
     reader_changes = _reader_changes_without_cross_card_locator_pairs(
@@ -517,13 +520,24 @@ def write_reports(
         if '</main>' not in html and '</body>' not in html:
             raise ValueError('Physical row receipt cannot be emitted without a report insertion point')
         html = html.replace('</main>', physical_html + '</main>') if '</main>' in html else html.replace('</body>', physical_html + '</body>')
+    from .formula_source_review_export import render_formula_source_reviews
+    formula_records = [r for c in [*reader_changes, *similarity_review_changes] for r in c.formula_review_records]
+    formula_html, formula_md, formula_txt = render_formula_source_reviews(formula_records, report_dir)
+    if formula_records:
+        html = html.replace('</main>', formula_html + '</main>')
+        markdown += formula_md
+        html = html.replace(_escape(_empty_report_message(reader_result)), '正文差异清单为空；仍有公式来源待核实，不能认定内容相同。')
+        markdown = markdown.replace(_empty_report_message(reader_result), '正文差异清单为空；仍有公式来源待核实，不能认定内容相同。')
     text = _markdown_to_plain_text(markdown)
     markdown += physical_text_export(physical_payload, markdown=True)
     text += physical_text_export(physical_payload)
+    text += formula_txt
     csv_rows = _rows_for_csv(reader_changes)
     table_csv_rows = _rows_for_table_csv(reader_table_changes)
     sections_payload = {
         "comparison_focus": "substantive_content",
+        "formula_source_review_count": len(formula_records),
+        "formula_source_reviews": formula_records,
         "uncertain_table_correspondences": uncertainty_rows,
         "physical_table_receipts": physical_payload,
         "physical_table_dedup_authorizations": sorted(physical_receipts),
@@ -722,7 +736,7 @@ def _render_markdown(
     # write_reports 已把元信息从读者副本剔除；此处只渲染技术正文，避免空板块和零值指标占空间。
     technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
-        len(change.review_replaced_snippets)
+        len(change.formula_review_records) + len(change.review_replaced_snippets)
         or (1 if change.change_type == "review" else 0)
         for change in technical_changes
     )
@@ -771,6 +785,7 @@ def _render_markdown(
         "|---|---:|",
         f"| 正文差异候选（章节） | {material_technical_count} |",
         f"| 正文待核实项（未分类） | {technical_review_count} |",
+        f"| 公式来源待核实 | {sum(len(c.formula_review_records) for c in technical_changes)} |",
         f"| 章节修改 / 新增 / 删除 | {counts.get('modified', 0)} / {counts.get('added', 0)} / {counts.get('deleted', 0)} |",
         "| 公式自动对比项（已关闭） | 0 |",
         f"| 视觉漏检核对项 | {len(result.visual_review_items)} |",
@@ -1028,7 +1043,7 @@ def _render_html(
     # HTML 与 Markdown 共用技术正文口径，元信息只留在机器审计文件。
     technical_changes = [change for change in result.changes if change.role == "technical"]
     technical_review_count = sum(
-        len(change.review_replaced_snippets)
+        len(change.formula_review_records) + len(change.review_replaced_snippets)
         or (1 if change.change_type == "review" else 0)
         for change in technical_changes
     )
@@ -1637,6 +1652,8 @@ def _render_change_html(
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
     review_pairs = _render_review_pairs_html(change.review_replaced_snippets, context_scope=bool(change.context_review_records))
+    if change.formula_review_records:
+        review_pairs += '<p class="review-note">公式来源待核实（' + str(len(change.formula_review_records)) + ' 项）；完整原文、精确来源位置与双侧原图见公式来源待核实记录，不表示公式相同。</p>'
     neutral = change.change_type == "review"
     if neutral:
         pairs = "\n".join(_render_pair_html(pair.old, pair.new, neutral=True) for pair in change.replaced_snippets)
@@ -1646,7 +1663,7 @@ def _render_change_html(
         match_basis_html += f'<div class="match-basis">{_escape(change.review_reason)}</div>'
     omitted = _render_omitted_html(change.omitted_snippet_count)
     text_body = (pairs or "") + review_pairs + added + removed + omitted
-    if change.context_review_records and prose_source_visual is not None:
+    if (change.context_review_records or change.formula_review_records) and prose_source_visual is not None:
         # The original segmentation highlights are no longer factual deltas.
         # Show actual unannotated pixels; never relabel a colored image as raw.
         def context_raw(visuals):
@@ -8617,6 +8634,8 @@ def _change_summary(change: SectionChange) -> str:
     parts: list[str] = []
     if change.replaced_snippets:
         parts.append(f"{len(change.replaced_snippets)} 处替换")
+    if change.formula_review_records:
+        parts.append(f"{len(change.formula_review_records)} 处公式来源待核实")
     if change.review_replaced_snippets:
         parts.append(f"{len(change.review_replaced_snippets)} 处" + ("上下文归属待核实" if change.context_review_records else "结构顺延复核"))
     if change.added_snippets:
@@ -13555,6 +13574,7 @@ def _change_to_dict(
             {"old": pair.old, "new": pair.new} for pair in audit_replaced
         ],
         "context_review_records": list(visible.context_review_records),
+        "formula_review_records": list(visible.formula_review_records),
         "review_replaced_snippets": [{"old": p.old, "new": p.new} for p in visible.review_replaced_snippets],
         "display_added_snippets": list(visible.added_snippets),
         "display_removed_snippets": list(visible.removed_snippets),

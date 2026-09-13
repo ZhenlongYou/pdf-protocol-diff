@@ -166,9 +166,13 @@ def run_diff(
         progress_side="new",
     )
     notify_progress(progress_observer, ProgressEvent(stage="match_diff"))
+    from .table_view_transaction import capture_extractions
+    capture_extractions(old_extraction, new_extraction)
     result = compare_extractions(old_extraction, new_extraction, options)
     notify_progress(progress_observer, ProgressEvent(stage="visual_evidence"))
+    from .table_view_transaction import capture_visual_inputs
     if options.visual_watchdog:
+        capture_visual_inputs(old_extraction, new_extraction, result)
         visual_review_items, visual_warnings, visual_audit = detect_visual_review_items(
             old_extraction,
             new_extraction,
@@ -201,10 +205,20 @@ def run_diff(
     )  # 仍持有页面坐标与抽取快照散列时生成长正文截图，报告层不再事后猜位置。
     from .visual_ownership import build_visual_owned_spans
     owned_spans = build_visual_owned_spans(result, old_extraction, new_extraction, prose_source_visuals)
+    from .formula_source_review import build_formula_source_reviews
+    formula_source_reviews = build_formula_source_reviews(result, old_extraction, new_extraction)
     return replace(
         result,
+        formula_source_reviews=formula_source_reviews,
+        formula_source_context=tuple(
+            (str(path), ex.source_sha256, page)
+            for side, path, ex in (("old", result.old_pdf, old_extraction), ("new", result.new_pdf, new_extraction))
+            for page in ex.pages
+            if any(getattr(r, side)["page"] == page.page_number for r in formula_source_reviews)
+        ),
         visual_owned_spans=owned_spans,
         visual_review_items=visual_review_items,
+        visual_review_warnings=tuple(visual_warnings),
         prose_source_visuals=prose_source_visuals,
         warnings=[*result.warnings, *visual_warnings, *prose_visual_warnings],
         assessment=_assessment_with_visual_review(
@@ -296,21 +310,19 @@ def compare_extractions(
     report_progress("sectioning", 1, 4, unit="轮")
     new_reconciliation_sections = section_document(new_extraction)
     report_progress("sectioning", 2, 4, unit="轮")
-    old_sections = section_document(
-        _extraction_without_page_bound_table_captions(
-            old_extraction,
-            original_tables=old_extraction.table_visuals,
-            repaired_tables=old_table_visuals,
-        )
+    old_comparison_extraction = _extraction_without_page_bound_table_captions(
+        old_extraction,
+        original_tables=old_extraction.table_visuals,
+        repaired_tables=old_table_visuals,
     )
+    old_sections = section_document(old_comparison_extraction)
     report_progress("sectioning", 3, 4, unit="轮")
-    new_sections = section_document(
-        _extraction_without_page_bound_table_captions(
-            new_extraction,
-            original_tables=new_extraction.table_visuals,
-            repaired_tables=new_table_visuals,
-        )
-    )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
+    new_comparison_extraction = _extraction_without_page_bound_table_captions(
+        new_extraction,
+        original_tables=new_extraction.table_visuals,
+        repaired_tables=new_table_visuals,
+    )
+    new_sections = section_document(new_comparison_extraction)  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
     report_progress("sectioning", 4, 4, unit="轮")
     old_header_section = _running_header_section(old_extraction)
     new_header_section = _running_header_section(new_extraction)
@@ -385,6 +397,8 @@ def compare_extractions(
     from .url_literal_evidence import extraction_url_receipts
     from .source_typography import source_superscript_receipts
     return DiffResult(
+        old_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in old_comparison_extraction.pages if p.caption_source_spans),
+        new_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in new_comparison_extraction.pages if p.caption_source_spans),
         old_pdf=old_extraction.pdf_path,
         new_pdf=new_extraction.pdf_path,
         old_sections=old_sections,
@@ -653,15 +667,28 @@ def _extraction_without_page_bound_table_captions(
                 remaining[selected_key] += 1
         # 完整 title 与 `Table N.` 是同一视觉表 caption 的替代表达，只能消费其中一个 occurrence。
         kept_lines: list[str] = []
+        source_chunks = page.text.splitlines(keepends=True)
+        source_offset = 0
+        output_offset = 0
+        mapped_spans = []
+        removed_spans = []
         for line_index, line in enumerate(page.text.splitlines()):
+            line_source_offset = source_offset
+            source_offset += len(source_chunks[line_index])
             if line_index in consumed_line_indexes:
+                removed_spans.append((line_source_offset, line_source_offset + len(line), line))
                 continue
             key = _review_unit_key(line)
             if remaining[key] > 0:
                 remaining[key] -= 1
+                removed_spans.append((line_source_offset, line_source_offset + len(line), line))
                 continue
+            if kept_lines:
+                output_offset += 1
+            mapped_spans.append((output_offset, output_offset + len(line), line_source_offset))
+            output_offset += len(line)
             kept_lines.append(line)
-        pages.append(replace(page, text="\n".join(kept_lines)))
+        pages.append(replace(page, text="\n".join(kept_lines), caption_source_spans=tuple(mapped_spans), caption_removed_spans=tuple(removed_spans)))
     return replace(extraction, pages=pages)
 
 
@@ -5052,6 +5079,7 @@ _SEMANTIC_OPERATOR_RE = re.compile(
     r"|([<>!=＜＞！＝]\s*[=＝]|≤|≥|≠)"
     r"|(?<=[A-Za-z0-9)\]])\s+([+\-−*/×÷])\s+(?=[A-Za-z0-9(\[])"
     r"|(?<=[A-Za-z0-9)\]])([+*×÷−])(?=[A-Za-z0-9(\[])"
+    r"|(?<=[A-Za-z0-9)\]])[ \t]*(\*)[ \t]*(?=[A-Za-z0-9(\[])"
 )  # 保留明确的公式运算符；ASCII 连字符仅在两侧有空格时视作减号，避免误伤词内连字符。
 _SUPERSCRIPT_TRANSLATION = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾", "0123456789+-=()")
 _SUBSCRIPT_TRANSLATION = str.maketrans("₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", "0123456789+-=()")

@@ -110,7 +110,7 @@ def _worker(connection, old_pdf, new_pdf, options, staging):
         connection.send({"type": "ready"})
         if connection.recv() != "go":
             return
-        from .compare import run_diff
+        from .table_view_transaction import run_diff_transaction as run_diff, report_outcome
         from .comparison_session import comparison_scope
         from .progress import ProgressEvent
         from .reporting import write_reports
@@ -125,7 +125,8 @@ def _worker(connection, old_pdf, new_pdf, options, staging):
         with comparison_scope():
             result = run_diff(old_pdf, new_pdf, options, progress_observer=progress)
             progress(ProgressEvent(stage="report"))
-            outputs = write_reports(result, staging, options)
+            outcome = report_outcome(result, staging, options, writer=write_reports)
+            result, outputs = outcome.selected_result, outcome.outputs
             payload = ProtocolDiffWebApi._success_payload(result, outputs)
             connection.send({"type": "complete", "outputs": {k: str(v) for k, v in outputs.items()},
                              "payload": payload})

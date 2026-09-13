@@ -171,6 +171,8 @@ def extract_pdf_text(
         ValueError: The requested page range or OCR language is invalid.
     """
 
+    from .table_view_transaction import begin_extraction
+    begin_extraction(pdf_path)
     path = Path(pdf_path).expanduser().resolve()  # 统一成绝对路径，报告和错误信息都能直接定位源文件。
     normalized_ocr_language = normalize_ocr_language(ocr_language)
     if not path.exists():  # 提前检查路径，避免底层 PDF 库给出难懂的打开错误。
@@ -629,6 +631,8 @@ def _extract_pdfplumber_page_text(
     blocks = reassign_block_reading_order(
         (*native_blocks, *ocr_blocks, *table_blocks)
     )  # 所有来源共享一个连续页内序号，方便后续页面路由和审计。
+    from .table_view_transaction import capture_page
+    capture_page(filtered_page, pdf_name, page_number, comparison_coordinate_words, fully_covered_table_bboxes, table_lines, block_warnings, coordinate_error, ocr_used)
     combined_text = _combine_text_and_table_lines(text, table_lines)
     comparable_text_characters = len(re.sub(r"\s+", "", combined_text))
     coordinate_coverage_insufficient = (
@@ -3989,6 +3993,8 @@ def _fully_represented_table_row_bboxes(
 ) -> tuple[tuple[float, float, float, float], ...]:
     """Return only physical data-row boxes proven safe for structured replacement."""
 
+    from .table_view_transaction import capture_rows
+    capture_rows(page, table, rows, cell_word_rows, data_cell_geometry_complete)
     if not data_cell_geometry_complete:
         return ()  # 缺格、重叠格或跨行争抢词时，禁止逐行路径绕过物理归属门禁。
     row_flags = _table_row_replacement_flags(rows, cell_word_rows)

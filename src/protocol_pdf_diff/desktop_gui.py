@@ -21,7 +21,7 @@ import tkinter as tk
 import tkinter.font as tkfont  # 读取当前 Tcl/Tk 实际可用字体，避免 Windows 回退不存在的 macOS 字体。
 from tkinter import ttk
 
-from .compare import run_diff
+from .table_view_transaction import run_diff_transaction as run_diff, report_outcome
 from .desktop_visuals import (
     DropZone,
     GlassPanel,
@@ -1185,7 +1185,8 @@ class ProtocolDiffDesktopApp:
                 progress_observer=observer,
             )
             notify_progress(observer, ProgressEvent(stage="report"))
-            outputs = write_reports(result, config.output_dir, config.options)
+            outcome = report_outcome(result, config.output_dir, config.options, writer=write_reports)
+            result, outputs = outcome.selected_result, outcome.outputs
         except (FileNotFoundError, MissingDependencyError, PdfReadError, ValueError) as exc:
             self._result_queue.put(("error", exc))
         except Exception as exc:  # pragma: no cover - last-resort UI diagnostics.
@@ -1283,6 +1284,8 @@ class ProtocolDiffDesktopApp:
             )
             table_note = f"，表格变化 {reader_summary.table_changes}"
             visual_note = f"，视觉差异项 {reader_summary.visual_items}"
+            visual_note += (f"，正文待核实 {reader_summary.pending_reviews}"
+                            f"（其中公式来源待核实 {reader_summary.formula_reviews}）")
         else:
             body_note = "正文和表格计数请查看报告"
             table_note = ""

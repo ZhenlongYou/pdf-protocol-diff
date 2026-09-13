@@ -84,6 +84,8 @@ class ReaderReportSummary:
     deleted: int
     table_changes: int
     visual_items: int
+    pending_reviews: int = 0
+    formula_reviews: int = 0
 
 
 def reported_reader_summary(
@@ -127,6 +129,8 @@ def reported_reader_summary(
             deleted=deleted,
             table_changes=int(values["变化表格"]),
             visual_items=int(values["视觉漏检核对项"]),
+            pending_reviews=int(values.get("正文待核实项（未分类）", "0")),
+            formula_reviews=int(values.get("公式来源待核实", "0")),
         )
         if any(value < 0 for value in summary.__dict__.values()):
             return None

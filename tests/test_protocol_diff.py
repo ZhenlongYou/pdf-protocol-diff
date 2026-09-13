@@ -1664,7 +1664,7 @@ class ProtocolDiffTests(unittest.TestCase):
         )  # GUI 必须先切 .venv，再导入 WebView 和 PDF 相关模块。
         self.assertLess(
             main_source.index("reexec_into_project_venv("),
-            main_source.index("from protocol_pdf_diff.compare"),
+            main_source.index("from protocol_pdf_diff.table_view_transaction"),
         )  # 命令行入口必须先切 .venv，再导入 pdfplumber 相关链路。
         self.assertLess(
             build_source.index("reexec_into_project_venv("),

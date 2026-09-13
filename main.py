@@ -88,7 +88,7 @@ if __name__ == "__main__":  # PyCharm 直接运行 main.py 时先切到项目 .v
     freeze_support()
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 使用 sys.prefix 判断环境，避开 macOS 软链接误判。
 
-from protocol_pdf_diff.compare import run_diff  # noqa: E402
+from protocol_pdf_diff.table_view_transaction import run_diff_transaction as run_diff, report_outcome  # noqa: E402
 from protocol_pdf_diff.models import DiffOptions  # noqa: E402
 from protocol_pdf_diff.pdf_extract import MissingDependencyError, PdfReadError  # noqa: E402
 from protocol_pdf_diff.quality import ReliabilityState  # noqa: E402
@@ -235,7 +235,8 @@ def main() -> int:
         )  # 共享配置验证属于可预期的用户输入错误，必须由同一中文错误路径捕获。
         old_pdf, new_pdf = resolve_inputs(args)
         result = run_diff(old_pdf, new_pdf, options)
-        outputs = write_reports(result, PROJECT_ROOT / args.output_dir, options)
+        outcome = report_outcome(result, PROJECT_ROOT / args.output_dir, options, writer=write_reports)
+        result, outputs = outcome.selected_result, outcome.outputs
     except (FileNotFoundError, MissingDependencyError, PdfReadError, ValueError) as exc:
         print(f"运行失败: {exc}", file=sys.stderr)
         return 2
