@@ -4760,6 +4760,17 @@ def _prose_outside_displayed_formula(unit: str) -> list[str]:
         spans.append(unit[edges[-1]:label.start()].strip())
         edges.append(label.end())
     spans.append(unit[edges[-1]:].strip())
+    # Equation labels can be extracted before or after the same baseline.
+    # Keep adjacent mathematical fragments together: splitting at a moved
+    # locator would itself manufacture a removal/replacement.
+    joined_spans = []
+    for span in spans:
+        if (joined_spans and not _starts_prose_sentence(span)
+                and not _starts_prose_sentence(joined_spans[-1])):
+            joined_spans[-1] = (joined_spans[-1] + ' ' + span).strip()
+        else:
+            joined_spans.append(span)
+    spans = joined_spans
     kept=[]
     for span in spans:
         if not span:
@@ -4926,8 +4937,23 @@ def _looks_like_new_sentence_after_linebreak(left: str, right: str) -> bool:
 
     if _is_standalone_list_marker(left) or left.endswith("-"):
         return False
+    if (re.search(r'[\ue000-\uf8ff]', left)
+            and re.search(r'[=<>≤≥]', right)
+            and not _starts_prose_sentence(right)):
+        return False  # A capital mathematical variable is not a new sentence.
+    if (_starts_prose_sentence(right)
+            and (re.search(r'[\ue000-\uf8ff]|\(\d+[-–.]\d+\)\s*$', left)
+                 or re.match(r'(?i)^Figure\s+\d', left))):
+        return True  # Preserve the actual line boundary after a drawing/equation.
     first = right[:1]
     return bool(len(left) <= 60 and first and first.isascii() and first.isupper())
+
+
+def _starts_prose_sentence(value: str) -> bool:
+    """Recognize a sentence start for segmentation, never for deletion."""
+    return bool(re.match(r'^[A-Z][a-z]+\b', value)
+                and len(re.findall(r'\b[A-Za-z]+\b', value)) >= 5
+                and re.search(r'(?i)\b(?:is|are|shall|should|must|may|can|allows?|requires?|provides?)\b', value))
 
 
 def _split_long_unit(unit: str, max_chars: int = 720) -> list[str]:

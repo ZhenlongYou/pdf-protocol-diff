@@ -435,6 +435,7 @@ def _page_vector_graphic_bboxes(
             if x1 <= x0 or bottom <= top:
                 continue
             bboxes.append((x0, top, x1, bottom))
+    bboxes.extend(_closed_drawing_frames(page))
     # PDF 常为同一描边/叠画重复发出完全相同对象；重复 bbox 不能虚增图形证据。
     return tuple(dict.fromkeys(bboxes))
 
@@ -892,9 +893,6 @@ def _repair_body_visual_subscript_order(
             continue
         edges_by_line_pair.setdefault((base_line, suffix_line), []).append(edge)
     for (base_line, suffix_line), edges in edges_by_line_pair.items():
-        suffix_indexes_for_pair = {suffix_index for _base_index, suffix_index in edges}
-        if set(indexed_lines[suffix_line]) != suffix_indexes_for_pair:
-            continue
         combined_indexes = sorted(
             [*indexed_lines[base_line], *indexed_lines[suffix_line]],
             key=lambda index: (
@@ -910,14 +908,54 @@ def _repair_body_visual_subscript_order(
         raw_indexes = raw_occurrences.get(_character_signature(combined_text), [])
         if len(raw_indexes) != 1 or raw_indexes[0] in inline_replacements:
             continue
-        rebuilt = _rebuild_body_subscript_visual_line(
-            combined_indexes,
-            observed_words,
-            edges,
-        )
-        if _character_signature(rebuilt) != _character_signature(combined_text):
+        # Bind each source character to this unique raw line in the exact
+        # observed word order. Never rebuild unmatched words by x position.
+        raw_index = raw_indexes[0]
+        raw = raw_lines[raw_index]
+        positions = [i for i, char in enumerate(raw) if not char.isspace()]
+        ordered = "".join(_character_signature(str(observed_words[i]["text"]))
+                          for i in combined_indexes)
+        if ordered != _character_signature(raw):
             continue
-        inline_replacements[raw_indexes[0]] = rebuilt
+        # A repeated physical composite row cannot borrow one raw occurrence.
+        composite_count = 0
+        for other_line in range(len(indexed_lines) - 1):
+            other_indexes = sorted(
+                [*indexed_lines[other_line], *indexed_lines[other_line + 1]],
+                key=lambda i: (float(observed_words[i]["x0"]),
+                               float(observed_words[i]["x1"]),
+                               float(observed_words[i]["top"]),
+                               str(observed_words[i]["text"])))
+            other = "".join(_character_signature(str(observed_words[i]["text"]))
+                            for i in other_indexes)
+            composite_count += other == ordered
+        if composite_count != 1:
+            continue
+        word_positions = {}
+        cursor = 0
+        for index in combined_indexes:
+            length = len(_character_signature(str(observed_words[index]["text"])))
+            word_positions[index] = positions[cursor:cursor + length]
+            cursor += length
+        deleted = set()
+        insertions = {}
+        for base_index, suffix_index in edges:
+            base_positions = word_positions[base_index]
+            suffix_positions = word_positions[suffix_index]
+            # A backwards edge does not prove reading order.
+            if base_positions[-1] >= suffix_positions[0]:
+                continue
+            deleted.update(suffix_positions)
+            insertions[base_positions[-1]] = "".join(raw[i] for i in suffix_positions)
+            # Collapse only the demonstrated base-to-suffix whitespace gap.
+            gap = range(base_positions[-1] + 1, suffix_positions[0])
+            if all(raw[i].isspace() for i in gap):
+                deleted.update(gap)
+        rebuilt = "".join(("" if i in deleted else char) + insertions.get(i, "")
+                          for i, char in enumerate(raw))
+        if _non_whitespace_character_counts(rebuilt) != _non_whitespace_character_counts(raw):
+            continue
+        inline_replacements[raw_index] = normalize_line(rebuilt)
         inline_edges.update(edges)
 
     accepted_edges: list[tuple[int, int]] = []
@@ -3432,6 +3470,8 @@ def _extract_table_lines_and_visuals(
         ) or _table_bbox_is_plot_axis_label(
             bbox, table_lines, geometry_words, title=title,
             grid_bboxes=grid_bboxes,
+        ) or _table_is_physical_vertical_axis_fragment(
+            page, bbox, table_lines, geometry_words, title=title,
         ) or _table_inside_captioned_drawing_panels(
             page, bbox, table_lines, geometry_words, title=title,
         ) or _table_fragment_inside_figure_frame(
@@ -4132,6 +4172,88 @@ def _should_skip_detected_table(title: str, table_lines: list[str]) -> bool:
     return False  # 其余候选保守保留，确保真实表格截图不会被误删。
 
 
+def _table_is_physical_vertical_axis_fragment(page, bbox, rows, words, *, title=""):
+    """Classify narrow axis artifacts; never grant body removal permission."""
+    if (bbox is None or not rows or bbox[2]-bbox[0] > 20 or bbox[3]-bbox[1] < 40
+            or _looks_like_table_caption(title) or _looks_like_table_context_caption(title)
+            or _table_rows_have_explicit_technical_schema(rows)):
+        return False
+    records = _word_line_records(words)
+    def caption_for(box):
+        found = [line for line in records if 0 <= box[1]-line[1] <= 45
+                 and _looks_like_figure_caption(line[2])
+                 and (span := _word_span_horizontal_bounds(line[3])) is not None
+                 and min(span[1],box[2])-max(span[0],box[0]) >= .8*min(span[1]-span[0],box[2]-box[0])]
+        return len(found)==1
+    chars=[c for c in getattr(page,'chars',()) if c.get('text','').strip()
+           and bbox[0] <= (c['x0']+c['x1'])/2 <= bbox[2]
+           and bbox[1] <= (c['top']+c['bottom'])/2 <= bbox[3]]
+    if not chars:
+        return False
+    # Native rotated labels superposed on a raster figure are not table cells.
+    if all(_is_rotated_text_object(c) for c in chars):
+        for image in getattr(page,'images',()):
+            box=(image['x0'],image['top'],image['x1'],image['bottom'])
+            if (box[2]-box[0]>=120 and box[3]-box[1]>=80
+                    and box[0]-2 <= bbox[0] and bbox[2] <= box[0]+.12*(box[2]-box[0])
+                    and box[1] <= bbox[1] < bbox[3] <= box[3] and caption_for(box)):
+                return True
+    # A column of minus glyphs is a tick fragment only when each belongs to
+    # an observed signed numeric word beside a captioned ruled graph.
+    if not all(c['text'] in '-−–' for c in chars):
+        return False
+    numbers=[w for w in words if re.fullmatch(r'[-−–]\d+(?:\.\d+)?',str(w.get('text','')))
+             and abs(float(w['x0'])-bbox[0]) <= 8
+             and bbox[1]-10 <= float(w['top']) <= bbox[3]+10]
+    if len(numbers)<3 or not all(any(w['x0']-1 <= c['x0'] <= w['x1']+1
+          and w['top']-1 <= c['top'] <= w['bottom']+1 for w in numbers) for c in chars):
+        return False
+    horizontals=[x for x in getattr(page,'edges',()) if x.get('orientation')=='h'
+                 and x['x1']-x['x0']>=120]
+    for top in horizontals:
+        for bottom in horizontals:
+            if (bottom['top']-top['top']<80 or abs(top['x0']-bottom['x0'])>2
+                    or abs(top['x1']-bottom['x1'])>2):
+                continue
+            box=(top['x0'],top['top'],top['x1'],bottom['top'])
+            if not (0<=box[0]-bbox[2]<=60 and box[1]<=bbox[1]<bbox[3]<=box[3] and caption_for(box)):
+                continue
+            x_ticks=[w for w in words if re.fullmatch(r'\d+(?:\.\d+)?',str(w.get('text','')))
+                     and box[0]-5 <= w['x0'] <= box[2]+5 and 0 <= w['top']-box[3] <= 25]
+            if len(x_ticks)>=3:
+                return True
+    return False
+
+
+def _closed_drawing_frames(page):
+    """Return only physically observed closed frames, including four-edge encodings."""
+    frames = []
+    for obj in getattr(page, 'rects', ()) or ():
+        box = (obj.get('x0'), obj.get('top'), obj.get('x1'), obj.get('bottom'))
+        if (all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
+                and box[2]-box[0] >= 100 and box[3]-box[1] >= 50):
+            frames.append(box)
+    # A rectangle may be encoded as four narrow filled rectangles/curves.
+    # Require all four actually observed edges; never infer a missing side.
+    edges = getattr(page, 'edges', ()) or ()
+    horizontal = [edge for edge in edges if edge.get('orientation') == 'h'
+                  and edge['x1']-edge['x0'] >= 100]
+    vertical = [edge for edge in edges if edge.get('orientation') == 'v'
+                and edge['bottom']-edge['top'] >= 50]
+    for top in horizontal:
+        for bottom in horizontal:
+            if (bottom['top']-top['top'] < 50
+                    or abs(top['x0']-bottom['x0']) > 1
+                    or abs(top['x1']-bottom['x1']) > 1):
+                continue
+            if all(any(abs(edge['x0']-x) <= 1 and edge['top'] <= top['top']+1
+                       and edge['bottom'] >= bottom['top']-1 for edge in vertical)
+                   for x in (top['x0'],top['x1'])):
+                frames.append((top['x0'],top['top'],top['x1'],bottom['top']))
+    frames = list(dict.fromkeys(frames))
+    return frames
+
+
 def _table_inside_captioned_drawing_panels(page, bbox, table_lines, words, *, title=""):
     """Recognize detected grids inside closed, caption-owned drawing panels.
 
@@ -4144,12 +4266,7 @@ def _table_inside_captioned_drawing_panels(page, bbox, table_lines, words, *, ti
             or _table_rows_begin_with_explicit_caption(table_lines)
             or _table_rows_have_explicit_technical_schema(table_lines)):
         return False
-    frames = []
-    for obj in getattr(page, 'rects', ()) or ():
-        box = (obj.get('x0'), obj.get('top'), obj.get('x1'), obj.get('bottom'))
-        if (all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
-                and box[2]-box[0] >= 100 and box[3]-box[1] >= 50):
-            frames.append(box)
+    frames = _closed_drawing_frames(page)
     # Keep outer physical frames; nested boxes are diagram components.
     frames = [a for a in frames if not any(a != b and b[0] <= a[0]
               and b[1] <= a[1] and a[2] <= b[2] and a[3] <= b[3] for b in frames)]
@@ -5612,6 +5729,24 @@ def _expanded_rows_preserve_source_cells(
     return True
 
 
+def _scalar_physical_limit_record(source_row, expanded_rows, cell_word_row, header):
+    if not header or len(header)!=len(source_row) or len(expanded_rows)!=1:return False
+    labels=[normalize_line(x).casefold() for x in header]
+    if labels.count('parameter') != 1 or labels.count('conditions') != 1:return False
+    if not {'min','max'}.issubset(labels) or not any(x in {'unit','units'} for x in labels):return False
+    for label,cell in zip(labels,source_row):
+        nonempty=[x for x in cell if normalize_line(x)]
+        if label in {'parameter','conditions'}:continue
+        if label in {'min','max','unit','units','test point'}:
+            if len(nonempty)!=1:return False
+        elif any(nonempty):return False
+    if len(expanded_rows[0]) != len(source_row):return False
+    exact=lambda text: "".join(text.split())
+    if any(exact("\n".join(cell)) != exact(value) for cell,value in zip(source_row,expanded_rows[0])):return False
+    return bool(cell_word_row and _source_cells_match_observed_geometry(source_row,cell_word_row)
+                and _expanded_rows_preserve_source_cells(source_row,expanded_rows))
+
+
 def _expanded_rows_preserve_source_alignment(
     source_row: list[list[str]],
     expanded_rows: list[list[str]],
@@ -5644,7 +5779,8 @@ def _expanded_rows_preserve_source_alignment(
                         and all(words or not any(cell) for words, cell in zip(cell_word_row, source_row))
                         and _source_cells_match_observed_geometry(source_row, cell_word_row)
                         and _expanded_rows_preserve_source_cells(source_row, expanded_rows))
-    return multiline_columns < 2 or definition_cells
+    return (multiline_columns < 2 or definition_cells
+            or _scalar_physical_limit_record(source_row, expanded_rows, cell_word_row, header))
 
 
 def _expanded_rows_match_observed_baselines(
@@ -6549,6 +6685,8 @@ def _looks_like_body_technical_subscript_pair(base: str, suffix: str) -> bool:
         or formula_pair
         or voltage_threshold_pair
         or known_engineering_pair
+        or (bool(re.fullmatch(r"[^\W\d_]", base, re.UNICODE))
+            and bool(re.fullmatch(r"[A-Z]{1,4}\d{1,4}|[+−–-]\d{1,4}", suffix)))
     )
 
 

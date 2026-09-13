@@ -102,6 +102,7 @@ def _is_combined_figure_visual_fragment(value: str) -> bool:
     return bool(
         not _figure_caption_is_identifier_only(value)
         and _looks_like_figure_caption(value)
+        and not _PROSE_OR_REQUIREMENT_VERB_RE.search(value)
     )
 
 

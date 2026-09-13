@@ -485,12 +485,17 @@ def write_reports(
             return "; ".join(f"PDF {t.page_number}: {t.title or '未识别表题'}" for t in tables) or "尚未找到对应表"
         uncertainty_rows.append({"old": side_summary(group.old_tables),
                                  "new": side_summary(group.new_tables),
+                                 "old_sources": [{"page": t.page_number, "bbox": t.bbox} for t in group.old_tables],
+                                 "new_sources": [{"page": t.page_number, "bbox": t.bbox} for t in group.new_tables],
                                  "reason": "文字对应或行列归属尚未完全验证；不能据此认定新增、删除或一致。"})
     if uncertainty_rows:
         heading = f"表格对应待核实（{len(uncertainty_rows)} 项，不计为已确认差异）"
-        appendix = "<details><summary>" + heading + "</summary><ul>" + "".join(
-            "<li>旧版：" + _escape(row['old']) + "；新版：" + _escape(row['new'])
-            + "。" + row['reason'] + "</li>" for row in uncertainty_rows) + "</ul></details>"
+        appendix = "<details><summary>" + heading + "</summary>" + "".join(
+            '<section class="table-change"><p>旧版：' + _escape(row['old']) + "；新版：" + _escape(row['new'])
+            + "。" + row['reason'] + '</p><div class="table-shot-grid">'
+            + _render_table_shot_group("旧版", group.old_tables)
+            + _render_table_shot_group("新版", group.new_tables, side="new")
+            + "</div></section>" for row, group in zip(uncertainty_rows, uncertain_tables)) + "</details>"
         html = html.replace("</main>", appendix + "</main>") if "</main>" in html else html.replace("</body>", appendix + "</body>")
         markdown += "\n\n<details><summary>" + heading + "</summary>\n\n" + "\n".join(
             f"- 旧版：{row['old']}；新版：{row['new']}。{row['reason']}" for row in uncertainty_rows) + "\n\n</details>\n"
@@ -4368,6 +4373,22 @@ def _table_row_changes(
 
     old_rows = _table_group_rows(old_tables)
     new_rows = _table_group_rows(new_tables)
+    # Prove a pure insertion/deletion between equal positional ends. For mixed
+    # edits retain the complete context: equal rows can be competing identities
+    # needed by the order/ambiguity proof below.
+    def exact_record(row):
+        return tuple(_table_row_cells_for_display(row)) or (row,)
+    prefix = 0
+    while prefix < min(len(old_rows), len(new_rows)) and exact_record(old_rows[prefix]) == exact_record(new_rows[prefix]):
+        prefix += 1
+    old_middle, new_middle = old_rows[prefix:], new_rows[prefix:]
+    suffix = 0
+    while suffix < min(len(old_middle), len(new_middle)) and exact_record(old_middle[-1-suffix]) == exact_record(new_middle[-1-suffix]):
+        suffix += 1
+    if suffix:
+        old_middle, new_middle = old_middle[:-suffix], new_middle[:-suffix]
+    if not old_middle or not new_middle:
+        old_rows, new_rows = old_middle, new_middle
     old_rows, new_rows = _remove_one_sided_leading_schema_rows(old_rows, new_rows)
     overwide_changes, old_rows, new_rows = _partition_overwide_generic_rows(
         old_rows,

@@ -47,6 +47,12 @@ def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False, conte
         value = without_email_addresses(value)
         # A written negative exponent keeps its sign under hyphen/minus glyph variants.
         value = re.sub(r'(?<=\d)([eE])[‐‑−](?=\d)', r'\1-', value)
+        # Quantity spacing carries no value or unit change. Keep unit spelling
+        # and case, numeric signs, and line/list boundaries intact.
+        if not re.search(r'["`]|https?://|\b(?:identifier|literal|regex|path)\b', context+' '+value, re.I):
+            value = re.sub(r'(?<=\d)[ \t]+(?=(?:GHz|MHz|kHz|Hz|mV|mA|mW|dB|ns|ps|mm|cm|V|A|W|s|m)\b)', '', value)
+        if not _LITERAL_CONTEXT.search(context+' '+value) and not re.search(r'https?://|www\.', value):
+            value = re.sub(r'(?<=[A-Za-z])[‐‑](?=[A-Za-z])', '-', value)
         if cell_wrap:
             value = re.sub(r"(?<=[A-Za-z])\s*(?:↵|\n)\s*(?=[A-Za-z])", " ", value)
         # Preserve unproven cell boundaries instead of flattening numeric lists.

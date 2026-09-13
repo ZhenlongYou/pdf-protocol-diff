@@ -1,0 +1,186 @@
+{
+  "source": "OIF CEI 5.1 PDF112-113 vs CEI05.3 PDF116-117; complete native extraction b4f8d7f",
+  "old": [
+    {
+      "page_number": 112,
+      "table_number": 1,
+      "title": "Table 2-1. Use of CEI Test Patterns",
+      "bbox": [
+        68.58,
+        291.00001,
+        533.0599933333333,
+        701.0400099999999
+      ],
+      "page_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "row_texts": [
+        "表格行: T1 | Column 1=Electrical Requirement | Column 2=“Method” | Column 3=IA | Column 4=Data | Column 5=Test Patterns | Column 6=",
+        "表格行: T1 | Column 1= | Column 2= | Column 3= | Column 4= | Column 5=Mandatory | Column 6=Recommended",
+        "表格行: T1 | Column 1=CEI Clause 4 (SxI-5) | Column 2=A | Column 3=SFI-4.2\\nOther\\nSPI-5\\nSFI-5.1\\nSFI-5.1s | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPR\\nSSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 5 (TFI-5) | Column 2=B | Column 3=TFI-5 | Column 4=Scrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 6 (CEI-6G-SR) | Column 2=B | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 7 (CEI-6G-LR) | Column 2=D | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 8 (CEI-11G-SR) | Column 2=E | Column 3=TDM-P\\nCEI-P\\nSFI5.2\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-64",
+        "表格行: T1 | Column 1=CEI Clause 9 (CEI-11G-LR/MR) | Column 2=E for 11G-\\nMR\\nC&D without\\nTx emphasis\\nfor 11G-LR | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-64"
+      ],
+      "grid_summary": "OpenCV 网格检测: 横线 9 条，竖线 7 条",
+      "ocr_status": "OCR 已执行。",
+      "context_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "is_continuation": false,
+      "content_fully_represented": true,
+      "row_alignment_reliable": false,
+      "data_rows_fully_represented": true,
+      "image_data_uri": ""
+    },
+    {
+      "page_number": 113,
+      "table_number": 1,
+      "title": "Table 2-1. Use of CEI Test Patterns",
+      "bbox": [
+        76.60000333333333,
+        90.00001000000003,
+        541.1200133333333,
+        556.98
+      ],
+      "page_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "row_texts": [
+        "表格行: T1 | Column 1=Electrical Requirement | Column 2=“Method” | Column 3=IA | Column 4=Data | Column 5=Test Patterns | Column 6=",
+        "表格行: T1 | Column 1= | Column 2= | Column 3= | Column 4= | Column 5=Mandatory | Column 6=Recommended",
+        "表格行: T1 | Column 1=CEI Clause 10 (CEI-28G-SR) | Column 2=C | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 11 (CEI-25G-LR) | Column 2=D | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 13 (CEI-28G-VSR) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for eye,\\notherwise PRBS31 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 14 (CEI-28G-MR) | Column 2=C | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 16 (CEI-56G-VSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 17 (CEI-56G-MR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 18 (CEI-56G-USR-NRZ) | Column 2=E | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ,\\notherwise SSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 19 (CEI-56G-XSR-NRZ) | Column 2=E | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ,\\notherwise SSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 20 (CEI-56G-XSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 21 (CEI-56G-LR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 22 (CEI-56G-LR-ENRZ) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For ENRZ see\\nAppendix 22.A.5 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 24 (CEI-112G-XSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 25 (CEI-112G-VSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 26 (CEI-112G-MR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 27 (CEI-112G-LR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6="
+      ],
+      "grid_summary": "OpenCV 网格检测: 横线 18 条，竖线 7 条",
+      "ocr_status": "OCR 已执行。",
+      "context_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "is_continuation": false,
+      "content_fully_represented": true,
+      "row_alignment_reliable": true,
+      "data_rows_fully_represented": true,
+      "image_data_uri": ""
+    }
+  ],
+  "new": [
+    {
+      "page_number": 116,
+      "table_number": 1,
+      "title": "Table 2-1. Use of CEI Test Patterns",
+      "bbox": [
+        69.1171,
+        290.988,
+        533.0385,
+        701.0116
+      ],
+      "page_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "row_texts": [
+        "表格行: T1 | Column 1=Electrical Requirement | Column 2=“Method” | Column 3=IA | Column 4=Data | Column 5=Test Patterns | Column 6=",
+        "表格行: T1 | Column 1= | Column 2= | Column 3= | Column 4= | Column 5=Mandatory | Column 6=Recommended",
+        "表格行: T1 | Column 1=CEI Clause 4 (SxI-5) | Column 2=A | Column 3=SFI-4.2\\nOther\\nSPI-5\\nSFI-5.1\\nSFI-5.1s | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPR\\nSSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 5 (TFI-5) | Column 2=B | Column 3=TFI-5 | Column 4=Scrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 6 (CEI-6G-SR) | Column 2=B | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 7 (CEI-6G-LR) | Column 2=D | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-16",
+        "表格行: T1 | Column 1=CEI Clause 8 (CEI-11G-SR) | Column 2=E | Column 3=TDM-P\\nCEI-P\\nSFI5.2\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-64",
+        "表格行: T1 | Column 1=CEI Clause 9 (CEI-11G-LR/MR) | Column 2=E for 11G-\\nMR\\nC&D without\\nTx emphasis\\nfor 11G-LR | Column 3=TDM-P\\nCEI-P\\nOther\\nOther | Column 4=Scrambled\\nScrambled\\nScrambled\\nPartially scrambled | Column 5=PRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR\\nPRBS31 or SSPR | Column 6=SSPS-64"
+      ],
+      "grid_summary": "OpenCV 网格检测: 横线 9 条，竖线 7 条",
+      "ocr_status": "OCR 已执行。",
+      "context_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "is_continuation": false,
+      "content_fully_represented": true,
+      "row_alignment_reliable": false,
+      "data_rows_fully_represented": true,
+      "image_data_uri": ""
+    },
+    {
+      "page_number": 117,
+      "table_number": 1,
+      "title": "Table 2-1. Use of CEI Test Patterns",
+      "bbox": [
+        77.0967,
+        89.99620000000004,
+        541.0981333333334,
+        589.9561
+      ],
+      "page_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "row_texts": [
+        "表格行: T1 | Column 1=Electrical Requirement | Column 2=“Method” | Column 3=IA | Column 4=Data | Column 5=Test Patterns | Column 6=",
+        "表格行: T1 | Column 1= | Column 2= | Column 3= | Column 4= | Column 5=Mandatory | Column 6=Recommended",
+        "表格行: T1 | Column 1=CEI Clause 10 (CEI-28G-SR) | Column 2=C | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 11 (CEI-25G-LR) | Column 2=D | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 13 (CEI-28G-VSR) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for eye,\\notherwise PRBS31 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 14 (CEI-28G-MR) | Column 2=C | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ & Tx\\nemphasis, otherwise\\nSSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 16 (CEI-56G-VSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 17 (CEI-56G-MR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 18 (CEI-56G-USR-NRZ) | Column 2=E | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ,\\notherwise SSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 19 (CEI-56G-XSR-NRZ) | Column 2=E | Column 3=Other | Column 4=Scrambled | Column 5=PRBS9 for DDJ,\\notherwise SSPR | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 20 (CEI-56G-XSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 21 (CEI-56G-LR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For PAM-4 see\\nAppendix 16.C.3 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 22 (CEI-56G-LR-ENRZ) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For ENRZ see\\nAppendix 22.A.5 | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 24 (CEI-112G-XSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 25 (CEI-112G-VSR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 26 (CEI-112G-MR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 27 (CEI-112G-LR-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6=",
+        "表格行: T1 | Column 1=CEI Clause 28 (CEI-112G-XSR+-PAM4) | Column 2=- | Column 3=Other | Column 4=Scrambled | Column 5=For 112G PAM-4 see\\nAppendix 16.C.3,\\nAppendix 25.G | Column 6="
+      ],
+      "grid_summary": "OpenCV 网格检测: 横线 19 条，竖线 7 条",
+      "ocr_status": "OCR 已执行。",
+      "context_bbox": [
+        0.0,
+        0.0,
+        612.0,
+        792.0
+      ],
+      "is_continuation": false,
+      "content_fully_represented": true,
+      "row_alignment_reliable": true,
+      "data_rows_fully_represented": true,
+      "image_data_uri": ""
+    }
+  ]
+}

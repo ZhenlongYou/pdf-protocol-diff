@@ -6,6 +6,98 @@ from protocol_pdf_diff.models import TableVisual
 
 
 class CompleteReportFollowupTests(unittest.TestCase):
+    def test_single_scalar_record_preserves_wrapped_condition_and_sign(self):
+        import json,copy
+        from pathlib import Path
+        r=json.loads((Path(__file__).parent/'fixtures/content-correspondence/scalar-physical-record.json').read_text())
+        prove=extract._scalar_physical_limit_record
+        self.assertTrue(prove(r['row'],r['expanded'],r['words'],r['header']))
+        for column,old,new in [(5,'MHz','GHz'),(3,'10','11'),(3,'10','-10'),(4,'%','mV')]:
+            changed=copy.deepcopy(r['expanded']);changed[0][column]=changed[0][column].replace(old,new)
+            self.assertFalse(prove(r['row'],changed,r['words'],r['header']))
+        self.assertFalse(prove(r['row'],r['expanded'],None,r['header']))
+        row=copy.deepcopy(r['row']);row[3]=['10','20']
+        self.assertFalse(prove(row,r['expanded'],r['words'],r['header']))
+
+    def test_local_subscript_move_keeps_unmatched_lower_words(self):
+        def w(text,x,y,size=12):
+            return dict(text=text,x0=x,x1=x+len(text)*5,top=y,bottom=y+size)
+        words=[w('f',0,0),w('b',5,4,9.6),w('untouched',30,0),w('ILmin',90,4,9.6)]
+        repair=extract._repair_body_visual_subscript_order
+        self.assertEqual('fb untouched ILmin',repair('f b untouched ILmin',words))
+        for text,observed in [('f b untouched ILmin',words[:-1]),('f b ILmin untouched',words),
+                              ('f b untouched ILmin\nf b untouched ILmin',words+[{**w,'top':w['top']+30,'bottom':w['bottom']+30} for w in words])]:
+            self.assertEqual(text,repair(text,observed))
+        self.assertEqual('C-1 value 800',repair('C -1 value 800',[w('C',0,0),w('-1',5,4,9.6),w('value',30,0),w('800',80,4,9.6)]))
+        self.assertEqual('C 1 value 800',repair('C 1 value 800',[w('C',0,0),w('1',5,0,9.6),w('value',30,0),w('800',80,4,9.6)]))
+
+    def test_closed_frame_requires_all_four_observed_edges(self):
+        edges=[dict(orientation='h',x0=100,x1=400,top=y,bottom=y) for y in (100,300)]
+        edges += [dict(orientation='v',x0=x,x1=x,top=100,bottom=300) for x in (100,400)]
+        self.assertIn((100,100,400,300),extract._closed_drawing_frames(SimpleNamespace(rects=[],edges=edges)))
+        self.assertEqual([],extract._closed_drawing_frames(SimpleNamespace(rects=[],edges=edges[:-1])))
+
+    def test_complete_repeated_header_table_only_adds_new_clause(self):
+        import json
+        from pathlib import Path
+        data=json.loads((Path(__file__).parent/'fixtures/content-correspondence/table-followup-source.json').read_text())
+        changes=reporting._table_row_changes(tuple(TableVisual(**t) for t in data['old']),tuple(TableVisual(**t) for t in data['new']))
+        self.assertEqual(1,len(changes))
+        self.assertIn('Clause 28',changes[0].item)
+        def tables(rows):
+            return (TableVisual(1,1,'Table 1 ordered priority rules',(0,0,100,100),'',rows,''),)
+        for old,new in [(['Parameter=A | Value=1','Parameter=B | Value=2'],['Parameter=B | Value=2','Parameter=A | Value=1']),
+                        (['Parameter=A | Value=1','Parameter=A | Value=2'],['Parameter=A | Value=1','Parameter=A | Value=3']),
+                        ([],['Column 1=Mandatory | Column 2=Enabled'])]:
+            self.assertTrue(reporting._table_row_changes(tables(old),tables(new)))
+        self.assertTrue(reporting._table_row_changes(tables(['Parameter=Gain | Value=1 | Note A']),
+                                                    tables(['Parameter=Gain | Value=1 | Note B'])))
+
+    def test_uncertain_table_keeps_both_source_images_in_public_report(self):
+        from pathlib import Path
+        import tempfile,json
+        from protocol_pdf_diff.models import DiffResult,DiffOptions
+        tables=[TableVisual(i,1,'',(0,0,100,100),f'data:image/png;base64,source{i}',
+                            ['Parameter=Gain | Value=1','Parameter=Loss | Value=2'],'',
+                            content_fully_represented=True,row_alignment_reliable=False,data_rows_fully_represented=True) for i in (1,2)]
+        result=DiffResult(Path('old.pdf'),Path('new.pdf'),[],[],[],[],old_table_visuals=[tables[0]],new_table_visuals=[tables[1]])
+        with tempfile.TemporaryDirectory() as directory:
+            outputs=reporting.write_reports(result,directory,DiffOptions())
+            html=outputs['html'].read_text()
+            self.assertIn('src="'+tables[0].image_data_uri+'"',html)
+            self.assertIn('src="'+tables[1].image_data_uri+'"',html)
+            data=json.loads(outputs['json'].read_text())
+            self.assertTrue(any(r['old_sources'] and r['new_sources'] for r in data['uncertain_table_correspondences']))
+
+    def test_quantity_spacing_preserves_unit_value_sign_and_literal(self):
+        from protocol_pdf_diff.content_equivalence import cosmetic_content_equal
+        self.assertTrue(cosmetic_content_equal('Below 10 GHz', 'Below 10GHz'))
+        self.assertTrue(cosmetic_content_equal('Host‐to‐Module insertion loss', 'Host-to-Module insertion loss'))
+        for old,new in [('10 mV','10 MV'),('10 GHz','10 MHz'),('-10 mV','10 mV'),
+                        ('10 GHz','11 GHz'),('10 ↵ GHz','10GHz'),('"10 GHz"','"10GHz"'),
+                        ('https://example.test/a‐b','https://example.test/a-b')]:
+            self.assertFalse(cosmetic_content_equal(old,new,cell_wrap=True))
+
+    def test_equation_label_baseline_does_not_move_following_sentence(self):
+        old = '\uf0e6 –COM \uf0f6\n----------------- (25-19)\nVEC = –20 log \uf0e71 – 10 20 \uf0f7\n10\n\uf0e8 \uf0f8\n'
+        new = '\uf0e6 –COM \uf0f6\n-----------------\nVEC = –20 log \uf0e71 – 10 20 \uf0f7 (25-19)\n10\n\uf0e8 \uf0f8\n'
+        prose = 'This allows designers to choose equalization while meeting BER specifications.'
+        self.assertEqual(([], [], []), compare._summarize_text_delta(old+prose, new+prose,20)[:3])
+        self.assertTrue(compare._summarize_text_delta(old+prose, new+prose.replace('BER','SER'),20)[2])
+
+    def test_figure_prefix_cannot_own_following_prose(self):
+        from protocol_pdf_diff.figure_filters import filter_figure_visual_snippets
+        prose = 'Channel insertion loss is an informative recommendation.'
+        drawing = 'Figure 27-2.Channel Insertion Loss Limit for 58.0 Gsym/s\n0 10 20 30 40 50 60 70 80\nFrequency (GHz)\n(27-1)\n(27-2)\n'
+        units = compare._paragraph_review_units(drawing+prose,suppressed_table_unit_keys=set())
+        self.assertIn(prose, filter_figure_visual_snippets(units))
+        mixed = drawing.replace('\n',' ')+prose
+        self.assertEqual([mixed],filter_figure_visual_snippets([mixed]))
+        old = '6 5.5 \uf02c 34 GHz \uf03c f \uf0a3 0.8 fb\n'+prose
+        removed,added,pairs,*_ = compare._summarize_text_delta(old,drawing+prose,20)
+        self.assertFalse(any(prose in value for value in removed+added))
+        self.assertFalse(any(prose in pair.old or prose in pair.new for pair in pairs))
+
     def test_publication_header_is_metadata_but_identifier_is_not(self):
         self.assertTrue(compare._publication_version_header('Implementation Agreement ABC-PHY-05.3 Common Electrical I/O'))
         self.assertFalse(compare._publication_version_header('Implementation Agreement Protocol ALPHA'))

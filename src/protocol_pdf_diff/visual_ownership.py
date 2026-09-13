@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 
 from .text_utils import compact_inline
+from .models import DocumentBlockKind
 
 
 def _tokens(text):
@@ -38,8 +39,19 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
                 page = pages.get(visual.page_number)
                 if page is None:
                     continue
-                caption_boxes = [block.bbox for block in page.blocks
-                                 if compact_inline(block.text) == compact_inline(caption)]
+                caption_boxes = []
+                for block in page.blocks:
+                    if block.kind != DocumentBlockKind.TEXT:
+                        continue
+                    if compact_inline(block.text) == compact_inline(caption):
+                        caption_boxes.append(block.bbox)
+                        continue
+                    if [t[0] for t in _tokens(block.text)] != [w[0] for w in block.word_boxes]:
+                        continue
+                    kept = [w for w in block.word_boxes if not any(_inside(w, b) for b in page.visual_noise_bboxes)]
+                    if kept and compact_inline(' '.join(w[0] for w in kept)) == compact_inline(caption):
+                        caption_boxes.append((min(w[1] for w in kept), min(w[2] for w in kept),
+                                              max(w[3] for w in kept), max(w[4] for w in kept)))
                 if len(caption_boxes) != 1:
                     continue
                 cap = caption_boxes[0]
@@ -65,6 +77,8 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
                 continue
             seen, words, incomplete = set(), [], set()
             for block in sorted(page.blocks, key=lambda b: b.reading_order):
+                if block.kind == DocumentBlockKind.TABLE:
+                    continue  # Derived table summaries are not extra native occurrences.
                 block_tokens = [t[0] for t in _tokens(block.text)]
                 word_tokens = [w[0] for w in block.word_boxes]
                 if block_tokens != word_tokens:
@@ -73,6 +87,8 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
                     words.append(('', 0., 0., 0., 0.))
                     continue  # an unmapped block is an ambiguity, not an absence
                 for word in block.word_boxes:
+                    if any(_inside(word, box) for box in page.visual_noise_bboxes):
+                        continue  # Only the extractor's proved furniture intervals.
                     if word in seen:
                         continue
                     seen.add(word)
