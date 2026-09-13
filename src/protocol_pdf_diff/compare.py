@@ -199,8 +199,11 @@ def run_diff(
         old_extraction,
         new_extraction,
     )  # 仍持有页面坐标与抽取快照散列时生成长正文截图，报告层不再事后猜位置。
+    from .visual_ownership import build_visual_owned_spans
+    owned_spans = build_visual_owned_spans(result, old_extraction, new_extraction, prose_source_visuals)
     return replace(
         result,
+        visual_owned_spans=owned_spans,
         visual_review_items=visual_review_items,
         prose_source_visuals=prose_source_visuals,
         warnings=[*result.warnings, *visual_warnings, *prose_visual_warnings],
@@ -4747,7 +4750,7 @@ def _prose_outside_displayed_formula(unit: str) -> list[str]:
     tail = re.search(r"(?i)\bwhere\b|\bNOTE\s*\d*\s*[—–:-]", unit)
     math_part = unit[:tail.start()] if tail else unit
     result = []
-    assignment = re.search(r"\b[A-Za-z][A-Za-z0-9_]*\s*=", math_part)
+    assignment = re.search(r"(?<!\w)[^\W\d]\w*\s*(?:<=|>=|=|≤|≥|<|>)", math_part)
     if assignment:
         prefix = math_part[:assignment.start()].strip()
         if (re.search(r"(?i)\b(?:shall|should|must|may|is|are|satisfy|defined|given)\b", prefix)

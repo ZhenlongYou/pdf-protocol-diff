@@ -7,6 +7,7 @@ never removes or rewrites pages, sections, warnings, or comparison findings.
 from __future__ import annotations
 
 import os
+import subprocess
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -341,7 +342,7 @@ def build_provenance(
 
     return DiffProvenance(
         package_version=__version__,
-        build_commit=os.environ.get("PROTOCOL_PDF_DIFF_BUILD_COMMIT") or None,
+        build_commit=_source_build_commit(),
         supported_profile=SUPPORTED_PROFILE,
         old_input=_input_provenance(old_extraction),
         new_input=_input_provenance(new_extraction),
@@ -692,3 +693,17 @@ def _input_provenance(extraction: ExtractionResult) -> InputProvenance:
         selected_start_page=start_page,
         selected_end_page=end_page,
     )
+
+
+def _source_build_commit():
+    """Bind source checkouts; packaged builds may supply their release identity."""
+    supplied = os.environ.get("PROTOCOL_PDF_DIFF_BUILD_COMMIT")
+    if supplied:
+        return supplied
+    root = Path(__file__).resolve().parents[2]
+    try:
+        commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+        dirty = subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--", "src", "main.py"], stderr=subprocess.DEVNULL, timeout=5)
+        return commit + ("+dirty" if dirty else "")
+    except (OSError, subprocess.SubprocessError):
+        return None

@@ -164,24 +164,10 @@ class LongPdfPerformanceTests(unittest.TestCase):
             self.assertEqual(2.0 * 12000 / 24001, exact_match.ratio("a" * 12000, "a" * 12000 + "b"))
             self.assertEqual(1.0, exact_match.ratio("a" * 12000, "a" * 12000))
 
-    def test_coordinate_cleanup_preserves_frozen_results_without_unused_scan(self):
-        from protocol_pdf_diff import figure_filters as filters
-        # The historical character-bag oracle encoded the escaped deletion bug.
-        # Keep a hand-specified semantic contract and the independent cache test.
-        values = ["", "Time Undershoot VMA 1 All receivers shall support this mode.",
-                  "2. Capture the specified waveform.", "Figure 3. Alpha Beta Gamma Delta"]
-        for sentence in (values[2], "The receiver shall use alpha mode."):
-            self.assertEqual(sentence, filters._strip_one_coordinate_figure_prefix(
-                sentence, sentence, allow_interleaved_prefix=False))
-        self.assertEqual("", filters._strip_one_coordinate_figure_prefix(
-            "Alpha Beta Gamma Delta", "Alpha Beta Gamma Delta", allow_interleaved_prefix=False))
-        # Visible and audit views reuse only immutable string results, inside
-        # the same comparison. List-token outputs are deliberately not cached.
-        with comparison_scope(), patch.object(filters, "_figure_text_tokens", wraps=filters._figure_text_tokens) as tokenize:
-            first = filters._strip_one_coordinate_figure_prefix(values[1], values[3], allow_interleaved_prefix=True)
-            calls = tokenize.call_count
-            self.assertEqual(first, filters._strip_one_coordinate_figure_prefix(values[1], values[3], allow_interleaved_prefix=True))
-            self.assertEqual(calls, tokenize.call_count)
+    def test_coordinate_cleanup_without_ownership_is_linear_noop(self):
+        from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
+        value = "Alpha Beta " * 10000
+        self.assertEqual(value.strip(), strip_coordinate_owned_visual_fragment(value, ("Alpha Beta",)))
 
     def test_fallback_preserves_matches_and_reuses_filtered_bodies(self):
         from protocol_pdf_diff.models import Section, DiffOptions

@@ -31,7 +31,7 @@ def main():
     for name, source, transform in (
         ('LIMIT', 'reporting', lambda text: text.replace('if any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 'if False and any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 1)),
         ('FORMULA', 'compare', lambda text: text.replace('            result.append(prefix)\n', '            pass  # injected loss of normative introduction\n', 1)),
-        ('SIGN', 'figure_filters', lambda text: text.replace('remaining = remaining.strip()', 'remaining = remaining.strip(" –—-")', 1)),
+        ('SIGN', 'visual_ownership', lambda text: text.replace("return ''.join(kept).strip()", "return ''.join(kept).strip(' –—-')", 1)),
     ):
         current = (ROOT / f'src/protocol_pdf_diff/{source}.py').read_text()
         changed = transform(current)

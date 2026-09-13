@@ -250,6 +250,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 change,
                 figure_visual_sides=(True, True),
                 figure_visual_texts=((old_labels,), (new_labels,)),
+                visual_owned_spans=({old_labels: [(0, len(old_labels))]}, {new_labels: [(0, len(new_labels))]}),
             )
         )
 
@@ -311,7 +312,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         ):
             with self.subTest(labels=labels):
                 self.assertEqual(
-                    prose,
+                    f"{labels} {prose}",
                     strip_coordinate_owned_visual_fragment(
                         f"{labels} {prose}",
                         (labels,),
@@ -370,6 +371,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             change,
             figure_visual_sides=(False, True),
             figure_visual_texts=((), (labels,)),
+            visual_owned_spans=({}, {labels: [(0, len(labels))]}),
         )
 
         self.assertIsNotNone(cleaned)
@@ -400,6 +402,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             change,
             figure_visual_sides=(False, True),
             figure_visual_texts=((), (labels,)),
+            visual_owned_spans=({}, {f"{labels} {prose}": [(0, len(labels))]}),
         )
 
         self.assertIsNotNone(cleaned)
@@ -445,6 +448,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             [new_section],
             [change],
             [],
+            visual_owned_spans={"new:new-method": {f"{labels} {prose}": [(0, len(labels))]}},
             old_total_pages=1,
             new_total_pages=1,
             prose_source_visuals=(
@@ -468,7 +472,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             payload = json.loads(paths["json"].read_text(encoding="utf-8"))
 
         self.assertEqual(
-            prose,
+            f"{labels} {prose}",
             strip_coordinate_owned_visual_fragment(
                 f"{labels} {prose}",
                 (source_text,),
@@ -523,7 +527,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "added", None, section, 0.0, added_snippets=[repeated_labels]
         )
 
-        self.assertIsNone(
+        self.assertIsNotNone(
             _reader_section_change(
                 change,
                 figure_visual_sides=(False, True),
@@ -696,7 +700,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
         evidence = TableChange("deleted", (table,), (), 0.0, True, ())
 
-        self.assertIsNone(_reader_section_change(change, [evidence]))
+        self.assertIsNone(_reader_section_change(change, [evidence], visual_owned_spans=({fragment: [(0, len(source))]}, {})))
 
     def test_table_and_figure_captions_joined_by_reading_order_are_not_prose(self) -> None:
         """A visible Table number can expose the following coordinate Figure run."""
@@ -729,6 +733,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
                 [table_evidence],
                 figure_visual_sides=(True, True),
                 figure_visual_texts=((figure_source,), (figure_source,)),
+                visual_owned_spans=({old_fragment: [(0, len(old_fragment))]}, {new_fragment: [(0, len(new_fragment))]}),
             )
         )
 
@@ -749,6 +754,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         )
         result = DiffResult(
             Path("old.pdf"), Path("new.pdf"), [], [child], [change], [],
+            visual_owned_spans={"new:child": {fragment: [(0, len(fragment))]}},
             old_total_pages=1, new_total_pages=1,
             prose_source_visuals=(
                 ProseSourceVisualGroup(
@@ -3708,7 +3714,7 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             "modified", (old_table,), (new_table,), 0.8, False, ()
         )
 
-        self.assertIsNone(_reader_section_change(change, [evidence]))
+        self.assertIsNone(_reader_section_change(change, [evidence], visual_owned_spans=({old_header: [(0, len(old_header))]}, {new_header: [(0, len(new_header))]})))
 
     def test_table_wall_filter_preserves_readable_normative_suffixes(self) -> None:
         """A table-heavy snippet may be shortened, but its changed prose tail must survive."""

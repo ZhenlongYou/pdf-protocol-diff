@@ -4089,7 +4089,8 @@ def _table_fragment_inside_figure_frame(page, bbox, table_lines, words, *, title
     not short axis labels. Require the four observed frame edges and a nearby
     Figure caption; table captions and explicit data schemas always win.
     """
-    if (bbox is None or len(table_lines) != 1 or _looks_like_table_caption(title)
+    if (bbox is None or not _finite_positive_layout_box(bbox[0], bbox[2], bbox[1], bbox[3])
+            or len(table_lines) != 1 or _looks_like_table_caption(title)
             or _table_rows_have_explicit_technical_schema(table_lines)):
         return False
     values = [f[1].strip() for cell in split_table_cells(table_lines[0])

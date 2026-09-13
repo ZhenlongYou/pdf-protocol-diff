@@ -32,6 +32,9 @@ def draw(path, maximum):
 
 def run(case, root):
     kind = case['kind']
+    if kind == 'owned':
+        from protocol_pdf_diff.visual_ownership import apply_owned_spans
+        return apply_owned_spans(case['value'], case['spans'])
     if kind == 'limit':
         return reporting._table_row_value_display(case['value'])
     if kind == 'formula':

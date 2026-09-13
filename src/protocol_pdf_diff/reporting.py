@@ -414,6 +414,8 @@ def write_reports(
                 new_figure_sources,
             ),
             figure_visual_pages=(old_figure_texts_by_page, new_figure_texts_by_page),
+            visual_owned_spans=tuple(result.visual_owned_spans.get(side + ':' + section.section_id, {}) if section else {}
+                                     for side, section in (('old', change.old_section), ('new', change.new_section))),
         )
         if reader_change is not None:
             reader_changes.append(reader_change)
@@ -498,6 +500,7 @@ def write_reports(
     sections_payload = {
         "comparison_focus": "substantive_content",
         "uncertain_table_correspondences": uncertainty_rows,
+        "visual_owned_spans": result.visual_owned_spans,
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
         "similarity_review_changes": [_change_to_dict(c) for c in similarity_review_changes],
@@ -4535,6 +4538,8 @@ def _remove_one_sided_leading_schema_rows(
         return old_rows, new_rows
     names = [value for _column, _label, _normalized, value in first_entries]
     if remove_count == 2:
+        if len(names) != len(second_values):
+            return old_rows, new_rows
         names = [f"{name} {unit}".strip() for name, unit in zip(names, second_values)]
     cleaned = []
     for row in rows[remove_count:]:
@@ -9842,9 +9847,37 @@ def _reader_section_change(
     figure_visual_sides: tuple[bool, bool] = (False, False),
     figure_visual_texts: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
     figure_visual_pages: tuple[dict[int, list[str]], dict[int, list[str]]] | None = None,
+    visual_owned_spans: tuple[dict, dict] | None = None,
 ) -> SectionChange | None:
     """Return reader-only classification without mutating raw audit facts."""
 
+    if visual_owned_spans:
+        from .visual_ownership import apply_owned_spans
+        def owned(value, side):
+            return apply_owned_spans(value, visual_owned_spans[side].get(compact_inline(value), ()))
+        def clean_lists(removed_values, added_values, replaced_values):
+            removed = [cleaned for value in removed_values if (cleaned := owned(value, 0))]
+            added = [cleaned for value in added_values if (cleaned := owned(value, 1))]
+            pairs = []
+            for pair in replaced_values:
+                old, new = owned(pair.old, 0), owned(pair.new, 1)
+                if old and new:
+                    if old != new:
+                        pairs.append(SnippetPair(old, new))
+                elif old:
+                    removed.append(old)
+                elif new:
+                    added.append(new)
+            return removed, added, pairs
+        removed, added, pairs = clean_lists(change.removed_snippets, change.added_snippets, change.replaced_snippets)
+        audit_removed, audit_added, audit_pairs = clean_lists(
+            change.audit_removed_snippets if change.audit_removed_snippets is not None else change.removed_snippets,
+            change.audit_added_snippets if change.audit_added_snippets is not None else change.added_snippets,
+            change.audit_replaced_snippets if change.audit_replaced_snippets is not None else change.replaced_snippets)
+        change = replace(change, removed_snippets=removed, added_snippets=added, replaced_snippets=pairs,
+                         audit_removed_snippets=audit_removed if change.audit_removed_snippets is not None else None,
+                         audit_added_snippets=audit_added if change.audit_added_snippets is not None else None,
+                         audit_replaced_snippets=audit_pairs if change.audit_replaced_snippets is not None else None)
     # 用户排除了全文邮箱；仅变地址的片段消失，混合句仍保留其要求、数值和条件。
     def email_free_values(values):
         return [cleaned for value in values if (cleaned := neutral_email_text(value))]

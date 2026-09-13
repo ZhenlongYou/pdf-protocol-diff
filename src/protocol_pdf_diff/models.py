@@ -575,6 +575,7 @@ class DiffResult:
     old_total_pages_known: bool = False  # 追加在历史位置参数之后；True仅表示抽取入口明确读到源PDF总页数。
     new_total_pages_known: bool = False  # 测试或局部页面推断出的数值不能授权全篇消噪。
     prose_source_visuals: list[ProseSourceVisualGroup] = field(default_factory=list)  # 长正文变化的旧/新原文区域截图；仅用于读者核对，不改写语义事实。
+    visual_owned_spans: dict[str, dict[str, list[tuple[int, int]]]] = field(default_factory=dict, repr=False)
 
 
 def _normalize_key(value: str) -> str:

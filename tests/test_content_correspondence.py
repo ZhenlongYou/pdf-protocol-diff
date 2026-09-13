@@ -131,5 +131,19 @@ class CorrespondenceSafetyTests(unittest.TestCase):
         self.assertIn('Min=1', old)
         self.assertIn('Max=1', new)
 
+    def test_unicode_and_inequality_formula_preserves_modality(self):
+        for relation in ('x <=', 'x ≥', 'ΔV ='):
+            for modal in ('shall', 'should'):
+                value = f'The receiver {modal} satisfy {relation} a + b (1-1)'
+                units = compare._paragraph_review_units(value, suppressed_table_unit_keys=set())
+                self.assertIn(f'receiver {modal} satisfy', ' '.join(units))
+
+    def test_mismatched_unit_columns_are_not_truncated(self):
+        rows = ['Column 1=Frequency | Column 2=Minimum | Column 3=Maximum',
+                'Column 1=(GHz) | Column 2=(dB) | Column 3=(dB) | Column 4=(RMS)',
+                'Column 1=1 | Column 2=2 | Column 3=3']
+        old, new = reporting._remove_one_sided_leading_schema_rows([], rows)
+        self.assertEqual(rows, new)
+
 if __name__ == '__main__':
     unittest.main()

@@ -3,12 +3,18 @@
   "cases": [
     {
       "id": "negative-boundary",
-      "kind": "fragment",
+      "kind": "owned",
       "value": "Label Alpha Beta – 10.75 dB",
       "sources": [
         "Label Alpha Beta"
       ],
-      "equals": "– 10.75 dB"
+      "equals": "– 10.75 dB",
+      "spans": [
+        [
+          0,
+          16
+        ]
+      ]
     }
   ]
 }

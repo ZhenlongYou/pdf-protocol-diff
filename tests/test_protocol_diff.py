@@ -1393,7 +1393,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("reliable", payload["assessment"]["state"])
         provenance = payload["provenance"]
         self.assertEqual(__version__, provenance["package_version"])
-        self.assertIsNone(provenance["build_commit"])
+        self.assertTrue(provenance["build_commit"] is None or len(provenance["build_commit"]) >= 40)
         self.assertIn("稳定编号章节", provenance["supported_profile"])
         self.assertEqual(hashlib.sha256(old_bytes).hexdigest(), provenance["inputs"]["old"]["sha256"])
         self.assertEqual(hashlib.sha256(new_bytes).hexdigest(), provenance["inputs"]["new"]["sha256"])
