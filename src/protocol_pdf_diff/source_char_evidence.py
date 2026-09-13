@@ -51,6 +51,11 @@ def inside(char, box):
 
 
 def char_owned_candidate(value, section, pages, boxes):
+    # A proof requires a source frame in this section. With no frames the
+    # exhaustive scan can only return None; avoid rereading unrelated pages.
+    if not any(section.start_page <= page <= section.end_page and items
+               for page, items in boxes.items()):
+        return None
     value = compact_inline(value)
     if has_unproven_private_use(value):
         return None

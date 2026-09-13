@@ -333,6 +333,8 @@ def _extract_pdf_text_with_pdfplumber(
                 header_boxes=header_boxes_by_page.get(index, ()),
                 document_footer_boxes=footer_evidence_by_page.get(index, ((), (), ()))[0],
             )
+            from .physical_native_evidence import rebind_native_table_rows
+            page_visuals = rebind_native_table_rows(page_visuals, page)
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
             page_formulas, formula_warnings = extract_formula_visuals(

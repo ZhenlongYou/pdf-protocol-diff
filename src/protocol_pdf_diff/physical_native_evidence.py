@@ -75,6 +75,20 @@ def capture_native_row(row, page):
     return candidate if valid_native_row(candidate) else row
 
 
+def rebind_native_table_rows(tables, source_page):
+    """Use the same original TextMap as PageText.physical_native_text.
+
+    Table extraction may use a filtered page. Its glyph offsets and inter-cell
+    reading order cannot be used against the original page's text stream.
+    Failed rebinding leaves the physical cells intact with no native authority.
+    """
+    from dataclasses import replace
+    return [replace(table, physical_rows=tuple(
+        capture_native_row(replace(row, native_chars=()), source_page)
+        for row in table.physical_rows)) if table.physical_rows else table
+        for table in tables]
+
+
 def _occurrence_owners(value, section, pages, rows):
     needle = compact_inline(value)
     if not needle or re.search(r'(?i)\b(?:shall|should|must|required|prohibited)\b', needle):

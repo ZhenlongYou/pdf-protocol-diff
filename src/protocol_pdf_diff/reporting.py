@@ -434,6 +434,10 @@ def write_reports(
     reader_changes = [restore_change_typography(
         c, result.old_superscript_receipts, result.new_superscript_receipts
     ) for c in reader_changes]
+    from .bullet_context_review import partial_bullet_context_review
+    raw_by_identity = {_section_change_reader_identity(c): c for c in result.changes}
+    reader_changes = [partial_bullet_context_review(c, raw_by_identity.get(
+        _section_change_reader_identity(c), c)) for c in reader_changes]
     # This is a reader-selected display threshold, not semantic equality.
     similarity_review_changes = [c for c in reader_changes if _displayed_similarity_one(c)]
     similarity_review_tables = [c for c in reader_table_changes if _displayed_similarity_one(c)]
@@ -623,6 +627,9 @@ def write_reports(
                 "removed_snippets",
                 "replaced_snippets",
                 "omitted_snippet_count",
+                "context_review_records",
+                "display_added_snippets",
+                "display_replaced_snippets",
             ],
         )
         writer.writeheader()
@@ -642,6 +649,8 @@ def write_reports(
                 "old_value",
                 "new_value",
                 "row_change_type",
+                "row_role",
+                "source_receipts",
             ],
         )
         writer.writeheader()
@@ -764,6 +773,7 @@ def _render_markdown(
         f"| 视觉漏检核对项 | {len(result.visual_review_items)} |",
         f"| 变化表格 | {len(material_table_changes)} |",
         f"| 表格行变化 | {table_row_change_count} |",
+        f"| 表说明变化 | {sum(r.row_role == 'annotation' for c in table_changes for r in c.row_changes)} |",
         f"| 表格复核项 | {table_review_count} |",
         "",
     ]
@@ -924,10 +934,13 @@ def _append_markdown_changes(
                 if glyph_note := _unverified_pua_mapping_note(pair.old, pair.new):
                     lines.append(f"    说明: {glyph_note}")
         if change.review_replaced_snippets:
-            lines.append("- 结构顺延复核（不计入核心差异，保留原文供核对）:")
+            lines.append("- 上下文归属待核实（不表示适用条件相同）:" if change.context_review_records else "- 结构顺延复核（不计入核心差异，保留原文供核对）:")
             for pair in change.review_replaced_snippets:
                 lines.append(f"  - 旧: {_reader_snippet_text(pair.old)}")
                 lines.append(f"    新: {_reader_snippet_text(pair.new)}")
+        if change.context_review_records:
+            lines.append("- 上下文来源与原始分段审计（未证明适用范围相同）:")
+            lines.extend(["```json", json.dumps(change.context_review_records, ensure_ascii=False, indent=2), "```"])
         if change.added_snippets:
             lines.append("- 新版待核实原文:" if change.change_type == "review" else "- 新增片段:")
             for snippet in _reader_single_list_groups(change.added_snippets):
@@ -1559,6 +1572,7 @@ def _render_html(
         <div class="metric"><strong>{len(result.visual_review_items)}</strong><span>视觉漏检核对</span></div>
         <div class="metric"><strong>{len(material_table_changes)}</strong><span>变化表格</span></div>
         <div class="metric"><strong>{table_row_change_count}</strong><span>表格行变化</span></div>
+        <div class="metric"><strong>{sum(r.row_role == 'annotation' for c in table_changes for r in c.row_changes)}</strong><span>表说明变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
       <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。文字明细默认折叠，相似度显示为 1.000 的条目收在报告末尾。</p>
@@ -1619,7 +1633,7 @@ def _render_change_html(
             f'（{_escape(_match_basis_explanation(change.match_basis))}）</div>'
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
-    review_pairs = _render_review_pairs_html(change.review_replaced_snippets)
+    review_pairs = _render_review_pairs_html(change.review_replaced_snippets, context_scope=bool(change.context_review_records))
     neutral = change.change_type == "review"
     if neutral:
         pairs = "\n".join(_render_pair_html(pair.old, pair.new, neutral=True) for pair in change.replaced_snippets)
@@ -1629,6 +1643,15 @@ def _render_change_html(
         match_basis_html += f'<div class="match-basis">{_escape(change.review_reason)}</div>'
     omitted = _render_omitted_html(change.omitted_snippet_count)
     text_body = (pairs or "") + review_pairs + added + removed + omitted
+    if change.context_review_records and prose_source_visual is not None:
+        # The original segmentation highlights are no longer factual deltas.
+        # Show actual unannotated pixels; never relabel a colored image as raw.
+        def context_raw(visuals):
+            return tuple(replace(v, image_data_uri=v.raw_image_data_uri,
+                                 highlight_region_count=0) for v in visuals if v.raw_image_data_uri)
+        prose_source_visual = replace(prose_source_visual, change_type="review",
+                                      old_visuals=context_raw(prose_source_visual.old_visuals),
+                                      new_visuals=context_raw(prose_source_visual.new_visuals))
     source_visual_html = (
         _render_prose_source_visual_group(prose_source_visual, prefix=f"change-{index}-source")
         if prose_source_visual is not None
@@ -1639,7 +1662,12 @@ def _render_change_html(
         '<details class="prose-text-details"><summary>展开文字识别明细</summary>'
         + (focus or text_body) + '</details>' if text_body or focus else ""
     )
-    body = (source_visual_html or '<p class="prose-source-empty">原页截图暂不可用；可展开文字明细核对。</p>') + text_detail
+    context_proof_html = (
+        '<details><summary>查看上下文来源与原始分段审计（归属待核实）</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'
+        + _escape(json.dumps(change.context_review_records, ensure_ascii=False, indent=2)) + '</pre></details>'
+        if change.context_review_records else ''
+    )
+    body = (source_visual_html or '<p class="prose-source-empty">原页截图暂不可用；可展开文字明细核对。</p>') + text_detail + context_proof_html
     if not body:
         body = f'<p class="snippet">{_escape(_empty_change_message(change))}</p>'
     return f"""
@@ -1896,6 +1924,8 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
         if _table_group_is_isolated_one_cell_image_fragment(group):
             continue  # 图中孤立短标签即使被网格检测框住，也没有足够证据宣称新增/删除表格。
         row_change_list = _table_row_changes(group.old_tables, group.new_tables)
+        from .table_annotations import classify_annotations
+        row_change_list = classify_annotations(row_change_list, group.old_tables, group.new_tables, _make_table_row_change)
         unreliable_multirow_alignment = _table_group_has_unreliable_multirow_alignment(group)
         alignment_review_is_reader_evidence = bool(
             unreliable_multirow_alignment
@@ -2065,7 +2095,7 @@ def _material_table_row_changes(change: TableChange) -> tuple[TableRowChange, ..
     return tuple(
         row
         for row in change.row_changes
-        if row.change_type != "需人工复核"
+        if row.change_type != "需人工复核" and row.row_role != "annotation"
     )
 
 
@@ -8520,6 +8550,9 @@ def _render_table_nav_item(index: int, change: TableChange) -> str:
     material_count = len(_material_table_row_changes(change))
     review_count = len(_table_review_rows(change))
     detail_parts = []
+    annotation_count = sum(r.row_role == "annotation" for r in change.row_changes)
+    if annotation_count:
+        detail_parts.append(f"{annotation_count} 条表说明")
     if material_count:
         detail_parts.append(f"{material_count} 行")
     if review_count:
@@ -8582,7 +8615,7 @@ def _change_summary(change: SectionChange) -> str:
     if change.replaced_snippets:
         parts.append(f"{len(change.replaced_snippets)} 处替换")
     if change.review_replaced_snippets:
-        parts.append(f"{len(change.review_replaced_snippets)} 处结构顺延复核")
+        parts.append(f"{len(change.review_replaced_snippets)} 处" + ("上下文归属待核实" if change.context_review_records else "结构顺延复核"))
     if change.added_snippets:
         label = "段新版待核实原文" if change.change_type == "review" else "段新增"
         parts.append(f"{len(_reader_single_list_groups(change.added_snippets))} {label}")
@@ -8691,13 +8724,13 @@ def _render_pair_html(old_text: str, new_text: str, *, neutral: bool = False) ->
     """
 
 
-def _render_review_pairs_html(pairs: list[SnippetPair]) -> str:
+def _render_review_pairs_html(pairs: list[SnippetPair], *, context_scope: bool = False) -> str:
     """Render ambiguous structural renumbering without red/green change emphasis."""
 
     if not pairs:
         return ""
     rendered: list[str] = [
-        '<div class="match-basis">结构顺延复核（不计入核心技术差异；旧、新原文保留供核对）</div>'
+        ('<div class="match-basis">上下文归属待核实（不表示文字已一致；双侧原文及邻近项目保留）</div>' if context_scope else '<div class="match-basis">结构顺延复核（不计入核心技术差异；旧、新原文保留供核对）</div>')
     ]
     for pair in pairs:
         old_html = _render_collapsible_snippet_html(pair.old, _escape(pair.old))
@@ -13013,10 +13046,13 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
                     change.match_basis,
                     change.match_basis,
                 ),
-                "summary": "；".join(summary_parts),
+                "summary": _change_summary(change) if change.context_review_records else "；".join(summary_parts),
                 "added_snippets": "\n".join(audit_added),
                 "removed_snippets": "\n".join(audit_removed),
                 "replaced_snippets": "\n".join(replaced),
+                "context_review_records": json.dumps(change.context_review_records, ensure_ascii=False),
+                "display_added_snippets": "\n".join(change.added_snippets),
+                "display_replaced_snippets": json.dumps([{"old": p.old, "new": p.new} for p in change.replaced_snippets], ensure_ascii=False),
                 "omitted_snippet_count": str(change.omitted_snippet_count),
             }
         )
@@ -13044,6 +13080,8 @@ def _rows_for_table_csv(changes: list[TableChange]) -> list[dict[str, str]]:
                     "old_value": row_change.old_value,
                     "new_value": row_change.new_value,
                     "row_change_type": row_change.change_type,
+                    "row_role": row_change.row_role,
+                    "source_receipts": json.dumps(row_change.source_receipts, ensure_ascii=False),
                 }
             )
     return rows
@@ -13513,6 +13551,8 @@ def _change_to_dict(
         "replaced_snippets": [
             {"old": pair.old, "new": pair.new} for pair in audit_replaced
         ],
+        "context_review_records": list(visible.context_review_records),
+        "review_replaced_snippets": [{"old": p.old, "new": p.new} for p in visible.review_replaced_snippets],
         "display_added_snippets": list(visible.added_snippets),
         "display_removed_snippets": list(visible.removed_snippets),
         "display_replaced_snippets": [
@@ -13572,6 +13612,7 @@ def _table_change_to_dict(change: TableChange) -> dict[str, object]:
         ),
         "caption_changed": change.caption_changed,
         "row_change_count": len(_material_table_row_changes(change)),
+        "annotation_change_count": sum(r.row_role == "annotation" for r in change.row_changes),
         "review_count": len(_table_review_rows(change)),
         "row_changes": [
             {
@@ -13579,6 +13620,8 @@ def _table_change_to_dict(change: TableChange) -> dict[str, object]:
                 "old_value": row.old_value,
                 "new_value": row.new_value,
                 "change_type": row.change_type,
+                "row_role": row.row_role,
+                "source_receipts": list(row.source_receipts),
             }
             for row in change.row_changes
         ],

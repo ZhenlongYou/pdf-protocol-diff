@@ -75,5 +75,28 @@ class NativeOwnershipTests(unittest.TestCase):
   self.new=replace(self.new,image_data_uri='');self.assertTrue(self.candidates());self.assertFalse(authorized_spans(self.candidates(),'old','oldsec',self.receipts()))
  def test_changed_cell_order_cannot_reuse_native_receipt(self):
   row=self.old.physical_rows[0];self.assertFalse(n.valid_native_row(replace(row,cells=(*row.cells[:2],'0\n-1\n0.02',row.cells[3]))))
+ def test_filtered_offsets_rebind_to_original_page_stream(self):
+  prefix='Printed page 123 '
+  offset=len(''.join(prefix.split()))
+  original=tuple((c[0]+offset,*c[1:6],c[6]+offset,c[7]) for row in self.old.physical_rows for c in row.native_chars)
+  page=NS(_physical_native_evidence=(prefix+self.ox.pages[0].physical_native_text,original))
+  self.ox.pages[0].physical_native_text=page._physical_native_evidence[0]
+  self.assertFalse(self.candidates())
+  rebound=n.rebind_native_table_rows([self.old],page)[0]
+  self.assertEqual(self.old.physical_rows[0].cells,rebound.physical_rows[0].cells)
+  self.old=rebound
+  self.assertTrue(self.candidates())
+ def test_failed_rebinding_discards_stale_authority_keeps_cells(self):
+  rebound=n.rebind_native_table_rows([self.old],NS(_physical_native_evidence=(None,())))[0]
+  self.assertEqual([r.cells for r in self.old.physical_rows],[r.cells for r in rebound.physical_rows])
+  self.assertTrue(all(not r.native_chars for r in rebound.physical_rows))
+  self.old=rebound
+  self.assertFalse(self.candidates())
+ def test_rebinding_changed_native_value_cannot_keep_old_proof(self):
+  chars=[c for row in self.old.physical_rows for c in row.native_chars]
+  index=next(i for i,c in enumerate(chars) if c[1]=='2')
+  chars[index]=(chars[index][0],'3',*chars[index][2:])
+  rebound=n.rebind_native_table_rows([self.old],NS(_physical_native_evidence=('changed',tuple(chars))))[0]
+  self.assertFalse(rebound.physical_rows[0].native_chars)
 
 if __name__=='__main__':unittest.main()

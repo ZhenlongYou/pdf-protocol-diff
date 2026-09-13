@@ -330,6 +330,8 @@ class TableRowChange:
     old_value: str  # 旧表中与该项目对应的符号、数值和单位摘要。
     new_value: str  # 新表中与该项目对应的符号、数值和单位摘要。
     change_type: str  # 用户可读分类，例如“实质变化”“新表新增行”。
+    row_role: str = "data"  # Geometry-proven annotation remains a substantive finding.
+    source_receipts: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -505,6 +507,7 @@ class SectionChange:
         repr=False,
     )  # 读者层中性复核证据；不计入核心差异，JSON/CSV 原始审计仍使用 audit_* 字段。
     review_reason: str = ""
+    context_review_records: list[dict[str, object]] = field(default_factory=list, compare=False, repr=False)
 
     @property
     def role(self) -> str:

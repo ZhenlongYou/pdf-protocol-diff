@@ -19,6 +19,18 @@
           "size_bytes": 43864
         },
         {
+          "id": "SRC-BULLET_BOUNDARY_EVIDENCE",
+          "path": "src/protocol_pdf_diff/bullet_boundary_evidence.py",
+          "sha256": "2f373546ee348857faa3f54826f73226f672bdb016f53d05b0ee320018a826c5",
+          "size_bytes": 2987
+        },
+        {
+          "id": "SRC-BULLET_CONTEXT_REVIEW",
+          "path": "src/protocol_pdf_diff/bullet_context_review.py",
+          "sha256": "21c9ee9cc94bc2e3318d1b39deea7dc1eadcf9c14548e83d2b82b7a0fda88d9d",
+          "size_bytes": 4593
+        },
+        {
           "id": "SRC-CATALOG_EVIDENCE",
           "path": "src/protocol_pdf_diff/catalog_evidence.py",
           "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
@@ -117,8 +129,8 @@
         {
           "id": "SRC-MODELS",
           "path": "src/protocol_pdf_diff/models.py",
-          "sha256": "f6bb38a626075eb132447006e6d86997a8cfad9eda7252b3631ca810d5f2eb7f",
-          "size_bytes": 29494
+          "sha256": "11f117efec557a08fdd02b9423975605a09396dbb300a9160f017882821d7814",
+          "size_bytes": 29747
         },
         {
           "id": "SRC-MONOTONIC_ALIGNMENT",
@@ -147,14 +159,14 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "094d8c8bcc8323a081dd13b54d5f5d408b134242499b5c825b679f934d34819c",
-          "size_bytes": 376979
+          "sha256": "d6f53510570e275a3669ebc38a2aadef59a171094872f4c0d477551dd0830c4c",
+          "size_bytes": 377126
         },
         {
           "id": "SRC-PHYSICAL_NATIVE_EVIDENCE",
           "path": "src/protocol_pdf_diff/physical_native_evidence.py",
-          "sha256": "9da1778888e7883b668a40be88561f3ef16660eed8daf3ba8932363be5602eb7",
-          "size_bytes": 7951
+          "sha256": "deda5c27fabe77c9a84cae757418145e33902c41f4fbdd76ef28193c615d9930",
+          "size_bytes": 8576
         },
         {
           "id": "SRC-PHYSICAL_TABLE_ROWS",
@@ -189,8 +201,8 @@
         {
           "id": "SRC-REPORTING",
           "path": "src/protocol_pdf_diff/reporting.py",
-          "sha256": "c5cab0c6c5203c587dc2b2807701ab86503dfd9a210ed59e35e3a686810a820f",
-          "size_bytes": 540639
+          "sha256": "a05a77ca18b007027707817854fc718d2379bb15bfc4b9e4bd157442220245a7",
+          "size_bytes": 544468
         },
         {
           "id": "SRC-SAMPLE_DATA",
@@ -213,8 +225,8 @@
         {
           "id": "SRC-SOURCE_CHAR_EVIDENCE",
           "path": "src/protocol_pdf_diff/source_char_evidence.py",
-          "sha256": "20ef9f2088b4f5ccc1a41f5eb0367861f86ac355afd2ffd2ac35e26989e35f34",
-          "size_bytes": 6842
+          "sha256": "55aa6af8c57f2a64dbc58d633fb100b52bbcdc63006c886b52a20d0e0e00f2f3",
+          "size_bytes": 7135
         },
         {
           "id": "SRC-SOURCE_REGIONS",
@@ -227,6 +239,12 @@
           "path": "src/protocol_pdf_diff/source_typography.py",
           "sha256": "3ae741f7b86247842873b19efa0afb72fb26c804e5e1b02114dab845086a3a83",
           "size_bytes": 6298
+        },
+        {
+          "id": "SRC-TABLE_ANNOTATIONS",
+          "path": "src/protocol_pdf_diff/table_annotations.py",
+          "sha256": "5711f7a20afea5ebee77a2b78c2493e2916c7b81b3ad877d3c47a7f1f964b4f2",
+          "size_bytes": 5952
         },
         {
           "id": "SRC-TABLE_CODEC",
@@ -381,6 +399,8 @@
           "production_source_ids": [
             "SRC-__INIT__",
             "SRC-ACCURACY_EVALUATION",
+            "SRC-BULLET_BOUNDARY_EVIDENCE",
+            "SRC-BULLET_CONTEXT_REVIEW",
             "SRC-CATALOG_EVIDENCE",
             "SRC-COMPARE",
             "SRC-COMPARISON_JOB",
@@ -416,6 +436,7 @@
             "SRC-SOURCE_CHAR_EVIDENCE",
             "SRC-SOURCE_REGIONS",
             "SRC-SOURCE_TYPOGRAPHY",
+            "SRC-TABLE_ANNOTATIONS",
             "SRC-TABLE_CODEC",
             "SRC-TEXT_UTILS",
             "SRC-UI_SHARED",
@@ -434,8 +455,8 @@
         {
           "id": "MUT-LIMIT",
           "path": "work/content-correspondence-gate/limit.py",
-          "sha256": "2f6e321591f388bc5dba1f350a139f993b3647ee56ccf73afd0dd5c37fe2b3f0",
-          "size_bytes": 540649,
+          "sha256": "590d0234c78e86b4381b96f77756263ebc370bce00f04f773f90166c7de784da",
+          "size_bytes": 544478,
           "target_source_id": "SRC-REPORTING"
         },
         {
@@ -469,22 +490,22 @@
         {
           "id": "MUT-UNITS",
           "path": "work/content-correspondence-gate/units.py",
-          "sha256": "93a40e3a061a5a714f2bc52d5eb61e4972af84ca2f75222c32d9028dec677686",
-          "size_bytes": 540649,
+          "sha256": "74f23f4d01aa065cd02fdb3190dea3e7c8572257bb648957845b7e4140320f77",
+          "size_bytes": 544478,
           "target_source_id": "SRC-REPORTING"
         },
         {
           "id": "MUT-HEADER",
           "path": "work/content-correspondence-gate/header.py",
-          "sha256": "f1588c8dd5c608d01972cb54adbf8f3049053133625bf992c5eb8eefcffecabd",
-          "size_bytes": 376987,
+          "sha256": "a4095acbfd6c4f7c5333c76d85a354ce555ea2f2b278f0aebd485fcd58855ba5",
+          "size_bytes": 377134,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
           "id": "MUT-GROUP",
           "path": "work/content-correspondence-gate/group.py",
-          "sha256": "f6bfb8f096cdd2c4e2de8ee1fca19f0e4763656f7a85f2912c28e782b543129f",
-          "size_bytes": 540617,
+          "sha256": "f3d2c2a17f5d936d0981ced100137750a1168eb4d1026ba9b57fb4d91267044a",
+          "size_bytes": 544446,
           "target_source_id": "SRC-REPORTING"
         },
         {
