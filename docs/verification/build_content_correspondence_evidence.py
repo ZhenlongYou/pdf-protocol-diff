@@ -32,6 +32,15 @@ def main():
         ('LIMIT', 'reporting', lambda text: text.replace('if any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 'if False and any(label in {"min", "minimum", "typ", "typical", "max", "maximum"}', 1)),
         ('FORMULA', 'compare', lambda text: text.replace('            result.append(prefix)\n', '            pass  # injected loss of normative introduction\n', 1)),
         ('SIGN', 'visual_ownership', lambda text: text.replace("return ''.join(kept).strip()", "return ''.join(kept).strip(' –—-')", 1)),
+        ('UNIQUE', 'visual_ownership', lambda text: text.replace('if len(matches) != 1 or matches[0] is None:', 'if not matches or matches[0] is None:', 1)),
+        ('COVERAGE', 'visual_ownership', lambda text: text.replace('if set(keys) & unknown_tokens.get(page.page_number, set()):', 'if False and set(keys) & unknown_tokens.get(page.page_number, set()):', 1).replace('if text_count > len(matches) - before_count:', 'if False and text_count > len(matches) - before_count:', 1)),
+        ('UNITS', 'reporting', lambda text: text.replace('if len(names) != len(second_values):', 'if False and len(names) != len(second_values):', 1)),
+        ('HEADER', 'pdf_extract', lambda text: text.replace('if not cell_bounds_rows or header_index != 1 or len(rows) < 3:', 'if True or not cell_bounds_rows or header_index != 1 or len(rows) < 3:', 1)),
+        ('GROUP', 'reporting', lambda text: text.replace('(_table_visual_caption_key(previous) or caption_identity)', '_table_visual_caption_key(previous)', 1)),
+        ('CROP', 'visual_ownership', lambda text: text.replace('boxes[page.page_number].append(box)', 'boxes[page.page_number].append(visual.crop_bbox)', 1)),
+        ('TABLE', 'visual_ownership', lambda text: text.replace('if (table.bbox and table.row_texts and table.content_fully_represented\n                    and table.row_alignment_reliable and table.data_rows_fully_represented):', 'if table.bbox:', 1)),
+
+
     ):
         current = (ROOT / f'src/protocol_pdf_diff/{source}.py').read_text()
         changed = transform(current)
@@ -59,7 +68,7 @@ def main():
 
     runs = [run('RUN-ORACLE', 'oracle', list(range(6))), run('RUN-SUITE', 'suite', list(range(6))), run('RUN-CORRESPONDENCE-REAL', 'real_path', [4], artifact=True)]
     pairs = []
-    for name, selected in [('LIMIT', [5]), ('FORMULA', [3]), ('SIGN', [1])]:
+    for name, selected in [('LIMIT', [5]), ('FORMULA', [3]), ('SIGN', [1]), ('UNIQUE', [3]), ('COVERAGE', [3]), ('UNITS', [2]), ('HEADER', [5]), ('GROUP', [0]), ('CROP', [4]), ('TABLE', [3])]:
         runs += [run('RUN-' + name + '-RED', 'target_red', selected, 'MUT-' + name), run('RUN-' + name + '-GREEN', 'target_green', selected)]
         pairs.append(dict(id='PAIR-CONTENT-CORRESPONDENCE' if name == 'LIMIT' else 'PAIR-CONTENT-' + name, requirement_id=REQ, defect_id=DEFECT, test_id='CONTENT_CORRESPONDENCE_TEST', failure_signature='CONTENT_CORRESPONDENCE_CONTRACT_FAIL', red_run_id='RUN-' + name + '-RED', green_run_id='RUN-' + name + '-GREEN'))
     ledger = yaml.safe_load((ROOT / 'docs/verification/escaped-defects.yaml').read_text())

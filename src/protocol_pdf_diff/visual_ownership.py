@@ -31,9 +31,33 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
             if (table.bbox and table.row_texts and table.content_fully_represented
                     and table.row_alignment_reliable and table.data_rows_fully_represented):
                 boxes[table.page_number].append(table.bbox)
+        pages = {page.page_number: page for page in extraction.pages}
         for group in visual_groups:
-            for visual in getattr(group, side + '_figure_visuals'):
-                boxes[visual.page_number].append(visual.crop_bbox)
+            captions = getattr(group, side + '_figure_captions')
+            for visual, caption in zip(getattr(group, side + '_figure_visuals'), captions):
+                page = pages.get(visual.page_number)
+                if page is None:
+                    continue
+                caption_boxes = [block.bbox for block in page.blocks
+                                 if compact_inline(block.text) == compact_inline(caption)]
+                if len(caption_boxes) != 1:
+                    continue
+                cap = caption_boxes[0]
+                for box in page.vector_graphic_bboxes:
+                    # A contextual screenshot is not an ownership region. A
+                    # nearby same-column physical drawing boundary is required.
+                    if not _inside(('', *box), visual.crop_bbox):
+                        continue
+                    gap = min(abs(box[1] - cap[3]), abs(cap[1] - box[3]))
+                    overlap = min(box[2], cap[2]) - max(box[0], cap[0])
+                    if gap > 40 or overlap < .8 * min(box[2]-box[0], cap[2]-cap[0]):
+                        continue
+                    if any(table.page_number == page.page_number and table.bbox
+                           and min(box[2],table.bbox[2]) > max(box[0],table.bbox[0])
+                           and min(box[3],table.bbox[3]) > max(box[1],table.bbox[1])
+                           for table in getattr(result, side + '_table_visuals')):
+                        continue  # Figure context cannot bypass the Table quality gate.
+                    boxes[page.page_number].append(box)
         streams = {}
         unknown_tokens = {}
         for page in extraction.pages:

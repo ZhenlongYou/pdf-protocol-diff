@@ -9,6 +9,141 @@
         "Max=1000",
         "mVppd"
       ]
+    },
+    {
+      "id": "merged-parent-labels",
+      "kind": "header",
+      "rows": [
+        [
+          "gDC2",
+          "",
+          "gDC",
+          "",
+          "Location"
+        ],
+        [
+          "Min",
+          "Max",
+          "Min",
+          "Max",
+          ""
+        ],
+        [
+          "0",
+          "2",
+          "0",
+          "10",
+          "TP1a"
+        ]
+      ],
+      "bounds": [
+        [
+          [
+            0,
+            0,
+            100,
+            10
+          ],
+          null,
+          [
+            100,
+            0,
+            200,
+            10
+          ],
+          null,
+          [
+            200,
+            0,
+            250,
+            20
+          ]
+        ],
+        [
+          [
+            0,
+            10,
+            50,
+            20
+          ],
+          [
+            50,
+            10,
+            100,
+            20
+          ],
+          [
+            100,
+            10,
+            150,
+            20
+          ],
+          [
+            150,
+            10,
+            200,
+            20
+          ],
+          [
+            200,
+            10,
+            250,
+            20
+          ]
+        ],
+        [
+          [
+            0,
+            20,
+            50,
+            30
+          ],
+          [
+            50,
+            20,
+            100,
+            30
+          ],
+          [
+            100,
+            20,
+            150,
+            30
+          ],
+          [
+            150,
+            20,
+            200,
+            30
+          ],
+          [
+            200,
+            20,
+            250,
+            30
+          ]
+        ]
+      ],
+      "contains": [
+        "gDC2 / Min",
+        "gDC2 / Max",
+        "gDC / Min",
+        "gDC / Max",
+        "Location"
+      ]
+    },
+    {
+      "id": "inherited-ui",
+      "kind": "schema",
+      "rows": [
+        "Column 1=Parameter | Column 2=Minimum | Column 3=Maximum",
+        "Column 1=(UI) | Column 2=(UI) | Column 3=(UI)",
+        "Column 1=1 | Column 2=2 | Column 3=3"
+      ],
+      "contains": [
+        "Minimum (UI)=2",
+        "Maximum (UI)=3"
+      ]
     }
   ]
 }

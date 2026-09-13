@@ -7,7 +7,7 @@ from protocol_pdf_diff.visual_ownership import build_visual_owned_spans, apply_o
 from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
 
 
-def fixture(value, lines):
+def fixture(value, lines, *, crop=(0.,0.,500.,50.)):
     blocks = []
     for index, (text, top) in enumerate(lines):
         x, words = 10., []
@@ -16,13 +16,14 @@ def fixture(value, lines):
             x += len(token)*4 + 4
         blocks.append(DocumentBlock(1, (10,top,x,top+8), DocumentBlockKind.TEXT,
                                     text, index, 'native', word_boxes=tuple(words)))
-    page = PageText(1, '\n'.join(text for text, _ in lines), blocks=tuple(blocks))
+    blocks.append(DocumentBlock(1, (10.,-20.,50.,-10.), DocumentBlockKind.TEXT, 'Figure 1.', -1, 'native', word_boxes=(('Figure',10.,-20.,34.,-10.),('1.',38.,-20.,46.,-10.))))
+    page = PageText(1, '\n'.join(text for text, _ in lines), blocks=tuple(blocks), vector_graphic_bboxes=((0.,0.,500.,50.),))
     section = Section('new', '1 Requirements', 'Requirements', 1, ('1',), ('1',), 1, 1,
                       value, page_bodies=((1,page.text),))
     change = SectionChange('added', None, section, 0., added_snippets=[value])
     result = DiffResult(Path('old.pdf'), Path('new.pdf'), [], [section], [change], [])
-    visual = ProseSourceVisual(1, (0.,0.,500.,50.), '', 0, 0)
-    groups = [ProseSourceVisualGroup('added', None, 'new', new_figure_visuals=(visual,))]
+    visual = ProseSourceVisual(1, crop, '', 0, 0)
+    groups = [ProseSourceVisualGroup('added', None, 'new', new_figure_visuals=(visual,), new_figure_captions=('Figure 1.',))]
     spans = build_visual_owned_spans(result, ExtractionResult(Path('old.pdf'), []),
                                     ExtractionResult(Path('new.pdf'), [page]), groups)
     return spans.get('new:new', {}).get(value, [])
@@ -93,6 +94,10 @@ class OwnershipTests(unittest.TestCase):
             return original(result, old, new, [])
         with patch(__name__ + '.build_visual_owned_spans', side_effect=with_table):
             self.assertEqual([], fixture(value, [(value,10.)]))
+
+    def test_context_crop_does_not_own_prose_below_drawing(self):
+        value = 'Maximum differential voltage: 800 mV'
+        self.assertEqual([], fixture(value, [(value,100.)], crop=(0.,0.,500.,200.)))
 
 
 if __name__ == '__main__':

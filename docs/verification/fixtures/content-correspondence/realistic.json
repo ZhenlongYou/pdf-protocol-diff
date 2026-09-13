@@ -9,6 +9,14 @@
         "Max=1200",
         "mV"
       ]
+    },
+    {
+      "id": "public-same-page-shared-phrase",
+      "kind": "public_visual",
+      "contains": [
+        "800 mV",
+        "900 mV"
+      ]
     }
   ]
 }

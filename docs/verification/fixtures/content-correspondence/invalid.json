@@ -7,6 +7,19 @@
       "value": "The maximum voltage is 350 mV.",
       "sources": [],
       "equals": "The maximum voltage is 350 mV."
+    },
+    {
+      "id": "unequal-unit-columns",
+      "kind": "schema",
+      "rows": [
+        "Column 1=Frequency | Column 2=Minimum | Column 3=Maximum",
+        "Column 1=(GHz) | Column 2=(dB) | Column 3=(dB) | Column 4=(RMS)",
+        "Column 1=1 | Column 2=2 | Column 3=3"
+      ],
+      "contains": [
+        "(RMS)",
+        "(GHz)"
+      ]
     }
   ]
 }

@@ -15,6 +15,22 @@
           16
         ]
       ]
+    },
+    {
+      "id": "physical-prefix",
+      "kind": "ownership",
+      "value": "Alpha Beta – 10.75 dB",
+      "lines": [
+        {
+          "text": "Alpha Beta",
+          "top": 10
+        },
+        {
+          "text": "– 10.75 dB",
+          "top": 100
+        }
+      ],
+      "equals": "– 10.75 dB"
     }
   ]
 }

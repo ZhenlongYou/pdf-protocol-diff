@@ -18,6 +18,58 @@
         "CPO channel recommended module third consists of The a"
       ],
       "equals": "The third recommended channel consists of a CPO module."
+    },
+    {
+      "id": "same-page-repetition",
+      "kind": "ownership",
+      "value": "Maximum differential voltage: 800 mV",
+      "lines": [
+        {
+          "text": "Maximum differential voltage: 800 mV",
+          "top": 10
+        },
+        {
+          "text": "Maximum differential voltage: 800 mV",
+          "top": 100
+        }
+      ],
+      "equals": "Maximum differential voltage: 800 mV"
+    },
+    {
+      "id": "partial-word-coverage",
+      "kind": "ownership",
+      "value": "Maximum differential voltage: 800 mV",
+      "lines": [
+        {
+          "text": "Maximum differential voltage: 800 mV",
+          "top": 10
+        },
+        {
+          "text": "Maximum differential voltage: 800 mV",
+          "top": 100,
+          "missing_words": true
+        }
+      ],
+      "equals": "Maximum differential voltage: 800 mV"
+    },
+    {
+      "id": "other-column-frame",
+      "kind": "frame",
+      "caption_left": 10,
+      "equals": "False"
+    },
+    {
+      "id": "unrepresented-table",
+      "kind": "ownership",
+      "value": "Maximum differential voltage: 800 mV",
+      "lines": [
+        {
+          "text": "Maximum differential voltage: 800 mV",
+          "top": 10
+        }
+      ],
+      "uncertain_table": true,
+      "equals": "Maximum differential voltage: 800 mV"
     }
   ]
 }

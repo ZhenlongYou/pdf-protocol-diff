@@ -10,6 +10,18 @@
         "Max=2",
         "dB"
       ]
+    },
+    {
+      "id": "three-continuation-fragments",
+      "kind": "group",
+      "count": 3,
+      "equals": "[[0, 1, 2]]"
+    },
+    {
+      "id": "same-column-frame",
+      "kind": "frame",
+      "caption_left": 310,
+      "equals": "True"
     }
   ]
 }
