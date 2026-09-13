@@ -1108,6 +1108,8 @@ def _repair_body_visual_subscript_order_with_duplicate_fallback(
     one-to-one geometry, and a lossless final multiset.
     """
 
+    from .native_subscript_source import repair_native_subscripts
+    text = repair_native_subscripts(text, page, coordinate_words)
     repaired = _repair_body_visual_subscript_order(text, coordinate_words)
     if repaired != text:
         return repaired

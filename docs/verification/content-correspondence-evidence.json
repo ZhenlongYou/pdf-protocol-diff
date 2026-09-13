@@ -139,6 +139,12 @@
           "size_bytes": 2590
         },
         {
+          "id": "SRC-NATIVE_SUBSCRIPT_SOURCE",
+          "path": "src/protocol_pdf_diff/native_subscript_source.py",
+          "sha256": "b6f75b7466cc1469258e45d8cb6baba4ffb2d735cbd54a210510981b26374356",
+          "size_bytes": 4639
+        },
+        {
           "id": "SRC-PAGE_FURNITURE",
           "path": "src/protocol_pdf_diff/page_furniture.py",
           "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
@@ -159,8 +165,8 @@
         {
           "id": "SRC-PDF_EXTRACT",
           "path": "src/protocol_pdf_diff/pdf_extract.py",
-          "sha256": "00889b160836a1f90d698bf5c16103172eff52e400d98a10d9806f856d71f3f3",
-          "size_bytes": 378490
+          "sha256": "602fb654e4994fa8d6777441fc3cf079f045da7395c1e489d700a0170b27910f",
+          "size_bytes": 378622
         },
         {
           "id": "SRC-PHYSICAL_NATIVE_EVIDENCE",
@@ -425,6 +431,7 @@
             "SRC-LAYOUT_BLOCKS",
             "SRC-MODELS",
             "SRC-MONOTONIC_ALIGNMENT",
+            "SRC-NATIVE_SUBSCRIPT_SOURCE",
             "SRC-PAGE_FURNITURE",
             "SRC-PAGE_OCR",
             "SRC-PARSING_BENCHMARK",
@@ -504,8 +511,8 @@
         {
           "id": "MUT-HEADER",
           "path": "work/content-correspondence-gate/header.py",
-          "sha256": "2e961c16852bf0434e39503a4eed1ecc8df00724b3c419414d410c57580b9f5e",
-          "size_bytes": 378498,
+          "sha256": "63483eab8ca954070c303e51207bc860e52919fa125a6e0f103e56b4f817dc72",
+          "size_bytes": 378630,
           "target_source_id": "SRC-PDF_EXTRACT"
         },
         {
