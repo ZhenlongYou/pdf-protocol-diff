@@ -208,6 +208,14 @@ function svgElement(tag, attrs) {
   Object.entries(attrs).forEach(([k,v]) => node.setAttribute(k,String(v)));
   return node;
 }
+function resolveSource(node) {
+  const seen = new Set();
+  while (node && node.dataset.sourceAlias && !seen.has(node)) {
+    seen.add(node);
+    node = document.getElementById(node.dataset.sourceAlias);
+  }
+  return node;
+}
 document.addEventListener('click', function(event) {
   const link = event.target.closest('a[href^="#"]');
   if (link) {
@@ -228,7 +236,7 @@ document.addEventListener('click', function(event) {
     const figure = document.createElement('figure'); grid.append(figure);
     const caption = document.createElement('div'); caption.className='focus-caption'; figure.append(caption);
     const target = targets[side];
-    const source = target && document.getElementById(target.id);
+    const source = resolveSource(target && document.getElementById(target.id));
     const img = source && source.querySelector('img');
     const view = source && JSON.parse(source.dataset.sourceView || 'null');
     caption.textContent = (side==='old'?'旧版':'新版') + (target?' · PDF 第 '+target.page+' 页':' · 此条无可靠定位');

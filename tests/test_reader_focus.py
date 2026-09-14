@@ -13,7 +13,7 @@ import fitz
 from PIL import Image, ImageDraw
 from protocol_pdf_diff.models import DiffOptions, ProseSourceVisual, ProseSourceVisualGroup, Section, SectionChange, SnippetPair, TableChange, TableRowChange
 from protocol_pdf_diff.reader_focus import difference_windows, locate_source, delta_spans
-from protocol_pdf_diff.reporting import _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, write_reports
+from protocol_pdf_diff.reporting import _build_prose_source_aliases, _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, write_reports
 from protocol_pdf_diff.visual_watchdog import _compare_page_images
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
@@ -34,6 +34,21 @@ def source(text, page=12, y=30):
 
 
 class ReaderFocusTests(unittest.TestCase):
+    def test_neutral_repeated_source_page_points_to_highlighted_canonical(self):
+        highlighted = replace(source("changed value", 8), highlight_region_count=1)
+        first = ProseSourceVisualGroup(
+            "modified", "old-a", "new-a", old_visuals=(highlighted,)
+        )
+        second = ProseSourceVisualGroup(
+            "modified", "old-b", "new-b", old_visuals=(source("context", 8),)
+        )
+        aliases = _build_prose_source_aliases(
+            [("change-1", first), ("change-2", second)]
+        )
+        self.assertEqual(
+            {("old", 0): "change-1-source-old-0"}, aliases["change-2"]
+        )
+
     def test_compact_changes_keep_complete_written_numbers_and_glyph_uncertainty(self):
         for old,new in (('3.0 V','2.5 V'),('+1.50 mV','-1.50 mV'),('1e-6','1e-9'),('1.50 mV','-1.50 mV'),('-1.50 mV','1.50 mV'),('3 V','3.5 V')):
             spans=list(delta_spans(old,new))

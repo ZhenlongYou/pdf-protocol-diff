@@ -113,6 +113,37 @@ class PhysicalTableReceiptTests(unittest.TestCase):
             )[2]
         )
 
+    def test_same_table_image_is_emitted_once_for_multiple_physical_rows(self):
+        words = list(self.row.cell_words)
+        words[0] = tuple(
+            ("Other" if word[0] == "Device" else word[0], *word[1:])
+            for word in words[0]
+        )
+        second_old = replace(
+            self.row,
+            row_id="old-2",
+            cells=("Other\nValue", *self.row.cells[1:]),
+            cell_words=tuple(words),
+        )
+        second_new = replace(second_old, row_id="new-2")
+        old_table = replace(self.old, physical_rows=(self.row, second_old))
+        new_table = replace(self.new, physical_rows=(self.new.physical_rows[0], second_new))
+
+        markup, _payload, receipt = self.render(old=old_table, new=new_table)
+
+        self.assertEqual(4, len(receipt))
+        self.assertEqual(2, markup.count("<img"))
+        self.assertEqual(2, markup.count("table-shot-reused"))
+
+    def test_report_level_table_image_can_be_reused_without_embedding(self):
+        markup, _payload, receipt = render_physical_appendix(
+            [NS(old_tables=(self.old,), new_tables=(self.new,))],
+            displayed_source_keys={("old", 1, 1), ("new", 2, 1)},
+        )
+        self.assertEqual(2, len(receipt))
+        self.assertNotIn("<img", markup)
+        self.assertEqual(2, markup.count("上方表格证据"))
+
     def test_candidate_is_inert_without_authorization(self):
         candidates = {"physical:old:old:S": {"Device": [(0, 6)]}}
         self.assertEqual(authorized_spans(candidates, "old", "S", set()), {})

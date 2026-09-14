@@ -342,7 +342,19 @@ def write_reports(
         *table_groups,
     ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
     from .physical_table_rows import render_physical_appendix, authorized_spans, write_physical_csv, physical_text_export
-    physical_html, physical_payload, physical_receipts = render_physical_appendix(table_groups)
+    # Physical-row records use the same table-level source images as the main
+    # table/uncertainty evidence.  Suppress another embedded copy there; the
+    # row text and its audit receipt remain separate.
+    displayed_table_source_keys = {
+        (side, table.page_number, table.table_number)
+        for group in table_groups
+        for side, tables in (("old", group.old_tables), ("new", group.new_tables))
+        for table in tables
+    }
+    physical_html, physical_payload, physical_receipts = render_physical_appendix(
+        table_groups,
+        displayed_source_keys=displayed_table_source_keys,
+    )
     physical_csv_path = report_dir / 'physical_table_records.csv'
     physical_receipts &= write_physical_csv(physical_payload, physical_csv_path)
     from .formula_source_review import prepare_formula_source_reviews, project_formula_source_review
@@ -496,6 +508,16 @@ def write_reports(
     uncertain_tables = [group for group in table_groups
                         if any(not t.row_alignment_reliable or not t.content_fully_represented
                                for t in (*group.old_tables, *group.new_tables))]
+    table_evidence_refs = {
+        _table_group_identity(change.old_tables, change.new_tables): f"T{index}"
+        for index, change in enumerate(reader_table_changes, start=1)
+    }
+    table_evidence_refs.update(
+        {
+            _table_group_identity(change.old_tables, change.new_tables): f"A-T{index}"
+            for index, change in enumerate(similarity_review_tables, start=1)
+        }
+    )
     uncertainty_rows = []
     for group in uncertain_tables:
         def side_summary(tables):
@@ -504,15 +526,29 @@ def write_reports(
                                  "new": side_summary(group.new_tables),
                                  "old_sources": [{"page": t.page_number, "bbox": t.bbox} for t in group.old_tables],
                                  "new_sources": [{"page": t.page_number, "bbox": t.bbox} for t in group.new_tables],
+                                 "table_evidence_ref": table_evidence_refs.get(
+                                     _table_group_identity(group.old_tables, group.new_tables)
+                                 ),
                                  "reason": "文字对应或行列归属尚未完全验证；不能据此认定新增、删除或一致。"})
     if uncertainty_rows:
         heading = f"表格对应待核实（{len(uncertainty_rows)} 项，不计为已确认差异）"
         appendix = "<details><summary>" + heading + "</summary>" + "".join(
             '<section class="table-change"><p>旧版：' + _escape(row['old']) + "；新版：" + _escape(row['new'])
-            + "。" + row['reason'] + '</p><div class="table-shot-grid">'
-            + _render_table_shot_group("旧版", group.old_tables)
-            + _render_table_shot_group("新版", group.new_tables, side="new")
-            + "</div></section>" for row, group in zip(uncertainty_rows, uncertain_tables)) + "</details>"
+            + "。" + row['reason']
+            + (
+                f' 截图已在 {_escape(row["table_evidence_ref"])} 表格证据中展示，本处不重复嵌入。'
+                if row.get("table_evidence_ref")
+                else ''
+            )
+            + (
+                ''
+                if row.get("table_evidence_ref")
+                else '<div class="table-shot-grid">'
+                + _render_table_shot_group("旧版", group.old_tables)
+                + _render_table_shot_group("新版", group.new_tables, side="new")
+                + "</div>"
+            )
+            + "</section>" for row, group in zip(uncertainty_rows, uncertain_tables)) + "</details>"
         html = html.replace("</main>", appendix + "</main>") if "</main>" in html else html.replace("</body>", appendix + "</body>")
         markdown += "\n\n<details><summary>" + heading + "</summary>\n\n" + "\n".join(
             f"- 旧版：{row['old']}；新版：{row['new']}。{row['reason']}" for row in uncertainty_rows) + "\n\n</details>\n"
@@ -722,6 +758,18 @@ def _table_change_reader_identity(
         tuple(id(table) for table in change.old_tables),
         tuple(id(table) for table in change.new_tables),
         change.role,
+    )
+
+
+def _table_group_identity(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Bind a logical table group to its exact source visual objects."""
+
+    return (
+        tuple(id(table) for table in old_tables),
+        tuple(id(table) for table in new_tables),
     )
 
 
@@ -1073,6 +1121,25 @@ def _render_html(
                                      precision="source-page-unlocalized", source_words=())
                              for v in visuals if v.raw_image_data_uri)
             prose_visual_lookup[key] = replace(group, change_type="review", old_visuals=neutral(group.old_visuals), new_visuals=neutral(group.new_visuals))
+    # A section can span a page boundary, so adjacent cards may otherwise
+    # embed the same full source page repeatedly.  Keep the occurrence that
+    # carries the most useful coordinate highlights and turn neutral repeats
+    # into links to that canonical figure.  Distinct highlighted occurrences
+    # remain visible because they may point at different changed text.
+    prose_card_groups = [
+        (
+            f"change-{index}",
+            prose_visual_lookup.get(_section_change_visual_identity(change)),
+        )
+        for index, change in indexed_technical
+    ] + [
+        (
+            f"appendix-{index}",
+            prose_visual_lookup.get(_section_change_visual_identity(change)),
+        )
+        for index, change in enumerate(similarity_review_changes, start=1)
+    ]
+    prose_source_aliases = _build_prose_source_aliases(prose_card_groups)
     figure_source_visuals = tuple(
         group
         for group in materialized_source_visuals
@@ -1119,6 +1186,7 @@ def _render_html(
             prose_source_visual=prose_visual_lookup.get(
                 _section_change_visual_identity(change)
             ),
+            source_visual_aliases=prose_source_aliases.get(f"change-{index}"),
         )
         for index, change in indexed_technical
     )
@@ -1132,7 +1200,12 @@ def _render_html(
     table_visual_html = _render_table_changes_html(table_changes)
     figure_visual_html = _render_figure_source_visual_groups(figure_source_visuals)
     appendix_cards = "".join(
-        _render_change_html(f"appendix-{i}", c, prose_source_visual=prose_visual_lookup.get(_section_change_visual_identity(c)))
+        _render_change_html(
+            f"appendix-{i}",
+            c,
+            prose_source_visual=prose_visual_lookup.get(_section_change_visual_identity(c)),
+            source_visual_aliases=prose_source_aliases.get(f"appendix-{i}"),
+        )
         for i, c in enumerate(similarity_review_changes, 1)
     ) + "".join(_render_table_change_html(f"appendix-{i}", c) for i, c in enumerate(similarity_review_tables, 1))
     appendix_html = (
@@ -1350,6 +1423,16 @@ def _render_html(
       font-size: 12px;
       background: #f8fafc;
       border-bottom: 1px solid var(--line);
+    }}
+    .prose-source-page-reused {{
+      padding-bottom: 10px;
+      background: #fbfcfe;
+    }}
+    .prose-source-reuse {{
+      display: inline-block;
+      margin: 10px 10px 0;
+      color: var(--blue);
+      font-size: 13px;
     }}
     .prose-source-page img {{ display: block; width: auto; max-width: 100%; height: auto; background: #fff; }}
     .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
@@ -1626,6 +1709,7 @@ def _render_change_html(
     change: SectionChange,
     *,
     prose_source_visual: ProseSourceVisualGroup | None = None,
+    source_visual_aliases: dict[tuple[str, int], str] | None = None,
 ) -> str:
     """Render one change as a side-by-side HTML block."""
 
@@ -1673,7 +1757,11 @@ def _render_change_html(
                                       old_visuals=context_raw(prose_source_visual.old_visuals),
                                       new_visuals=context_raw(prose_source_visual.new_visuals))
     source_visual_html = (
-        _render_prose_source_visual_group(prose_source_visual, prefix=f"change-{index}-source")
+        _render_prose_source_visual_group(
+            prose_source_visual,
+            prefix=f"change-{index}-source",
+            source_visual_aliases=source_visual_aliases,
+        )
         if prose_source_visual is not None
         else ""
     )
@@ -1719,7 +1807,60 @@ def _prose_source_visual_identity(
     return (group.change_type, group.old_section_id, group.new_section_id)
 
 
-def _render_prose_source_visual_group(group: ProseSourceVisualGroup, *, prefix: str = "") -> str:
+def _build_prose_source_aliases(
+    card_groups: Iterable[tuple[str, ProseSourceVisualGroup | None]],
+) -> dict[str, dict[tuple[str, int], str]]:
+    """Plan links for neutral duplicate page screenshots across prose cards.
+
+    The source builder intentionally gives each section every page it owns so
+    context is complete.  Rendering those pages in every neighboring change
+    card makes a report look as though pages were duplicated.  A highlighted
+    occurrence is the canonical evidence when available; neutral repeats are
+    represented by a link.  Highlighted occurrences are never collapsed since
+    they can identify different changed regions on the same page.
+    """
+
+    occurrences: dict[tuple[str, int], list[tuple[str, int, int, int]]] = {}
+    for order, (card_key, group) in enumerate(card_groups):
+        if group is None:
+            continue
+        for side, visuals in (("old", group.old_visuals), ("new", group.new_visuals)):
+            for visual_index, visual in enumerate(visuals):
+                occurrences.setdefault((side, visual.page_number), []).append(
+                    (card_key, visual_index, visual.highlight_region_count, order)
+                )
+
+    aliases: dict[str, dict[tuple[str, int], str]] = {}
+    for (side, _page_number), items in occurrences.items():
+        if len(items) < 2:
+            continue
+        highlighted = [item for item in items if item[2] > 0]
+        canonical = max(
+            highlighted or items,
+            key=lambda item: (item[2], -item[3], -item[1]),
+        )
+        source_prefix = (
+            f"change-{canonical[0]}-source"
+            if canonical[0].startswith("appendix-")
+            else f"{canonical[0]}-source"
+        )
+        canonical_id = f"{source_prefix}-{side}-{canonical[1]}"
+        for card_key, visual_index, highlight_count, _order in items:
+            # Preserve every independently highlighted occurrence.  Only a
+            # neutral page can be safely replaced with canonical evidence.
+            if highlight_count == 0 and (card_key, visual_index) != (
+                canonical[0], canonical[1]
+            ):
+                aliases.setdefault(card_key, {})[(side, visual_index)] = canonical_id
+    return aliases
+
+
+def _render_prose_source_visual_group(
+    group: ProseSourceVisualGroup,
+    *,
+    prefix: str = "",
+    source_visual_aliases: dict[tuple[str, int], str] | None = None,
+) -> str:
     if not group.old_visuals and not group.new_visuals:
         return ""
     old_side = _render_prose_source_visual_side(
@@ -1729,6 +1870,11 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup, *, prefix: 
         omitted_page_count=group.old_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "old-highlight",
         source_prefix=prefix + "-old" if prefix else "",
+        source_aliases={
+            index: target
+            for (side, index), target in (source_visual_aliases or {}).items()
+            if side == "old"
+        },
     )
     new_side = _render_prose_source_visual_side(
         "新版原文区域",
@@ -1737,6 +1883,11 @@ def _render_prose_source_visual_group(group: ProseSourceVisualGroup, *, prefix: 
         omitted_page_count=group.new_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "new-highlight",
         source_prefix=prefix + "-new" if prefix else "",
+        source_aliases={
+            index: target
+            for (side, index), target in (source_visual_aliases or {}).items()
+            if side == "new"
+        },
     )
     legend = ("原文出处：对应关系尚待核实，不作新增或删除标色。"
               if group.change_type == "review" else
@@ -1806,6 +1957,7 @@ def _render_prose_source_visual_side(
     omitted_page_count: int = 0,
     display_mode: str = "raw",
     source_prefix: str = "",
+    source_aliases: dict[int, str] | None = None,
 ) -> str:
     materialized = tuple(visuals)
     if materialized:
@@ -1814,17 +1966,37 @@ def _render_prose_source_visual_side(
             "new-highlight": "淡绿差异标注",
             "raw": "原始裁剪，无标色",
         }.get(display_mode, "原始裁剪")
-        pages = "".join(
-            '<figure class="prose-source-page"'
-            + (f' id="{_escape(source_prefix)}-{visual_index}"' if source_prefix else '')
-            +
-            f' data-source-view="{_escape(json.dumps(visual.source_view_box))}">'
-            f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · {_escape(mode_label if visual.highlight_region_count else "原页上下文，未标色")} · 点击放大</figcaption>'
-            f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
-            f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
-            '</figure>'
-            for visual_index, visual in enumerate(materialized)
-        )
+        pages_parts: list[str] = []
+        for visual_index, visual in enumerate(materialized):
+            figure_id = (
+                f' id="{_escape(source_prefix)}-{visual_index}"'
+                if source_prefix
+                else ""
+            )
+            alias_target = (source_aliases or {}).get(visual_index)
+            if alias_target:
+                pages_parts.append(
+                    '<figure class="prose-source-page prose-source-page-reused"'
+                    + figure_id
+                    + f' data-source-alias="{_escape(alias_target)}">'
+                    f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
+                    '本页截图已在其他变化项展示</figcaption>'
+                    f'<a class="prose-source-reuse" href="#{_escape(alias_target)}">'
+                    '跳转到已展示截图</a>'
+                    '</figure>'
+                )
+                continue
+            pages_parts.append(
+                '<figure class="prose-source-page"'
+                + figure_id
+                + f' data-source-view="{_escape(json.dumps(visual.source_view_box))}">'
+                f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
+                f'{_escape(mode_label if visual.highlight_region_count else "原页上下文，未标色")} · 点击放大</figcaption>'
+                f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
+                f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
+                '</figure>'
+            )
+        pages = "".join(pages_parts)
     else:
         pages = f'<div class="prose-source-empty">{_escape(empty_message)}</div>'
     if omitted_page_count:

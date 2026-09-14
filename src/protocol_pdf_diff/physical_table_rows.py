@@ -123,8 +123,19 @@ def _valid_row(row, table):
     return True
 
 
-def render_physical_appendix(groups):
+def render_physical_appendix(groups, *, displayed_source_keys=()):
+    """Render physical-row records while emitting each source table image once.
+
+    A physical row is still a separate audit record, but its screenshot is
+    table-level evidence.  Repeating that image for every row made one source
+    page appear many times in the reader report.  When the main/uncertainty
+    table evidence already displays the source, the row record keeps the
+    original cells and points back to that evidence instead of embedding a
+    second copy.
+    """
     sections, payload, receipts = [], [], set()
+    displayed_source_keys = set(displayed_source_keys)
+    emitted_images = {}
     for group in groups:
         if not group.old_tables or not group.new_tables:
             continue
@@ -148,11 +159,13 @@ def render_physical_appendix(groups):
                 _image_is_decodable(t.image_data_uri) for t in (old_table, new_table)
             ):
                 continue
+            section_id = f"physical-table-row-{len(sections) + 1}"
             parts = [
-                '<section class="physical-table-row"><p>保留两版原始单元格及截图；各参数与数值的对应关系仍需核实，未认定表格内容一致。</p>'
+                f'<section class="physical-table-row" id="{section_id}"><p>保留两版原始单元格及截图；各参数与数值的对应关系仍需核实，未认定表格内容一致。</p>'
             ]
             entry = {}
             for side, table, row in [("old", old_table, old), ("new", new_table, new)]:
+                source_key = (side, table.page_number, table.table_number)
                 parts.append(
                     '<div class="table-shot"><p>'
                     + ("旧版" if side == "old" else "新版")
@@ -164,11 +177,31 @@ def render_physical_appendix(groups):
                     + "</pre></td>"
                     for cell in row.cells
                 )
-                parts.append(
-                    '</tr></table><div class="table-shot-page"><img alt="原始表格截图" src="'
-                    + table.image_data_uri
-                    + '"></div></div>'
+                image_key = (
+                    source_key
+                    + (hashlib.sha256(table.image_data_uri.encode()).hexdigest(),)
                 )
+                if source_key in displayed_source_keys:
+                    image_html = (
+                        '<div class="table-shot-page table-shot-reused">'
+                        '原页截图已在上方表格证据中展示；本条保留原始单元格文字。'
+                        '</div>'
+                    )
+                elif image_key in emitted_images:
+                    image_html = (
+                        '<div class="table-shot-page table-shot-reused">'
+                        f'截图已在 <a href="#{emitted_images[image_key]}">前一条记录</a> 展示；'
+                        '本条保留原始单元格文字。'
+                        '</div>'
+                    )
+                else:
+                    emitted_images[image_key] = section_id
+                    image_html = (
+                        '<div class="table-shot-page"><img alt="原始表格截图" src="'
+                        + table.image_data_uri
+                        + '"></div>'
+                    )
+                parts.append('</tr></table>' + image_html + '</div>')
                 entry[side] = {
                     "page": table.page_number,
                     **asdict(row),
