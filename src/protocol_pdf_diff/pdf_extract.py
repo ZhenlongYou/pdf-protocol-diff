@@ -275,10 +275,32 @@ def _extract_pdf_text_with_pdfplumber(
                 for index, evidence in coordinate_evidence.items()
             },
         )  # 只有跨页完整重置网格与空白编号基线共同成立时，才从比较面剔除窄边列。
+        if selected_page_count < _DOCUMENT_LINE_NUMBER_MIN_PAGES:
+            for index, page in selected_pages:
+                if gutter_boxes_by_page.get(index):
+                    continue
+                local_evidence = _page_printed_line_number_grid_evidence(
+                    page,
+                    words=coordinate_evidence[index][0],
+                    minimum_orphan_baselines=1,
+                )
+                if len(local_evidence) == 1:
+                    gutter_boxes_by_page[index] = local_evidence[0][0]
+        # A short page-window cannot establish a repeated header, but an explicit
+        # publication masthead with a revision/version token is still page furniture.
         header_evidence_by_page = _document_running_header_evidence(
             selected_pages,
             {index: evidence[0] for index, evidence in coordinate_evidence.items()},
-        )  # 只分离跨页坐标已证明的运行页眉；文字另存后仍参与两个版本的结构化比较。
+        )  # 先使用跨页坐标证据，避免单页局部标题获得删除权。
+        for index, page in selected_pages:
+            if index in header_evidence_by_page:
+                continue
+            local_header = _page_local_publication_header_evidence(
+                page,
+                words=coordinate_evidence[index][0],
+            )
+            if local_header is not None:
+                header_evidence_by_page[index] = local_header
         footer_evidence_by_page = _document_running_footer_evidence(
             selected_pages, {index: evidence[0] for index, evidence in coordinate_evidence.items()})
         header_boxes_by_page = {
@@ -316,7 +338,7 @@ def _extract_pdf_text_with_pdfplumber(
                     *footer_evidence_by_page.get(index, ((), (), ()))[0],
                     *header_boxes_by_page.get(index, ()),
                 ]
-            )  # 视觉层只屏蔽抽取层本次已删除的页脚和窄边区域；版本相关页眉始终参与比较。
+            )  # 视觉层只屏蔽抽取层本次已删除的页脚、窄边和页眉区域；原始家具仍保留审计字段。
             (
                 text,
                 page_warnings,
@@ -539,7 +561,7 @@ def _extract_pdfplumber_page_text(
         )
     if gutter_boxes:
         warnings.append(
-            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由至少三页的连续重置数字序列 "
+            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由连续重置数字序列、"
             "稳定网格与空白编号基线共同证明为打印行号；"
             "已证明并从比较文本过滤，原始坐标块仍保留供审计。"
         )
@@ -2291,6 +2313,58 @@ def _looks_like_running_footer_marker(line_text: str) -> bool:
         and bool(re.search(r"\s[-–—|]\s", candidate))
         and not re.search(r"\b(?:shall|must|should|required|prohibited)\b", candidate)
     )
+
+
+_PUBLICATION_HEADER_PREFIX_RE = re.compile(
+    r"(?i)^(?:implementation agreement|technical specification|user manual|reference manual)\b"
+)
+_PUBLICATION_HEADER_VERSION_RE = re.compile(
+    r"(?i)(?:\b(?:rev(?:ision)?|version|edition)\s*[:.]?\s*|[A-Za-z]-)"
+    r"\d+(?:\.\d+)+"
+)
+
+
+def _looks_like_publication_version_header(text: str) -> bool:
+    """Recognize a masthead whose revision token is publication metadata."""
+
+    candidate = normalize_line(text)
+    return bool(
+        _PUBLICATION_HEADER_PREFIX_RE.match(candidate)
+        and _PUBLICATION_HEADER_VERSION_RE.search(candidate)
+        and not re.search(
+            r"(?i)\b(?:shall|must|should|required|prohibited|identifier|register|mode)\b",
+            candidate,
+        )
+    )
+
+
+def _page_local_publication_header_evidence(
+    page: object,
+    *,
+    words: list[dict[str, object]],
+) -> tuple[tuple[tuple[float, float, float, float], ...], tuple[str, ...]] | None:
+    """Return a page-local masthead only when its text has a publication shape."""
+
+    width = float(getattr(page, "width", 0) or 0)
+    height = float(getattr(page, "height", 0) or 0)
+    if width <= 0 or height <= 0:
+        return None
+    top_words = [
+        word
+        for word in words
+        if float(word.get("bottom", height + 1)) <= height * 0.12
+    ]
+    for _top, _bottom, _line_text, line_words in _word_line_records(top_words):
+        ordered = tuple(sorted(line_words, key=lambda item: float(item["x0"])))
+        display_text = normalize_line(" ".join(str(word.get("text", "")) for word in ordered))
+        if not _looks_like_publication_version_header(display_text):
+            continue
+        boxes = tuple(
+            _tight_word_bbox(word, width=width, height=height)
+            for word in ordered
+        )
+        return boxes, (display_text,)
+    return None
 
 
 def _document_running_header_evidence(
@@ -4298,14 +4372,22 @@ def _table_is_physical_vertical_axis_fragment(page, bbox, rows, words, *, title=
 def _closed_drawing_frames(page):
     """Return only physically observed closed frames, including four-edge encodings."""
     frames = []
-    for obj in getattr(page, 'rects', ()) or ():
+    rects = getattr(page, "rects", ())
+    if not isinstance(rects, list | tuple):
+        rects = ()
+    for obj in rects:
+        if not isinstance(obj, dict):
+            continue
         box = (obj.get('x0'), obj.get('top'), obj.get('x1'), obj.get('bottom'))
         if (all(isinstance(v, (int, float)) and math.isfinite(v) for v in box)
                 and box[2]-box[0] >= 100 and box[3]-box[1] >= 50):
             frames.append(box)
     # A rectangle may be encoded as four narrow filled rectangles/curves.
     # Require all four actually observed edges; never infer a missing side.
-    edges = getattr(page, 'edges', ()) or ()
+    edges = getattr(page, "edges", ())
+    if not isinstance(edges, list | tuple):
+        edges = ()
+    edges = [edge for edge in edges if isinstance(edge, dict)]
     horizontal = [edge for edge in edges if edge.get('orientation') == 'h'
                   and edge['x1']-edge['x0'] >= 100]
     vertical = [edge for edge in edges if edge.get('orientation') == 'v'

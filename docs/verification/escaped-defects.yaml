@@ -19,6 +19,15 @@ escaped_defects:
     regression_test_id: FIGURE_TEXT_LAYER_TEST
     public_path_rerun_id: RUN-FIGURE-TEXT-REAL-PAGE-209
     state: verified
+  - id: DEF-PAGE-FURNITURE-20260914
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "右侧打印行号以及页眉版本号被当作内容差异，例如 05.1/05.3 和 32/33。"
+    discovered_via: user_counterexample
+    failure_mechanism: "单页比较窗口缺少跨页家具证据；页内连续行号和出版物版本页眉因此进入比较文本。"
+    red_green_pair_id: PAIR-PAGE-FURNITURE
+    regression_test_id: FIGURE_TEXT_LAYER_TEST::page_furniture
+    public_path_rerun_id: RUN-FIGURE-TEXT-REAL-PAGE-209
+    state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"
