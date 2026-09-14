@@ -5,6 +5,7 @@ import hashlib
 import html
 import json
 import math
+import re
 import unicodedata
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -35,6 +36,42 @@ def begin_extraction(path):
     state = _ACTIVE.get()
     if state is not None:
         state["current_name"] = Path(path).name
+
+
+def _complete_numeric_literal_key(value):
+    """Only the sign spelling of a complete decimal/scientific literal.
+
+    This is typed numeric equivalence, not font/glyph identity. No whitespace,
+    ranges, placeholders, fractions, expressions or private glyphs are accepted.
+    """
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[+\-‐]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+\-‐]?[0-9]+)?", value
+    ):
+        return None
+    return value.replace("‐", "-")
+
+
+def _supported_three_cells(cells):
+    return (
+        len(cells) == 3 and all(isinstance(c, str) for c in cells)
+        and cells[0].isascii() and cells[2].isascii()
+        and (cells[1].isascii() or _complete_numeric_literal_key(cells[1]) is not None)
+    )
+
+
+def _same_three_cells(old, new):
+    # The caller already proves one unique row per side in the same table group.
+    # Identity and units remain exact; only the complete Setting can vary.
+    if not _supported_three_cells(old) or not _supported_three_cells(new):
+        return False
+    if old == new:
+        return True
+    # Literal shape alone does not distinguish versions/encoding identifiers.
+    # Only these explicit physical Units establish a numeric measurement role.
+    physical_units = {"ns/mm", "ps/mm", "V", "mV"}
+    return (old[0] == new[0] and old[2] == new[2] and old[2] in physical_units
+            and _complete_numeric_literal_key(old[1]) is not None
+            and _complete_numeric_literal_key(old[1]) == _complete_numeric_literal_key(new[1]))
 
 
 def capture_rows(page, table, rows, observed, complete):
@@ -89,7 +126,7 @@ def capture_rows(page, table, rows, observed, complete):
                 or not raw[1]
             ):
                 continue
-            if any(ord(ch) > 127 for cell in raw for ch in cell):
+            if not _supported_three_cells(raw):
                 continue
             if not valid(box) or not all(valid(b) for b in bs):
                 continue
@@ -354,7 +391,7 @@ def _source_row_matches(record, table):
         box = record["bbox"]
         chars = record["native_chars"]
         if (
-            len(cells) != 3
+            not _supported_three_cells(cells)
             or len(bounds) != 3
             or not _valid_box(box)
             or not _valid_box(table.bbox)
@@ -394,7 +431,7 @@ def _source_row_matches(record, table):
             or c[0] < 0
             or not isinstance(c[1], str)
             or len(c[1]) != 1
-            or not c[1].isascii()
+            or not (c[1].isascii() or (c[1] == "‐" and inside(c, bounds[1])))
             or c[1].isspace()
             or not _valid_box(c[2:6])
             or c[7] != 1
@@ -462,7 +499,7 @@ def _write_receipts(bundle, directory):
         if (
             len(paired) != 2
             or {o[0] for _, o in paired} != {"old", "new"}
-            or paired[0][0]["cells"] != paired[1][0]["cells"]
+            or not _same_three_cells(paired[0][0]["cells"], paired[1][0]["cells"])
         ):
             return False
         for r, o in paired:

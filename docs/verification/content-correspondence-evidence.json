@@ -39,8 +39,8 @@
         {
           "id": "SRC-COMPARE",
           "path": "src/protocol_pdf_diff/compare.py",
-          "sha256": "1097bc74c9cfff73662c8cd9b32294f310d00a050a86cbc5d3dc798986c2156b",
-          "size_bytes": 280798
+          "sha256": "4a232992e2f2373d3c311578b46e20930d7b55cb709f58f38125328bc22082ce",
+          "size_bytes": 282230
         },
         {
           "id": "SRC-COMPARISON_JOB",
@@ -117,8 +117,8 @@
         {
           "id": "SRC-FORMULA_SOURCE_REVIEW_EXPORT",
           "path": "src/protocol_pdf_diff/formula_source_review_export.py",
-          "sha256": "6d5e416dbe468d9b84079f7fb11a1ef08a4a057ecc66770497ead858f24dbbad",
-          "size_bytes": 3155
+          "sha256": "7b690f5f4c0b3a9b2ec2b85d4fad9cf35cd409dcdadea4a65af9e7f042c6c137",
+          "size_bytes": 3768
         },
         {
           "id": "SRC-FORMULA_VISUALS",
@@ -285,8 +285,8 @@
         {
           "id": "SRC-TABLE_VIEW_TRANSACTION",
           "path": "src/protocol_pdf_diff/table_view_transaction.py",
-          "sha256": "7688e7d9a207024e0d8357e500b6f165318868db1e9e192915f26947bc1dbcb6",
-          "size_bytes": 24737
+          "sha256": "69ace563a9d19ae9b4913dbf6e60397c3ecaa5a88f5cdd76e19343a216c0ab84",
+          "size_bytes": 26342
         },
         {
           "id": "SRC-TEXT_UTILS",
@@ -511,8 +511,8 @@
         {
           "id": "MUT-FORMULA",
           "path": "work/content-correspondence-gate/formula.py",
-          "sha256": "493106a6bc2c12fabfdbd40171352738701354144114ec304fd4cdfc06afa03d",
-          "size_bytes": 280828,
+          "sha256": "e6deac65dd36ab032d9164d62f09ef3ab98ba0f50af42e18e99afadbd6c8374d",
+          "size_bytes": 282260,
           "target_source_id": "SRC-COMPARE"
         },
         {

@@ -4537,6 +4537,36 @@ def _summarize_text_delta(
     *,
     suppressed_old_table_unit_keys: set[str] | None = None,
     suppressed_new_table_unit_keys: set[str] | None = None,
+):
+    # Cache only text computation. Every caller receives independent mutable lists;
+    # SnippetPair is frozen. No extraction, matching or evidence authority is cached.
+    values = _cached_summarize_text_delta(
+        old_text, new_text, max_snippets, leading_replacement,
+        None if suppressed_old_table_unit_keys is None else frozenset(suppressed_old_table_unit_keys),
+        None if suppressed_new_table_unit_keys is None else frozenset(suppressed_new_table_unit_keys),
+    )
+    return tuple(value if index == 3 else list(value) for index, value in enumerate(values))
+
+
+@memoize_comparison(maxsize=2048)
+def _cached_summarize_text_delta(old_text, new_text, max_snippets, leading_replacement,
+                                 suppressed_old_table_unit_keys, suppressed_new_table_unit_keys):
+    values = _compute_summarize_text_delta(
+        old_text, new_text, max_snippets, leading_replacement,
+        suppressed_old_table_unit_keys=suppressed_old_table_unit_keys,
+        suppressed_new_table_unit_keys=suppressed_new_table_unit_keys,
+    )
+    return tuple(value if index == 3 else tuple(value) for index, value in enumerate(values))
+
+
+def _compute_summarize_text_delta(
+    old_text: str,
+    new_text: str,
+    max_snippets: int,
+    leading_replacement: SnippetPair | None = None,
+    *,
+    suppressed_old_table_unit_keys: set[str] | None = None,
+    suppressed_new_table_unit_keys: set[str] | None = None,
 ) -> tuple[
     list[str],
     list[str],

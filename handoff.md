@@ -2,43 +2,14 @@
 
 ## 当前任务：整份报告内容对应修复（2026-09-13）
 
-- 最新完整运行：冻结 `a242a1bcd822af8ef1212ea90c5d139cdda60cee`（C58行为源0223d05）的第十三原生 GUI 1330.942秒完成；`repair_20260913/full-native-thirteenth/native-result.json`。JSON SHA `bfd631463f5f54f6cbe07340093f11193b98c76280cfca406a8e60ee50e97466`，HTML SHA `3846fe4194c3682e620589606f0a8605c91e6b06bdb418eb9c6939d7b8be9e88`。冻结前完整1661项测试259.279秒通过（1条件skip）、20内容合同及10定向反例通过。
-- 第十三完整501原ID、190当前正文卡（169主卡=162material+7review，21附录）、44表卡全部重新绑定，见 `complete-thirteenth-audit.json`。C58两条input/output规范句与原331/335页核实，fb=29GHz完整；11项新增原句保全检查及17+28既有检查通过。23处完整body差分另行源核对，不能把C58名称当影响范围。剩53原正文噪声（46主卡+7附录），另17混合真实变化带噪声、19几何/26数学未决；未作整份准确性验收。
-- 全部632来源表矩阵/图片/几何、68未知对应、64物理侧及表格CSV与已源审第十二完全相同，限定复用126原表结论。104视觉项完整payload相同，复用原82及后22页对的实际源审结论，不认证曲线/公式等价。
-- 原生HTML1200图无损坏，默认折叠、缩放同源、窄窗无溢出；root实际目视顶部/正文/物理表/窄窗，见 `full-native-thirteenth/native-actual-review.json`。原报告未覆盖。
-- 第十四待整本组合：FormulaSourceReview f34c（仅显式UNKNOWN、完整原文/双侧实际原图/真实PageText桥接）、乘号空格451b、表格双视图V3 dc13及视觉后处理8c均已加入，三个真实三页公开窗口通过。表格候选重新构建公式凭证，视觉证据仅在全部实际输入严格相同后复用，否则重新扫描；保留候选自己的内容评估与警告。不能将小范围结果当作整本验收。
-- 表格V3已独立复核：错位置图借证回退、真实isolated CSV失败发布原结果、固定时刻既有目录保留、发布失败仅清理独占目录均通过。1411528/d8d899失败证据保留，未用于canonical。真实package窗口只消除gamma/Zc两行假正文，tau/Cd仍未决。
-- 组合首轮完整1717测试259.084秒有1项旧入口字符串断言错误（compare导入已改为table_view_transaction），启动顺序仍在venv引导之后；已更新断言并重跑完整套件，1717项266.313秒通过（1条件skip），fourteenth-full-tests-recheck.log。20内容合同与10定向负控通过；正式STRICT尚未运行。原失败日志fourteenth-full-tests.log保留。
-- 早期拒绝的C58计数授权、C59仅改动词坐标、C37公式等价字体/分数几何候选均未复活。所有失败历史留在外部review目录。`DEF-CONTENT-CORRESPONDENCE-20260913`仍open，未push/main/正式STRICT/最终attest。恢复状态 `repair_20260913/continuation-state.json`。
-
-以下为此前轮次记录（有冲突时以上述最新状态为准）：
-
-- 第九修正后完整1517项测试240.561秒通过（1条件skip，ninth-release-tests.log），20内容保全案例与10定向错误注入均通过；原3fail/3error保留日志且原用例复验。准备冻结候选提交、启动full-native-ninth；整本验收/STRICT正式回执/最终交付仍未完成。
-
-- 第九首次最终全套1511项出现3fail/3error（ninth-final-tests.log），尚未启动整本：已修缺table.rows兼容与多行下标未归属词越过问题，原反例通过；剩余Table31-13可见表头序列化与既有text-backed适配回归正在修复。不得引用此前全绿作当前最终验收。
-
-- 第九候选已合入上标、完整JSON正文、连续行下标、相噪原位置同格消噪、几何合并条件/双层表头及单层物理表头；独立集成复核0重要问题，69项局部测试通过。完整ninth-final-tests.log执行中；后续必须冻结提交再跑full-native-ninth并复核501项，当前未最终验收。
-
-- 最新整本：源 `5edc350f18a9065838a7e0eb07e317c2a40c6041` 的第八次原生 GUI 于 1598.603 秒完成，636/685 页；`repair_20260913/full-native-eighth/native-result.json` 绑定输入与产物。完整 1442 项测试通过（1 条件 skip），但整本验收尚未通过。
-- 第八轮 501 个原审计 ID 已全部有裁决，见 `repair_20260913/complete-eighth-audit.json`；全部 219 当前正文卡、44 表格卡、82 原视觉项及 18 新视觉页对已复查。HTML 1217 图片无损坏、折叠/缩放/窄屏检查通过；这些不等于内容全正确。
-- 尚存：81 原正文噪声、64 因正文预览截断未闭环、26 数学/结构不确定；C140/C175 的上标20/12平铺造成阅读语义损坏；A-T6/7/9 同文相噪行误报、新增表头数据化及条件归属/H55 噪声仍待修。不得以候选标签或单元格保存替代内容验收。逃逸缺陷继续 open，未 push/main integration。
-- 正在合入有界原生上标排印投影（只改显示，不回流比较/图去重）及完整 JSON body_text 审计字段；独立负控与两页公开路径通过，最终全套和后续整本尚未运行。表格、剩余下标读序候选由只读评审在外部生成，root 是唯一 canonical 写入者。
-
-- task_id: `pdf-content-correspondence-20260913`；owner: `01a09983-9268-7c20-94c1-83e2272ddff7`；baseline: `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；branch: `project/pdf-protocol-diff`；status: active。
-- 用户授权按整体方案实施，保护真实新增，修复错配、文字误删及字段关系损坏；验收原OIF-CEI5.1/5.3两本完整PDF。
-- 诊断及501条审计：`/Users/mac/Documents/ProtocolPdfDiffReports/audit_20260913_132844/`；本轮证据：`/Users/mac/Documents/ProtocolPdfDiffReports/repair_20260913/`。
-- 首次完整GUI重比源 `c2544e0269c69908ba9a08cffe2eaa240bcea49d`，636/685页、1302.930秒完成；`full-native-release/native-result.json`绑定输入与源码。独立293正文＋126表格台账复查发现残余及31条隐藏噪声回归；该结果未验收，不得作为最终修复报告。
-- 后续补充出版页眉分类、跨页页脚递进证据、定义单元格、多行脚注归属、字体真实空glyph、完全同属性重绘去重、标量条件/公式边界、参数Setting身份、唯一F31续段和闭合Figure面板伪表分类。公开定义5页和脚注3页复测均0假正文/表变化；不替代整本。
-- `full-release.log`1364项通过仅对应c254源；`full-followup.log`1369项通过对应中间源；`full-followup-2.log`1373项有1个旧公式清理契约失败，已纠正其把标量限值/频段整体隐藏的预期。最终完整套件、第二次完整GUI、STRICT v2及正式exact-OID复审仍待完成。逃逸缺陷保持open。
-
-
-- 第二次完整GUI源`b4f8d7f78e7750ace8135bbdf2558ead5c38383e`已完成；1378项全套267.542秒通过、18语义案例及10负控预检通过。293正文/126表复核仍有C128图题吞正文、公式号切分、上下标、3图伪表与Mandatory假单侧，故未验收。
-- 第三轮候选：真实行边界保护图后正文；公式号移位不切碎同式；唯一有序字词offset搬移上下标（6真实页）；单标量表行保持条件与数值（6真实页）；四边绘图编码和竖轴分类；纯插删公共端保留完整cell，混合改动保留上下文；不确定表附录双侧原图；证明家具词与派生TABLE块不作为额外正文出现。首轮第三次预检1380项15失败揭示公共端过宽，已收窄且27相关反例通过，不能用该失败结果声称交付通过。
-- 下一步：第三轮完整测试/GUI报告、501条复核及STRICT；尚未push/main integration。H55合并Symbol组和复杂公式尚不能自动证明同一，保持open。
-
-- `a83478677ccfc91fc988a8372101fe72397d045f`全套1386项266.395秒通过，但独立审查发现公式后短命令/独立标量限制可能被新合并吞掉；第三次GUI在约数分钟后主动终止，仅终止本任务进程树，`full-native-third/aborted.json`留痕。已补“任何源span保留资格不得因公式号合并降级”的不变量和11个短句/标量反例，等待独立复验后第四次GUI。
-
-- `d5f4f3a0b0636f5a762ccaf2ceba0a81016b4012`全套1387项265.362秒通过，原C47页窗发现单侧视觉清理制造假删除，第四次GUI亦已终止（仅本任务进程树，aborted.json）。成对清理事务已补：双方具体replacement均实际成功trim才同时采用；该版paired direct增删不剪（后被第六轮契约修正替代）。6独立反例、24followup通过；fifth-figure真实旧303–305/新307–309不再误报该标签删除，但仍保留图中字序待核对，不声称图义已判等。
+- task_id: pdf-content-correspondence-20260913；owner: 01a09983-9268-7c20-94c1-83e2272ddff7；持久分支project/pdf-protocol-diff；status: active；root为唯一canonical写入者。
+- 第十四完整原生GUI已完成：冻结43c8cb0d53843586f9abd3735c0d1f10298d1039，636/685页，2349.933秒；full-native-fourteenth/native-result.json绑定源码/输入。报告JSON SHA ad55361b7152fe7b1e78b254db00e01dfeb1448df588c5749f887c5a0f7df55f，HTML SHA 09049c48ec7335fbc2d5fd24b030a36068dbb5e217b740a371d88de001d33af6。冻结前完整1717测试266.313秒通过（1条件skip），20合同/10定向反例通过。
+- 全501原ID、189当前正文卡（169主卡=162候选+7复核，20附录）及44表卡已完整审计，complete-fourteenth-audit.json。剩52原正文噪声（46主卡+6附录），另17混合真实内容带噪声、19几何/26数学未决；未作整本准确性验收。1963完整section仅旧S0872去除两条已承接gamma/Zc副本，其他body逐字相同；C102附录乘号空格假替换消失。
+- 三个公式来源UNKNOWN（旧241/257/314↔新245/261/318）各保留双侧原页、全文与相邻标量；六PNG实际重渲染一致，120源glyph逐字/位置唯一匹配。不能宣称公式相等或整个C37/C42/C54修完；原PageText未导出，报告独立offset重证仍有边界。完整表字段/632来源矩阵/配对/质量/三CSV/104视觉payload与已审13相同，限定复用源判断。四条三格记录及154个源字符另行原PDF核对，tau/Cd仍未决。
+- 17+28+11+9内容保全检查及82原视觉清单检查通过。原生HTML旧类1198图无损坏、默认折叠/统一放大通过，但520px窄屏因新增公式裸img/pre溢出失败；两次原native失败记录保留。外部formulaUI候选dce4dd8以现有grid/sourcepage修复、全14HTML重放1520img/六formula图/展开proof无溢出，独立390px全部展开复验通过，root已目视桌面/窄窗/proof；已合入，待最终整本。
+- 当前未提交：独立通过的numeric074149b已加入，仅完整Setting数值且明确物理Units才允许U2010短横编码等价，原值不改；79b43e因版本/编码ID反例被拒。summary-cache1538f7f已加入，仅完整实参的会话内纯摘要缓存2048，返回列表隔离；128容量140键二遍0命中的证据保留，未宣称整本性能收益。18项新增局部测试通过；UI已合入，最终完整1735测试260.043秒通过（1条件skip），20合同/10定向及三组真实3页公开窗口通过。尚待下一冻结整本，不能据缓存微基准宣称整本提速。
+- H50“2 6 Term”图内端口被误标题的628985候选已拒：框内小字会吞合法2.6/2.7章节关联。真实两侧各510glyph的位置、字体和矢量表示不能严格相等；不按字袋/任意距离阈值判等。该问题及其他旋转/二维关系仍open，见review/figure-region-source-candidate/rejected-boundary.md及exact-scene-boundary.md。
+- DEF-CONTENT-CORRESPONDENCE-20260913仍open。正式STRICT实际运行因该open缺陷BLOCKED（strict-fourteenth.log），不是PASS。未push/main/最终attest；不能把当前候选当最终交付。恢复状态repair_20260913/continuation-state.json。
 
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
