@@ -1,5 +1,37 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：重复原页截图修复（2026-09-15）
+
+- 用户反馈报告 `/Users/mac/Documents/ProtocolPdfDiffReports/protocol_diff_jqhgimg4_1ccd91325f4645898124463cc1666097/protocol_diff_report.html` 中第 4、5、7、8 页等原页截图重复出现。根因已定位为三条独立渲染路径：同一表格同时进入主表格卡和“表格对应待核实”附录；物理表格行逐行重复嵌入同一张表格截图；跨页正文变化卡各自嵌入相同的中性页截图。
+- canonical 源码已修复：表格待核实附录引用已有 `T*`/`A-T*` 证据，不再复制图片；物理行记录保留单元格和审计回执但复用上方表格截图；正文同侧同页的中性截图改为跳转到带标注的唯一截图，保留独立标注截图和文字定位。来源定位脚本会沿 `data-source-alias` 解析，点击文字明细仍可到原页。
+- 定向回归：`tests.test_reader_focus`、`tests.test_physical_table_rows_candidate`、`tests.test_complete_report_followup` 共 53 项通过；正文/截图相关套件另有 117 项与 22 项通过；`.venv/bin/python -m compileall -q src tests` 与 `git diff --check` 通过。
+- 真实输入按旧版 1–20 页、新版 1–19 页重新生成：`/Users/mac/Documents/ProtocolPdfDiffReports/duplicate_page_fix_final/protocol_diff_dqg5d5kr/protocol_diff_report.html`。HTML 图片由原报告 95 张降至 56 张，重复图片组从 11 组降为 0；正文截图重复的中性页改为 8 个跳转占位，表格物理行不再重复嵌入。第 12/17 页仍各有两张不同变化区域的独立标注截图，这是不同变更证据，不是同一图片复制。
+- 本轮验证覆盖上述真实页窗和渲染/导航回归，未宣称任意 PDF 或整本协议的内容对应准确率；旧报告文件未覆盖。代码已提交为 `9f25664`，持久分支仍为 `project/pdf-protocol-diff`；推送状态以本轮交付回执为准。
+
+## 当前任务：左右原页截图对称候选回退（2026-09-15）
+
+- 针对旧版第 19 页与新版第 18 页在章节分页变化后整页截图内容不对称的问题，生成了按正文变化段落裁剪的候选预览：`/Users/mac/Documents/ProtocolPdfDiffReports/symmetry_preview_candidate/protocol_diff_5upn940j/protocol_diff_report.html`。
+- 用户查看候选 HTML 后认为视觉效果不符合预期，明确要求保持原行为；候选代码与测试改动已全部撤回，canonical 源码恢复到 `feda2f8a83956df4944b17956e6ada4ada19de70` 的已接受行为。`tests.test_screenshot_first` 定向回归 11 项通过。
+- 本候选未提交、未合入、未覆盖原报告；后续若再次处理，应先取得新的视觉方案确认。
+
+## 当前任务：原页文字标注与句子标点过滤（2026-09-14）
+
+- 普通英文/中文句子中的逗号、分号、句号、问号、冒号及顿号不再生成正文差异或行内高亮；数值、标识符和紧凑技术表达式中的结构符号仍保留语义保护。
+- 正文变化继续沿用原页截图优先展示，旧版淡红、新版淡绿；“展开文字识别明细”保持折叠。新增单页真实入口报告：`/Users/mac/Documents/ProtocolPdfDiffReports/punctuation_repair_page13/protocol_diff_a8of0dt0/protocol_diff_report.html`。
+- 定向标点/截图测试 12 项通过；报告、截图和原页视觉套件 169 项通过。正文套件 502 项中仅保留基线已有的 4 个失败（058 编号上下文 1 个、532 表格展示 3 个），未新增失败；完整 PDF 未重跑。
+- 代码已提交为 `feda2f8`；交付时保留上述人工复核边界，不把单页验证扩展为整本准确性结论。
+
+## 当前任务：第十五整本复核状态（2026-09-14）
+
+- 第十五轮已用冻结源码 `6b95fb6e61895b6332332d1787204ac4443d6086` 对两份完整 PDF 重跑：旧 636 页、新 685 页，耗时 1986.310 秒。报告已生成，源码与两份输入 SHA 已绑定；HTML SHA `c64658cad6344c7e4f2228ffe0123e830463a46323926d3ec6009aa824f9bb0c`，JSON SHA `f336f35b825cccd447db1f548b6d6b2b41ecb5fa3e46d15fab9824f571d7f151`。
+- 当前报告统计仍为正文 162（修改 96、新增 66、删除 0）、表格 23、视觉 104；状态是 `degraded / 需人工复核`。关键第十五定向检查通过：三公式来源保持 UNKNOWN、六条 package 三格记录与两侧原始编码保留、FOM 空格误配不再出现；这只是范围检查，不是整本准确性验收。
+- 整本剩余风险仍包括：697/749 条抽取警告、旧/新多页非线性阅读顺序风险、重复章节编号路径 8/9 个、各有 1 个无编号技术段、新版第 681 页整页 OCR 与大面积栅格图；视觉哨兵只核对 104/369 对，265 对未核对，263 页对无法安全配对。因此报告不能自动下“无差异”结论。
+- 第十四轮全 501 原 ID 审计的剩余边界仍适用于第十五：正文噪声 52（主文 46、附录 6），另有 17 条混合真实内容带噪声；19 条图形/区域来源未决，26 条数学或结构关系未决。表格仍有 68 条结构/字形未决，包含附录短横编码、私用字形、Cd/PUA、分式和混合单元格；真实参数与条件必须继续保留。
+- 尚未进入 canonical 的候选：C80 `log10 (2 f / fb)` 与 `log10(2f/fb)` 的 typed 商空格投影；C127 的唯一 lowered `R_LM` 来源承接；QPRBS 8 张表 16 对 Index 字段的有界 source-codec 呈现。它们已有外部正/负证据或原型，但还没有完成生产 hook、独立复核和整本重跑，不能写成已修复。
+- 当前整本报告路径：`/Users/mac/Documents/ProtocolPdfDiffReports/repair_20260913/full-native-fifteenth/reports/protocol_diff_whm_ej91_d8334d4ca6264bebbbefdbdb1b9f1277/protocol_diff_report.html`。完整 prose/table/visual 501 项第十五逐项审计和最终原生页面检查仍待继续；DEF-CONTENT-CORRESPONDENCE-20260913 仍 OPEN，STRICT 门禁不可宣称 PASS。
+- 本轮针对用户指出的图内重复文字层及页边家具误差已完成修复（代码提交 `747d68c`、`426e3cc`、`c5d156a`）；按旧209页↔新213页一页窗口重新生成报告，页眉版本号、右侧行号和页脚均不再进入比较文本，真实 PDF 单页回归通过，结果为 0 条内容差异。整本报告未重跑。
+- 报告展示层继续收敛：表格截图若只提供网格横/竖线诊断则不再显示该块；表格文字明细默认展开。相关报告渲染/表格回归通过，未改变内部网格证据或表格识别算法。
+
 ## 当前任务：整份报告内容对应修复（2026-09-13）
 
 - task_id: pdf-content-correspondence-20260913；owner: 01a09983-9268-7c20-94c1-83e2272ddff7；持久分支project/pdf-protocol-diff；status: active；root为唯一canonical写入者。

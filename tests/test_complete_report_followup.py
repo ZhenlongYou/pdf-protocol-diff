@@ -92,8 +92,11 @@ class CompleteReportFollowupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             outputs=reporting.write_reports(result,directory,DiffOptions())
             html=outputs['html'].read_text()
-            self.assertIn('src="'+tables[0].image_data_uri+'"',html)
-            self.assertIn('src="'+tables[1].image_data_uri+'"',html)
+            # The uncertain table is already rendered in the main table card;
+            # the uncertainty appendix keeps the reason but must not embed a
+            # second copy of either source image.
+            self.assertEqual(1, html.count('src="'+tables[0].image_data_uri+'"'))
+            self.assertEqual(1, html.count('src="'+tables[1].image_data_uri+'"'))
             data=json.loads(outputs['json'].read_text())
             self.assertTrue(any(r['old_sources'] and r['new_sources'] for r in data['uncertain_table_correspondences']))
 
