@@ -10,6 +10,15 @@ escaped_defects:
     regression_test_id: CONTENT_CORRESPONDENCE_TEST
     public_path_rerun_id: RUN-CORRESPONDENCE-REAL
     state: open
+  - id: DEF-FIGURE-TEXT-LAYER-20260914
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "图内 Component/Edge 在报告正文中被重复拼接，导致同一内容被误报为删除和新增。"
+    discovered_via: user_counterexample
+    failure_mechanism: "同一视觉字形由多个文字层重复绘制；旧去重比较把 mcid/tag 与 0/0.0 等记账差异当作视觉差异，正文路径未使用图形区域去重。"
+    red_green_pair_id: PAIR-FIGURE-TEXT-LAYER
+    regression_test_id: FIGURE_TEXT_LAYER_TEST
+    public_path_rerun_id: RUN-FIGURE-TEXT-REAL-PAGE-209
+    state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"
