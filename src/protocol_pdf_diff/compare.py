@@ -5181,6 +5181,11 @@ def _review_unit_key(value: str) -> str:
     )
     case_signature_source = _normalize_directional_symbols(case_signature_source)
     case_signature_source = re.sub(
+        r"(?<=[a-z])[,;:](?=[a-z])",
+        " ",
+        case_signature_source,
+    )  # 普通小写英文句中紧凑标点不能制造词位移或伪技术大小写。
+    case_signature_source = re.sub(
         r"(?<=\d)(?![eE][+-]?\d)(?=(?:[^\W\d_]|_))",
         " ",
         case_signature_source,
@@ -5222,9 +5227,32 @@ def _review_unit_key(value: str) -> str:
     normalized = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=\d)", "", normalized)
     normalized = re.sub(r"(?<=\d)\s+(?=[\u4e00-\u9fff])", "", normalized)
     token_source = mark_english_cardinal_list_commas(normalized)
-    token_source = re.sub(
-        r"(?<!\d)[.,;:?!，。；：！？]|[.,;:?!，。；：！？](?!\d)",
-        f" {_REVIEW_NUMBER_PHRASE_BOUNDARY_SENTINEL} ",
+    punctuation_boundary_re = re.compile(
+        r"(?<!\d)[.,;:?!，。；：！？、]|[.,;:?!，。；：！？、](?!\d)"
+    )
+
+    def replace_sentence_punctuation(match: re.Match[str]) -> str:
+        """Drop CJK sentence punctuation without splitting adjacent CJK words."""
+
+        index = match.start()
+        left_index = index - 1
+        while left_index >= 0 and token_source[left_index].isspace():
+            left_index -= 1
+        right_index = index + 1
+        while right_index < len(token_source) and token_source[right_index].isspace():
+            right_index += 1
+        cjk_range = "\u3400-\u4dbf\u4e00-\u9fff"
+        if (
+            left_index >= 0
+            and right_index < len(token_source)
+            and re.fullmatch(f"[{cjk_range}]", token_source[left_index])
+            and re.fullmatch(f"[{cjk_range}]", token_source[right_index])
+        ):
+            return ""
+        return f" {_REVIEW_NUMBER_PHRASE_BOUNDARY_SENTINEL} "
+
+    token_source = punctuation_boundary_re.sub(
+        replace_sentence_punctuation,
         token_source,
     )
     tokens = [
@@ -5469,14 +5497,35 @@ def _measurement_modifier_signatures(value: str) -> list[str]:
 
 
 def _contextual_punctuation_signatures(value: str) -> list[str]:
-    """Preserve punctuation only where neighboring syntax makes it structural."""
+    """Preserve punctuation only when it is compact technical syntax.
+
+    Sentence punctuation between ordinary words is presentation noise for the
+    semantic comparison.  Compact punctuation inside identifiers or numeric
+    expressions remains available as structural evidence.
+    """
 
     signatures: list[str] = []
     punctuation_run_ranges: set[int] = set()
     for match in re.finditer(r"[.,;:?!]{2,}", value):
         position = _punctuation_token_position(value, match.start())
-        signatures.append(f"{position}:run:{match.group(0)}")
-        punctuation_run_ranges.update(range(match.start(), match.end()))
+        left_index = match.start() - 1
+        while left_index >= 0 and value[left_index].isspace():
+            left_index -= 1
+        right_index = match.end()
+        while right_index < len(value) and value[right_index].isspace():
+            right_index += 1
+        if (
+            left_index >= 0
+            and right_index < len(value)
+            and re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]", value[left_index])
+            and re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]", value[right_index])
+        ):
+            continue  # 中文句中 ASCII 连续标点也属于排版噪声。
+        left_attached = match.start() > 0 and not value[match.start() - 1].isspace()
+        right_attached = match.end() < len(value) and not value[match.end()].isspace()
+        if left_attached and right_attached:
+            signatures.append(f"{position}:run:{match.group(0)}")
+            punctuation_run_ranges.update(range(match.start(), match.end()))
     for index, character in enumerate(value):
         if character not in ".:,;?":
             continue
@@ -5491,6 +5540,13 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
         left = value[left_index].casefold() if left_index >= 0 else ""
         right = value[right_index].casefold() if right_index < len(value) else ""
         if (
+            left_index >= 0
+            and right_index < len(value)
+            and re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]", value[left_index])
+            and re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]", value[right_index])
+        ):
+            continue  # 中文句中 ASCII 单个标点不进入语义键。
+        if (
             character == "."
             and index > 0
             and index + 1 < len(value)
@@ -5503,11 +5559,35 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             for match in _NUMBER_TOKEN_RE.finditer(value)
         ):
             continue  # 合法千分位逗号由完整数字 token 归一，不能误当列表分隔符。
-        if character in ".:,;" and left and right and (left.isalnum() or left == "_") and (right.isalnum() or right == "_"):
+        tightly_attached = (
+            index > 0
+            and index + 1 < len(value)
+            and not value[index - 1].isspace()
+            and not value[index + 1].isspace()
+        )
+        if (
+            character in ".:,;"
+            and tightly_attached
+            and left
+            and right
+            and (left.isalnum() or left == "_")
+            and (right.isalnum() or right == "_")
+            and (
+                character == "."
+                or _compact_punctuation_neighbors_are_technical(
+                    value, left_index, right_index
+                )
+            )
+        ):
             kind = {".": "dot", ":": "colon", ",": "comma", ";": "semicolon"}[character]
             position = _punctuation_token_position(value, index)
             signatures.append(f"{position}:{kind}")
-        elif character == "?" and left and (left.isalnum() or left == "_"):
+        elif (
+            character == "?"
+            and tightly_attached
+            and left
+            and (left.isalnum() or left == "_")
+        ):
             position = _punctuation_token_position(value, index)
             signatures.append(f"{position}:question:{left}")
     stack: list[str] = []
@@ -5541,6 +5621,32 @@ def _contextual_punctuation_signatures(value: str) -> list[str]:
             f"{position}:backtick:{normalize_line(match.group('literal'))}"
         )
     return signatures
+
+
+def _compact_punctuation_neighbors_are_technical(
+    value: str,
+    left_index: int,
+    right_index: int,
+) -> bool:
+    """Keep compact separators only when adjacent words look like syntax."""
+
+    left_match = re.search(r"(?:[^\W\d_]|_)\w*$", value[: left_index + 1], flags=re.UNICODE)
+    right_match = re.match(r"\w+", value[right_index:], flags=re.UNICODE)
+    neighbors = (
+        left_match.group(0) if left_match else "",
+        right_match.group(0) if right_match else "",
+    )
+    return any(
+        bool(token)
+        and (
+            len(token) <= 2
+            or "_" in token
+            or any(character.isdigit() for character in token)
+            or any(character.isupper() for character in token[1:])
+            or all(character.isupper() for character in token if character.isalpha())
+        )
+        for token in neighbors
+    )
 
 
 def _super_subscript_signatures(value: str) -> list[str]:

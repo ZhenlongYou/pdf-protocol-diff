@@ -20806,6 +20806,68 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("+0/-2 mV", snippets)
         self.assertIn("0/2 mV", snippets)
 
+    def test_ordinary_sentence_punctuation_only_change_is_ignored(self) -> None:
+        """Removing a prose semicolon must not create a content-difference card."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_sentence_punctuation.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "A CEI implementation complies to the specifications of this clause "
+                        "over the range of baud rates; stated for the implementation within this range.\n"
+                        "The limit is stable;verified."
+                    ),
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_sentence_punctuation.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text=(
+                        "1 Scope\n"
+                        "A CEI implementation complies to the specifications of this clause "
+                        "over the range of baud rates stated for the implementation within this range.\n"
+                        "The limit is stable verified."
+                    ),
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
+    def test_fullwidth_sentence_punctuation_only_change_is_ignored(self) -> None:
+        """Fullwidth CJK sentence punctuation is presentation noise as well."""
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_fullwidth_punctuation.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 范围\n供应商应在7个工作日内交付；设备应保存记录、归档。",
+                )
+            ],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_fullwidth_punctuation.pdf"),
+            pages=[
+                PageText(
+                    page_number=1,
+                    text="1 范围\n供应商应在7个工作日内交付设备应保存记录归档",
+                )
+            ],
+        )
+
+        result = compare_extractions(old_extraction, new_extraction, DiffOptions())
+
+        self.assertEqual([], result.changes)
+
     def test_comparison_operator_changes_are_not_suppressed(self) -> None:
         """Inequality operators are protocol content, not display punctuation."""
 
@@ -21406,8 +21468,8 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual([], result.changes)
 
-    def test_semantic_semicolon_is_not_lost_when_sentence_boundaries_change(self) -> None:
-        """A command separator remains visible even when it changes unit splitting."""
+    def test_ordinary_semicolon_boundary_is_ignored(self) -> None:
+        """A prose semicolon is presentation punctuation, not a content change."""
 
         shared = (
             "The implementation shall retain traceable requirements and review records. "
@@ -21433,19 +21495,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         result = compare_extractions(old_extraction, new_extraction, DiffOptions())
 
-        self.assertEqual(1, len(result.changes))
-        self.assertEqual("modified", result.changes[0].change_type)
-        evidence = "\n".join(
-            [
-                *result.changes[0].audit_added_snippets,
-                *result.changes[0].audit_removed_snippets,
-                *(
-                    f"{pair.old}\n{pair.new}"
-                    for pair in result.changes[0].audit_replaced_snippets
-                ),
-            ]
-        )
-        self.assertIn("reset;", evidence)
+        self.assertEqual([], result.changes)
 
     def test_unicode_adjacent_comparison_operator_changes_remain_visible(self) -> None:
         """CJK text directly touching a comparison operator remains semantic."""
@@ -21656,7 +21706,7 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
         self.assertEqual(1, len(result.changes))
-        self.assertEqual(2, result.changes[0].omitted_snippet_count)  # 内部逗号变化也作为可观察差异计入省略数。
+        self.assertEqual(1, result.changes[0].omitted_snippet_count)  # 普通句中逗号不计入差异，后续实质变化仍保留省略提示。
         shown = "\n".join(
             pair.old + "\n" + pair.new for pair in result.changes[0].replaced_snippets
         )

@@ -12266,6 +12266,14 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
                 text,
             )
         )
+    raw_tokens = [
+        item
+        for item in raw_tokens
+        if not _inline_sentence_punctuation_is_ignored(
+            item[0], text, item[1], item[2]
+        )
+    ]
+    raw_tokens = _merge_cjk_tokens_across_ignored_punctuation(raw_tokens, text)
 
     tokens: list[_InlineToken] = []
     raw_words = [_inline_context_word(raw) for raw, _start, _end in raw_tokens]
@@ -12341,6 +12349,75 @@ def _inline_tokens(text: str, *, field_label: str = "") -> list[_InlineToken]:
             tokens.append(_InlineToken(text=raw, start=start, end=end, key=key))
         index += 1
     return tokens
+
+
+def _merge_cjk_tokens_across_ignored_punctuation(
+    raw_tokens: list[tuple[str, int, int]],
+    source_text: str,
+) -> list[tuple[str, int, int]]:
+    """Keep Chinese runs aligned when a fullwidth sentence mark is removed."""
+
+    merged: list[tuple[str, int, int]] = []
+    index = 0
+    while index < len(raw_tokens):
+        raw, start, end = raw_tokens[index]
+        if re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]+", raw):
+            next_index = index + 1
+            combined_end = end
+            combined_raw = raw
+            merged_one = False
+            while next_index < len(raw_tokens):
+                next_raw, next_start, next_end = raw_tokens[next_index]
+                separator = source_text[combined_end:next_start]
+                if not (
+                    re.fullmatch(r"[\u3400-\u4dbf\u4e00-\u9fff]+", next_raw)
+                    and any(character in ".,;:?，。；：！？、" for character in separator)
+                    and canonicalize_chinese_number_token(combined_raw) is None
+                    and canonicalize_chinese_number_token(next_raw) is None
+                ):
+                    break
+                # Keep the key punctuation-free; start/end still span the exact
+                # source range so a real wording change remains locatable.
+                combined_raw += next_raw
+                combined_end = next_end
+                next_index += 1
+                merged_one = True
+            if merged_one:
+                merged.append((combined_raw, start, combined_end))
+                index = next_index
+                continue
+        if not _inline_sentence_punctuation_is_ignored(raw, source_text, start, end):
+            merged.append((raw, start, end))
+        index += 1
+    return merged
+
+
+def _inline_sentence_punctuation_is_ignored(
+    token: str,
+    source_text: str,
+    start: int,
+    end: int,
+) -> bool:
+    """Recognize fullwidth marks and ASCII marks between Chinese prose runs."""
+
+    punctuation = ".,;:?，。；：！？、"
+    if not token or any(character not in punctuation for character in token):
+        return False
+    if all(character in "，。；：！？、" for character in token):
+        return True
+    left_index = start - 1
+    while left_index >= 0 and source_text[left_index].isspace():
+        left_index -= 1
+    right_index = end
+    while right_index < len(source_text) and source_text[right_index].isspace():
+        right_index += 1
+    cjk_re = r"[\u3400-\u4dbf\u4e00-\u9fff]"
+    return bool(
+        left_index >= 0
+        and right_index < len(source_text)
+        and re.fullmatch(cjk_re, source_text[left_index])
+        and re.fullmatch(cjk_re, source_text[right_index])
+    )
 
 
 def _number_word_phrase_has_positive_count_context(
@@ -12631,7 +12708,7 @@ def _inline_token_key(
     if token in {"'", '"', "`", "‘", "’", "“", "”"}:
         quote_key = _inline_literal_quote_key(token, source_text, start, end)
         return f"quote:{quote_key}" if quote_key else ""
-    if re.fullmatch(r"[.,;:?]+", token):
+    if re.fullmatch(r"[.,;:?，。；：！？、]+", token):
         punctuation_key = _inline_contextual_punctuation_key(token, source_text, start, end)
         return f"punctuation:{punctuation_key}" if punctuation_key else ""
     if token in _SEMANTIC_OPERATOR_KEYS:
@@ -12812,10 +12889,32 @@ def _inline_contextual_punctuation_key(
     start: int,
     end: int,
 ) -> str | None:
-    """Preserve punctuation only when its neighbors show technical structure."""
+    """Preserve punctuation only when it is compact technical syntax.
+
+    Ordinary sentence punctuation between words is ignored so a removed
+    comma/semicolon/period cannot become a reader-facing text difference.
+    Punctuation glued to both sides of an identifier or numeric expression
+    remains highlightable as technical syntax.
+    """
 
     before = source_text[:start]
     after = source_text[end:]
+    if _inline_sentence_punctuation_is_ignored(token, source_text, start, end):
+        return None
+    tightly_attached = (
+        start > 0
+        and end < len(source_text)
+        and not source_text[start - 1].isspace()
+        and not source_text[end].isspace()
+    )
+    word_attached = (
+        tightly_attached
+        and bool(re.search(r"\w$", before))
+        and bool(re.match(r"^\w", after))
+    )
+    separator_is_technical = _inline_compact_separator_is_technical(
+        before, after
+    )
     if len(token) > 1:
         punctuation_names = {
             ".": "period",
@@ -12825,32 +12924,56 @@ def _inline_contextual_punctuation_key(
             "?": "question",
         }
         run_shape = "+".join(punctuation_names[character] for character in token)
-        if re.search(r"\w\s*$", before) or re.match(r"^\s*\w", after):
+        if word_attached:
             return f"run:{run_shape}"  # 连续标点的类型、数量和出现位置都是可观测事实。
         return None
     if token == ".":
-        if re.search(r"\w$", before) and re.match(r"^\w", after):
+        if word_attached:
             return "member"
         return None
     if token == ",":
-        if re.search(r"\w$", before) and re.match(r"^\s*\w", after):
+        if word_attached and separator_is_technical:
             return "separator"
         return None
     if token == ";":
-        if re.search(r"\w$", before) and re.match(r"^\s*\w", after):
+        if word_attached and separator_is_technical:
             return "separator"
         return None
     if token == ":":
-        if re.search(r"\w\s*$", before) and re.match(r"^\s*\w", after):
+        if word_attached and separator_is_technical:
             return "colon"
         return None
     if token == "?":
         identifier_match = re.search(r"([^\W\d_]|_)\w*$", before)
+        if not tightly_attached:
+            return None
         if identifier_match and _token_shape_is_technical(identifier_match.group(0)):
             return "query"
         if re.search(r"(?i)\b(?:command|query|function)\s+\w+\s*$", before):
             return "query"
     return None
+
+
+def _inline_compact_separator_is_technical(before: str, after: str) -> bool:
+    """Keep compact separators when adjacent words look like identifiers."""
+
+    left_match = re.search(r"(?:[^\W\d_]|_)\w*$", before, flags=re.UNICODE)
+    right_match = re.match(r"\w+", after, flags=re.UNICODE)
+    neighbors = (
+        left_match.group(0) if left_match else "",
+        right_match.group(0) if right_match else "",
+    )
+    return any(
+        bool(token)
+        and (
+            len(token) <= 2
+            or "_" in token
+            or any(character.isdigit() for character in token)
+            or any(character.isupper() for character in token[1:])
+            or all(character.isupper() for character in token if character.isalpha())
+        )
+        for token in neighbors
+    )
 
 
 def _token_shape_is_technical(token: str) -> bool:

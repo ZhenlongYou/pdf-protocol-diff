@@ -151,7 +151,45 @@ class ScreenshotFirstTests(unittest.TestCase):
             group=next(g for g in result.prose_source_visuals if g.old_visuals)
             self.assertGreater(group.old_visuals[0].highlight_region_count,0)
             self.assertEqual((0.,0.),group.old_visuals[0].crop_bbox[:2])
+            self.assertNotEqual(
+                group.old_visuals[0].image_data_uri,
+                group.old_visuals[0].raw_image_data_uri,
+            )
+            self.assertNotEqual(
+                group.new_visuals[0].image_data_uri,
+                group.new_visuals[0].raw_image_data_uri,
+            )
             self.assertIn('<details class="prose-text-details">',html)
             self.assertLess(html.index('class="prose-source-visual"'),html.index('<details class="prose-text-details">'))
+
+    def test_sentence_punctuation_only_pdf_change_is_ignored_end_to_end(self):
+        """Ordinary prose punctuation must not become a report-level delta."""
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            old = write_multipage_text_pdf(
+                root / "old.pdf",
+                [[
+                    "1 Receiver",
+                    "A CEI implementation complies to the specifications of this clause over the range of baud rates; stated for the implementation within this range.",
+                ]],
+            )
+            new = write_multipage_text_pdf(
+                root / "new.pdf",
+                [[
+                    "1 Receiver",
+                    "A CEI implementation complies to the specifications of this clause over the range of baud rates stated for the implementation within this range.",
+                ]],
+            )
+
+            result = run_diff(old, new, DiffOptions(visual_watchdog=False))
+            outputs = write_reports(result, root / "report", DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            html = outputs["html"].read_text(encoding="utf-8")
+
+            self.assertEqual([], result.changes)
+            self.assertEqual([], payload["content_changes"])
+            self.assertNotIn("展开文字识别明细", html)
+            self.assertNotIn("<mark", html)
 
 if __name__=='__main__': unittest.main()

@@ -242,7 +242,7 @@ class ReportingGeneralityTests(unittest.TestCase):
         self.assertNotIn("<mark", old_html)
         self.assertNotIn("<mark", new_html)
 
-    def test_inline_highlight_preserves_spaced_separators(self) -> None:
+    def test_inline_highlight_ignores_spaced_sentence_separators(self) -> None:
         for old_text, new_text in (
             ("Use 1, 2.", "Use 1 2."),
             ("Select RX, TX.", "Select RX TX."),
@@ -252,20 +252,23 @@ class ReportingGeneralityTests(unittest.TestCase):
         ):
             with self.subTest(old_text=old_text, new_text=new_text):
                 old_html, _new_html = _inline_diff_html(old_text, new_text)
-                self.assertIn("<mark", old_html)
+                self.assertNotIn("<mark", old_html)
 
     def test_inline_highlight_preserves_punctuation_runs(self) -> None:
         for old_text, new_text in (
             ("Address fe80::1.", "Address fe80 1."),
             ("Use A::B.", "Use A B."),
             ("Read obj..member.", "Read obj member."),
-            ("Pass args...", "Pass args"),
             ("Use A;;B.", "Use A B."),
             ("Use A,,B.", "Use A B."),
         ):
             with self.subTest(old_text=old_text, new_text=new_text):
                 old_html, _new_html = _inline_diff_html(old_text, new_text)
                 self.assertIn("<mark", old_html)
+
+        old_html, new_html = _inline_diff_html("Pass args...", "Pass args")
+        self.assertNotIn("<mark", old_html)
+        self.assertNotIn("<mark", new_html)
 
     def test_inline_number_words_fold_only_in_positive_count_context(self) -> None:
         for old_text, new_text in (
@@ -507,7 +510,6 @@ class ReportingGeneralityTests(unittest.TestCase):
             ("Use DATA[7:0].", "Use DATA[7 0].", ":"),
             ("Use A.B.C.", "Use A.B C.", "."),
             ("Use ratio 1:2:3.", "Use ratio 1:2 3.", ":"),
-            ("Use ratio 1 : 2.", "Use ratio 1 2.", ":"),
             ("Send MEAS?.", "Send MEAS.", "?"),
             ('Select "ON".', "Select ON.", "&quot;"),
             ("Command Meas?.", "Command Meas.", "?"),
@@ -525,9 +527,28 @@ class ReportingGeneralityTests(unittest.TestCase):
                     old_html,
                 )
 
-    def test_inline_highlight_preserves_punctuation_occurrence_positions(self) -> None:
+    def test_inline_highlight_ignores_ordinary_sentence_punctuation(self) -> None:
         for old_text, new_text in (
-            ("Poll STAT? then STAT.", "Poll STAT then STAT?."),
+            ("rates; stated", "rates stated"),
+            ("rates;stated", "rates stated"),
+            ("Use ratio 1 : 2.", "Use ratio 1 2."),
+            ("Poll STAT? then STAT.", "Poll STAT then STAT."),
+            ("供应商应交付；设备应保存、归档。", "供应商应交付设备应保存归档"),
+            ("供应商应交付;设备应保存。", "供应商应交付设备应保存"),
+        ):
+            with self.subTest(old_text=old_text):
+                old_html, new_html = _inline_diff_html(old_text, new_text)
+                self.assertNotIn("<mark", old_html)
+                self.assertNotIn("<mark", new_html)
+
+    def test_inline_highlight_preserves_punctuation_occurrence_positions(self) -> None:
+        old_html, new_html = _inline_diff_html(
+            "Poll STAT? then STAT.",
+            "Poll STAT then STAT.",
+        )
+        self.assertNotIn("<mark", old_html)
+        self.assertNotIn("<mark", new_html)
+        for old_text, new_text in (
             ("Use A.B then A B.", "Use A B then A.B."),
             ('Literal "ON" then ON.', 'Literal ON then "ON".'),
             ("Use (x,y) then (x y).", "Use (x y) then (x,y)."),
