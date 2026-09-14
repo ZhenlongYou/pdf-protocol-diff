@@ -1593,7 +1593,7 @@ def _render_html(
         <div class="metric"><strong>{sum(r.row_role == 'annotation' for c in table_changes for r in c.row_changes)}</strong><span>表说明变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
-      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。文字明细默认折叠，相似度显示为 1.000 的条目收在报告末尾。</p>
+      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。正文文字明细默认折叠，表格文字明细默认展开；相似度显示为 1.000 的条目收在报告末尾。</p>
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -4307,7 +4307,7 @@ def _render_table_change_html(
           <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
           新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
           <div class="table-shot-grid">{old_shot}{new_shot}</div>
-          <details class="table-text-details"><summary>展开表格文字明细</summary>{rows_html}</details>
+          <details open class="table-text-details"><summary>表格文字明细</summary>{rows_html}</details>
         </div>
     """
 
@@ -4350,11 +4350,6 @@ def _render_one_table_shot_page(table: TableVisual, *, change: TableChange | Non
 
     caption = f"页 {table.page_number} · 表格 {table.table_number}"
     text_backed = table.ocr_status == "text_backed_exact_match"
-    grid_summary = (
-        "行列网格：未验证"
-        if text_backed
-        else _display_table_grid_summary(table.grid_summary)
-    )
     image_html = (
         f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
         if table.image_data_uri
@@ -4371,7 +4366,7 @@ def _render_one_table_shot_page(table: TableVisual, *, change: TableChange | Non
     return (
         f'<div class="table-shot-page"><div class="table-shot-page-label">{_escape(caption)}</div>'
         f"{image_html}"
-        f'<details class="table-image-diagnostics"><summary>截图识别信息</summary><div class="snippet">{_escape(grid_summary)}</div></details></div>'
+        "</div>"
     )
 
 

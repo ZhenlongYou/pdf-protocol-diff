@@ -131,8 +131,22 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
 
         shot_html = reporting._render_one_table_shot_page(text_backed)
         self.assertIn("扁平文字精确匹配，行列边界未验证", shot_html)
-        self.assertIn("行列网格：未验证", shot_html)
+        self.assertNotIn("table-image-diagnostics", shot_html)
+        self.assertNotIn("行列网格：未验证", shot_html)
         self.assertNotIn("仅使用结构化表格行摘要", shot_html)
+
+        change_html = reporting._render_table_change_html(
+            1,
+            TableChange(
+                "modified",
+                (text_backed,),
+                (structured,),
+                1.0,
+                False,
+                (),
+            ),
+        )
+        self.assertIn('<details open class="table-text-details">', change_html)
 
     def test_review_only_table_is_not_reported_as_a_confirmed_modification(self) -> None:
         """Equal contents with one flat reconstruction create a review, not a change."""
