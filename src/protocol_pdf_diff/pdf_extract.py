@@ -1652,8 +1652,12 @@ def _filtered_layout_page(
 ) -> object:
     """Return a page view with only spatially proven gutters/watermarks removed."""
 
-    from .exact_glyph_view import exact_glyph_comparison_view
+    from .exact_glyph_view import deduplicate_figure_text_layers, exact_glyph_comparison_view
     working_page = exact_glyph_comparison_view(page)
+    working_page = deduplicate_figure_text_layers(
+        working_page,
+        _page_vector_graphic_bboxes(working_page),
+    )
     watermark_keys = _draft_watermark_object_keys(working_page)
     gutter_boxes = gutter_boxes if gutter_boxes is not None else ()  # 单页局部几何无法排除合法长列表，默认必须保留。
     footer_boxes = footer_boxes if footer_boxes is not None else _proven_running_footer_boxes(
