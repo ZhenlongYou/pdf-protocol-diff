@@ -6,7 +6,7 @@
 - canonical 源码已修复：表格待核实附录引用已有 `T*`/`A-T*` 证据，不再复制图片；物理行记录保留单元格和审计回执但复用上方表格截图；正文同侧同页的中性截图改为跳转到带标注的唯一截图，保留独立标注截图和文字定位。来源定位脚本会沿 `data-source-alias` 解析，点击文字明细仍可到原页。
 - 定向回归：`tests.test_reader_focus`、`tests.test_physical_table_rows_candidate`、`tests.test_complete_report_followup` 共 53 项通过；正文/截图相关套件另有 117 项与 22 项通过；`.venv/bin/python -m compileall -q src tests` 与 `git diff --check` 通过。
 - 真实输入按旧版 1–20 页、新版 1–19 页重新生成：`/Users/mac/Documents/ProtocolPdfDiffReports/duplicate_page_fix_final/protocol_diff_dqg5d5kr/protocol_diff_report.html`。HTML 图片由原报告 95 张降至 56 张，重复图片组从 11 组降为 0；正文截图重复的中性页改为 8 个跳转占位，表格物理行不再重复嵌入。第 12/17 页仍各有两张不同变化区域的独立标注截图，这是不同变更证据，不是同一图片复制。
-- 本轮验证覆盖上述真实页窗和渲染/导航回归，未宣称任意 PDF 或整本协议的内容对应准确率；旧报告文件未覆盖。代码已提交为 `75207b4`，持久分支仍为 `project/pdf-protocol-diff`；推送状态以本轮交付回执为准。
+- 本轮验证覆盖上述真实页窗和渲染/导航回归，未宣称任意 PDF 或整本协议的内容对应准确率；旧报告文件未覆盖。代码已提交为 `070a681`，持久分支仍为 `project/pdf-protocol-diff`；推送状态以本轮交付回执为准。
 
 ## 当前任务：左右原页截图对称候选回退（2026-09-15）
 
