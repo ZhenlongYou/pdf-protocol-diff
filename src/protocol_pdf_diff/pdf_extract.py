@@ -397,7 +397,11 @@ def _extract_pdf_text_with_pdfplumber(
                     page_bbox=page_bounds(page),
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
-                    running_header_texts=header_evidence_by_page.get(index, ((), ()))[1],
+                    running_header_texts=tuple(
+                        text
+                        for text in header_evidence_by_page.get(index, ((), ()))[1]
+                        if not _looks_like_publication_version_header(text)
+                    ),
                     running_footer_texts=tuple(dict.fromkeys((*_footer_source_texts(page, coordinate_evidence[index][0]),
                         *footer_evidence_by_page.get(index, ((), (), ()))[1]))),
                     running_footer_values=tuple(dict.fromkeys((*_footer_source_texts(page, coordinate_evidence[index][0], omit_proven_folio=True),

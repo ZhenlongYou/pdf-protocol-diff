@@ -34,6 +34,7 @@ class DuplicateFigureTextTests(unittest.TestCase):
                 )
                 text = extraction.pages[0].text
                 self.assertNotIn(f"Implementation Agreement OIF-CEI-{revision}", text)
+                self.assertEqual((), extraction.pages[0].running_header_texts)
                 self.assertNotIn("D 32", text)
                 self.assertNotIn("* 33", text)
                 self.assertNotIn(" 209", text)
