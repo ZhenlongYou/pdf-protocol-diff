@@ -736,11 +736,24 @@ def write_reports(
 
 
 def _displayed_similarity_one(change: SectionChange | TableChange) -> bool:
-    """Only paired items have a meaningful displayed similarity score."""
+    """Return whether a paired finding may be moved to the folded 1.000 appendix.
+
+    Table similarity proves logical-table pairing, not cell equality.  A table
+    whose row or caption facts changed must stay in the primary evidence list
+    even when its pairing score is exactly 1.000.
+    """
     paired = (bool(change.old_section and change.new_section)
               if isinstance(change, SectionChange)
               else bool(change.old_tables and change.new_tables))
-    return paired and format(change.similarity, ".3f") == "1.000"
+    if not paired or format(change.similarity, ".3f") != "1.000":
+        return False
+    if isinstance(change, TableChange):
+        has_confirmed_table_delta = bool(change.caption_changed) or any(
+            row.change_type != "需人工复核"
+            for row in change.row_changes
+        )
+        return not has_confirmed_table_delta
+    return True
 
 
 def _section_change_reader_identity(change: SectionChange) -> tuple[int, int, str]:

@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-TABLE-SIMILARITY-FOLD-20260915
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "表格符号或数值已经发生变化，但表格配对相似度显示为 1.000 并被折叠，主差异区看不到。"
+    discovered_via: user_counterexample
+    failure_mechanism: "表格配对分数按表题和行身份计算并主动忽略单元格值；展示层却把所有 1.000 配对直接移入折叠附录，没有检查行级实质变化。"
+    red_green_pair_id: PAIR-TABLE-SIMILARITY-FOLD
+    regression_test_id: TABLE_SIMILARITY_FOLD_TEST
+    public_path_rerun_id: RUN-TABLE-SIMILARITY-FOLD-20260915
+    state: verified
   - id: DEF-CONTENT-CORRESPONDENCE-20260913
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "整份报告同文增删、跨章节串配、公式附近正文误删及表头关系丢失。"

@@ -26,6 +26,8 @@ from protocol_pdf_diff.models import (
     ExtractionResult,
     PageText,
     Section,
+    TableChange,
+    TableRowChange,
     TableVisual,
 )
 from protocol_pdf_diff.pdf_extract import (
@@ -1781,6 +1783,78 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
 
         self.assertNotAlmostEqual(first_page_score, group_score)  # 该反例必须区分旧首屏分数和真实整组分数。
         self.assertEqual(round(group_score, 6), payload["pair_similarity"])  # 展示值必须与实际整组门槛一致。
+
+    def test_material_table_delta_stays_visible_at_similarity_one(self) -> None:
+        """Pairing score 1.000 must not fold confirmed table content changes."""
+
+        old_table = TableVisual(
+            9,
+            1,
+            "Table 9-7. Receiver Jitter Parameters",
+            (0.0, 0.0, 100.0, 100.0),
+            "",
+            ["表格行: T1 | Characteristic=Uncorrelated jitter symbol | Symbol=T_JH4.3u03 | MAX=0.121 | UNIT=UI"],
+            "rows",
+            row_alignment_reliable=True,
+        )
+        new_table = replace(
+            old_table,
+            page_number=11,
+            row_texts=["表格行: T1 | Characteristic=Uncorrelated jitter symbol | Symbol=T_JH4.3u | MAX=0.121 | UNIT=UI"],
+        )
+        material_change = TableChange(
+            change_type="modified",
+            old_tables=(old_table,),
+            new_tables=(new_table,),
+            similarity=1.0,
+            caption_changed=False,
+            row_changes=(
+                TableRowChange(
+                    item="Uncorrelated jitter symbol",
+                    old_value="Symbol=T_JH4.3u03",
+                    new_value="Symbol=T_JH4.3u",
+                    change_type="实质/符号变化",
+                ),
+            ),
+        )
+
+        self.assertFalse(reporting_module._displayed_similarity_one(material_change))
+        self.assertTrue(
+            reporting_module._displayed_similarity_one(
+                replace(
+                    material_change,
+                    row_changes=(
+                        TableRowChange(
+                            item="表格结构复核",
+                            old_value="行列边界未验证",
+                            new_value="行列边界未验证",
+                            change_type="需人工复核",
+                        ),
+                    ),
+                )
+            )
+        )
+
+        result = DiffResult(
+            Path("old-table.pdf"),
+            Path("new-table.pdf"),
+            [],
+            [],
+            [],
+            [],
+            old_table_visuals=[old_table],
+            new_table_visuals=[new_table],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, len(payload["table_changes"]))
+        self.assertEqual([], payload["similarity_review_table_changes"])
+        self.assertIn('id="table-change-1"', html)
+        self.assertIn("T_JH4.3u03", html)
+        self.assertIn("T_JH4.3u", html)
 
     def test_unique_exact_caption_does_not_pair_disjoint_cross_schema_rows(self) -> None:
         """An exact table title cannot override unrelated first-column identities."""
