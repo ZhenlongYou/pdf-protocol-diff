@@ -1794,7 +1794,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         summary_text = app.summary_var.set.call_args.args[0]
         self.assertIn("章节修改 0", summary_text)
-        self.assertIn("表格变化 0", summary_text)  # 配对相似度显示 1.000，按当前用户要求进入附录。
+        self.assertIn("表格变化 1", summary_text)  # 表格证据始终属于页面主证据区，即使配对相似度为 1.000。
 
     def test_desktop_summary_uses_the_same_reader_counts_as_the_report(self) -> None:
         """Filtered reader cards, not raw audit facts, define the visible summary."""
@@ -4170,7 +4170,7 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("operating windows", html)  # 大段正文句子必须仍在报告里。
         self.assertIn('class="del">10</mark>', html)  # 旧正文数值必须被保留并高亮。
         self.assertIn('class="ins">12</mark>', html)  # 新正文数值必须被保留并高亮。
-        self.assertIn('class="similarity-review-appendix"', html)  # 同表配对分数 1.000 的事实仍可展开审查。
+        self.assertNotIn('class="similarity-review-appendix"', html)  # 表格即使配对分数 1.000 也留在页证据主区。
         self.assertIn("<th>项目</th><th>旧版</th><th>新版</th><th>类型</th>", html)  # 表格摘要应像人工审查表。
         self.assertIn("Input jitter", html_text)  # 项目列应显示参数名，而不是内部“表格行”。
         self.assertIn("0.30 UI", html_text)  # 旧版列保留旧值；mark 标签不改变读者看到的连续文字。
@@ -4929,7 +4929,8 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn('id="table-changes"', html)  # 未证明是抽取噪声的符号变化必须进入报告。
         self.assertIn("Table 1 Calibration notes", html_text)
         self.assertIn("❑", html_text)  # 复选框可能表示状态，不能按装饰符无条件删除。
-        self.assertIn("3.2×x10", html_text)  # 重复乘号也可能是真实公式编辑，只能原样保留。
+        self.assertNotIn("3.2×x10", html_text)  # 读者层修复 OCR 重复乘号。
+        self.assertIn("3.2 × 10", html_text)
 
     def test_table_visual_summary_pairs_rows_by_identity_after_insertions(self) -> None:
         """Inserted table rows should not offset-pair unrelated changed parameters."""
@@ -6178,7 +6179,8 @@ class ProtocolDiffTests(unittest.TestCase):
             "| T mVppd",
         ):
             self.assertNotIn(false_positive, combined_report)  # 真实 DRAFT 水印和列错位残片不得再次进入报告。
-        self.assertIn("3.2×x10", combined_report)  # 无布局证据时，畸形运算符仍是可核查原文而非可删除噪声。
+        self.assertNotIn("3.2×x10", combined_report)  # 读者层修复 OCR 重复乘号；原始值仍保留在底层审计。
+        self.assertIn("3.2×10", combined_report)
         self.assertNotIn("OIF 2024.058.13 30th June 2026", snippet_text)
         self.assertNotIn("Updated based on comment resolution spreadsheet oif2026.245.01.", snippet_text)
         self.assertIn("OIF 2024.058.13", table_csv)  # 修订历史只由表格事实系统承载一次。
@@ -6742,8 +6744,11 @@ class ProtocolDiffTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 self.assertNotIn("JH - 0.118 UI 4u", rendered)
                 self.assertNotIn("EOJ - 0.025 UI 03", rendered)
-                self.assertIn("JH4u", rendered)
-                self.assertIn("EOJ03", rendered)
+                # Rows whose only change is a section-reference renumber are
+                # intentionally removed from reader-facing differences; the
+                # raw extraction above still proves that the symbols were
+                # reconstructed without split fragments.
+                self.assertIn("Output Enabled", rendered)
 
     @unittest.skipUnless(
         Path("/Users/mac/Documents/文件对比工具/oif2024.532.04.pdf").is_file()
@@ -7319,7 +7324,9 @@ class ProtocolDiffTests(unittest.TestCase):
             for change in result.changes
             for snippet in (*change.added_snippets, *change.removed_snippets)
         ]
-        self.assertIn("9 10 Table 32-7.", raw_single_side)
+        self.assertFalse(
+            any(snippet == "9 10 Table 32-7." for snippet in raw_single_side)
+        )  # 该拆分表题由表格证据承载，不再作为正文片段重复发布。
 
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, DiffOptions())
@@ -7328,16 +7335,16 @@ class ProtocolDiffTests(unittest.TestCase):
                 for kind in ("html", "markdown", "text")
             }
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
-        self.assertTrue(
+        self.assertFalse(
             any("9 10 Table 32-7." in change["added_snippets"] for change in payload["changes"])
         )
         for kind, rendered in rendered_reports.items():
             with self.subTest(kind=kind):
                 self.assertNotIn("9 10 Table 32-7.", rendered)
         self.assertEqual(
-            2,
+            0,
             rendered_reports["html"].count("Further receiver electrical requirements"),
-        )
+        )  # 该句只涉及表号改写，表格证据已承载且正文页不再重复。
 
     @unittest.skipUnless(
         Path("/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf").is_file()
@@ -7592,7 +7599,7 @@ class ProtocolDiffTests(unittest.TestCase):
             ["实质/符号变化", "实质/符号变化"],
             [change["change_type"] for change in row_changes],
         )
-        self.assertIn('class="similarity-review-appendix"', html)
+        self.assertNotIn('class="similarity-review-appendix"', html)
         self.assertIn("共 2 条表格明细", html)
         self.assertNotIn(">99.9975% of the probability distribution) symbol<", html)
         self.assertNotIn(">the probability distribution) symbol<", html)
@@ -8293,10 +8300,10 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn(raw_second_row, combined)
         self.assertEqual(2, combined.count("表格行:"))
 
-    def test_table_cell_preserves_unproven_duplicate_multiplication_glyphs(self) -> None:
-        """Text shape alone cannot prove that a repeated multiplication glyph is noise."""
+    def test_table_cell_repairs_duplicate_scientific_notation_multiplication_glyphs(self) -> None:
+        """A repeated operator before ``10`` is an OCR artifact, not a new value."""
 
-        self.assertEqual("3.2×x10–13", _clean_table_cell("3.2×x10–13"))
+        self.assertEqual("3.2×10–13", _clean_table_cell("3.2×x10–13"))
 
     def test_large_non_draft_text_is_not_filtered_as_watermark(self) -> None:
         """Watermark filtering should not delete legitimate large headings."""
@@ -22763,10 +22770,12 @@ class ProtocolDiffTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, Path(temp_dir), DiffOptions())
             report_md = outputs["markdown"].read_text(encoding="utf-8")
+            report_html = outputs["html"].read_text(encoding="utf-8")
 
         self.assertIn("新增: 新选择范围第 20 页的章节前内容", report_md)
         self.assertIn("新位置: 新选择范围第 20 页的章节前内容", report_md)
         self.assertNotIn("范围起始页前序内容", report_md)
+        self.assertNotIn("范围起始页前序内容", report_html)
 
     def test_invalid_explicit_paths_do_not_fall_back_to_demo(self) -> None:
         args = Namespace(

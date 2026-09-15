@@ -25,7 +25,11 @@ from protocol_pdf_diff.models import (
     DocumentBlockKind,
     ExtractionResult,
     PageText,
+    ProseSourceVisual,
+    ProseSourceVisualGroup,
     Section,
+    SectionChange,
+    SnippetPair,
     TableChange,
     TableRowChange,
     TableVisual,
@@ -1819,7 +1823,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         )
 
         self.assertFalse(reporting_module._displayed_similarity_one(material_change))
-        self.assertTrue(
+        self.assertFalse(
             reporting_module._displayed_similarity_one(
                 replace(
                     material_change,
@@ -1855,6 +1859,149 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn('id="table-change-1"', html)
         self.assertIn("T_JH4.3u03", html)
         self.assertIn("T_JH4.3u", html)
+
+    def test_same_page_table_findings_share_one_page_evidence_group(self) -> None:
+        """Tables on one physical page are listed below one shared screenshot area."""
+
+        image_uri = "data:image/png;base64,page19"
+
+        def table(table_number: int, title: str, symbol: str) -> TableVisual:
+            return TableVisual(
+                19,
+                table_number,
+                title,
+                (0.0, 0.0, 100.0, 100.0),
+                image_uri,
+                [
+                    f"表格行: T1 | Characteristic={title} | Symbol={symbol} | UNIT=UI",
+                ],
+                "rows",
+                row_alignment_reliable=True,
+            )
+
+        old_tables = (
+            table(1, "Table 33-7. Receiver Electrical Input Specification", "A"),
+            table(2, "Table 33-8. Receiver interference tolerance parameters", "B"),
+        )
+        new_tables = (
+            table(1, "Table 33-7. Receiver Electrical Input Specification", "C"),
+            table(2, "Table 33-8. Receiver interference tolerance parameters", "D"),
+        )
+        result = DiffResult(
+            Path("old-page19.pdf"),
+            Path("new-page19.pdf"),
+            [],
+            [],
+            [],
+            [],
+            old_table_visuals=list(old_tables),
+            new_table_visuals=list(new_tables),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+            html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(2, len(payload["table_changes"]))
+        self.assertEqual([], payload["similarity_review_table_changes"])
+        self.assertEqual(1, html.count('class="page-evidence-group"'))
+        group_start = html.index('id="page-evidence-19-19"')
+        self.assertLess(group_start, html.index('id="table-change-1"'))
+        self.assertLess(group_start, html.index('id="table-change-2"'))
+        self.assertIn("第 19 页对比证据", html)
+        self.assertIn("Table 33-7. Receiver Electrical Input Specification", html)
+        self.assertIn("Table 33-8. Receiver interference tolerance parameters", html)
+        # The two table cards share one old and one new source image through
+        # the page-level alias map.
+        self.assertEqual(2, html.count(f'src="{image_uri}"'))
+
+    def test_deduplicated_prose_focus_targets_resolve_to_table_source(self) -> None:
+        """A reused prose crop keeps focus ids and the canonical page view."""
+
+        visual = ProseSourceVisual(
+            page_number=19,
+            crop_bbox=(0.0, 0.0, 100.0, 100.0),
+            image_data_uri="data:image/png;base64,prose",
+            highlight_region_count=0,
+            matched_snippet_count=1,
+            source_words=(("Requirement", 10.0, 10.0, 50.0, 20.0),),
+            source_view_box=(0.0, 0.0, 100.0, 100.0),
+        )
+        group = ProseSourceVisualGroup(
+            change_type="modified",
+            old_section_id="old",
+            new_section_id="new",
+            old_visuals=(visual,),
+            new_visuals=(replace(visual, page_number=18),),
+        )
+        rendered = reporting_module._render_prose_source_visual_group(
+            group,
+            prefix="change-2-source",
+            source_visual_aliases={
+                ("old", 0): "table-change-1-source-old-0",
+                ("new", 0): "table-change-1-source-new-0",
+            },
+        )
+        self.assertIn('id="change-2-source-old-0"', rendered)
+        self.assertIn('data-source-alias="table-change-1-source-old-0"', rendered)
+        self.assertIn('id="change-2-source-new-0"', rendered)
+
+        table = TableVisual(
+            19,
+            1,
+            "Table 1",
+            (10.0, 10.0, 90.0, 90.0),
+            "data:image/png;base64,crop",
+            ["表格行: T1 | Parameter=Requirement | Value=A"],
+            "rows",
+            context_image_data_uri="data:image/png;base64,full-page",
+            context_bbox=(0.0, 0.0, 100.0, 100.0),
+        )
+        source = reporting_module._render_one_table_shot_page(
+            table,
+            source_id="table-change-1-source-old-0",
+        )
+        self.assertIn('data-source-view="[0.0, 0.0, 100.0, 100.0]"', source)
+
+    def test_reader_projection_hides_running_publication_metadata(self) -> None:
+        """Footer copyright/draft records never become technical reader deltas."""
+
+        old = Section(
+            "old", "1 Receiver", "Receiver", 1,
+            ("1 Receiver",), ("1",), 19, 19, "The receiver shall meet the limit.",
+        )
+        new = replace(old, section_id="new", body="The receiver shall meet the revised limit.")
+        change = SectionChange(
+            "modified", old, new, 0.9,
+            added_snippets=[
+                "Copyright © 2026 Optical Internetworking Forum",
+                "This is a draft and not to be shared.",
+            ],
+            replaced_snippets=[
+                SnippetPair("The receiver shall meet the limit.", "The receiver shall meet the revised limit.")
+            ],
+        )
+        visible = reporting_module._reader_section_change(change)
+        self.assertIsNotNone(visible)
+        assert visible is not None
+        self.assertNotIn("Copyright", " ".join(visible.added_snippets))
+        self.assertNotIn("draft", " ".join(visible.added_snippets).casefold())
+        self.assertTrue(visible.replaced_snippets)
+
+    def test_one_sided_findings_join_their_shared_physical_page_group(self) -> None:
+        """Matched and one-sided cards sharing a page render under one heading."""
+
+        entries = [
+            ((19, 0, "matched"), 0, 1, '<article id="matched">matched</article>', (19, 18)),
+            ((0, 0, "new-only"), 0, 2, '<article id="new-only">new-only</article>', (None, 18)),
+            ((19, 0, "old-only"), 0, 3, '<article id="old-only">old-only</article>', (19, None)),
+        ]
+        rendered = reporting_module._render_page_evidence_groups(entries)
+        self.assertEqual(1, rendered.count('class="page-evidence-group"'))
+        self.assertIn('id="matched"', rendered)
+        self.assertIn('id="new-only"', rendered)
+        self.assertIn('id="old-only"', rendered)
 
     def test_unique_exact_caption_does_not_pair_disjoint_cross_schema_rows(self) -> None:
         """An exact table title cannot override unrelated first-column identities."""

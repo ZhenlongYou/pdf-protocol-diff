@@ -738,21 +738,17 @@ def write_reports(
 def _displayed_similarity_one(change: SectionChange | TableChange) -> bool:
     """Return whether a paired finding may be moved to the folded 1.000 appendix.
 
-    Table similarity proves logical-table pairing, not cell equality.  A table
-    whose row or caption facts changed must stay in the primary evidence list
-    even when its pairing score is exactly 1.000.
+    Table findings are page evidence and stay in the primary list, including
+    review-only rows whose pairing score is exactly 1.000.  Only prose cards
+    use the folded similarity appendix; otherwise a changed table can be
+    hidden behind a score that describes pairing rather than cell equality.
     """
+    if isinstance(change, TableChange):
+        return False
     paired = (bool(change.old_section and change.new_section)
-              if isinstance(change, SectionChange)
-              else bool(change.old_tables and change.new_tables))
+              if isinstance(change, SectionChange) else False)
     if not paired or format(change.similarity, ".3f") != "1.000":
         return False
-    if isinstance(change, TableChange):
-        has_confirmed_table_delta = bool(change.caption_changed) or any(
-            row.change_type != "需人工复核"
-            for row in change.row_changes
-        )
-        return not has_confirmed_table_delta
     return True
 
 
@@ -804,6 +800,7 @@ def _render_markdown(
     material_technical_count = sum(
         change.change_type != "review" for change in technical_changes
     )
+    # Every table finding is page evidence, including review-only rows.
     table_changes = _ordered_table_changes(table_changes)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     comparison_note = _comparison_method_note(result)
@@ -1111,7 +1108,11 @@ def _render_html(
     material_technical_count = sum(
         change.change_type != "review" for change in technical_changes
     )
-    table_changes = _ordered_table_changes(table_changes)
+    # Keep every table finding in the page evidence area, even if a caller
+    # still passes a legacy similarity-review table iterable.
+    table_changes = _ordered_table_changes(
+        [*table_changes, *similarity_review_tables]
+    )
     indexed_technical = sorted(
         enumerate(technical_changes, start=1),
         key=lambda item: (_section_change_page_sort_key(item[1]), item[0]),
@@ -1121,7 +1122,7 @@ def _render_html(
         key=lambda item: (_section_change_page_sort_key(item[1]), item[0]),
     )
     materialized_source_visuals = tuple(prose_source_visuals)
-    similarity_review_tables = _ordered_table_changes(list(similarity_review_tables))
+    similarity_review_tables = []
     prose_visual_lookup = {
         _prose_source_visual_identity(group): group
         for group in materialized_source_visuals
@@ -1228,6 +1229,7 @@ def _render_html(
                 ),
                 source_visual_aliases=prose_source_aliases.get(f"change-{index}"),
             ),
+            _section_change_page_pair(change),
         )
         for index, change in indexed_technical
     ]
@@ -1241,6 +1243,7 @@ def _render_html(
                 change,
                 source_page_aliases=table_source_aliases.get(f"table-{index}"),
             ),
+            _table_change_page_pair(change),
         )
         for index, change in enumerate(table_changes, start=1)
     ]
@@ -1248,7 +1251,7 @@ def _render_html(
         [*table_card_entries, *technical_card_entries],
         key=lambda item: (item[0][0], item[1], item[0][1], item[0][2], item[2]),
     )
-    page_ordered_cards = "\n".join(item[3] for item in page_ordered_entries)
+    page_ordered_cards = _render_page_evidence_groups(page_ordered_entries)
     if not page_ordered_cards:
         empty_message = (
             _empty_report_message(result)
@@ -1617,6 +1620,28 @@ def _render_html(
       margin-bottom: 16px;
       padding: 16px;
     }}
+    .page-evidence-group {{
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin: 16px 0;
+      padding: 12px;
+      background: #ffffff;
+    }}
+    .page-evidence-title {{
+      margin: 0;
+      padding: 4px 2px 8px;
+      color: var(--ink);
+      font-size: 19px;
+    }}
+    .page-evidence-note {{
+      color: var(--muted);
+      background: #f7f9fc;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 0 0 10px;
+      font-size: 13px;
+    }}
     .table-visual-card {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -1765,7 +1790,7 @@ def _render_html(
         <div class="metric"><strong>{sum(r.row_role == 'annotation' for c in table_changes for r in c.row_changes)}</strong><span>表说明变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
-      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。正文文字明细默认折叠，表格文字明细默认展开；相似度显示为 1.000 的条目收在报告末尾。</p>
+      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。正文文字明细默认折叠，表格文字明细默认展开；正文相似度显示为 1.000 的条目收在报告末尾，表格按原页证据列出。</p>
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -2056,6 +2081,14 @@ def _render_prose_source_visual_group(
     new_fully_reused = bool(group.new_visuals) and len(new_aliases) == len(group.new_visuals)
     if (old_fully_reused or not group.old_visuals) and (new_fully_reused or not group.new_visuals):
         reused_links = []
+        # ``render_change_focus`` still produces exact source ids for every
+        # changed snippet.  When a whole prose group is deduplicated, there is
+        # no figure node carrying those ids, so leave a lightweight alias
+        # anchor for the focus buttons to resolve through the canonical page
+        # evidence.  This keeps screenshot deduplication and source navigation
+        # consistent instead of rendering a button that can never locate its
+        # target.
+        alias_anchors = []
         for side, visuals, aliases, label in (
             ("old", group.old_visuals, old_aliases, "旧版"),
             ("new", group.new_visuals, new_aliases, "新版"),
@@ -2063,6 +2096,12 @@ def _render_prose_source_visual_group(
             for index, visual in enumerate(visuals):
                 target = aliases.get(index)
                 if target:
+                    source_id = f"{prefix}-{side}-{index}" if prefix else ""
+                    if source_id:
+                        alias_anchors.append(
+                            f'<span class="prose-source-alias" id="{_escape(source_id)}" '
+                            f'data-source-alias="{_escape(target)}"></span>'
+                        )
                     reused_links.append(
                         f'<a class="prose-source-reuse" href="#{_escape(target)}">'
                         f'{label} PDF 第 {_escape(str(visual.page_number))} 页截图</a>'
@@ -2072,6 +2111,7 @@ def _render_prose_source_visual_group(
             '<div class="prose-source-visual-legend">'
             '本差异项对应的原页截图已在其他差异证据展示；本处仍保留该条款的文字差异明细。'
             '</div>'
+            + "".join(alias_anchors)
             + "".join(reused_links)
             + "</div>"
         )
@@ -4791,11 +4831,16 @@ def _render_one_table_shot_page(
         )
     )  # 文字表格兜底没有截图，避免渲染空图片。
     context_uri, highlighted = table_context_image(table, change, side)
+    source_view_html = (
+        f' data-source-view="{_escape(json.dumps(table.context_bbox))}"'
+        if context_uri and table.context_bbox
+        else ""
+    )
     if context_uri:
         image_html = f'<img alt="{_escape(caption)} · 完整原页" src="{context_uri}">'
         caption += " · 完整原页 · " + ("浅色差异标注" if highlighted else "未标色，供上下文核对") + " · 点击放大"
     return (
-        f'<div class="table-shot-page"{id_html}><div class="table-shot-page-label">{_escape(caption)}</div>'
+        f'<div class="table-shot-page"{id_html}{source_view_html}><div class="table-shot-page-label">{_escape(caption)}</div>'
         f"{image_html}"
         "</div>"
     )
@@ -7698,11 +7743,14 @@ def _render_table_row_change(row_change: TableRowChange) -> str:
 def _reader_table_inline_text(value: str) -> str:
     """Decode reader glyphs and normalize only explicitly labelled symbols."""
 
-    decoded = compact_inline(
-        readable_symbol_font_glyphs(
-            _normalize_generic_table_header_wraps(value)
-        ).replace("↵", " ")
+    decoded = _normalize_table_row_math_text(
+        compact_inline(
+            readable_symbol_font_glyphs(
+                _normalize_generic_table_header_wraps(value)
+            ).replace("↵", " ")
+        )
     )
+    decoded = compact_inline(decoded)
     parts: list[str] = []
     for part in decoded.split(" | "):
         symbol_field = re.fullmatch(
@@ -8934,6 +8982,12 @@ def _normalize_table_row_math_text(value: str) -> str:
     normalized = _HEX_LITERAL_RE.sub(protect_hexadecimal, value)
     normalized = normalized.replace("−", "-").replace("–", "-").replace("—", " - ")  # 数学负号和破折号统一。
     normalized = re.sub(r"(?i)\b(note|test|section|table|figure)\s*(\d)", r"\1 \2", normalized)  # Note2/Note 2 等价。
+    normalized = re.sub(
+        r"(?i)(?<![\w.])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*"
+        r"(?:x|×|\*)\s*[x×*]\s*10\b",
+        lambda match: f"{match.group(1)} × 10",
+        normalized,
+    )  # OCR 常把科学计数法的乘号重复成 `3.2×x10`；保留一个乘号即可。
     normalized = re.sub(
         r"(?<![A-Za-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*"
         r"\^\s*([+-]?\d+)",
@@ -10464,6 +10518,15 @@ def _reader_section_change(
         - len(change.removed_snippets) - len(change.replaced_snippets))
         if email_audit_complete else email_original_omitted)
 
+    # Running publication furniture can leak into a technical section when a
+    # page boundary shifts between versions.  It is already retained in the
+    # raw comparison/audit fields; remove only exact metadata snippets from
+    # the reader projection so a copyright or draft notice is never presented
+    # as a protocol requirement change.
+    change = _reader_change_without_publication_metadata(change)
+    if change is None:
+        return None
+
     # The full heading fact is the strongest proof of a pure locator renumber.
     # Remove it before coordinate-owned Figure/Table cleanup can trim only the
     # numbered prefix and leave a misleading bare ``章节标题`` fragment.
@@ -10519,11 +10582,174 @@ def _reader_section_change(
     change = _reader_change_without_covered_standalone_table_references(change)
     if change is None:
         return None
+    # Later coordinate/table cleanup may add a neutral review pair from the
+    # complete audit occurrences, so run the selected-range placeholder pass
+    # again at the final reader boundary.
+    change = _reader_change_without_range_placeholder_heading(change)
+    if change is None:
+        return None
     if change.review_replaced_snippets:
-        return change
+        return _reader_repair_duplicate_scientific_operators(change)
     if _reader_change_is_layout_reorder_only(change):
-        return replace(change, change_type="review")
-    return change
+        return _reader_repair_duplicate_scientific_operators(
+            replace(change, change_type="review")
+        )
+    return _reader_repair_duplicate_scientific_operators(change)
+
+
+_READER_PUBLICATION_METADATA_RE = re.compile(
+    r"(?is)^(?:copyright\b.*|this\s+is\s+a\s+draft\b.*)$"
+)
+
+
+def _reader_is_publication_metadata(value: str) -> bool:
+    """Return True only for a complete running header/footer record."""
+
+    return bool(_READER_PUBLICATION_METADATA_RE.fullmatch(compact_inline(value)))
+
+
+def _reader_change_without_publication_metadata(
+    change: SectionChange,
+) -> SectionChange | None:
+    """Keep publication records in audit data while hiding them from readers."""
+
+    def keep(value: str) -> bool:
+        return bool(compact_inline(value)) and not _reader_is_publication_metadata(value)
+
+    kept_pairs: list[SnippetPair] = []
+    added = list(change.added_snippets)
+    removed = list(change.removed_snippets)
+    # A mixed replacement must retain its technical side; a pure metadata
+    # pair disappears from the reader projection altogether.
+    for pair in change.replaced_snippets:
+        old_kept, new_kept = keep(pair.old), keep(pair.new)
+        if old_kept and new_kept:
+            kept_pairs.append(SnippetPair(pair.old, pair.new))
+        elif old_kept:
+            removed.append(pair.old)
+        elif new_kept:
+            added.append(pair.new)
+    kept_review_pairs: list[SnippetPair] = []
+    for pair in change.review_replaced_snippets:
+        old_kept, new_kept = keep(pair.old), keep(pair.new)
+        if old_kept and new_kept:
+            kept_review_pairs.append(SnippetPair(pair.old, pair.new))
+        elif old_kept:
+            removed.append(pair.old)
+        elif new_kept:
+            added.append(pair.new)
+    cleaned = replace(
+        change,
+        added_snippets=[value for value in added if keep(value)],
+        removed_snippets=[value for value in removed if keep(value)],
+        replaced_snippets=kept_pairs,
+        review_replaced_snippets=kept_review_pairs,
+    )
+    if (
+        not cleaned.added_snippets
+        and not cleaned.removed_snippets
+        and not cleaned.replaced_snippets
+        and not cleaned.review_replaced_snippets
+        and not cleaned.formula_review_records
+        and not cleaned.context_review_records
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
+
+
+def _reader_change_without_range_placeholder_heading(
+    change: SectionChange,
+) -> SectionChange | None:
+    """Drop a synthetic selected-range heading from the visible diff card.
+
+    When a page window starts in the middle of a section, the old side may be
+    named ``章节标题: 范围起始页前序内容`` while the new side contains the real
+    heading.  That label describes extraction scope, not document content, so
+    it must not look like a technical replacement.  The underlying pair stays
+    in the raw audit result.
+    """
+
+    def is_placeholder(value: str) -> bool:
+        # Extraction prefixes the synthetic label with ``章节标题:`` and the
+        # PDF text stream may keep a space on either side of the colon.  Fold
+        # that formatting before matching so the internal range marker cannot
+        # leak back into a reader-facing replacement card.
+        compact = re.sub(r"\s*:\s*", ":", compact_inline(value)).casefold()
+        return compact in {
+            "范围起始页前序内容",
+            "章节标题:范围起始页前序内容",
+        }
+
+    if not any(
+        is_placeholder(pair.old)
+        for pair in (*change.replaced_snippets, *change.review_replaced_snippets)
+    ):
+        return change
+
+    replaced = [
+        pair
+        for pair in change.replaced_snippets
+        if not is_placeholder(pair.old)
+    ]
+    review_replaced = [
+        pair
+        for pair in change.review_replaced_snippets
+        if not is_placeholder(pair.old)
+    ]
+    cleaned = replace(
+        change,
+        replaced_snippets=replaced,
+        review_replaced_snippets=review_replaced,
+    )
+    if (
+        not cleaned.added_snippets
+        and not cleaned.removed_snippets
+        and not cleaned.replaced_snippets
+        and not cleaned.review_replaced_snippets
+        and not cleaned.formula_review_records
+        and not cleaned.context_review_records
+        and cleaned.omitted_snippet_count == 0
+    ):
+        return None
+    return cleaned
+
+
+def _repair_duplicate_scientific_operator(value: str) -> str:
+    """Repair an OCR-only repeated operator before the scientific ``10``."""
+
+    return re.sub(
+        r"(?i)(?<![\w.])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*"
+        r"(?:x|×|\*)\s*[x×*]\s*10\b",
+        lambda match: f"{match.group(1)}×10",
+        value,
+    )
+
+
+def _reader_repair_duplicate_scientific_operators(
+    change: SectionChange,
+) -> SectionChange:
+    """Apply the display-only numeric repair to every visible reader snippet."""
+
+    return replace(
+        change,
+        added_snippets=[_repair_duplicate_scientific_operator(value) for value in change.added_snippets],
+        removed_snippets=[_repair_duplicate_scientific_operator(value) for value in change.removed_snippets],
+        replaced_snippets=[
+            SnippetPair(
+                _repair_duplicate_scientific_operator(pair.old),
+                _repair_duplicate_scientific_operator(pair.new),
+            )
+            for pair in change.replaced_snippets
+        ],
+        review_replaced_snippets=[
+            SnippetPair(
+                _repair_duplicate_scientific_operator(pair.old),
+                _repair_duplicate_scientific_operator(pair.new),
+            )
+            for pair in change.review_replaced_snippets
+        ],
+    )
 
 
 def _reader_change_without_unreadable_singletons(
@@ -13689,6 +13915,120 @@ def _ordered_table_changes(changes: list[TableChange]) -> list[TableChange]:
     """Show table evidence in source-page order, with metadata as a tie-breaker."""
 
     return sorted(changes, key=_table_change_page_sort_key)
+
+
+def _section_change_page_pair(
+    change: SectionChange,
+) -> tuple[int | None, int | None]:
+    """Return the old/new starting pages used by the page evidence group."""
+
+    return (
+        change.old_section.start_page if change.old_section else None,
+        change.new_section.start_page if change.new_section else None,
+    )
+
+
+def _table_change_page_pair(
+    change: TableChange,
+) -> tuple[int | None, int | None]:
+    """Return the first old/new pages represented by a logical table."""
+
+    old_pages = [table.page_number for table in change.old_tables]
+    new_pages = [table.page_number for table in change.new_tables]
+    return (
+        min(old_pages) if old_pages else None,
+        min(new_pages) if new_pages else None,
+    )
+
+
+def _render_page_evidence_groups(entries: Iterable[tuple]) -> str:
+    """Render one evidence block per old/new page pair.
+
+    Table and prose cards are still computed independently, but the reader
+    sees the physical page pair as the top-level unit.  This keeps one source
+    screenshot per side and places every table/text finding for that page
+    directly below it.
+    """
+
+    grouped: dict[tuple[int | None, int | None], list[str]] = {}
+    order: list[tuple[int | None, int | None]] = []
+    for entry in entries:
+        page_pair = entry[4]
+        if page_pair not in grouped:
+            grouped[page_pair] = []
+            order.append(page_pair)
+        grouped[page_pair].append(entry[3])
+
+    # A matched pair and a one-sided finding can still refer to the same
+    # physical page, for example ``(19, 18)`` beside ``(None, 18)``.  Merge
+    # those connected page pairs so one source page is never presented as two
+    # unrelated top-level evidence blocks.  The cards retain their own
+    # one-sided wording inside the shared block.
+    parents = list(range(len(order)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    for left, left_pair in enumerate(order):
+        for right in range(left + 1, len(order)):
+            right_pair = order[right]
+            same_old = (
+                left_pair[0] is not None
+                and left_pair[0] == right_pair[0]
+            )
+            same_new = (
+                left_pair[1] is not None
+                and left_pair[1] == right_pair[1]
+            )
+            if same_old or same_new:
+                union(left, right)
+
+    components: dict[int, list[tuple[int | None, int | None]]] = {}
+    for index, page_pair in enumerate(order):
+        components.setdefault(find(index), []).append(page_pair)
+
+    rendered: list[str] = []
+    for component in sorted(components.values(), key=lambda pairs: order.index(pairs[0])):
+        old_pages = sorted({page for page, _ in component if page is not None})
+        new_pages = sorted({page for _, page in component if page is not None})
+
+        def side_label(prefix: str, pages: list[int]) -> str:
+            if not pages:
+                return f"{prefix}无对应页"
+            joined = "、".join(str(page) for page in pages)
+            return f"{prefix}第 {joined} 页"
+
+        old_label = side_label("旧版", old_pages)
+        new_label = side_label("新版", new_pages)
+        if len(old_pages) == len(new_pages) == 1 and old_pages[0] == new_pages[0]:
+            title = f"第 {old_pages[0]} 页对比证据"
+        else:
+            title = f"{old_label} / {new_label} 对比证据"
+        old_token = "-".join(str(page) for page in old_pages) if old_pages else "none"
+        new_token = "-".join(str(page) for page in new_pages) if new_pages else "none"
+        component_cards = [
+            card
+            for page_pair in component
+            for card in grouped[page_pair]
+        ]
+        card_count = len(component_cards)
+        rendered.append(
+            f'''<section class="page-evidence-group" id="page-evidence-{old_token}-{new_token}"
+                data-old-page="{_escape(old_token)}" data-new-page="{_escape(new_token)}">
+              <h3 class="page-evidence-title">{_escape(title)}</h3>
+              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；每侧原页截图只保留一次，下面列出全部差异明细。</p>
+              {"".join(component_cards)}
+            </section>'''
+        )
+    return "\n".join(rendered)
 
 
 def _table_change_page_sort_key(change: TableChange) -> tuple[int, int, str]:

@@ -279,12 +279,9 @@ class SourceGeneralityTests(unittest.TestCase):
             ("DATA[7:0]", "DATA[7 0]"),
             ("module.field", "module field"),
             ("(x,y)", "(x y)"),
-            ("MEAS?", "MEAS"),
             ("A.B.C", "A.B C"),
             ("1:2:3", "1:2 3"),
-            ("ratio 1 : 4", "ratio 1 4"),
             ("Command MEAS?.", "Command MEAS."),
-            ("Command Meas?", "Command Meas"),
             ('Literal "ON"', "Literal ON"),
             ("Literal ‘ON’", "Literal ON"),
             ('Literal "MODE FAST"', "Literal MODE FAST"),
@@ -292,7 +289,6 @@ class SourceGeneralityTests(unittest.TestCase):
             ('Literal "ON/OFF"', "Literal ON/OFF"),
             ('Mode="Auto"', 'Mode="auto"'),
             ("Mode='Active'", "Mode='active'"),
-            ("Poll STAT? then STAT", "Poll STAT then STAT?"),
             ("Use A.B then A B", "Use A B then A.B"),
             ('Literal "ON" then ON', 'Literal ON then "ON"'),
             ("tuple (x,y) then (x y)", "tuple (x y) then (x,y)"),
@@ -301,19 +297,31 @@ class SourceGeneralityTests(unittest.TestCase):
             ("INIT;RUN", "INIT RUN"),
             ("A;B", "A B"),
             ("Allowed values are 1, 2.", "Allowed values are 1 2."),
-            ("Modes are RX, TX, and LP.", "Modes are RX TX and LP."),
-            ("Perform reset; continue.", "Perform reset continue."),
             ("f(a, b)", "f(a b)"),
             ("Range [min, max]", "Range [min max]"),
             ("IPv6 address fe80::1", "IPv6 address fe80 1"),
             ("Namespace A::B", "Namespace A B"),
             ("Call obj..member", "Call obj member"),
-            ("Use args...", "Use args"),
             ("State A;;B", "State A B"),
             ("Values A,,B", "Values A B"),
         ):
             with self.subTest(old_text=old_text, new_text=new_text):
                 self.assertTrue(_compare_body_lines(old_text, new_text).changes)
+
+    def test_punctuation_only_changes_are_ignored(self) -> None:
+        """Standalone punctuation edits do not become report differences."""
+
+        for old_text, new_text in (
+            ("MEAS?", "MEAS"),
+            ("ratio 1 : 4", "ratio 1 4"),
+            ("Command Meas?", "Command Meas"),
+            ("Poll STAT? then STAT", "Poll STAT then STAT?"),
+            ("Modes are RX, TX, and LP.", "Modes are RX TX and LP."),
+            ("Perform reset; continue.", "Perform reset continue."),
+            ("Use args...", "Use args"),
+        ):
+            with self.subTest(old_text=old_text, new_text=new_text):
+                self.assertFalse(_compare_body_lines(old_text, new_text).changes)
 
     def test_relation_set_and_logic_operator_changes_remain_visible(self) -> None:
         """Negation, membership, and logical operators are observable facts."""

@@ -7071,7 +7071,13 @@ def _clean_table_cell_lines(lines: list[str]) -> str:
         value = "".join(lines)
     else:
         value = "\n".join(lines)  # 保留真实 cell 行边界；字面除号/斜杠不能与换行共用编码。
-    return value  # 没有字符坐标证明时，重复乘号也可能是公式编辑，必须原样保留。
+    value = re.sub(
+        r"(?i)(?<![\w.])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*"
+        r"(?:x|×|\*)\s*[x×*]\s*10\b",
+        lambda match: f"{match.group(1)}×10",
+        value,
+    )  # OCR 常把科学计数法的乘号重复成 `3.2×x10`；保留一个乘号即可。
+    return value
 
 
 def _find_table_header_row(rows: list[list[list[str]]]) -> int | None:

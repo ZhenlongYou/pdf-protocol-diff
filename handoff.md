@@ -1,9 +1,18 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：同页证据归并与表格主区展示（2026-09-16）
+
+- 用户要求同一旧/新版物理页只出现一个对比区；若该页同时有表格和正文变化，应在同一页证据区的截图下集中列出，而不是拆成多个页面卡片。
+- canonical `reporting.py` 已将表格卡和正文卡按旧版/新版物理页组成连通的 `page-evidence-group`。同一页对只生成一个页面组，页面组内按表格优先、正文随后排列；同页的单侧证据也会并入该组。页级来源别名继续保证每侧原页截图最多嵌入一次，后续卡只显示可回到截图的链接。
+- 所有 `TableChange`（包括配对相似度为 `1.000` 且行列边界需要人工复核的表格）均留在页面主证据区；只有正文 `SectionChange` 仍使用相似度 `1.000` 折叠附录。表格文字明细保持默认展开，正文文字明细保持默认折叠。
+- 真实页窗验证：旧版 `oif2024.058.11.pdf` 第 19 页、 新版 `oif2024.058.13.pdf` 第 18 页，报告 `/Users/mac/Documents/ProtocolPdfDiffReports/page_group_fix_20260916_release_candidate2/protocol_diff_a8zzcomh/protocol_diff_report.html`。页面组 `page-evidence-19-18` 将两张表和正文证据归于同一组；2 个图片源无重复，所有别名目标均解析到带 `data-source-view` 的原图节点。页脚版权/草稿声明、范围占位和 OCR 重复科学计数法已从读者 HTML 过滤，原始 JSON/CSV 保留审计值。
+- 新增回归覆盖同页两张表、页面组唯一性、单侧证据合并、来源别名焦点、页脚元信息、范围占位和重复数字符号；定向套件 91 项通过，完整 `unittest discover -s tests -q` 为 1754 项通过、1 项条件跳过。`compileall` 与 `git diff --check` 也已通过。
+- 当前工作树尚未提交；下一步是提交并推送 `project/pdf-protocol-diff`，记录最终 OID。上述真实页窗验证不外推整本 PDF 的语义对应准确率。
+
 ## 当前任务：表格 1.000 相似度折叠修复（2026-09-15）
 
 - 用户指出表格符号/数值发生变化时仍显示“相似度 1.000”并被折叠。根因是配对相似度只证明同一逻辑表（表题与行身份），主动忽略单元格值；展示层却没有检查行级内容变化就统一移入折叠附录。
-- canonical `reporting.py` 已调整：配对分数仍保留为审计字段，但存在任一已确认行级变化或表题变化的 `TableChange` 不再进入 `similarity-review-appendix`；只有纯配对、仅含“需人工复核”的表格才按原规则折叠。正文 `SectionChange` 的既有 1.000 折叠行为保持不变。
+- canonical `reporting.py` 已调整：配对分数仍保留为审计字段，所有 `TableChange` 均留在页面主证据区，不再进入 `similarity-review-appendix`；正文 `SectionChange` 的既有 1.000 折叠行为保持不变。
 - 回归测试 `TABLE_SIMILARITY_FOLD_TEST` 覆盖截图中的 `T_JH4.3u03 → T_JH4.3u` 与 `T_JRMS03 → T_JHRMS`，确认 `pair_similarity=1.000`、两条“实质/符号变化”位于主 `table_changes`，`similarity_review_table_changes` 为空。单元测试与正式 `write_reports` 生成流程均通过。
 - 公开验证产物：`/Users/mac/Documents/ProtocolPdfDiffReports/table_similarity_fold_fix_20260915/protocol_diff_20260915_224706/protocol_diff_report.html`；验证摘要 `verification.json`。该产物是两行表格规则的定向回放，不代表整本 PDF 重跑或全量对应准确率。
 - `DEF-TABLE-SIMILARITY-FOLD-20260915` 已在 `docs/verification/escaped-defects.yaml` 记录并标为 verified；更大范围的 `DEF-CONTENT-CORRESPONDENCE-20260913` 仍保持 open。

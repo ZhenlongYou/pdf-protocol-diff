@@ -2686,9 +2686,11 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertEqual("modified", mixed_payload["change_type"])
         self.assertEqual(1, mixed_payload["row_change_count"])
         self.assertEqual(1, mixed_payload["review_count"])
-        self.assertIn("<strong>0</strong><span>变化表格</span>", mixed_html)
-        self.assertIn('class="similarity-review-appendix"', mixed_html)
-        self.assertIn("<strong>0</strong><span>表格复核项</span>", mixed_html)
+        # Table findings stay in the page evidence area even when the table
+        # pairing score is 1.000; only prose pairs may use the folded appendix.
+        self.assertIn("<strong>1</strong><span>变化表格</span>", mixed_html)
+        self.assertNotIn('<details class="similarity-review-appendix"', mixed_html)
+        self.assertIn("<strong>1</strong><span>表格复核项</span>", mixed_html)
 
         conditional_old = [
             *old_rows,

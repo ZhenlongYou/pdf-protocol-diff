@@ -5924,6 +5924,12 @@ def _normalize_math_symbol_artifacts(value: str) -> str:
     )  # 0x10/0XCAFE 是协议地址或掩码，绝不能把 x 猜成乘号。
     normalized = normalized.replace("−", "-").replace("–", "-").replace("—", " - ")  # 统一数学负号和破折号形态。
     normalized = re.sub(
+        r"(?i)(?<![\w.])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*"
+        r"(?:x|×|\*)\s*[x×*]\s*10\b",
+        lambda match: f"{match.group(1)} × 10",
+        normalized,
+    )  # OCR 常把科学计数法的乘号重复成 `3.2×x10`；保留一个乘号即可。
+    normalized = re.sub(
         r"(?i)(?<![a-z])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*(?:x|×|\*)\s*10\s*\^\s*([+-]?\s*\d+)",
         lambda match: (
             f"{match.group(1)}e"

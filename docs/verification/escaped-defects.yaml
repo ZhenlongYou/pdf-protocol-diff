@@ -10,6 +10,51 @@ escaped_defects:
     regression_test_id: TABLE_SIMILARITY_FOLD_TEST
     public_path_rerun_id: RUN-TABLE-SIMILARITY-FOLD-20260915
     state: verified
+  - id: DEF-PAGE-EVIDENCE-GROUP-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "同一物理页的表格和正文差异被拆成多个卡片，截图重复或表格复核卡没有放在对应页对比下方。"
+    discovered_via: user_counterexample
+    failure_mechanism: "页面截图去重只建立了跨卡跳转别名，渲染层仍按逻辑表格和章节分别输出，没有按旧版/新版物理页聚合证据。"
+    red_green_pair_id: PAIR-PAGE-EVIDENCE-GROUP
+    regression_test_id: PAGE_EVIDENCE_GROUP_TEST
+    public_path_rerun_id: RUN-PAGE-EVIDENCE-GROUP-20260916
+    state: verified
+  - id: DEF-PAGE-EVIDENCE-FOCUS-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "截图去重后正文差异的定位按钮可能没有可解析的目标，表格截图也无法按单元格坐标回源。"
+    discovered_via: user_counterexample
+    failure_mechanism: "来源图像复用只保留了可见图片，后续 occurrence 没有锚点；表格上下文图没有暴露坐标视口。"
+    red_green_pair_id: PAIR-PAGE-EVIDENCE-FOCUS
+    regression_test_id: PAGE_EVIDENCE_FOCUS_TEST
+    public_path_rerun_id: RUN-PAGE-EVIDENCE-GROUP-20260916
+    state: verified
+  - id: DEF-READER-PUBLICATION-METADATA-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "页码漂移时页脚版权和草稿声明被当作正文新增内容。"
+    discovered_via: user_counterexample
+    failure_mechanism: "运行页脚混入正文分段，读者投影没有按完整出版元数据记录过滤。"
+    red_green_pair_id: PAIR-READER-PUBLICATION-METADATA
+    regression_test_id: READER_PUBLICATION_METADATA_TEST
+    public_path_rerun_id: RUN-PAGE-EVIDENCE-GROUP-20260916
+    state: verified
+  - id: DEF-READER-RANGE-PLACEHOLDER-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "从章节中间开始的页窗把内部的‘范围起始页前序内容’标签显示为技术正文变化。"
+    discovered_via: user_counterexample
+    failure_mechanism: "选定页窗的合成标题参与了章节替换；带空格的‘章节标题:’前缀没有被读者投影识别。"
+    red_green_pair_id: PAIR-READER-RANGE-PLACEHOLDER
+    regression_test_id: READER_RANGE_PLACEHOLDER_TEST
+    public_path_rerun_id: RUN-PAGE-EVIDENCE-GROUP-20260916
+    state: verified
+  - id: DEF-TABLE-NUMERIC-GLYPH-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "表格科学计数法被 OCR 拼成 `3.2×x10`，读者看到重复乘号。"
+    discovered_via: user_counterexample
+    failure_mechanism: "文本比较、表格单元格清理和读者表格行渲染分别处理乘法符号，重复运算符没有统一修复。"
+    red_green_pair_id: PAIR-TABLE-NUMERIC-GLYPH
+    regression_test_id: TABLE_NUMERIC_GLYPH_TEST
+    public_path_rerun_id: RUN-PAGE-EVIDENCE-GROUP-20260916
+    state: verified
   - id: DEF-CONTENT-CORRESPONDENCE-20260913
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "整份报告同文增删、跨章节串配、公式附近正文误删及表头关系丢失。"
