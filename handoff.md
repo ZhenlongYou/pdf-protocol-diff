@@ -7,6 +7,7 @@
 - 回归测试 `TABLE_SIMILARITY_FOLD_TEST` 覆盖截图中的 `T_JH4.3u03 → T_JH4.3u` 与 `T_JRMS03 → T_JHRMS`，确认 `pair_similarity=1.000`、两条“实质/符号变化”位于主 `table_changes`，`similarity_review_table_changes` 为空。单元测试与正式 `write_reports` 生成流程均通过。
 - 公开验证产物：`/Users/mac/Documents/ProtocolPdfDiffReports/table_similarity_fold_fix_20260915/protocol_diff_20260915_224706/protocol_diff_report.html`；验证摘要 `verification.json`。该产物是两行表格规则的定向回放，不代表整本 PDF 重跑或全量对应准确率。
 - `DEF-TABLE-SIMILARITY-FOLD-20260915` 已在 `docs/verification/escaped-defects.yaml` 记录并标为 verified；更大范围的 `DEF-CONTENT-CORRESPONDENCE-20260913` 仍保持 open。
+- 修复提交 `b04ad6a321869d655160fb645a8c77343b030741` 已推送到 `origin/project/pdf-protocol-diff`，本地与远端 OID 一致，工作区干净。
 
 ## 当前任务：同页表格/正文截图合并与页序排列（2026-09-15）
 
