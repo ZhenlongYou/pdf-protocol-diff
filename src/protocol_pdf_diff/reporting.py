@@ -1498,6 +1498,13 @@ def _render_html(
       color: var(--blue);
       font-size: 13px;
     }}
+    .prose-source-reused-summary {{
+      padding: 10px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }}
+    .prose-source-reused-summary .prose-source-reuse {{ margin-left: 0; }}
     .prose-source-page img {{ display: block; width: auto; max-width: 100%; height: auto; background: #fff; }}
     .section-anchor {{ display: block; height: 0; overflow: hidden; }}
     .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
@@ -2022,6 +2029,39 @@ def _render_prose_source_visual_group(
 ) -> str:
     if not group.old_visuals and not group.new_visuals:
         return ""
+    old_aliases = {
+        index: target
+        for (side, index), target in (source_visual_aliases or {}).items()
+        if side == "old"
+    }
+    new_aliases = {
+        index: target
+        for (side, index), target in (source_visual_aliases or {}).items()
+        if side == "new"
+    }
+    old_fully_reused = bool(group.old_visuals) and len(old_aliases) == len(group.old_visuals)
+    new_fully_reused = bool(group.new_visuals) and len(new_aliases) == len(group.new_visuals)
+    if (old_fully_reused or not group.old_visuals) and (new_fully_reused or not group.new_visuals):
+        reused_links = []
+        for side, visuals, aliases, label in (
+            ("old", group.old_visuals, old_aliases, "旧版"),
+            ("new", group.new_visuals, new_aliases, "新版"),
+        ):
+            for index, visual in enumerate(visuals):
+                target = aliases.get(index)
+                if target:
+                    reused_links.append(
+                        f'<a class="prose-source-reuse" href="#{_escape(target)}">'
+                        f'{label} PDF 第 {_escape(str(visual.page_number))} 页截图</a>'
+                    )
+        return (
+            '<div class="prose-source-visual prose-source-reused-summary">'
+            '<div class="prose-source-visual-legend">'
+            '本差异项对应的原页截图已在其他差异证据展示；本处仍保留该条款的文字差异明细。'
+            '</div>'
+            + "".join(reused_links)
+            + "</div>"
+        )
     old_side = _render_prose_source_visual_side(
         "旧版原文区域",
         group.old_visuals,
@@ -2029,11 +2069,7 @@ def _render_prose_source_visual_group(
         omitted_page_count=group.old_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "old-highlight",
         source_prefix=prefix + "-old" if prefix else "",
-        source_aliases={
-            index: target
-            for (side, index), target in (source_visual_aliases or {}).items()
-            if side == "old"
-        },
+        source_aliases=old_aliases,
     )
     new_side = _render_prose_source_visual_side(
         "新版原文区域",
@@ -2042,11 +2078,7 @@ def _render_prose_source_visual_group(
         omitted_page_count=group.new_omitted_page_count,
         display_mode="raw" if group.change_type == "review" else "new-highlight",
         source_prefix=prefix + "-new" if prefix else "",
-        source_aliases={
-            index: target
-            for (side, index), target in (source_visual_aliases or {}).items()
-            if side == "new"
-        },
+        source_aliases=new_aliases,
     )
     legend = ("原文出处：对应关系尚待核实，不作新增或删除标色。"
               if group.change_type == "review" else

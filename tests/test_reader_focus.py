@@ -68,6 +68,22 @@ class ReaderFocusTests(unittest.TestCase):
         self.assertEqual(8, text_key[0])
         self.assertLess((table_key[0], 0, table_key[1], table_key[2]), (text_key[0], 1, text_key[1], text_key[2]))
 
+    def test_fully_reused_prose_sources_render_as_compact_links(self):
+        change = SectionChange("modified", section("old", 8), section("new", 8, sid="new"), 0.9)
+        group = ProseSourceVisualGroup("modified", "old", "new", old_visuals=(source("old", 8),), new_visuals=(source("new", 9),))
+        rendered = _render_change_html(
+            1,
+            change,
+            prose_source_visual=group,
+            source_visual_aliases={
+                ("old", 0): "table-change-1-source-old-0",
+                ("new", 0): "table-change-1-source-new-0",
+            },
+        )
+        self.assertIn("prose-source-reused-summary", rendered)
+        self.assertNotIn("prose-source-visual-grid", rendered)
+        self.assertIn("文字差异明细", rendered)
+
     def test_neutral_repeated_source_page_points_to_highlighted_canonical(self):
         highlighted = replace(source("changed value", 8), highlight_region_count=1)
         first = ProseSourceVisualGroup(
