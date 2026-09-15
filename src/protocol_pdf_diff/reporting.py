@@ -1099,8 +1099,16 @@ def _render_html(
         change.change_type != "review" for change in technical_changes
     )
     table_changes = _ordered_table_changes(table_changes)
-    indexed_technical = sorted(enumerate(technical_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
+    indexed_technical = sorted(
+        enumerate(technical_changes, start=1),
+        key=lambda item: (_section_change_page_sort_key(item[1]), item[0]),
+    )
+    indexed_similarity_review = sorted(
+        enumerate(similarity_review_changes, start=1),
+        key=lambda item: (_section_change_page_sort_key(item[1]), item[0]),
+    )
     materialized_source_visuals = tuple(prose_source_visuals)
+    similarity_review_tables = _ordered_table_changes(list(similarity_review_tables))
     prose_visual_lookup = {
         _prose_source_visual_identity(group): group
         for group in materialized_source_visuals
@@ -1137,9 +1145,24 @@ def _render_html(
             f"appendix-{index}",
             prose_visual_lookup.get(_section_change_visual_identity(change)),
         )
-        for index, change in enumerate(similarity_review_changes, start=1)
+        for index, change in indexed_similarity_review
     ]
-    prose_source_aliases = _build_prose_source_aliases(prose_card_groups)
+    # Build one source-page namespace across table and prose cards. A page
+    # screenshot is evidence for the page itself, so a table crop and a prose
+    # crop of that same page must not make the reader inspect the page twice.
+    table_card_specs = [
+        (f"table-{index}", change)
+        for index, change in enumerate(table_changes, start=1)
+    ] + [
+        (f"table-appendix-{index}", change)
+        for index, change in enumerate(similarity_review_tables, start=1)
+    ]
+    page_source_aliases = _build_page_source_aliases(
+        table_card_specs,
+        prose_card_groups,
+    )
+    prose_source_aliases = page_source_aliases["prose"]
+    table_source_aliases = page_source_aliases["table"]
     figure_source_visuals = tuple(
         group
         for group in materialized_source_visuals
@@ -1179,25 +1202,56 @@ def _render_html(
         if similarity_review_changes or similarity_review_tables:
             nav_items = '<div class="empty-nav">主差异清单为空；配对证据收在末尾附录。</div>'
 
-    technical_cards = "\n".join(
-        _render_change_html(
+    technical_card_entries = [
+        (
+            _section_change_page_sort_key(change),
+            1,
             index,
-            change,
-            prose_source_visual=prose_visual_lookup.get(
-                _section_change_visual_identity(change)
+            _render_change_html(
+                index,
+                change,
+                prose_source_visual=prose_visual_lookup.get(
+                    _section_change_visual_identity(change)
+                ),
+                source_visual_aliases=prose_source_aliases.get(f"change-{index}"),
             ),
-            source_visual_aliases=prose_source_aliases.get(f"change-{index}"),
         )
         for index, change in indexed_technical
+    ]
+    table_card_entries = [
+        (
+            _table_change_page_sort_key(change),
+            0,
+            index,
+            _render_table_change_html(
+                index,
+                change,
+                source_page_aliases=table_source_aliases.get(f"table-{index}"),
+            ),
+        )
+        for index, change in enumerate(table_changes, start=1)
+    ]
+    page_ordered_entries = sorted(
+        [*table_card_entries, *technical_card_entries],
+        key=lambda item: (item[0][0], item[1], item[0][1], item[0][2], item[2]),
     )
-    if not technical_cards:
-        technical_message = (
+    page_ordered_cards = "\n".join(item[3] for item in page_ordered_entries)
+    if not page_ordered_cards:
+        empty_message = (
             _empty_report_message(result)
             if not table_changes and not result.visual_review_items
-            else "未列出技术正文变化；是否可确认一致请以顶部识别可信度为准。"
+            else "未列出技术正文或表格变化；是否可确认一致请以顶部识别可信度为准。"
         )
-        technical_cards = f'<section class="empty-state">{_escape(technical_message)}</section>'
-    table_visual_html = _render_table_changes_html(table_changes)
+        page_ordered_cards = f'<section class="empty-state">{_escape(empty_message)}</section>'
+    page_ordered_html = f'''
+      <section class="table-visuals page-ordered-evidence" id="page-ordered-evidence">
+        <span class="section-anchor" id="table-changes"></span>
+        <span class="section-anchor" id="text-changes"></span>
+        <h2>按 PDF 页数顺序的差异证据</h2>
+        <p class="change-summary">表格补充证据（变化与复核）和技术正文变化与复核按旧版/新版起始页排序；同一页只展示一份原页截图，表格与文字差异分别列在截图下方。</p>
+        {page_ordered_cards}
+      </section>
+    '''
     figure_visual_html = _render_figure_source_visual_groups(figure_source_visuals)
     appendix_cards = "".join(
         _render_change_html(
@@ -1206,8 +1260,15 @@ def _render_html(
             prose_source_visual=prose_visual_lookup.get(_section_change_visual_identity(c)),
             source_visual_aliases=prose_source_aliases.get(f"appendix-{i}"),
         )
-        for i, c in enumerate(similarity_review_changes, 1)
-    ) + "".join(_render_table_change_html(f"appendix-{i}", c) for i, c in enumerate(similarity_review_tables, 1))
+        for i, c in indexed_similarity_review
+    ) + "".join(
+        _render_table_change_html(
+            f"appendix-{i}",
+            c,
+            source_page_aliases=table_source_aliases.get(f"table-appendix-{i}"),
+        )
+        for i, c in enumerate(similarity_review_tables, 1)
+    )
     appendix_html = (
         '<details class="similarity-review-appendix" id="similarity-review-appendix">'
         '<summary>相似度 1.000：按偏好不计入差异，可展开审查</summary>'
@@ -1215,7 +1276,10 @@ def _render_html(
         + appendix_cards + '</details>' if appendix_cards else ""
     )
     if appendix_cards and not technical_changes and not table_changes:
-        technical_cards = '<section class="empty-state">主差异清单为空；相似度 1.000 的配对证据收在末尾附录。</section>'
+        page_ordered_html = page_ordered_html.replace(
+            page_ordered_cards,
+            '<section class="empty-state">主差异清单为空；相似度 1.000 的配对证据收在末尾附录。</section>',
+        )
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     material_table_changes = _material_table_changes(table_changes)
     table_row_change_count = sum(
@@ -1435,6 +1499,7 @@ def _render_html(
       font-size: 13px;
     }}
     .prose-source-page img {{ display: block; width: auto; max-width: 100%; height: auto; background: #fff; }}
+    .section-anchor {{ display: block; height: 0; overflow: hidden; }}
     .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
     .prose-source-omitted {{
       padding: 8px 10px;
@@ -1603,6 +1668,10 @@ def _render_html(
       background: #f7f9fc;
       border-bottom: 1px solid var(--line);
     }}
+    .table-shot-page-reused {{
+      padding-bottom: 10px;
+      background: #fbfcfe;
+    }}
     .table-status {{
       color: var(--muted);
       font-size: 12px;
@@ -1689,9 +1758,7 @@ def _render_html(
           <dt>提示</dt><dd>页码来自 PDF 抽取顺序；最终结论请回到源 PDF 复核。</dd>
         </dl>
       </section>
-      {table_visual_html}
-      <h2 class="section-heading" id="text-changes">技术正文变化与复核</h2>
-      {technical_cards}
+      {page_ordered_html}
       {visual_review_html}
       {figure_visual_html}
       {appendix_html}
@@ -1852,6 +1919,98 @@ def _build_prose_source_aliases(
                 canonical[0], canonical[1]
             ):
                 aliases.setdefault(card_key, {})[(side, visual_index)] = canonical_id
+    return aliases
+
+
+def _prose_source_id(card_key: str, side: str, visual_index: int) -> str:
+    """Return the DOM id used by a prose source occurrence."""
+
+    prefix = (
+        f"change-{card_key}-source"
+        if card_key.startswith("appendix-")
+        else f"{card_key}-source"
+    )
+    return f"{prefix}-{side}-{visual_index}"
+
+
+def _table_source_id(card_key: str, side: str, visual_index: int) -> str:
+    """Return the DOM id used by a table source occurrence."""
+
+    table_key = card_key[6:] if card_key.startswith("table-") else card_key
+    return f"table-change-{table_key}-source-{side}-{visual_index}"
+
+
+def _build_page_source_aliases(
+    table_card_groups: Iterable[tuple[str, TableChange]],
+    prose_card_groups: Iterable[tuple[str, ProseSourceVisualGroup | None]],
+) -> dict[str, dict[str, dict[tuple[str, int], str]]]:
+    """Deduplicate source screenshots by side and PDF page across card types.
+
+    A logical table and a prose section often own different crops of the same
+    source page. The page is the reader-facing evidence unit, so retain the
+    first table-backed occurrence when one exists and link every later table or
+    prose occurrence to it. If a page has prose evidence only, retain the most
+    highlighted prose occurrence for source navigation.
+    """
+
+    # kind, card key, side, visual index, highlight count, card order, DOM id
+    occurrences: dict[tuple[str, int], list[tuple[str, str, str, int, int, int, str]]] = {}
+    for order, (card_key, change) in enumerate(table_card_groups):
+        for side, tables in (("old", change.old_tables), ("new", change.new_tables)):
+            for visual_index, table in enumerate(tables):
+                # A text-only fallback has no screenshot to deduplicate.
+                if not (table.image_data_uri or table.context_image_data_uri):
+                    continue
+                occurrence = (
+                    "table",
+                    card_key,
+                    side,
+                    visual_index,
+                    0,
+                    order,
+                    _table_source_id(card_key, side, visual_index),
+                )
+                occurrences.setdefault((side, table.page_number), []).append(occurrence)
+
+    for order, (card_key, group) in enumerate(prose_card_groups):
+        if group is None:
+            continue
+        for side, visuals in (("old", group.old_visuals), ("new", group.new_visuals)):
+            for visual_index, visual in enumerate(visuals):
+                if not visual.image_data_uri:
+                    continue
+                occurrence = (
+                    "prose",
+                    card_key,
+                    side,
+                    visual_index,
+                    visual.highlight_region_count,
+                    order,
+                    _prose_source_id(card_key, side, visual_index),
+                )
+                occurrences.setdefault((side, visual.page_number), []).append(occurrence)
+
+    aliases: dict[str, dict[str, dict[tuple[str, int], str]]] = {
+        "table": {},
+        "prose": {},
+    }
+    for items in occurrences.values():
+        if len(items) < 2:
+            continue
+        table_items = [item for item in items if item[0] == "table"]
+        if table_items:
+            canonical = min(table_items, key=lambda item: (item[5], item[3]))
+        else:
+            canonical = max(
+                items,
+                key=lambda item: (item[4], -item[5], -item[3]),
+            )
+        canonical_id = canonical[6]
+        for kind, card_key, side, visual_index, _highlight_count, _order, source_id in items:
+            if source_id == canonical_id:
+                continue
+            aliases[kind].setdefault(card_key, {})[(side, visual_index)] = canonical_id
+
     return aliases
 
 
@@ -2017,7 +2176,7 @@ def _render_table_changes_html(table_changes: list[TableChange]) -> str:
         return ""
     cards = "\n".join(
         _render_table_change_html(index, change)
-        for index, change in sorted(enumerate(table_changes, start=1), key=lambda item: (item[1].change_type == "review", item[0]))
+        for index, change in enumerate(table_changes, start=1)
     )
     return f"""
       <section class="table-visuals" id="table-changes">
@@ -4460,12 +4619,29 @@ def _table_visual_identity(table: TableVisual) -> str:
 def _render_table_change_html(
     index: int,
     change: TableChange,
+    *,
+    source_page_aliases: dict[tuple[str, int], str] | None = None,
 ) -> str:
     """Render one changed logical table with auditable pairing metadata."""
 
     title = _table_change_title(change)
-    old_shot = _render_table_shot_group("旧版截图", change.old_tables, change=change, side="old")
-    new_shot = _render_table_shot_group("新版截图", change.new_tables, change=change, side="new")
+    source_prefix = f"table-change-{index}-source"
+    old_shot = _render_table_shot_group(
+        "旧版截图",
+        change.old_tables,
+        change=change,
+        side="old",
+        source_prefix=source_prefix,
+        source_page_aliases=source_page_aliases,
+    )
+    new_shot = _render_table_shot_group(
+        "新版截图",
+        change.new_tables,
+        change=change,
+        side="new",
+        source_prefix=source_prefix,
+        source_page_aliases=source_page_aliases,
+    )
     rows_html = _render_table_row_summary(change)
     label = _CHANGE_LABELS.get(change.change_type, change.change_type)
     similarity = (
@@ -4507,20 +4683,58 @@ def _table_side_description(tables: tuple[TableVisual, ...]) -> str:
     return f"{title_text}（页 {pages}）"
 
 
-def _render_table_shot_group(label: str, tables: tuple[TableVisual, ...], *, change: TableChange | None = None, side: str = "old") -> str:
+def _render_table_shot_group(
+    label: str,
+    tables: tuple[TableVisual, ...],
+    *,
+    change: TableChange | None = None,
+    side: str = "old",
+    source_prefix: str = "",
+    source_page_aliases: dict[tuple[str, int], str] | None = None,
+) -> str:
     """Render one side of a table screenshot group."""
 
     if not tables:
         return f'<div class="table-shot"><h4>{_escape(label)}</h4><div class="snippet">无对应表格截图</div></div>'
     heading = f"{label} · {len(tables)} 页" if len(tables) > 1 else f"{label} · 页 {tables[0].page_number} · 表格 {tables[0].table_number}"
-    pages = "".join(_render_one_table_shot_page(table, change=change, side=side) for table in tables)
+    pages = "".join(
+        _render_one_table_shot_page(
+            table,
+            change=change,
+            side=side,
+            source_id=(
+                f"{source_prefix}-{side}-{visual_index}"
+                if source_prefix
+                else ""
+            ),
+            alias_target=(source_page_aliases or {}).get((side, visual_index)),
+        )
+        for visual_index, table in enumerate(tables)
+    )
     return f'<div class="table-shot"><h4>{_escape(heading)}</h4>{pages}</div>'
 
 
-def _render_one_table_shot_page(table: TableVisual, *, change: TableChange | None = None, side: str = "old") -> str:
+def _render_one_table_shot_page(
+    table: TableVisual,
+    *,
+    change: TableChange | None = None,
+    side: str = "old",
+    source_id: str = "",
+    alias_target: str | None = None,
+) -> str:
     """Render one table screenshot page inside a screenshot group."""
 
     caption = f"页 {table.page_number} · 表格 {table.table_number}"
+    id_html = f' id="{_escape(source_id)}"' if source_id else ""
+    if alias_target:
+        return (
+            f'<div class="table-shot-page table-shot-page-reused"{id_html}'
+            f' data-source-alias="{_escape(alias_target)}">'
+            f'<div class="table-shot-page-label">{_escape(caption)} · '
+            '本页截图已在其他差异证据展示</div>'
+            f'<a class="prose-source-reuse" href="#{_escape(alias_target)}">'
+            '跳转到已展示截图</a></div>'
+        )
     text_backed = table.ocr_status == "text_backed_exact_match"
     image_html = (
         f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
@@ -4536,7 +4750,7 @@ def _render_one_table_shot_page(table: TableVisual, *, change: TableChange | Non
         image_html = f'<img alt="{_escape(caption)} · 完整原页" src="{context_uri}">'
         caption += " · 完整原页 · " + ("浅色差异标注" if highlighted else "未标色，供上下文核对") + " · 点击放大"
     return (
-        f'<div class="table-shot-page"><div class="table-shot-page-label">{_escape(caption)}</div>'
+        f'<div class="table-shot-page"{id_html}><div class="table-shot-page-label">{_escape(caption)}</div>'
         f"{image_html}"
         "</div>"
     )
@@ -13427,9 +13641,35 @@ def _change_counts(changes: list[SectionChange]) -> dict[str, int]:
 
 
 def _ordered_table_changes(changes: list[TableChange]) -> list[TableChange]:
-    """Show technical table evidence before publication-history tables."""
+    """Show table evidence in source-page order, with metadata as a tie-breaker."""
 
-    return sorted(changes, key=lambda change: change.role == "document_metadata")
+    return sorted(changes, key=_table_change_page_sort_key)
+
+
+def _table_change_page_sort_key(change: TableChange) -> tuple[int, int, str]:
+    """Return the first source page represented by a logical table change."""
+
+    pages = [
+        table.page_number
+        for table in (*change.old_tables, *change.new_tables)
+        if table.page_number is not None
+    ]
+    first_page = min(pages) if pages else 0
+    role_order = 1 if change.role == "document_metadata" else 0
+    return (first_page, role_order, _table_change_title(change))
+
+
+def _section_change_page_sort_key(change: SectionChange) -> tuple[int, int, str]:
+    """Return a stable page-order key for a matched or one-sided section."""
+
+    pages = [
+        section.start_page
+        for section in (change.old_section, change.new_section)
+        if section is not None
+    ]
+    first_page = min(pages) if pages else 0
+    role_order = 1 if change.role == "document_metadata" else 0
+    return (first_page, role_order, change.report_location)
 
 
 def _comparison_method_note(result: DiffResult) -> str:

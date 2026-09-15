@@ -11,9 +11,9 @@ import unittest
 
 import fitz
 from PIL import Image, ImageDraw
-from protocol_pdf_diff.models import DiffOptions, ProseSourceVisual, ProseSourceVisualGroup, Section, SectionChange, SnippetPair, TableChange, TableRowChange
+from protocol_pdf_diff.models import DiffOptions, ProseSourceVisual, ProseSourceVisualGroup, Section, SectionChange, SnippetPair, TableChange, TableRowChange, TableVisual
 from protocol_pdf_diff.reader_focus import difference_windows, locate_source, delta_spans
-from protocol_pdf_diff.reporting import _build_prose_source_aliases, _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, write_reports
+from protocol_pdf_diff.reporting import _build_page_source_aliases, _build_prose_source_aliases, _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, _section_change_page_sort_key, _table_change_page_sort_key, write_reports
 from protocol_pdf_diff.visual_watchdog import _compare_page_images
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
@@ -34,6 +34,40 @@ def source(text, page=12, y=30):
 
 
 class ReaderFocusTests(unittest.TestCase):
+    def test_table_and_prose_same_page_share_one_source_screenshot(self):
+        table = TableVisual(8, 1, "Table 1", (0, 0, 100, 100), source("table").image_data_uri, [], "")
+        table_change = TableChange("modified", (table,), (), 0.9, False, ())
+        prose_group = ProseSourceVisualGroup("modified", "old", "new", old_visuals=(source("text", 8),))
+        aliases = _build_page_source_aliases(
+            [("table-1", table_change)],
+            [("change-1", prose_group)],
+        )
+        self.assertEqual(
+            {("old", 0): "table-change-1-source-old-0"},
+            aliases["prose"]["change-1"],
+        )
+        self.assertEqual({}, aliases["table"])
+
+    def test_table_repeated_page_gets_link_instead_of_second_image(self):
+        image = source("table", 8).image_data_uri
+        first = TableVisual(8, 1, "Table 1", (0, 0, 100, 100), image, [], "")
+        second = TableVisual(8, 2, "Table 2", (0, 0, 100, 100), image, [], "")
+        change = TableChange("modified", (first, second), (), 0.9, False, ())
+        aliases = _build_page_source_aliases([("table-1", change)], [])
+        rendered = _render_table_change_html(1, change, source_page_aliases=aliases["table"]["table-1"])
+        self.assertEqual(1, rendered.count("<img"))
+        self.assertIn("table-shot-page-reused", rendered)
+
+    def test_page_sort_key_uses_page_then_table_before_text(self):
+        text_change = SectionChange("modified", section("old", 8), section("new", 8, sid="new"), 0.9)
+        table = TableVisual(8, 1, "Table 1", (0, 0, 100, 100), "", [], "")
+        table_change = TableChange("modified", (table,), (), 0.9, False, ())
+        table_key = _table_change_page_sort_key(table_change)
+        text_key = _section_change_page_sort_key(text_change)
+        self.assertEqual(8, table_key[0])
+        self.assertEqual(8, text_key[0])
+        self.assertLess((table_key[0], 0, table_key[1], table_key[2]), (text_key[0], 1, text_key[1], text_key[2]))
+
     def test_neutral_repeated_source_page_points_to_highlighted_canonical(self):
         highlighted = replace(source("changed value", 8), highlight_region_count=1)
         first = ProseSourceVisualGroup(
