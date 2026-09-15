@@ -8,6 +8,7 @@
 - 真实页窗验证：旧版 `oif2024.058.11.pdf` 第 19 页、 新版 `oif2024.058.13.pdf` 第 18 页，报告 `/Users/mac/Documents/ProtocolPdfDiffReports/page_group_fix_20260916_release_candidate2/protocol_diff_a8zzcomh/protocol_diff_report.html`。页面组 `page-evidence-19-18` 将两张表和正文证据归于同一组；2 个图片源无重复，所有别名目标均解析到带 `data-source-view` 的原图节点。页脚版权/草稿声明、范围占位和 OCR 重复科学计数法已从读者 HTML 过滤，原始 JSON/CSV 保留审计值。
 - 新增回归覆盖同页两张表、页面组唯一性、单侧证据合并、来源别名焦点、页脚元信息、范围占位和重复数字符号；定向套件 91 项通过，完整 `unittest discover -s tests -q` 为 1754 项通过、1 项条件跳过。`compileall` 与 `git diff --check` 也已通过。
 - 当前工作树尚未提交；下一步是提交并推送 `project/pdf-protocol-diff`，记录最终 OID。上述真实页窗验证不外推整本 PDF 的语义对应准确率。
+- 本轮实现已提交并推送：`project/pdf-protocol-diff`，OID `125210253bd75d3c269624ddfe6827e4207d0b14`；远端同一分支已核对为该 OID。
 
 ## 当前任务：表格 1.000 相似度折叠修复（2026-09-15）
 
