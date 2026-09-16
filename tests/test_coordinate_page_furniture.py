@@ -1912,9 +1912,9 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn("第 19 页对比证据", html)
         self.assertIn("Table 33-7. Receiver Electrical Input Specification", html)
         self.assertIn("Table 33-8. Receiver interference tolerance parameters", html)
-        # The two table cards share one old and one new source image through
-        # the page-level alias map.
-        self.assertEqual(2, html.count(f'src="{image_uri}"'))
+        # Both table cards keep their own original crop so every evidence
+        # item remains directly comparable without a jump/omission marker.
+        self.assertEqual(4, html.count(f'src="{image_uri}"'))
 
     def test_deduplicated_prose_focus_targets_resolve_to_table_source(self) -> None:
         """A reused prose crop keeps focus ids and the canonical page view."""
@@ -1946,6 +1946,8 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn('id="change-2-source-old-0"', rendered)
         self.assertIn('data-source-alias="table-change-1-source-old-0"', rendered)
         self.assertIn('id="change-2-source-new-0"', rendered)
+        self.assertEqual(2, rendered.count("<img"))
+        self.assertNotIn("本页截图已在其他变化项展示", rendered)
 
         table = TableVisual(
             19,

@@ -48,15 +48,16 @@ class ReaderFocusTests(unittest.TestCase):
         )
         self.assertEqual({}, aliases["table"])
 
-    def test_table_repeated_page_gets_link_instead_of_second_image(self):
+    def test_table_repeated_page_keeps_original_image_in_place(self):
         image = source("table", 8).image_data_uri
         first = TableVisual(8, 1, "Table 1", (0, 0, 100, 100), image, [], "")
         second = TableVisual(8, 2, "Table 2", (0, 0, 100, 100), image, [], "")
         change = TableChange("modified", (first, second), (), 0.9, False, ())
         aliases = _build_page_source_aliases([("table-1", change)], [])
         rendered = _render_table_change_html(1, change, source_page_aliases=aliases["table"]["table-1"])
-        self.assertEqual(1, rendered.count("<img"))
+        self.assertEqual(2, rendered.count("<img"))
         self.assertIn("table-shot-page-reused", rendered)
+        self.assertNotIn("本页截图已在其他差异证据展示", rendered)
 
     def test_page_sort_key_uses_page_then_table_before_text(self):
         text_change = SectionChange("modified", section("old", 8), section("new", 8, sid="new"), 0.9)
@@ -68,7 +69,7 @@ class ReaderFocusTests(unittest.TestCase):
         self.assertEqual(8, text_key[0])
         self.assertLess((table_key[0], 0, table_key[1], table_key[2]), (text_key[0], 1, text_key[1], text_key[2]))
 
-    def test_fully_reused_prose_sources_render_as_compact_links(self):
+    def test_fully_reused_prose_sources_render_original_images_in_place(self):
         change = SectionChange("modified", section("old", 8), section("new", 8, sid="new"), 0.9)
         group = ProseSourceVisualGroup("modified", "old", "new", old_visuals=(source("old", 8),), new_visuals=(source("new", 9),))
         rendered = _render_change_html(
@@ -80,9 +81,28 @@ class ReaderFocusTests(unittest.TestCase):
                 ("new", 0): "table-change-1-source-new-0",
             },
         )
-        self.assertIn("prose-source-reused-summary", rendered)
-        self.assertNotIn("prose-source-visual-grid", rendered)
-        self.assertIn("文字差异明细", rendered)
+        self.assertIn("prose-source-visual-grid", rendered)
+        self.assertEqual(2, rendered.count("<img"))
+        self.assertNotIn("本页截图已在其他变化项展示", rendered)
+        self.assertNotIn("本页左右对比证据中已展示截图", rendered)
+        self.assertIn("prose-source-side", rendered)
+
+    def test_reused_prose_source_direct_image_not_placeholder(self):
+        """A reused source occurrence still exposes its original crop locally."""
+
+        visual = source("old", 8)
+        group = ProseSourceVisualGroup(
+            "modified", "old", "new", old_visuals=(visual,), new_visuals=()
+        )
+        rendered = _render_change_html(
+            2,
+            SectionChange("modified", section("old", 8), None, 0.9),
+            prose_source_visual=group,
+            source_visual_aliases={("old", 0): "change-1-source-old-0"},
+        )
+        self.assertIn('<img src="data:image/png;base64,', rendered)
+        self.assertNotIn("本页截图已在其他变化项展示", rendered)
+        self.assertNotIn("跳转到已展示截图", rendered)
 
     def test_neutral_repeated_source_page_points_to_highlighted_canonical(self):
         highlighted = replace(source("changed value", 8), highlight_region_count=1)

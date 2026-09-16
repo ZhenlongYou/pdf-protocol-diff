@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-READER-SCREENSHOT-OMISSION-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "正文或表格截图复用时，当前差异项一侧只显示‘已在其他变化项展示’，无法直接左右核对原始截图。"
+    discovered_via: user_counterexample
+    failure_mechanism: "页面级来源别名只保留了 canonical occurrence 的图片，复用 occurrence 被渲染成空 figure/文字占位；页组存在其他图片时也不会补充缺失的一侧。"
+    red_green_pair_id: PAIR-READER-DIRECT-SOURCE-IMAGE
+    regression_test_id: READER_DIRECT_SOURCE_IMAGE_TEST
+    public_path_rerun_id: RUN-READER-DIRECT-SOURCE-20260916
+    state: verified
   - id: DEF-READER-RUNNING-MASTHEAD-20260916
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "版本型运行页眉（坐标证据）被作为读者差异卡展示，挤占重点内容。"

@@ -1161,11 +1161,11 @@ def _render_html(
                                      precision="source-page-unlocalized", source_words=())
                              for v in visuals if v.raw_image_data_uri)
             prose_visual_lookup[key] = replace(group, change_type="review", old_visuals=neutral(group.old_visuals), new_visuals=neutral(group.new_visuals))
-    # A section can span a page boundary, so adjacent cards may otherwise
-    # embed the same full source page repeatedly.  Keep the occurrence that
-    # carries the most useful coordinate highlights and turn neutral repeats
-    # into links to that canonical figure.  Distinct highlighted occurrences
-    # remain visible because they may point at different changed text.
+    # A section can span a page boundary, so adjacent cards may own the same
+    # physical source page.  Keep a canonical occurrence for focus resolution,
+    # but leave every card's original crop visible for direct side-by-side
+    # comparison; the reader should never encounter a missing screenshot or
+    # a jump-only placeholder.
     prose_card_groups = [
         (
             f"change-{index}",
@@ -1179,9 +1179,9 @@ def _render_html(
         )
         for index, change in indexed_similarity_review
     ]
-    # Build one source-page namespace across table and prose cards. A page
-    # screenshot is evidence for the page itself, so a table crop and a prose
-    # crop of that same page must not make the reader inspect the page twice.
+    # Build one source-page namespace across table and prose cards. It provides
+    # stable focus targets for repeated page crops; rendering does not replace
+    # any crop with a link or an omission.
     table_card_specs = [
         (f"table-{index}", change)
         for index, change in enumerate(table_changes, start=1)
@@ -1290,7 +1290,7 @@ def _render_html(
         <span class="section-anchor" id="table-changes"></span>
         <span class="section-anchor" id="text-changes"></span>
         <h2>按 PDF 页数顺序的差异证据</h2>
-        <p class="change-summary">表格补充证据（变化与复核）和技术正文变化与复核按旧版/新版起始页排序；同一页只展示一份原页截图，表格与文字差异分别列在截图下方。</p>
+        <p class="change-summary">表格补充证据（变化与复核）和技术正文变化与复核按旧版/新版起始页排序；每个证据项直接展示左右原页截图，表格与文字差异分别列在截图下方。</p>
         {page_ordered_cards}
       </section>
     '''
@@ -1534,19 +1534,6 @@ def _render_html(
       padding-bottom: 10px;
       background: #fbfcfe;
     }}
-    .prose-source-reuse {{
-      display: inline-block;
-      margin: 10px 10px 0;
-      color: var(--blue);
-      font-size: 13px;
-    }}
-    .prose-source-reused-summary {{
-      padding: 10px;
-      border: 1px dashed var(--line);
-      border-radius: 8px;
-      background: #fbfcfe;
-    }}
-    .prose-source-reused-summary .prose-source-reuse {{ margin-left: 0; }}
     .prose-source-page img {{ display: block; width: auto; max-width: 100%; height: auto; background: #fff; }}
     .section-anchor {{ display: block; height: 0; overflow: hidden; }}
     .prose-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
@@ -1980,14 +1967,13 @@ def _prose_source_visual_identity(
 def _build_prose_source_aliases(
     card_groups: Iterable[tuple[str, ProseSourceVisualGroup | None]],
 ) -> dict[str, dict[tuple[str, int], str]]:
-    """Plan links for neutral duplicate page screenshots across prose cards.
+    """Record canonical peers for repeated prose screenshots.
 
     The source builder intentionally gives each section every page it owns so
-    context is complete.  Rendering those pages in every neighboring change
-    card makes a report look as though pages were duplicated.  A highlighted
-    occurrence is the canonical evidence when available; neutral repeats are
-    represented by a link.  Highlighted occurrences are never collapsed since
-    they can identify different changed regions on the same page.
+    context is complete.  A highlighted occurrence remains the canonical
+    focus target when available, while every occurrence is still rendered
+    with its own source image so the reader never has to follow a link or
+    interpret an omitted screenshot.
     """
 
     occurrences: dict[tuple[str, int], list[tuple[str, int, int, int]]] = {}
@@ -2047,13 +2033,12 @@ def _build_page_source_aliases(
     table_card_groups: Iterable[tuple[str, TableChange]],
     prose_card_groups: Iterable[tuple[str, ProseSourceVisualGroup | None]],
 ) -> dict[str, dict[str, dict[tuple[str, int], str]]]:
-    """Deduplicate source screenshots by side and PDF page across card types.
+    """Record source peers by side and PDF page across card types.
 
     A logical table and a prose section often own different crops of the same
-    source page. The page is the reader-facing evidence unit, so retain the
-    first table-backed occurrence when one exists and link every later table or
-    prose occurrence to it. If a page has prose evidence only, retain the most
-    highlighted prose occurrence for source navigation.
+    source page. The page is the reader-facing evidence unit, so retain a
+    canonical occurrence for focus resolution, while each card still embeds
+    its own original crop instead of replacing it with a jump or omission.
     """
 
     # kind, card key, side, visual index, highlight count, card order, DOM id
@@ -2135,44 +2120,6 @@ def _render_prose_source_visual_group(
         for (side, index), target in (source_visual_aliases or {}).items()
         if side == "new"
     }
-    old_fully_reused = bool(group.old_visuals) and len(old_aliases) == len(group.old_visuals)
-    new_fully_reused = bool(group.new_visuals) and len(new_aliases) == len(group.new_visuals)
-    if (old_fully_reused or not group.old_visuals) and (new_fully_reused or not group.new_visuals):
-        reused_links = []
-        # ``render_change_focus`` still produces exact source ids for every
-        # changed snippet.  When a whole prose group is deduplicated, there is
-        # no figure node carrying those ids, so leave a lightweight alias
-        # anchor for the focus buttons to resolve through the canonical page
-        # evidence.  This keeps screenshot deduplication and source navigation
-        # consistent instead of rendering a button that can never locate its
-        # target.
-        alias_anchors = []
-        for side, visuals, aliases, label in (
-            ("old", group.old_visuals, old_aliases, "旧版"),
-            ("new", group.new_visuals, new_aliases, "新版"),
-        ):
-            for index, visual in enumerate(visuals):
-                target = aliases.get(index)
-                if target:
-                    source_id = f"{prefix}-{side}-{index}" if prefix else ""
-                    if source_id:
-                        alias_anchors.append(
-                            f'<span class="prose-source-alias" id="{_escape(source_id)}" '
-                            f'data-source-alias="{_escape(target)}"></span>'
-                        )
-                    reused_links.append(
-                        f'<span class="prose-source-reuse">'
-                        f'{label} PDF 第 {_escape(str(visual.page_number))} 页截图已在本页左右对比证据中展示</span>'
-                    )
-        return (
-            '<div class="prose-source-visual prose-source-reused-summary">'
-            '<div class="prose-source-visual-legend">'
-            '本差异项对应的原页截图已在其他差异证据展示；本处仍保留该条款的文字差异明细。'
-            '</div>'
-            + "".join(alias_anchors)
-            + "".join(reused_links)
-            + "</div>"
-        )
     old_side = _render_prose_source_visual_side(
         "旧版原文区域",
         group.old_visuals,
@@ -2277,13 +2224,19 @@ def _render_prose_source_visual_side(
             )
             alias_target = (source_aliases or {}).get(visual_index)
             if alias_target:
+                view_attr = (
+                    f' data-source-view="{_escape(json.dumps(visual.source_view_box))}"'
+                    if visual.source_view_box is not None
+                    else ""
+                )
                 pages_parts.append(
                     '<figure class="prose-source-page prose-source-page-reused"'
                     + figure_id
-                    + f' data-source-alias="{_escape(alias_target)}">'
+                    + f' data-source-alias="{_escape(alias_target)}"{view_attr}>'
                     f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
-                    '本页截图已在其他变化项展示</figcaption>'
-                    '<span class="prose-source-reuse">本页左右对比证据中已展示截图</span>'
+                    f'{_escape(mode_label if visual.highlight_region_count else "原页上下文，未标色")} · 点击放大</figcaption>'
+                    f'<img src="{visual.image_data_uri}" alt="{_escape(title)} PDF 第 '
+                    f'{_escape(str(visual.page_number))} 页原始裁剪截图">'
                     '</figure>'
                 )
                 continue
@@ -4956,14 +4909,11 @@ def _render_one_table_shot_page(
 
     caption = f"页 {table.page_number} · 表格 {table.table_number}"
     id_html = f' id="{_escape(source_id)}"' if source_id else ""
-    if alias_target:
-        return (
-            f'<div class="table-shot-page table-shot-page-reused"{id_html}'
-            f' data-source-alias="{_escape(alias_target)}">'
-            f'<div class="table-shot-page-label">{_escape(caption)} · '
-            '本页截图已在其他差异证据展示</div>'
-            '<span class="prose-source-reuse">本页左右对比证据中已展示截图</span></div>'
-        )
+    alias_attr = (
+        f' data-source-alias="{_escape(alias_target)}"'
+        if alias_target
+        else ""
+    )
     text_backed = table.ocr_status == "text_backed_exact_match"
     image_html = (
         f'<img alt="{_escape(caption)}" src="{table.image_data_uri}">'
@@ -4984,7 +4934,8 @@ def _render_one_table_shot_page(
         image_html = f'<img alt="{_escape(caption)} · 完整原页" src="{context_uri}">'
         caption += " · 完整原页 · " + ("浅色差异标注" if highlighted else "未标色，供上下文核对") + " · 点击放大"
     return (
-        f'<div class="table-shot-page"{id_html}{source_view_html}><div class="table-shot-page-label">{_escape(caption)}</div>'
+        f'<div class="table-shot-page{" table-shot-page-reused" if alias_target else ""}'
+        f'{id_html}{alias_attr}{source_view_html}><div class="table-shot-page-label">{_escape(caption)}</div>'
         f"{image_html}"
         "</div>"
     )
@@ -14228,9 +14179,9 @@ def _render_page_evidence_groups(
     """Render one evidence block per old/new page pair.
 
     Table and prose cards are still computed independently, but the reader
-    sees the physical page pair as the top-level unit.  This keeps one source
-    screenshot per side and places every table/text finding for that page
-    directly below it.
+    sees the physical page pair as the top-level unit.  Every source crop stays
+    visible in its owning card, and all table/text findings for that page sit
+    directly below the corresponding side-by-side evidence.
     """
 
     grouped: dict[tuple[int | None, int | None], list[str]] = {}
@@ -14303,10 +14254,9 @@ def _render_page_evidence_groups(
             for card in grouped[page_pair]
         ]
         card_count = len(component_cards)
-        # A canonical card already carries the side-by-side source image for
-        # this component.  Add a group-level pair only when every card was
-        # reduced to an alias/empty visual, so the reader never sees two copies
-        # of the same physical page.
+        # A group-level pair is only a fallback for cards that genuinely have
+        # no embedded image.  Reused source crops are rendered in place by the
+        # owning card, so they are never replaced by a jump-only placeholder.
         source_html = (
             _render_page_source_pair(component, page_source_candidates)
             if page_source_candidates and not any("<img" in card for card in component_cards)
@@ -14316,7 +14266,7 @@ def _render_page_evidence_groups(
             f'''<section class="page-evidence-group" id="page-evidence-{old_token}-{new_token}"
                 data-old-page="{_escape(old_token)}" data-new-page="{_escape(new_token)}">
               <h3 class="page-evidence-title">{_escape(title)}</h3>
-              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；左右原页截图各保留一次，下面列出全部差异明细。</p>
+              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；左右原页截图直接展示，下面列出全部差异明细。</p>
               {source_html}
               {"".join(component_cards)}
             </section>'''
