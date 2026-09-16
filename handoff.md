@@ -7,7 +7,7 @@
 - 兜底逻辑只为当前组件确实没有可见图片的物理页补图，并跳过报告中已经展示过的页；有真实来源时不再产生“跳转到已展示截图”“本页截图已在其他变化项展示”或“截图暂不可用”占位。删除/单侧证据仍保留其已有一侧原图和文字事实。
 - 真实 1–20 页入口重跑产物：`/Users/mac/Documents/ProtocolPdfDiffReports/final_reader_page_dedup_20260917/protocol_diff_2z74_s76/protocol_diff_report.html`；页面组 9，主证据区 32 个可见物理页/侧组合且无重复，44 张内嵌数据图全部唯一且可解码，22 个来源别名目标全部存在，跳转/省略/截图不可用占位均为 0，表格文字明细默认展开 6 项。页组 `旧版第 4、5、6、7、8 页 / 新版第 6、7、8、9、10 页` 同时保留表格与正文 4 张证据卡，旧版第 7 页只出现一次，新版第 10 页可见。
 - 定向套件 68 项通过；完整 `.venv/bin/python -m unittest discover -s tests -q` 为 1760 项通过、1 项条件跳过（309.842 秒）；`py_compile`、`git diff --check` 和浏览器实际加载/截图核对通过。结构化核验明细写入同目录 `verification.json`。报告整体识别状态仍为 `degraded / 需人工复核`，本页窗验证不外推整本 PDF 的内容对应准确率。
-- 缺陷账本新增并验证 `DEF-READER-PAGE-SCREENSHOT-DEDUP-20260917`；当前工作树的代码、回归测试和账本待本轮提交/推送，记录最终 OID 后再结束。
+- 缺陷账本新增并验证 `DEF-READER-PAGE-SCREENSHOT-DEDUP-20260917`；本轮提交已推送到 `origin/project/pdf-protocol-diff`，最终 OID 为 `ebdb326`，本地与远端一致。
 
 ## 历史记录：页眉降噪、左右截图和表格内容相似度分离（2026-09-16）
 
