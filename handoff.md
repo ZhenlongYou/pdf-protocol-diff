@@ -3,10 +3,10 @@
 ## 当前任务：页眉降噪、左右截图和表格内容相似度分离（2026-09-16）
 
 - 用户要求从读者报告移除当前 OIF 版本页眉这类非重点重复内容；含 `ALPHA/BETA` 等不透明标识的动态页眉仍保留，避免把潜在技术标识误删。原始 JSON/CSV 继续保存页眉审计记录。
-- `reporting.py` 已在读者投影过滤明确出版物型运行页眉；跳转截图链接改为当前页组的左右截图提示。页面组仍按旧版/新版物理页顺序合并，同一组只保留一份可见截图证据；表格和正文明细继续在截图下列出。
+- `reporting.py` 已在读者投影过滤明确出版物型运行页眉；每个表格/正文证据项都直接嵌入对应的原始裁剪截图，来源别名只保留给焦点定位使用，不再渲染跳转或“已在其他变化项展示”占位。页面组仍按旧版/新版物理页顺序合并，同一组只出现一次，表格和正文明细继续在截图下列出。
 - `TableChange.similarity` 现在是完整行内容相似度，新增 `pairing_similarity` 保留表题/行身份配对分数；JSON/CSV 同时输出 `content_similarity` 与 `pair_similarity`，HTML/Markdown 明确标注二者用途。截图中的 `T_J4.3u03 → T_JH4.3u`、`T_JRMS03 → T_JHRMS` 当前显示内容相似度约 0.996、配对相似度 1.000，表格不会进入相似度折叠附录。
-- 回归：完整 `unittest discover -s tests -q` 为 1757 项通过、1 项条件跳过；编译和 `git diff --check` 通过。真实 1–20 页入口重跑产物为 `/Users/mac/Documents/ProtocolPdfDiffReports/final_reader_fix_20260916/protocol_diff_xbzpalfb/protocol_diff_report.html`：读者页眉/页脚卡 0，原始页眉审计记录 1，页面组 13，跳转链接 0，表格明细默认展开 6，嵌入图 45 张且全部可解码。
-- 本轮源码、测试、缺陷账本和交接记录已提交并推送到 `project/pdf-protocol-diff`，行为提交 OID `0baf0bc614d6ff38216cf6de65f61c2ed7d14449`，本地与远端一致。真实报告仍为 `degraded / 需人工复核`，1–20 页验证不外推整本 PDF 的内容对应准确率。
+- 回归：完整 `unittest discover -s tests -q` 为 1758 项通过、1 项条件跳过；编译和 `git diff --check` 通过。真实 1–20 页入口重跑产物为 `/Users/mac/Documents/ProtocolPdfDiffReports/final_reader_direct_screenshots_20260916/protocol_diff_2s8hnfzc/protocol_diff_report.html`：读者页眉/页脚卡 0，原始页眉审计记录 1，页面组 13，省略/跳转占位 0，表格明细默认展开 6，嵌入图 68 张且全部可解码。
+- 本轮源码、测试和缺陷账本已提交并推送到 `project/pdf-protocol-diff`，行为提交 OID `81de3386acdeeaced107a1a923954c84739fec22`，本地与远端一致。真实报告仍为 `degraded / 需人工复核`，1–20 页验证不外推整本 PDF 的内容对应准确率。
 
 ## 当前任务：同页证据归并与表格主区展示（2026-09-16）
 
