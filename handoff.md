@@ -6,7 +6,7 @@
 - `reporting.py` 已在读者投影过滤明确出版物型运行页眉；跳转截图链接改为当前页组的左右截图提示。页面组仍按旧版/新版物理页顺序合并，同一组只保留一份可见截图证据；表格和正文明细继续在截图下列出。
 - `TableChange.similarity` 现在是完整行内容相似度，新增 `pairing_similarity` 保留表题/行身份配对分数；JSON/CSV 同时输出 `content_similarity` 与 `pair_similarity`，HTML/Markdown 明确标注二者用途。截图中的 `T_J4.3u03 → T_JH4.3u`、`T_JRMS03 → T_JHRMS` 当前显示内容相似度约 0.996、配对相似度 1.000，表格不会进入相似度折叠附录。
 - 回归：完整 `unittest discover -s tests -q` 为 1757 项通过、1 项条件跳过；编译和 `git diff --check` 通过。真实 1–20 页入口重跑产物为 `/Users/mac/Documents/ProtocolPdfDiffReports/final_reader_fix_20260916/protocol_diff_xbzpalfb/protocol_diff_report.html`：读者页眉/页脚卡 0，原始页眉审计记录 1，页面组 13，跳转链接 0，表格明细默认展开 6，嵌入图 45 张且全部可解码。
-- 当前源码工作树含本轮四个文件改动，尚未提交；下一步提交并推送 `project/pdf-protocol-diff`，记录远端完整 OID。真实报告仍为 `degraded / 需人工复核`，1–20 页验证不外推整本 PDF 的内容对应准确率。
+- 本轮源码、测试、缺陷账本和交接记录已提交并推送到 `project/pdf-protocol-diff`，行为提交 OID `0baf0bc614d6ff38216cf6de65f61c2ed7d14449`，本地与远端一致。真实报告仍为 `degraded / 需人工复核`，1–20 页验证不外推整本 PDF 的内容对应准确率。
 
 ## 当前任务：同页证据归并与表格主区展示（2026-09-16）
 
