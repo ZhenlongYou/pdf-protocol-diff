@@ -1912,12 +1912,89 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn("第 19 页对比证据", html)
         self.assertIn("Table 33-7. Receiver Electrical Input Specification", html)
         self.assertIn("Table 33-8. Receiver interference tolerance parameters", html)
-        # Both table cards keep their own original crop so every evidence
-        # item remains directly comparable without a jump/omission marker.
-        self.assertEqual(4, html.count(f'src="{image_uri}"'))
+        # The first table card owns the one visible old/new page pair.  The
+        # second table card keeps its row facts below the same page group and
+        # only carries a hidden source alias.
+        self.assertEqual(2, html.count(f'src="{image_uri}"'))
+        self.assertIn("prose-source-alias-anchor", html)
+
+    def test_same_page_table_and_prose_keep_all_cards_under_one_source_pair(self) -> None:
+        """One page pair is followed by both table and prose difference facts."""
+
+        image_uri = "data:image/png;base64,page19"
+        old_section = Section(
+            "old-text",
+            "1 Receiver acceptance",
+            "Receiver acceptance",
+            1,
+            ("1 Receiver acceptance",),
+            ("1",),
+            19,
+            19,
+            "The receiver shall use Np = 53.",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-text",
+            body="The receiver shall use Np = 60.",
+        )
+        text_change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.9,
+            replaced_snippets=[SnippetPair(old_section.body, new_section.body)],
+        )
+        old_table = TableVisual(
+            19,
+            1,
+            "Table 33-7. Receiver Electrical Input Specification",
+            (0.0, 0.0, 100.0, 100.0),
+            image_uri,
+            ["Parameter=A | Value=1"],
+            "rows",
+        )
+        new_table = replace(old_table, row_texts=["Parameter=A | Value=2"])
+        prose_visual = ProseSourceVisual(
+            19,
+            (0.0, 0.0, 100.0, 100.0),
+            image_uri,
+            1,
+            1,
+            source_view_box=(0.0, 0.0, 100.0, 100.0),
+        )
+        result = DiffResult(
+            Path("old-page19.pdf"),
+            Path("new-page19.pdf"),
+            [old_section],
+            [new_section],
+            [text_change],
+            [],
+            old_table_visuals=[old_table],
+            new_table_visuals=[new_table],
+            prose_source_visuals=[
+                ProseSourceVisualGroup(
+                    "modified",
+                    "old-text",
+                    "new-text",
+                    old_visuals=(prose_visual,),
+                    new_visuals=(replace(prose_visual),),
+                )
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outputs = write_reports(result, Path(temp_dir), DiffOptions())
+            html = outputs["html"].read_text(encoding="utf-8")
+
+        self.assertEqual(1, html.count('class="page-evidence-group"'))
+        self.assertEqual(2, html.count(f'src="{image_uri}"'))
+        self.assertIn('id="table-change-1"', html)
+        self.assertIn('id="change-1"', html)
+        self.assertIn("Np =", html)
+        self.assertIn("表格文字明细", html)
 
     def test_deduplicated_prose_focus_targets_resolve_to_table_source(self) -> None:
-        """A reused prose crop keeps focus ids and the canonical page view."""
+        """A reused prose crop keeps focus ids without another visible image."""
 
         visual = ProseSourceVisual(
             page_number=19,
@@ -1946,7 +2023,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn('id="change-2-source-old-0"', rendered)
         self.assertIn('data-source-alias="table-change-1-source-old-0"', rendered)
         self.assertIn('id="change-2-source-new-0"', rendered)
-        self.assertEqual(2, rendered.count("<img"))
+        self.assertEqual(0, rendered.count("<img"))
         self.assertNotIn("本页截图已在其他变化项展示", rendered)
 
         table = TableVisual(
@@ -2042,6 +2119,53 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn("page-evidence-source-grid", rendered)
         self.assertEqual(2, rendered.count("<img"))
         self.assertNotIn("跳转到已展示截图", rendered)
+
+    def test_cross_page_cards_share_sources_without_reintroducing_a_page(self) -> None:
+        """Cards spanning later pages merge before fallback screenshots are added."""
+
+        entries = [
+            (
+                (4, 0, "first"),
+                1,
+                1,
+                '<article id="first">first <img src="data:image/png;base64,old4">'
+                '<img src="data:image/png;base64,new6"></article>',
+                (4, 6),
+                {
+                    "all": {"old": {4, 7}, "new": {6, 9}},
+                    "visible": {"old": {4}, "new": {6}},
+                },
+            ),
+            (
+                (7, 0, "second"),
+                1,
+                2,
+                '<article id="second">second</article>',
+                (7, 9),
+                {
+                    "all": {"old": {7}, "new": {9}},
+                    "visible": {"old": set(), "new": set()},
+                },
+            ),
+        ]
+        sources = {
+            ("old", 4): ("data:image/png;base64,old4", None, 2),
+            ("old", 7): ("data:image/png;base64,old7", None, 2),
+            ("new", 6): ("data:image/png;base64,new6", None, 2),
+            ("new", 9): ("data:image/png;base64,new9", None, 2),
+        }
+
+        rendered = reporting_module._render_page_evidence_groups(
+            entries,
+            page_source_candidates=sources,
+        )
+
+        self.assertEqual(1, rendered.count('class="page-evidence-group"'))
+        self.assertIn('id="first"', rendered)
+        self.assertIn('id="second"', rendered)
+        for uri in ("old4", "old7", "new6", "new9"):
+            self.assertEqual(1, rendered.count(f'src="data:image/png;base64,{uri}"'))
+        self.assertNotIn("截图暂不可用", rendered)
 
     def test_unique_exact_caption_does_not_pair_disjoint_cross_schema_rows(self) -> None:
         """An exact table title cannot override unrelated first-column identities."""

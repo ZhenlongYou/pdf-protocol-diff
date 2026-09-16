@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-READER-PAGE-SCREENSHOT-DEDUP-20260917
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "同一物理页被多个证据卡重复截图，跨页卡还可能再次插入页级截图；同一页组的一侧新版截图也可能缺失。"
+    discovered_via: user_counterexample
+    failure_mechanism: "页面组只按章节起始页组织，未使用卡片实际覆盖的全部物理页；页级兜底没有全报告可见页账本，导致重复嵌入或单侧缺图。"
+    red_green_pair_id: PAIR-READER-PAGE-SCREENSHOT-DEDUP
+    regression_test_id: READER_PAGE_SCREENSHOT_DEDUP_TEST
+    public_path_rerun_id: RUN-READER-PAGE-SCREENSHOT-DEDUP-20260917
+    state: verified
   - id: DEF-READER-SCREENSHOT-OMISSION-20260916
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "正文或表格截图复用时，当前差异项一侧只显示‘已在其他变化项展示’，无法直接左右核对原始截图。"
