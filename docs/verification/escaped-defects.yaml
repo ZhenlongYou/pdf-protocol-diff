@@ -1,6 +1,33 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-READER-RUNNING-MASTHEAD-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "版本型运行页眉（坐标证据）被作为读者差异卡展示，挤占重点内容。"
+    discovered_via: user_counterexample
+    failure_mechanism: "页眉识别在两版抽取粒度不一致时降级为 technical，读者投影没有区分出版物页眉与可能含技术标识的动态页眉。"
+    red_green_pair_id: PAIR-READER-RUNNING-MASTHEAD
+    regression_test_id: READER_RUNNING_MASTHEAD_TEST
+    public_path_rerun_id: RUN-READER-FINAL-20260916
+    state: verified
+  - id: DEF-TABLE-CONTENT-SIMILARITY-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "表格单元格文字已经变化，但页面只显示 1.000，相似度折叠会隐藏重要信息。"
+    discovered_via: user_counterexample
+    failure_mechanism: "表题/行身份配对分数与单元格内容分数共用一个字段；配对分数忽略值变化，无法作为折叠依据。"
+    red_green_pair_id: PAIR-TABLE-CONTENT-SIMILARITY
+    regression_test_id: TABLE_CONTENT_SIMILARITY_TEST
+    public_path_rerun_id: RUN-READER-FINAL-20260916
+    state: verified
+  - id: DEF-READER-SCREENSHOT-JUMP-20260916
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "跳转到已展示截图不便比较，读者需要离开当前差异项寻找另一侧原图。"
+    discovered_via: user_usability_review
+    failure_mechanism: "截图去重后的复用 occurrence 只渲染锚点和跳转链接，没有在当前页组提供左右视觉证据。"
+    red_green_pair_id: PAIR-READER-SCREENSHOT-SIDE-BY-SIDE
+    regression_test_id: PAGE_EVIDENCE_SOURCE_PAIR_TEST
+    public_path_rerun_id: RUN-READER-FINAL-20260916
+    state: verified
   - id: DEF-TABLE-SIMILARITY-FOLD-20260915
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "表格符号或数值已经发生变化，但表格配对相似度显示为 1.000 并被折叠，主差异区看不到。"

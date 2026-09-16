@@ -2003,6 +2003,44 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertIn('id="new-only"', rendered)
         self.assertIn('id="old-only"', rendered)
 
+    def test_reader_projection_hides_all_running_page_furniture(self) -> None:
+        """Coordinate-evidenced running headers/footers never become reader cards."""
+
+        title = "运行页眉（坐标证据）"
+        old = Section("running-header-evidence", title, title, 1, (title,), (), 1, 1,
+                      "Implementation Agreement OIF-CEI-6.0 Common Electrical I/O (CEI)", role="technical")
+        new = replace(old, body="Implementation Agreement OIF-CEI-06 Common Electrical I/O (CEI)")
+        change = SectionChange("modified", old, new, 0.9, replaced_snippets=(SnippetPair(old.body, new.body),))
+        self.assertIsNone(reporting_module._reader_section_change(change))
+
+    def test_table_content_similarity_is_separate_from_identity_pairing(self) -> None:
+        """A same-row table with changed symbols cannot report content similarity 1.000."""
+
+        old_row = "表格行: T1 | Characteristic=Uncorrelated jitter symbol | Symbol=T_J4.3u03 | MAX=0.121 | UNIT=UI"
+        new_row = old_row.replace("T_J4.3u03", "T_JH4.3u")
+        old = TableVisual(9, 1, "Table 32-4. Transmitter Output Jitter Specification", (0, 0, 1, 1), "", [old_row], "rows")
+        new = replace(old, page_number=11, row_texts=[new_row])
+        pairing = reporting_module._table_visual_group_similarity((old,), (new,))
+        content = reporting_module._table_visual_group_content_similarity((old,), (new,))
+        self.assertEqual(1.0, pairing)
+        self.assertLess(content, 1.0)
+
+    def test_page_evidence_group_can_render_one_left_right_source_pair(self) -> None:
+        """A group-level fallback keeps visual comparison side by side without jump links."""
+
+        entries = [((9, 0, "text"), 1, 1, '<article id="text">text</article>', (9, 11))]
+        sources = {
+            ("old", 9): ("data:image/png;base64,old", None, 2),
+            ("new", 11): ("data:image/png;base64,new", None, 2),
+        }
+        rendered = reporting_module._render_page_evidence_groups(
+            entries,
+            page_source_candidates=sources,
+        )
+        self.assertIn("page-evidence-source-grid", rendered)
+        self.assertEqual(2, rendered.count("<img"))
+        self.assertNotIn("跳转到已展示截图", rendered)
+
     def test_unique_exact_caption_does_not_pair_disjoint_cross_schema_rows(self) -> None:
         """An exact table title cannot override unrelated first-column identities."""
 

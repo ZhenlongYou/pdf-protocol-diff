@@ -53,7 +53,7 @@ def table_context_image(table: TableVisual, change: TableChange | None, side: st
 
 IMAGE_VIEWER = """
 <style>
-.prose-source-page img,.table-shot-page img {cursor:zoom-in}
+.prose-source-page img,.table-shot-page img,.page-source-figure img {cursor:zoom-in}
 .similarity-review-appendix {margin-top:32px;border:1px solid #d6dce5;border-radius:12px;padding:20px;background:#f8fafc}
 .similarity-review-appendix>summary {font-size:19px;font-weight:650;cursor:pointer}
 .table-text-details {margin-top:16px}
@@ -68,7 +68,7 @@ IMAGE_VIEWER = """
 (() => {
   const dialog = document.querySelector('.source-image-viewer');
   document.addEventListener('click', e => {
-    const image = e.target.closest('.prose-source-page img,.table-shot-page img');
+    const image = e.target.closest('.prose-source-page img,.table-shot-page img,.page-source-figure img');
     if (!image) return;
     const full = dialog.querySelector('img'); full.src = image.src; full.alt = image.alt;
     dialog.querySelector('span').textContent = image.alt + ' · 原始分辨率';

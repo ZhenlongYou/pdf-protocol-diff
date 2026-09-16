@@ -64,6 +64,7 @@ from .text_utils import (
     is_known_engineering_symbol_letter_suffix,
     micro_identifier_signatures,
     normalize_table_number_dashes,
+    normalize_for_similarity,
     parse_number_word_phrase,
     readable_symbol_font_glyphs,
     reader_safe_glyphs,
@@ -698,6 +699,7 @@ def write_reports(
                 "old_pages",
                 "new_pages",
                 "pair_similarity",
+                "content_similarity",
                 "item",
                 "old_value",
                 "new_value",
@@ -750,6 +752,19 @@ def _displayed_similarity_one(change: SectionChange | TableChange) -> bool:
     if not paired or format(change.similarity, ".3f") != "1.000":
         return False
     return True
+
+
+def _table_pairing_similarity(change: TableChange) -> float | None:
+    """Return the identity score retained for table pairing/audit output."""
+
+    if not change.old_tables or not change.new_tables:
+        return None
+    if change.pairing_similarity is not None:
+        return change.pairing_similarity
+    # Legacy callers may construct TableChange without the new field.  Keep
+    # their serialized audit stable while all newly built changes carry both
+    # independent scores explicitly.
+    return _table_visual_group_similarity(change.old_tables, change.new_tables)
 
 
 def _section_change_reader_identity(change: SectionChange) -> tuple[int, int, str]:
@@ -915,9 +930,12 @@ def _append_markdown_table_changes(
         lines.append(f"- 类型: {_CHANGE_LABELS.get(table_change.change_type, table_change.change_type)}")
         lines.append(f"- 旧表: {_table_side_description(table_change.old_tables)}")
         lines.append(f"- 新表: {_table_side_description(table_change.new_tables)}")
-        # 双侧均存在时才显示配对分数，单侧新增/删除没有可解释的相似度。
+        # 双侧均存在时同时保留内容分数和配对分数；后者只说明为何判为同一逻辑表。
         if table_change.old_tables and table_change.new_tables:
-            lines.append(f"- 配对相似度: {table_change.similarity:.3f}")
+            lines.append(f"- 内容相似度: {table_change.similarity:.3f}")
+            pairing = _table_pairing_similarity(table_change)
+            if pairing is not None:
+                lines.append(f"- 配对相似度（仅用于表格身份）: {pairing:.3f}")
         # 表题变化与行变化分开说明，避免把编号变化误读成参数变化。
         if table_change.caption_changed:
             lines.append("- 表题/表号发生变化；行内容变化另列如下。")
@@ -1177,6 +1195,11 @@ def _render_html(
     )
     prose_source_aliases = page_source_aliases["prose"]
     table_source_aliases = page_source_aliases["table"]
+    page_source_candidates = _build_page_source_candidates(
+        table_changes,
+        technical_changes,
+        prose_visual_lookup,
+    )
     figure_source_visuals = tuple(
         group
         for group in materialized_source_visuals
@@ -1251,7 +1274,10 @@ def _render_html(
         [*table_card_entries, *technical_card_entries],
         key=lambda item: (item[0][0], item[1], item[0][1], item[0][2], item[2]),
     )
-    page_ordered_cards = _render_page_evidence_groups(page_ordered_entries)
+    page_ordered_cards = _render_page_evidence_groups(
+        page_ordered_entries,
+        page_source_candidates=page_source_candidates,
+    )
     if not page_ordered_cards:
         empty_message = (
             _empty_report_message(result)
@@ -1642,6 +1668,38 @@ def _render_html(
       margin: 0 0 10px;
       font-size: 13px;
     }}
+    .page-evidence-source-grid {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      margin: 10px 0 14px;
+    }}
+    .page-source-side {{
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }}
+    .page-source-side > h4 {{
+      margin: 0;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-size: 13px;
+      background: #edf1f6;
+      border-bottom: 1px solid var(--line);
+    }}
+    .page-source-figure {{ margin: 0; border-bottom: 1px solid var(--line); }}
+    .page-source-figure:last-child {{ border-bottom: 0; }}
+    .page-source-figure figcaption {{
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+    }}
+    .page-source-figure img {{ display: block; width: auto; max-width: 100%; height: auto; cursor: zoom-in; }}
+    .page-source-empty {{ padding: 24px 12px; color: var(--muted); text-align: center; }}
     .table-visual-card {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -2103,8 +2161,8 @@ def _render_prose_source_visual_group(
                             f'data-source-alias="{_escape(target)}"></span>'
                         )
                     reused_links.append(
-                        f'<a class="prose-source-reuse" href="#{_escape(target)}">'
-                        f'{label} PDF 第 {_escape(str(visual.page_number))} 页截图</a>'
+                        f'<span class="prose-source-reuse">'
+                        f'{label} PDF 第 {_escape(str(visual.page_number))} 页截图已在本页左右对比证据中展示</span>'
                     )
         return (
             '<div class="prose-source-visual prose-source-reused-summary">'
@@ -2225,8 +2283,7 @@ def _render_prose_source_visual_side(
                     + f' data-source-alias="{_escape(alias_target)}">'
                     f'<figcaption>PDF 第 {_escape(str(visual.page_number))} 页 · '
                     '本页截图已在其他变化项展示</figcaption>'
-                    f'<a class="prose-source-reuse" href="#{_escape(alias_target)}">'
-                    '跳转到已展示截图</a>'
+                    '<span class="prose-source-reuse">本页左右对比证据中已展示截图</span>'
                     '</figure>'
                 )
                 continue
@@ -2412,11 +2469,16 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
             )
         ):
             change_type = "review"  # 内容相同但行列边界未知，不得冒充已确认“修改”。
-        similarity = (
+        pairing_similarity = (
             _table_visual_group_similarity(group.old_tables, group.new_tables)
             if group.old_tables and group.new_tables
             else 0.0
-        )  # 报告分数与配对门槛共用整组表页，避免续页证据通过门槛却显示首屏低分。
+        )  # 配对分数与门槛共用整组表页，但不能冒充单元格内容相似度。
+        similarity = (
+            _table_visual_group_content_similarity(group.old_tables, group.new_tables)
+            if group.old_tables and group.new_tables
+            else 0.0
+        )  # 内容分数逐行比较完整字段；真实数值/符号变化会把分数降到 1.000 以下。
         changes.append(
             TableChange(
                 change_type=change_type,
@@ -2426,6 +2488,7 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
                 caption_changed=caption_changed,
                 row_changes=row_changes,
                 role=_table_change_role(group, row_changes),
+                pairing_similarity=pairing_similarity if group.old_tables and group.new_tables else None,
             )
         )
     return changes
@@ -3855,6 +3918,87 @@ def _table_visual_group_similarity(
     return min(caption_similarity, row_similarity)  # caption 与整组行身份必须同时过门，任一弱证据都不能被另一项补偿。
 
 
+def _table_row_content_similarity(old_row: str, new_row: str) -> float:
+    """Score the visible content of two already aligned table rows.
+
+    Row identities deliberately ignore values so that a changed cell can still
+    be paired with its counterpart.  This second score compares the complete
+    row payload and therefore exposes symbol, numeric, unit, and text edits.
+    Cosmetic wrapping/spacing remains equivalent through the same narrow reader
+    predicate used by row-level classification.
+    """
+
+    old_text = compact_inline(" | ".join(_table_row_cells_for_display(old_row)))
+    new_text = compact_inline(" | ".join(_table_row_cells_for_display(new_row)))
+    if not old_text and not new_text:
+        return 1.0
+    if not old_text or not new_text:
+        return 0.0
+    if cosmetic_content_equal(old_text, new_text, cell_wrap=True, context="table row"):
+        return 1.0
+    return difflib.SequenceMatcher(
+        None,
+        normalize_for_similarity(old_text),
+        normalize_for_similarity(new_text),
+        autojunk=False,
+    ).ratio()
+
+
+def _table_visual_group_content_similarity(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+) -> float:
+    """Score complete table content after the logical rows have been paired."""
+
+    if not old_tables or not new_tables:
+        return 0.0
+    old_rows = [row for row in _table_group_rows(old_tables) if compact_inline(row)]
+    new_rows = [row for row in _table_group_rows(new_tables) if compact_inline(row)]
+    if not old_rows and not new_rows:
+        # Empty visual tables still need their caption to participate in the score.
+        return _table_visual_group_similarity(old_tables, new_tables)
+
+    old_by_identity: dict[str, list[str]] = {}
+    new_by_identity: dict[str, list[str]] = {}
+    for row in old_rows:
+        old_by_identity.setdefault(_table_row_pairing_key(row), []).append(row)
+    for row in new_rows:
+        new_by_identity.setdefault(_table_row_pairing_key(row), []).append(row)
+
+    matched_score = 0.0
+    for identity in old_by_identity.keys() & new_by_identity.keys():
+        old_group = old_by_identity[identity]
+        new_group = new_by_identity[identity]
+        remaining = list(new_group)
+        # Prefer the highest content score for duplicate identities while
+        # keeping each physical row consumed at most once.
+        for old_row in old_group:
+            if not remaining:
+                break
+            best_index, best_row = max(
+                enumerate(remaining),
+                key=lambda item: _table_row_content_similarity(old_row, item[1]),
+            )
+            best_score = _table_row_content_similarity(old_row, best_row)
+            matched_score += best_score
+            remaining.pop(best_index)
+
+    total_rows = max(len(old_rows), len(new_rows))
+    row_content_score = matched_score / total_rows if total_rows else 0.0
+    old_captions = " ".join(sorted(
+        caption for table in old_tables if (caption := _table_visual_caption_key(table))
+    ))
+    new_captions = " ".join(sorted(
+        caption for table in new_tables if (caption := _table_visual_caption_key(table))
+    ))
+    if old_captions and new_captions:
+        caption_score = difflib.SequenceMatcher(
+            None, old_captions, new_captions, autojunk=False
+        ).ratio()
+        return min(caption_score, row_content_score)
+    return row_content_score
+
+
 def _table_groups_have_relaxed_primary_identity_support(
     old_tables: tuple[TableVisual, ...],
     new_tables: tuple[TableVisual, ...],
@@ -4729,11 +4873,12 @@ def _render_table_change_html(
     )
     rows_html = _render_table_row_summary(change)
     label = _CHANGE_LABELS.get(change.change_type, change.change_type)
-    similarity = (
-        f" · 配对相似度 {change.similarity:.3f}"
-        if change.old_tables and change.new_tables
-        else ""
-    )
+    similarity = ""
+    if change.old_tables and change.new_tables:
+        pairing = _table_pairing_similarity(change)
+        similarity = f" · 内容相似度 {change.similarity:.3f}"
+        if pairing is not None:
+            similarity += f" · 配对相似度 {pairing:.3f}"
     return f"""
         <div class="table-visual-card" id="table-change-{index}">
           <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
@@ -4817,8 +4962,7 @@ def _render_one_table_shot_page(
             f' data-source-alias="{_escape(alias_target)}">'
             f'<div class="table-shot-page-label">{_escape(caption)} · '
             '本页截图已在其他差异证据展示</div>'
-            f'<a class="prose-source-reuse" href="#{_escape(alias_target)}">'
-            '跳转到已展示截图</a></div>'
+            '<span class="prose-source-reuse">本页左右对比证据中已展示截图</span></div>'
         )
     text_backed = table.ocr_status == "text_backed_exact_match"
     image_html = (
@@ -10526,6 +10670,8 @@ def _reader_section_change(
     change = _reader_change_without_publication_metadata(change)
     if change is None:
         return None
+    if _is_reader_page_furniture_change(change):
+        return None
 
     # The full heading fact is the strongest proof of a pure locator renumber.
     # Remove it before coordinate-owned Figure/Table cleanup can trim only the
@@ -10600,6 +10746,38 @@ def _reader_section_change(
 _READER_PUBLICATION_METADATA_RE = re.compile(
     r"(?is)^(?:copyright\b.*|this\s+is\s+a\s+draft\b.*)$"
 )
+
+
+def _is_reader_page_furniture_change(change: SectionChange) -> bool:
+    """Hide coordinate-proven running headers/footers from the reader view.
+
+    These records are useful in raw JSON/CSV provenance, but they are repeated
+    page furniture rather than protocol content.  Keeping them in the reader
+    projection makes a selected page window look like a substantive change.
+    """
+
+    for section in (change.old_section, change.new_section):
+        if section is None or section.section_id != "running-header-evidence":
+            continue
+        values = [compact_inline(line) for line in section.body.splitlines() if compact_inline(line)]
+        # A standards masthead with a structured revision identifier is
+        # repeated page furniture.  A header that merely repeats an opaque
+        # identifier (for example ALPHA/BETA) remains visible because
+        # repetition alone cannot prove that identifier is disposable.
+        if values and all(_reader_is_publication_header_furniture(value) for value in values):
+            return True
+    return False
+
+
+def _reader_is_publication_header_furniture(value: str) -> bool:
+    """Recognize a repeated standards masthead without hiding technical IDs."""
+
+    compact = compact_inline(value)
+    return bool(
+        re.match(r"(?i)^implementation agreement\b", compact)
+        and re.search(r"(?i)\b[a-z]{2,}(?:-[a-z0-9]+){2,}\b", compact)
+        and re.search(r"(?i)\bcommon electrical i/o\b", compact)
+    )
 
 
 def _reader_is_publication_metadata(value: str) -> bool:
@@ -13872,7 +14050,8 @@ def _rows_for_table_csv(changes: list[TableChange]) -> list[dict[str, str]]:
                     "new_titles": _table_titles(change.new_tables),
                     "old_pages": _table_pages(change.old_tables),
                     "new_pages": _table_pages(change.new_tables),
-                    "pair_similarity": f"{change.similarity:.3f}" if change.old_tables and change.new_tables else "",
+                    "pair_similarity": f"{_table_pairing_similarity(change):.3f}" if change.old_tables and change.new_tables else "",
+                    "content_similarity": f"{change.similarity:.3f}" if change.old_tables and change.new_tables else "",
                     "item": row_change.item,
                     "old_value": row_change.old_value,
                     "new_value": row_change.new_value,
@@ -13941,7 +14120,111 @@ def _table_change_page_pair(
     )
 
 
-def _render_page_evidence_groups(entries: Iterable[tuple]) -> str:
+def _build_page_source_candidates(
+    table_changes: Iterable[TableChange],
+    prose_changes: Iterable[SectionChange],
+    prose_visual_lookup: dict[tuple[str, str | None, str | None], ProseSourceVisualGroup],
+) -> dict[tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]]:
+    """Choose one screenshot candidate per physical source page.
+
+    A page group is the reader's visual comparison unit.  Table cards already
+    render their own screenshots, so this map supplies prose-only pages whose
+    cards may have been reduced to a neutral alias.  The integer priority is
+    internal and is not exposed in the report.
+    """
+
+    candidates: dict[
+        tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]
+    ] = {}
+    table_pages: set[tuple[str, int]] = {
+        (side, table.page_number)
+        for change in table_changes
+        for side, tables in (("old", change.old_tables), ("new", change.new_tables))
+        for table in tables
+    }
+
+    def add(
+        side: str,
+        page: int,
+        uri: str,
+        view_box: tuple[float, float, float, float] | None,
+        priority: int,
+    ) -> None:
+        if not uri:
+            return
+        key = (side, page)
+        previous = candidates.get(key)
+        if previous is None or priority < previous[2]:
+            candidates[key] = (uri, view_box, priority)
+
+    for change in prose_changes:
+        group = prose_visual_lookup.get(_section_change_visual_identity(change))
+        if group is None:
+            continue
+        for side, visuals in (("old", group.old_visuals), ("new", group.new_visuals)):
+            for visual in visuals:
+                add(
+                    side,
+                    visual.page_number,
+                    "" if (side, visual.page_number) in table_pages else (visual.image_data_uri or visual.raw_image_data_uri),
+                    visual.source_view_box,
+                    2,
+                )
+    return candidates
+
+
+def _render_page_source_pair(
+    component: list[tuple[int | None, int | None]],
+    page_source_candidates: dict[
+        tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]
+    ],
+) -> str:
+    """Render one left/right screenshot pair for each page in a group."""
+
+    old_pages = sorted({page for page, _ in component if page is not None})
+    new_pages = sorted({page for _, page in component if page is not None})
+
+    def side_html(side: str, pages: list[int], label: str) -> str:
+        figures: list[str] = []
+        for page in pages:
+            candidate = page_source_candidates.get((side, page))
+            if candidate is None:
+                figures.append(
+                    f'<div class="page-source-empty">PDF 第 {_escape(str(page))} 页截图暂不可用</div>'
+                )
+                continue
+            uri, view_box, _priority = candidate
+            view_attr = (
+                f' data-source-view="{_escape(json.dumps(view_box))}"'
+                if view_box is not None
+                else ""
+            )
+            source_id = f"page-source-{side}-{page}"
+            figures.append(
+                f'<figure class="page-source-figure" id="{_escape(source_id)}"{view_attr}>'
+                f'<figcaption>PDF 第 {_escape(str(page))} 页 · 点击放大</figcaption>'
+                f'<img src="{uri}" alt="{_escape(label)} PDF 第 {_escape(str(page))} 页原页截图">'
+                "</figure>"
+            )
+        if not figures:
+            figures.append(f'<div class="page-source-empty">{_escape(label)}无对应原页截图</div>')
+        return (
+            '<section class="page-source-side">'
+            f'<h4>{_escape(label)}</h4>{"".join(figures)}</section>'
+        )
+
+    old_side = side_html("old", old_pages, "旧版原页截图")
+    new_side = side_html("new", new_pages, "新版原页截图")
+    return f'<div class="page-evidence-source-grid">{old_side}{new_side}</div>'
+
+
+def _render_page_evidence_groups(
+    entries: Iterable[tuple],
+    *,
+    page_source_candidates: dict[
+        tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]
+    ] | None = None,
+) -> str:
     """Render one evidence block per old/new page pair.
 
     Table and prose cards are still computed independently, but the reader
@@ -14020,11 +14303,21 @@ def _render_page_evidence_groups(entries: Iterable[tuple]) -> str:
             for card in grouped[page_pair]
         ]
         card_count = len(component_cards)
+        # A canonical card already carries the side-by-side source image for
+        # this component.  Add a group-level pair only when every card was
+        # reduced to an alias/empty visual, so the reader never sees two copies
+        # of the same physical page.
+        source_html = (
+            _render_page_source_pair(component, page_source_candidates)
+            if page_source_candidates and not any("<img" in card for card in component_cards)
+            else ""
+        )
         rendered.append(
             f'''<section class="page-evidence-group" id="page-evidence-{old_token}-{new_token}"
                 data-old-page="{_escape(old_token)}" data-new-page="{_escape(new_token)}">
               <h3 class="page-evidence-title">{_escape(title)}</h3>
-              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；每侧原页截图只保留一次，下面列出全部差异明细。</p>
+              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；左右原页截图各保留一次，下面列出全部差异明细。</p>
+              {source_html}
               {"".join(component_cards)}
             </section>'''
         )
@@ -14544,6 +14837,11 @@ def _table_change_to_dict(change: TableChange) -> dict[str, object]:
         "old_pages": [table.page_number for table in change.old_tables],
         "new_pages": [table.page_number for table in change.new_tables],
         "pair_similarity": (
+            round(_table_pairing_similarity(change), 6)
+            if change.old_tables and change.new_tables
+            else None
+        ),
+        "content_similarity": (
             round(change.similarity, 6)
             if change.old_tables and change.new_tables
             else None

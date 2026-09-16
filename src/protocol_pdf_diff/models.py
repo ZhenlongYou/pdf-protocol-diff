@@ -346,10 +346,11 @@ class TableChange:
     change_type: str  # modified / added / deleted / review（仅结构不确定）。
     old_tables: tuple[TableVisual, ...]  # 同一旧版逻辑表格可能跨多个页面。
     new_tables: tuple[TableVisual, ...]  # 同一新版逻辑表格可能跨多个页面。
-    similarity: float  # 表题和前几行形成的配对分数；单侧表格为 0。
+    similarity: float  # 表格可见内容相似度；单侧表格为 0。
     caption_changed: bool  # 表题或表号变化即使行内容相同也必须进入报告。
     row_changes: tuple[TableRowChange, ...]  # 完整行级事实，不受 HTML 展示上限影响。
     role: str = "technical"
+    pairing_similarity: float | None = None  # 表题/行身份配对分数；仅用于匹配审计，不用于折叠。
 
 
 @dataclass(frozen=True)
