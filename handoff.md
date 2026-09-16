@@ -7,7 +7,7 @@
 - 正文折叠现在必须同时满足双侧章节存在、配对分数精确为 `1.0`、完整正文内容精确相同、无数字/技术标识/语义运算符变化且无未展开差异；表格继续留在原页证据主区。`<=`/`>=` 等关系运算符也纳入关键内容保护。
 - 真实页窗入口重跑：旧版 `/Users/mac/Desktop/oif2024.058.13.pdf` 与新版 `/Users/mac/Desktop/oif2024.058.14.pdf` 第 1–23 页，输出 `/Users/mac/Documents/ProtocolPdfDiffReports/numeric_similarity_fix_20260917_release2/protocol_diff_9vrljqpw/protocol_diff_report.html`。共 7 条原始章节变化、6 条主区正文变化、2 条主区表格变化、0 条相似度附录；第 17 页卡为 `pair_similarity=0.999608`、`content_similarity=0.999160`、`critical_content_equal=false`，`26450` 与 `26560` 均保留在主证据中。
 - 回归：完整 `.venv/bin/python -m unittest discover -s tests -q` 在最终源码上为 1763 项通过、1 项条件跳过（274.944 秒）；`tests.test_screenshot_first` 定向测试 14 项通过；`.venv/bin/python -m compileall -q src tests docs/verification/numeric_similarity_probe.py docs/verification/numeric_similarity_oracle.py` 与 `git diff --check` 已通过。聚焦的可执行 v2 门禁 `docs/verification/numeric-similarity-fold-evidence.json` 取得 `EXECUTED_EVIDENCE_PASS`，回执为 `docs/verification/numeric-similarity-fold-receipt.json`，仅覆盖本次数值/标识符/关系运算符折叠场景。报告状态仍为 `degraded / 需人工复核`；本次真实页窗验证不外推整本 PDF 的语义对应准确率。
-- 缺陷账本新增 `DEF-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917`，关联回归 `PROSE_NUMERIC_NEAR_ONE_FOLD_TEST` 和公开路径重跑 `RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917`。提交和远端 OID 在最终验证后补写。
+- 缺陷账本新增 `DEF-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917`，关联回归 `PROSE_NUMERIC_NEAR_ONE_FOLD_TEST` 和公开路径重跑 `RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917`。修复提交 `4049d4a25d626bc5bb0eba10c9bb911d9fc65022` 已推送到 `origin/project/pdf-protocol-diff`；本地与远端 OID 一致。
 
 ## 当前任务：跨页证据归并、单页截图去重与新版补图（2026-09-17）
 
