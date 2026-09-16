@@ -289,3 +289,12 @@ escaped_defects:
     regression_test_id: READER_TEST::display
     public_path_rerun_id: RUN-READER-NATIVE-REPORT
     state: verified
+  - id: DEF-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "长正文中的 26450→26560 数值变化显示为相似度 1.000 并被折叠，可能隐藏协议关键参数。"
+    discovered_via: user_counterexample
+    failure_mechanism: "SectionChange.similarity 是整节配对分数；长段中单个数值变化只造成约 0.9996，三位小数显示为 1.000，展示层按舍入分数折叠。"
+    red_green_pair_id: PAIR-PROSE-NUMERIC-NEAR-ONE-FOLD
+    regression_test_id: PROSE_NUMERIC_NEAR_ONE_FOLD_TEST
+    public_path_rerun_id: RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917
+    state: verified

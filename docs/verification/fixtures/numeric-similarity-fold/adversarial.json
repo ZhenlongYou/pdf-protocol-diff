@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "adversarial-long-body",
+      "old": "The jitter is measured with a clock recovery unit and the receiver shall preserve operating conditions. The jitter limit is 26450 mV. The receiver shall preserve operating conditions. The receiver shall preserve operating conditions. The receiver shall preserve operating conditions.",
+      "new": "The jitter is measured with a clock recovery unit and the receiver shall preserve operating conditions. The jitter limit is 26560 mV. The receiver shall preserve operating conditions. The receiver shall preserve operating conditions. The receiver shall preserve operating conditions.",
+      "pair_similarity": 0.9998,
+      "expected_main": 1,
+      "expected_appendix": 0
+    }
+  ]
+}

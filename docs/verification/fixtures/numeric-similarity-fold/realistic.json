@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "realistic-oif-text",
+      "old": "The jitter is measured with a clock from a clock recovery unit (CRU) (i.e., a first order golden PLL, with corner frequency at fb /26450, and a 20 dB/decade slope, see Section 1.6) as the trigger or reference clock.",
+      "new": "The jitter is measured with a clock from a clock recovery unit (CRU) (i.e., a first order golden PLL, with corner frequency at fb /26560, and a 20 dB/decade slope, see Section 1.6) as the trigger or reference clock.",
+      "pair_similarity": 0.999664,
+      "expected_main": 1,
+      "expected_appendix": 0
+    }
+  ]
+}

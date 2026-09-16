@@ -397,4 +397,4 @@ artifact。下载后包含 `dist/ProtocolPdfDiff/ProtocolPdfDiff.exe` 及其依�
 本地 `build_windows.bat` 仍生成便于分发的单文件 EXE；两种打包方式使用完全相同的
 HTML/CSS 和 WebView2 后端。
 
-显示相似度为 **1.000** 的双侧条目按用户偏好不计入主差异汇总和导航，收在 HTML 末尾的折叠审查区。三位小数显示经过舍入，不代表逐字节相同；实际比较事实继续保留在 JSON、Markdown/TXT 附录及 `similarity_review_changes.csv` / `similarity_review_table_changes.csv`。单侧新增/删除仍在主区。原始表格配对分数也采用同一展示规则。
+报告把相似度拆成三个可审计字段，避免把章节配对分数误读成内容相同：`similarity`（兼容旧字段）和 `pair_similarity` 表示两侧是否是同一逻辑章节，`content_similarity` 表示完整正文经过保守空白归一后的逐字内容分数，`critical_content_equal` 表示数字、技术标识和语义运算符是否没有变化。HTML 会同时显示完整正文分数和配对分数，并保留六位小数；协议数值变化不会因为长正文的配对分数四舍五入成 **1.000** 而被省略。只有两侧内容完整相同、配对分数精确为 `1.0` 且没有关键内容变化的正文配对，才会收在 HTML 末尾的折叠审查区；表格始终留在原页证据主区。单侧新增/删除仍在主区，JSON/Markdown/TXT 和 CSV 保留相同的审计字段。

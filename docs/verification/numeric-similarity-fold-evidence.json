@@ -1,0 +1,887 @@
+{
+  "test_effectiveness_gate": {
+    "schema_version": 2,
+    "gate_id": "numeric-similarity-fold-20260917",
+    "project_root": "../..",
+    "source": {
+      "kind": "file_set",
+      "files": [
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-INIT-PY",
+          "path": "src/protocol_pdf_diff/__init__.py",
+          "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+          "size_bytes": 367
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-ACCURACY-EVALUATION-PY",
+          "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+          "sha256": "ab04d71dc6f9baaebc395a3f7608f1852ba8c970b0def4b060bd4fd57b597d2c",
+          "size_bytes": 43864
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-BOUNDARY-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/bullet_boundary_evidence.py",
+          "sha256": "2f373546ee348857faa3f54826f73226f672bdb016f53d05b0ee320018a826c5",
+          "size_bytes": 2987
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-CONTEXT-REVIEW-PY",
+          "path": "src/protocol_pdf_diff/bullet_context_review.py",
+          "sha256": "21c9ee9cc94bc2e3318d1b39deea7dc1eadcf9c14548e83d2b82b7a0fda88d9d",
+          "size_bytes": 4593
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CATALOG-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/catalog_evidence.py",
+          "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
+          "size_bytes": 1808
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARE-PY",
+          "path": "src/protocol_pdf_diff/compare.py",
+          "sha256": "80ff1e5af897d2aa1856a4e313921d0e14a58a4cb2a4b6ba18c6ca75ca3828d0",
+          "size_bytes": 286432
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-JOB-PY",
+          "path": "src/protocol_pdf_diff/comparison_job.py",
+          "sha256": "ef6afe1e30254520c30cec6281e92b11661dc219559a1b11b891eeaeab066efb",
+          "size_bytes": 11997
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-SESSION-PY",
+          "path": "src/protocol_pdf_diff/comparison_session.py",
+          "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+          "size_bytes": 1338
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CONTENT-EQUIVALENCE-PY",
+          "path": "src/protocol_pdf_diff/content_equivalence.py",
+          "sha256": "a5aec0d0946b5cdc45cbd8a5f89139aeea718970032b90838e18e4716389c8fe",
+          "size_bytes": 3756
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-GUI-PY",
+          "path": "src/protocol_pdf_diff/desktop_gui.py",
+          "sha256": "1d51fc88b16876b170e59679569e66227c7fccb166e0f381da93fbaf09b6e13f",
+          "size_bytes": 65736
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-VISUALS-PY",
+          "path": "src/protocol_pdf_diff/desktop_visuals.py",
+          "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+          "size_bytes": 13003
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EVIDENCE-ALIGNMENT-PY",
+          "path": "src/protocol_pdf_diff/evidence_alignment.py",
+          "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+          "size_bytes": 15836
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-GLYPH-VIEW-PY",
+          "path": "src/protocol_pdf_diff/exact_glyph_view.py",
+          "sha256": "86781dc509acff7df4543841138d4eb9b6f704acba5e2aaf4eba430bf6d45e06",
+          "size_bytes": 4624
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-MATCH-PY",
+          "path": "src/protocol_pdf_diff/exact_match.py",
+          "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+          "size_bytes": 4055
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FIGURE-FILTERS-PY",
+          "path": "src/protocol_pdf_diff/figure_filters.py",
+          "sha256": "67806d4dd95e2b6a1a33d9430409ce79aea2cce9bee0e3c3f16c83f2a8519144",
+          "size_bytes": 4248
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-FORWARD-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/formula_forward_evidence.py",
+          "sha256": "20787f70d61281c6c0095deba623321c11cabb33b40a96365b2a220416c88072",
+          "size_bytes": 5007
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-BRIDGE-PY",
+          "path": "src/protocol_pdf_diff/formula_source_bridge.py",
+          "sha256": "d0d9c5b0c4bea185594cd41c4ab1871f7f29b610c5a72e8a474349e0b35b360b",
+          "size_bytes": 5598
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-PY",
+          "path": "src/protocol_pdf_diff/formula_source_review.py",
+          "sha256": "1727688fa94795699fe9c47585d465ac6fe117ef2348f0b1af7102adecad311b",
+          "size_bytes": 16702
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-EXPORT-PY",
+          "path": "src/protocol_pdf_diff/formula_source_review_export.py",
+          "sha256": "7b690f5f4c0b3a9b2ec2b85d4fad9cf35cd409dcdadea4a65af9e7f042c6c137",
+          "size_bytes": 3768
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-VISUALS-PY",
+          "path": "src/protocol_pdf_diff/formula_visuals.py",
+          "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+          "size_bytes": 14125
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-GLYPH-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/glyph_evidence.py",
+          "sha256": "e37af46d5b80e3a3b6a7c04a3ea3f6244123dc9549c9d46708c3f9e24da8d3d9",
+          "size_bytes": 6954
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-HEADING-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/heading_evidence.py",
+          "sha256": "bfc75ed8c404d92ed477fb62aa1481032e5b7571474291f3bd55c9c4d73d1ff3",
+          "size_bytes": 9641
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BACKEND-PY",
+          "path": "src/protocol_pdf_diff/layout_backend.py",
+          "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+          "size_bytes": 11020
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BLOCKS-PY",
+          "path": "src/protocol_pdf_diff/layout_blocks.py",
+          "sha256": "a5d90d28d4e403227a1d4e9120bb40f5304078aa807d72e04ef1f54e47de8626",
+          "size_bytes": 17605
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MODELS-PY",
+          "path": "src/protocol_pdf_diff/models.py",
+          "sha256": "afebf0097b0cc906311c98e77b9a5a798fa4670915fadebc5687909254c08ae1",
+          "size_bytes": 30545
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MONOTONIC-ALIGNMENT-PY",
+          "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+          "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+          "size_bytes": 2590
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-NATIVE-SUBSCRIPT-SOURCE-PY",
+          "path": "src/protocol_pdf_diff/native_subscript_source.py",
+          "sha256": "b6f75b7466cc1469258e45d8cb6baba4ffb2d735cbd54a210510981b26374356",
+          "size_bytes": 4639
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-FURNITURE-PY",
+          "path": "src/protocol_pdf_diff/page_furniture.py",
+          "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+          "size_bytes": 2847
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-OCR-PY",
+          "path": "src/protocol_pdf_diff/page_ocr.py",
+          "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+          "size_bytes": 9723
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PARSING-BENCHMARK-PY",
+          "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+          "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+          "size_bytes": 34623
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PDF-EXTRACT-PY",
+          "path": "src/protocol_pdf_diff/pdf_extract.py",
+          "sha256": "94774c32fa6ea7bf88ba59c91afec80b15d4a38fc4aaabbfdd4f25d7f5a6c938",
+          "size_bytes": 382712
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-NATIVE-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/physical_native_evidence.py",
+          "sha256": "deda5c27fabe77c9a84cae757418145e33902c41f4fbdd76ef28193c615d9930",
+          "size_bytes": 8576
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-TABLE-ROWS-PY",
+          "path": "src/protocol_pdf_diff/physical_table_rows.py",
+          "sha256": "d17d4afa780ad0f8fdbcba5f5a7558d8980ddfa62913e4056688b76ec5cf1267",
+          "size_bytes": 12539
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROGRESS-PY",
+          "path": "src/protocol_pdf_diff/progress.py",
+          "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+          "size_bytes": 2087
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROSE-SOURCE-VISUALS-PY",
+          "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+          "sha256": "66022fd52e999b90978b617398eece29d56bcb7b2a07736d314e80efe87418ef",
+          "size_bytes": 86123
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-QUALITY-PY",
+          "path": "src/protocol_pdf_diff/quality.py",
+          "sha256": "ae6070b6243f9a907773fab60791af1105eb5ed84c449d432bd6e31c12828d3a",
+          "size_bytes": 29378
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-READER-FOCUS-PY",
+          "path": "src/protocol_pdf_diff/reader_focus.py",
+          "sha256": "c363be65da26c0204e382061757282e80f77fabd4bf00c2ca1bf57db8428f1c0",
+          "size_bytes": 15840
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-REPORTING-PY",
+          "path": "src/protocol_pdf_diff/reporting.py",
+          "sha256": "2879abdf2de7c211aaf2eeb810c8f0763ba88edce579d22c917630eaf5b39b8d",
+          "size_bytes": 606679
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SAMPLE-DATA-PY",
+          "path": "src/protocol_pdf_diff/sample_data.py",
+          "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+          "size_bytes": 11394
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SCREENSHOT-PRESENTATION-PY",
+          "path": "src/protocol_pdf_diff/screenshot_presentation.py",
+          "sha256": "a90a0e1d750e5fd3af6d0867789213c031b696945d914017102ce7b62c91c372",
+          "size_bytes": 3936
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SECTIONING-PY",
+          "path": "src/protocol_pdf_diff/sectioning.py",
+          "sha256": "4b443d22bd6564a1a4349e5e01e3fc0a2a11fc938ae27c18d4276a281776768e",
+          "size_bytes": 154733
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-CHAR-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/source_char_evidence.py",
+          "sha256": "55aa6af8c57f2a64dbc58d633fb100b52bbcdc63006c886b52a20d0e0e00f2f3",
+          "size_bytes": 7135
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-REGIONS-PY",
+          "path": "src/protocol_pdf_diff/source_regions.py",
+          "sha256": "25408141b2c25bcadfe341e57f1de2d1861c261392ee19ba12d4d673fb23c1e6",
+          "size_bytes": 6040
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-TYPOGRAPHY-PY",
+          "path": "src/protocol_pdf_diff/source_typography.py",
+          "sha256": "3ae741f7b86247842873b19efa0afb72fb26c804e5e1b02114dab845086a3a83",
+          "size_bytes": 6298
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-ANNOTATIONS-PY",
+          "path": "src/protocol_pdf_diff/table_annotations.py",
+          "sha256": "5711f7a20afea5ebee77a2b78c2493e2916c7b81b3ad877d3c47a7f1f964b4f2",
+          "size_bytes": 5952
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-CODEC-PY",
+          "path": "src/protocol_pdf_diff/table_codec.py",
+          "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+          "size_bytes": 2329
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-VIEW-TRANSACTION-PY",
+          "path": "src/protocol_pdf_diff/table_view_transaction.py",
+          "sha256": "69ace563a9d19ae9b4913dbf6e60397c3ecaa5a88f5cdd76e19343a216c0ab84",
+          "size_bytes": 26342
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TEXT-UTILS-PY",
+          "path": "src/protocol_pdf_diff/text_utils.py",
+          "sha256": "6c6233b0d29c902e7ff190cc2be4f960e9e96581fd58063cb0ace3e261e2a8e0",
+          "size_bytes": 40561
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-UI-SHARED-PY",
+          "path": "src/protocol_pdf_diff/ui_shared.py",
+          "sha256": "4d6485ddf965bb9d9b555fe8f5020867dbd55a9aa1e787482b7ab6f75505a230",
+          "size_bytes": 4490
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-URL-LITERAL-EVIDENCE-PY",
+          "path": "src/protocol_pdf_diff/url_literal_evidence.py",
+          "sha256": "6010f4d59d553cf610ee126e2277d64e4f33ccbc59943ff7b3ba906f3c091f95",
+          "size_bytes": 6458
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VENV-BOOTSTRAP-PY",
+          "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+          "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+          "size_bytes": 3376
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-OWNERSHIP-PY",
+          "path": "src/protocol_pdf_diff/visual_ownership.py",
+          "sha256": "5034b60e7016c201bdc0cc28e00bb927bab2026b775057f93bfccb0038c0f761",
+          "size_bytes": 18723
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-PREVIEW-PY",
+          "path": "src/protocol_pdf_diff/visual_preview.py",
+          "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+          "size_bytes": 1985
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-WATCHDOG-PY",
+          "path": "src/protocol_pdf_diff/visual_watchdog.py",
+          "sha256": "a2c27298cc630375fe1efda4d030040b293084b828a578be535e593ddd65e622",
+          "size_bytes": 33821
+        },
+        {
+          "id": "SRC-SRC-PROTOCOL-PDF-DIFF-WEBVIEW-GUI-PY",
+          "path": "src/protocol_pdf_diff/webview_gui.py",
+          "sha256": "e5a5873e3a6f61970cb31e7f4085067a2a624ba4f26a8a5db575d65c9a3854ad",
+          "size_bytes": 24147
+        },
+        {
+          "id": "SRC-MAIN-PY",
+          "path": "main.py",
+          "sha256": "fe4b7d3e84154997c4e8ef0643f4b8dcdef71f37f1a04d818f1264f4bfd9a2ed",
+          "size_bytes": 11325
+        }
+      ]
+    },
+    "evidence_catalog": {
+      "requirements": [
+        {
+          "id": "REQ-CONTENT-CORRESPONDENCE",
+          "observable": "A near-one prose pairing with a protocol numeric, identifier, or semantic operator change remains in the primary content_changes list and is not hidden by similarity folding.",
+          "authority": {
+            "kind": "user",
+            "locator": "Current task user report: 26450→26560 must not be omitted by a similarity-1 fold."
+          },
+          "threshold": {
+            "comparator": "exact",
+            "value": "modified critical-content cases have primary count 1 and similarity appendix count 0; exact unchanged pairs may fold only under the explicit guard.",
+            "unit": "report facts",
+            "locator": "docs/verification/numeric_similarity_probe.py and numeric-similarity-fold fixtures"
+          },
+          "oracle_ids": [
+            "ORACLE-NUMERIC-SIMILARITY"
+          ],
+          "partitions": {
+            "nominal": [
+              "IN-NUMERIC-NOMINAL"
+            ],
+            "boundary": [
+              "IN-NUMERIC-BOUNDARY"
+            ],
+            "invalid": [
+              "IN-NUMERIC-INVALID"
+            ],
+            "adversarial": [
+              "IN-NUMERIC-ADVERSARIAL"
+            ],
+            "realistic": [
+              "IN-NUMERIC-REALISTIC"
+            ],
+            "known_failure": [
+              "IN-NUMERIC-KNOWN-FAILURE"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "id": "IN-NUMERIC-NOMINAL",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+          "sha256": "7b05bb9ebda765813b7358534677931e12cb8b4a776455e1b7ee3971b312dfe0",
+          "size_bytes": 246,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        },
+        {
+          "id": "IN-NUMERIC-BOUNDARY",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+          "sha256": "61d5706b871e057537d8f5cc462af1ff5fdd589d912b247265b5e665e2c0bb69",
+          "size_bytes": 251,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        },
+        {
+          "id": "IN-NUMERIC-INVALID",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+          "sha256": "6177cc4845a30fdff6f948aaf5d653edb30e8e8f78e981cd3752c4ff05b67d44",
+          "size_bytes": 264,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        },
+        {
+          "id": "IN-NUMERIC-ADVERSARIAL",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+          "sha256": "ee9acba4720a90a83971e021e2caddafb525a76b50ae887774100e68a9c30579",
+          "size_bytes": 758,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        },
+        {
+          "id": "IN-NUMERIC-REALISTIC",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+          "sha256": "60f13dc96f0d33d6aedfe272d3e3af70dd76588725b795a68c6fdab05baeae13",
+          "size_bytes": 621,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        },
+        {
+          "id": "IN-NUMERIC-KNOWN-FAILURE",
+          "path": "docs/verification/fixtures/numeric-similarity-fold/known-failure.json",
+          "sha256": "1f0dcc33c41fd4709f13b80a30a118650af9e3144c676ed2087b03269fead285",
+          "size_bytes": 253,
+          "provenance": "Hand-authored partition for the near-one numeric folding contract; values and expected main/appendix counts are independent of production similarity code."
+        }
+      ],
+      "probes": [
+        {
+          "id": "PROBE-NUMERIC-SIMILARITY",
+          "path": "docs/verification/numeric_similarity_probe.py",
+          "sha256": "c1037a2656b077cbaf0d489acc3195f20353d9526481f643be3bfbfc0a964d08",
+          "size_bytes": 3931
+        }
+      ],
+      "oracles": [
+        {
+          "id": "ORACLE-NUMERIC-SIMILARITY",
+          "path": "docs/verification/numeric_similarity_oracle.py",
+          "sha256": "92d20a12a48a0a740479c9829f7156030ccb7bf4841c8c080b03ef5f3467fd03",
+          "size_bytes": 850,
+          "kind": "independent_reference",
+          "independence_basis": "The oracle only checks hand-authored partition expectations, exact non-equality, and valid pair scores; it imports no protocol_pdf_diff production module and does not reuse report normalization or folding code.",
+          "production_source_ids": [
+            "SRC-SRC-PROTOCOL-PDF-DIFF-INIT-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-ACCURACY-EVALUATION-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-BOUNDARY-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-CONTEXT-REVIEW-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-CATALOG-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-JOB-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-SESSION-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-CONTENT-EQUIVALENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-GUI-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-VISUALS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-EVIDENCE-ALIGNMENT-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-GLYPH-VIEW-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-MATCH-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FIGURE-FILTERS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-FORWARD-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-BRIDGE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-EXPORT-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-VISUALS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-GLYPH-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-HEADING-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BACKEND-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BLOCKS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-MODELS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-MONOTONIC-ALIGNMENT-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-NATIVE-SUBSCRIPT-SOURCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-FURNITURE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-OCR-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PARSING-BENCHMARK-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PDF-EXTRACT-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-NATIVE-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-TABLE-ROWS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PROGRESS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-PROSE-SOURCE-VISUALS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-QUALITY-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-READER-FOCUS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-REPORTING-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SAMPLE-DATA-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SCREENSHOT-PRESENTATION-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SECTIONING-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-CHAR-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-REGIONS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-TYPOGRAPHY-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-ANNOTATIONS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-CODEC-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-VIEW-TRANSACTION-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-TEXT-UTILS-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-UI-SHARED-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-URL-LITERAL-EVIDENCE-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-VENV-BOOTSTRAP-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-OWNERSHIP-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-PREVIEW-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-WATCHDOG-PY",
+            "SRC-SRC-PROTOCOL-PDF-DIFF-WEBVIEW-GUI-PY",
+            "SRC-MAIN-PY"
+          ],
+          "validator_run_ids": [
+            "RUN-NUMERIC-ORACLE"
+          ]
+        }
+      ],
+      "mutations": [
+        {
+          "id": "MUT-NUMERIC-LEGACY-FOLD",
+          "path": "work/numeric-similarity-fold-gate/baseline-reporting.py",
+          "sha256": "6b804401a46656e51337b3f999e538148955d1b2899f7fa8f6b687a2588d067a",
+          "size_bytes": 605545,
+          "target_source_id": "SRC-SRC-PROTOCOL-PDF-DIFF-REPORTING-PY"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "ART-NUMERIC-REAL-REPORT",
+          "path": "work/numeric-similarity-fold-gate/public-artifact.json",
+          "producer_run_id": "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917",
+          "required": true,
+          "min_size_bytes": 20
+        }
+      ],
+      "runs": [
+        {
+          "id": "RUN-NUMERIC-ORACLE",
+          "role": "oracle",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [],
+          "input_ids": [
+            "IN-NUMERIC-NOMINAL",
+            "IN-NUMERIC-BOUNDARY",
+            "IN-NUMERIC-INVALID",
+            "IN-NUMERIC-ADVERSARIAL",
+            "IN-NUMERIC-REALISTIC",
+            "IN-NUMERIC-KNOWN-FAILURE"
+          ],
+          "oracle_ids": [
+            "ORACLE-NUMERIC-SIMILARITY"
+          ],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/numeric_similarity_oracle.py",
+            "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+            "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+            "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+            "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+            "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+            "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_ORACLE_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-NUMERIC-SUITE",
+          "role": "suite",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-NUMERIC-SIMILARITY"
+          ],
+          "input_ids": [
+            "IN-NUMERIC-NOMINAL",
+            "IN-NUMERIC-BOUNDARY",
+            "IN-NUMERIC-INVALID",
+            "IN-NUMERIC-ADVERSARIAL",
+            "IN-NUMERIC-REALISTIC",
+            "IN-NUMERIC-KNOWN-FAILURE"
+          ],
+          "oracle_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/numeric_similarity_probe.py",
+            "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+            "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+            "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+            "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+            "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+            "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-NUMERIC-RED",
+          "role": "target_red",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "mutation_id": "MUT-NUMERIC-LEGACY-FOLD"
+          },
+          "probe_ids": [
+            "PROBE-NUMERIC-SIMILARITY"
+          ],
+          "input_ids": [
+            "IN-NUMERIC-KNOWN-FAILURE"
+          ],
+          "oracle_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/numeric_similarity_probe.py",
+            "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 1,
+            "stdout": {
+              "contains": [
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_FAIL"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-NUMERIC-GREEN",
+          "role": "target_green",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-NUMERIC-SIMILARITY"
+          ],
+          "input_ids": [
+            "IN-NUMERIC-KNOWN-FAILURE"
+          ],
+          "oracle_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/numeric_similarity_probe.py",
+            "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        },
+        {
+          "id": "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917",
+          "role": "real_path",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "source_variant": {
+            "base": "source"
+          },
+          "probe_ids": [
+            "PROBE-NUMERIC-SIMILARITY"
+          ],
+          "input_ids": [
+            "IN-NUMERIC-REALISTIC"
+          ],
+          "oracle_ids": [],
+          "argv": [
+            "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+            "docs/verification/numeric_similarity_probe.py",
+            "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+            "--artifact",
+            "work/numeric-similarity-fold-gate/public-artifact.json"
+          ],
+          "executable": {
+            "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+            "size_bytes": 152624
+          },
+          "cwd": ".",
+          "timeout_seconds": 120,
+          "interface": "cli",
+          "observable": "The public report writer keeps a realistic 26450 to 26560 prose change in content_changes and emits a fresh artifact.",
+          "produces_artifact_ids": [
+            "ART-NUMERIC-REAL-REPORT"
+          ],
+          "expected": {
+            "exit_code": 0,
+            "stdout": {
+              "contains": [
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+                "PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK"
+              ],
+              "excludes": [
+                "Traceback",
+                "0 tests"
+              ]
+            },
+            "stderr": {
+              "excludes": [
+                "Traceback",
+                "ModuleNotFoundError"
+              ]
+            }
+          }
+        }
+      ],
+      "red_green_pairs": [
+        {
+          "id": "PAIR-PROSE-NUMERIC-NEAR-ONE-FOLD",
+          "requirement_id": "REQ-CONTENT-CORRESPONDENCE",
+          "defect_id": "DEF-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917",
+          "test_id": "PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+          "failure_signature": "PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_FAIL",
+          "red_run_id": "RUN-NUMERIC-RED",
+          "green_run_id": "RUN-NUMERIC-GREEN"
+        }
+      ],
+      "isolation_contracts": [
+        {
+          "id": "ISO-NUMERIC-SIMILARITY",
+          "requirement_ids": [
+            "REQ-CONTENT-CORRESPONDENCE"
+          ],
+          "unit": "hand-authored case, no parameter selection",
+          "selection_ids": [],
+          "certification_ids": [
+            "IN-NUMERIC-NOMINAL",
+            "IN-NUMERIC-BOUNDARY",
+            "IN-NUMERIC-INVALID",
+            "IN-NUMERIC-ADVERSARIAL",
+            "IN-NUMERIC-REALISTIC",
+            "IN-NUMERIC-KNOWN-FAILURE"
+          ],
+          "justification": "All six required partitions are fixed certification cases; no sampling or selection process is used."
+        }
+      ],
+      "defect_ledgers": [
+        {
+          "id": "LEDGER-NUMERIC-SIMILARITY",
+          "path": "work/numeric-similarity-fold-gate/escaped-defects.yaml",
+          "sha256": "0e4bf0e6ec50d1eefbfba978fd68463692ff0c9b3df488874d32c275f6caca99",
+          "size_bytes": 799
+        }
+      ]
+    },
+    "matrix": {
+      "requirement": {
+        "requirement_ids": [
+          "REQ-CONTENT-CORRESPONDENCE"
+        ]
+      },
+      "target_red": {
+        "pair_ids": [
+          "PAIR-PROSE-NUMERIC-NEAR-ONE-FOLD"
+        ]
+      },
+      "independent_oracle": {
+        "oracle_ids": [
+          "ORACLE-NUMERIC-SIMILARITY"
+        ]
+      },
+      "fault_detection": {
+        "pair_ids": [
+          "PAIR-PROSE-NUMERIC-NEAR-ONE-FOLD"
+        ],
+        "survivor_ids": [],
+        "defect_ledger_ids": [
+          "LEDGER-NUMERIC-SIMILARITY"
+        ]
+      },
+      "input_design": {
+        "requirement_ids": [
+          "REQ-CONTENT-CORRESPONDENCE"
+        ]
+      },
+      "isolation": {
+        "contract_ids": [
+          "ISO-NUMERIC-SIMILARITY"
+        ]
+      },
+      "real_path": {
+        "run_ids": [
+          "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917"
+        ]
+      },
+      "reproducibility": {
+        "run_ids": [
+          "RUN-NUMERIC-ORACLE",
+          "RUN-NUMERIC-SUITE",
+          "RUN-NUMERIC-RED",
+          "RUN-NUMERIC-GREEN",
+          "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917"
+        ]
+      }
+    },
+    "open_items": []
+  }
+}

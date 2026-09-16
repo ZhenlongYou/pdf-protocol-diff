@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .comparison_session import comparison_session
 from .screenshot_presentation import IMAGE_VIEWER, table_context_image
+from .exact_match import ratio as exact_sequence_ratio
 
 import csv
 import difflib
@@ -456,7 +457,8 @@ def write_reports(
     raw_by_identity = {_section_change_reader_identity(c): c for c in result.changes}
     reader_changes = [partial_bullet_context_review(c, raw_by_identity.get(
         _section_change_reader_identity(c), c)) for c in reader_changes]
-    # This is a reader-selected display threshold, not semantic equality.
+    # Folding is reserved for exact content-equivalent pairs; near-one scores
+    # remain visible so a rounded pairing score cannot hide a real value delta.
     similarity_review_changes = [c for c in reader_changes if _displayed_similarity_one(c)]
     similarity_review_tables = [c for c in reader_table_changes if _displayed_similarity_one(c)]
     reader_changes = [c for c in reader_changes if not _displayed_similarity_one(c)]
@@ -490,14 +492,14 @@ def write_reports(
     )  # 读者层可把纯版面顺序不确定性降为复核或去除坐标已证明的表格重复；JSON/CSV 的 raw 字段继续保存原始比较事实。
     markdown = _render_markdown(reader_result, options, reader_table_changes)
     if similarity_review_changes or similarity_review_tables:
-        appendix_lines = ["", '<details><summary>相似度 1.000：按偏好不计入差异，可展开审查</summary>', "",
-                          "显示分数经过三位小数舍入；以下保留原始比较事实，未计入上方汇总。", ""]
+        appendix_lines = ["", '<details><summary>内容与配对相似度均为 1.000：按偏好不计入差异，可展开审查</summary>', "",
+                          "这些条目只有在完整正文内容相同且没有数值、技术标识或语义运算符变化时才会折叠；以下保留原始比较事实。", ""]
         _append_markdown_changes(appendix_lines, similarity_review_changes, start_index=1)
         _append_markdown_table_changes(appendix_lines, similarity_review_tables)
         appendix_lines = [re.sub(r"^### (T?)(\d+)\.", lambda m: "### A-" + ("T" if m[1] else "C") + m[2] + ".", line) for line in appendix_lines]
         markdown += "\n".join([*appendix_lines, "</details>", ""])
         markdown = reader_safe_glyphs(markdown)
-        markdown = markdown.replace(_empty_report_message(reader_result), "主差异清单为空；相似度 1.000 的配对证据收在末尾附录。")
+        markdown = markdown.replace(_empty_report_message(reader_result), "主差异清单为空；内容与配对相似度均为 1.000 的配对证据收在末尾附录。")
     html = _render_html(
         reader_result,
         options,
@@ -673,6 +675,9 @@ def write_reports(
                 "new_pages",
                 "old_pages",
                 "similarity",
+                "pair_similarity",
+                "content_similarity",
+                "critical_content_equal",
                 "match_basis",
                 "match_basis_label",
                 "review_reason",
@@ -738,20 +743,138 @@ def write_reports(
 
 
 def _displayed_similarity_one(change: SectionChange | TableChange) -> bool:
-    """Return whether a paired finding may be moved to the folded 1.000 appendix.
+    """Return whether a paired finding may be moved to the folded appendix.
 
     Table findings are page evidence and stay in the primary list, including
     review-only rows whose pairing score is exactly 1.000.  Only prose cards
     use the folded similarity appendix; otherwise a changed table can be
     hidden behind a score that describes pairing rather than cell equality.
+
+    A section score is a pairing aid and may be rounded to ``1.000`` even when
+    one value in a long paragraph changed.  Folding is therefore restricted to
+    an exact score, exact reader content, and no critical-token delta.  The
+    critical-token guard is deliberately conservative: an uncertain or
+    truncated finding remains in the primary evidence list.
     """
     if isinstance(change, TableChange):
         return False
     paired = (bool(change.old_section and change.new_section)
               if isinstance(change, SectionChange) else False)
-    if not paired or format(change.similarity, ".3f") != "1.000":
+    if not paired or change.change_type == "review":
+        return False
+    if change.context_review_records or change.formula_review_records:
+        return False
+    if change.similarity != 1.0:
+        return False
+    if _section_content_similarity(change) != 1.0:
+        return False
+    if _section_change_has_critical_delta(change):
         return False
     return True
+
+
+@lru_cache(maxsize=1024)
+def _normalized_content_similarity(left: str, right: str) -> float:
+    """Score the complete normalized content, without the section sample cap."""
+
+    left_norm = normalize_for_similarity(left)
+    right_norm = normalize_for_similarity(right)
+    if not left_norm and not right_norm:
+        return 1.0
+    if not left_norm or not right_norm:
+        return 0.0
+    return exact_sequence_ratio(left_norm, right_norm)
+
+
+def _section_content_similarity(change: SectionChange) -> float | None:
+    """Return the full-section content score used in reader-facing reports.
+
+    ``SectionChange.similarity`` remains the pairing score for backwards
+    compatibility.  This separate score covers the complete comparable text
+    and is never based on a 1,200-character matching sample.
+    """
+
+    if not change.old_section or not change.new_section:
+        return None
+    return _normalized_content_similarity(
+        change.old_section.comparable_text,
+        change.new_section.comparable_text,
+    )
+
+
+def _critical_inline_key_is_material(token: _InlineToken) -> bool:
+    """Identify numeric, technical-identifier, and semantic-operator tokens."""
+
+    key = token.key
+    if not key:
+        return False
+    if re.search(r"\d", key):
+        return True
+    # Relational operators such as ``<=`` are intentionally retained as raw
+    # keys by the highlighter because their meaning depends on local context;
+    # inspect the visible token as well as the normalized key so a changed
+    # constraint cannot pass the critical-content guard.
+    if token.text in {"=", "<", ">", "<=", ">=", "==", "!=", "≤", "≥", "≠"}:
+        return True
+    if key.startswith(
+        (
+            "operator:",
+            "case:",
+            "modifier:",
+            "script:",
+            "punctuation:",
+            "relation:",
+            "arrow:",
+            "variable-literal:",
+            "slash-literal:",
+            "backslash-path:",
+            "cli-option:",
+            "absolute-path:",
+            "hex-literal:",
+            "dotted-identifier:",
+            "micro-identifier:",
+        )
+    ):
+        return True
+    return _token_shape_is_technical(token.text)
+
+
+@lru_cache(maxsize=2048)
+def _critical_inline_signature(value: str) -> tuple[str, ...]:
+    """Return critical token keys after removing only proven locator numbers."""
+
+    normalized = _reader_neutralize_locator_numbers(value)
+    return tuple(
+        token.key
+        for token in _inline_tokens(normalized)
+        if _critical_inline_key_is_material(token)
+    )
+
+
+def _section_change_has_critical_delta(change: SectionChange) -> bool:
+    """Return true when any retained or omitted evidence changes critical data."""
+
+    if change.omitted_snippet_count > 0:
+        return True
+    if change.old_section and change.new_section:
+        # Snippets can be empty when extraction could not produce a safe local
+        # replacement.  Compare the complete bodies as a fallback so a
+        # case-sensitive identifier or operator cannot be marked equal merely
+        # because the display projection omitted its snippet.
+        if _critical_inline_signature(change.old_section.body) != _critical_inline_signature(
+            change.new_section.body
+        ):
+            return True
+    for pair in (
+        *_audit_replaced_snippets(change),
+        *change.review_replaced_snippets,
+    ):
+        if _critical_inline_signature(pair.old) != _critical_inline_signature(pair.new):
+            return True
+    for value in (*_audit_added_snippets(change), *_audit_removed_snippets(change)):
+        if _critical_inline_signature(value):
+            return True
+    return False
 
 
 def _table_pairing_similarity(change: TableChange) -> float | None:
@@ -932,10 +1055,10 @@ def _append_markdown_table_changes(
         lines.append(f"- 新表: {_table_side_description(table_change.new_tables)}")
         # 双侧均存在时同时保留内容分数和配对分数；后者只说明为何判为同一逻辑表。
         if table_change.old_tables and table_change.new_tables:
-            lines.append(f"- 内容相似度: {table_change.similarity:.3f}")
+            lines.append(f"- 内容相似度: {table_change.similarity:.6f}")
             pairing = _table_pairing_similarity(table_change)
             if pairing is not None:
-                lines.append(f"- 配对相似度（仅用于表格身份）: {pairing:.3f}")
+                lines.append(f"- 配对相似度（仅用于表格身份）: {pairing:.6f}")
         # 表题变化与行变化分开说明，避免把编号变化误读成参数变化。
         if table_change.caption_changed:
             lines.append("- 表题/表号发生变化；行内容变化另列如下。")
@@ -1002,7 +1125,10 @@ def _append_markdown_changes(
                 f"- 新位置: {_display_section_location(change.new_section, '新')}（页 {change.new_section.page_range}）"
             )
         if change.old_section and change.new_section:
-            lines.append(f"- 相似度: {change.similarity:.3f}")
+            content_similarity = _section_content_similarity(change)
+            if content_similarity is not None:
+                lines.append(f"- 内容相似度（完整正文）: {content_similarity:.6f}")
+            lines.append(f"- 配对相似度（仅用于章节身份）: {change.similarity:.6f}")
             if change.match_basis in _EXPLAINED_MATCH_BASES:
                 lines.append(
                     "- 配对依据: "
@@ -1319,14 +1445,14 @@ def _render_html(
     )
     appendix_html = (
         '<details class="similarity-review-appendix" id="similarity-review-appendix">'
-        '<summary>相似度 1.000：按偏好不计入差异，可展开审查</summary>'
-        '<p>这些条目未计入上方汇总。显示分数经过三位小数舍入，原始比较事实保留如下。</p>'
+        '<summary>内容与配对相似度均为 1.000：按偏好不计入差异，可展开审查</summary>'
+        '<p>这些条目未计入上方汇总；只有完整正文内容相同且没有数值、技术标识或语义运算符变化时才会折叠，原始比较事实保留如下。</p>'
         + appendix_cards + '</details>' if appendix_cards else ""
     )
     if appendix_cards and not technical_changes and not table_changes:
         page_ordered_html = page_ordered_html.replace(
             page_ordered_cards,
-            '<section class="empty-state">主差异清单为空；相似度 1.000 的配对证据收在末尾附录。</section>',
+            '<section class="empty-state">主差异清单为空；内容与配对相似度均为 1.000 的配对证据收在末尾附录。</section>',
         )
     visual_review_html = _render_visual_review_items_html(result.visual_review_items)
     material_table_changes = _material_table_changes(table_changes)
@@ -1834,7 +1960,7 @@ def _render_html(
         <div class="metric"><strong>{sum(r.row_role == 'annotation' for c in table_changes for r in c.row_changes)}</strong><span>表说明变化</span></div>
         <div class="metric"><strong>{table_review_count}</strong><span>表格复核项</span></div>
       </section>
-      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。正文文字明细默认折叠，表格文字明细默认展开；正文相似度显示为 1.000 的条目收在报告末尾，表格按原页证据列出。</p>
+      <p class="reader-guide">先看左右原页截图，点击图片可放大；浅色标出能可靠定位的变化。正文文字明细默认折叠，表格文字明细默认展开。正文卡同时显示完整正文内容相似度和章节配对相似度；数值、技术标识或语义运算符变化不会因四舍五入为 1.000 而折叠，只有两种分数都精确为 1.000 且无关键内容变化的配对才收在报告末尾。</p>
       <section class="meta">
         <dl>
           <dt>旧协议</dt><dd>{_escape(str(result.old_pdf))}</dd>
@@ -1872,11 +1998,16 @@ def _render_change_html(
     label = _CHANGE_LABELS.get(change.change_type, change.change_type)
     old_pages = change.old_section.page_range if change.old_section else "-"
     new_pages = change.new_section.page_range if change.new_section else "-"
-    similarity = (
-        f" · 相似度 {change.similarity:.3f}"
-        if change.old_section and change.new_section
-        else ""
-    )
+    if change.old_section and change.new_section:
+        content_similarity = _section_content_similarity(change)
+        similarity = (
+            f" · 内容相似度 {content_similarity:.6f}"
+            f" · 配对相似度 {change.similarity:.6f}"
+            if content_similarity is not None
+            else f" · 配对相似度 {change.similarity:.6f}"
+        )
+    else:
+        similarity = ""
     summary = _change_summary(change)
     summary_html = (
         f'<div class="change-summary">{_escape(summary)}</div>'
@@ -4831,9 +4962,9 @@ def _render_table_change_html(
     similarity = ""
     if change.old_tables and change.new_tables:
         pairing = _table_pairing_similarity(change)
-        similarity = f" · 内容相似度 {change.similarity:.3f}"
+        similarity = f" · 内容相似度 {change.similarity:.6f}"
         if pairing is not None:
-            similarity += f" · 配对相似度 {pairing:.3f}"
+            similarity += f" · 配对相似度 {pairing:.6f}"
     return f"""
         <div class="table-visual-card" id="table-change-{index}">
           <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
@@ -13975,7 +14106,19 @@ def _rows_for_csv(changes: list[SectionChange]) -> list[dict[str, str]]:
                 ),
                 "new_pages": change.new_section.page_range if change.new_section else "",
                 "old_pages": change.old_section.page_range if change.old_section else "",
-                "similarity": f"{change.similarity:.3f}" if change.old_section and change.new_section else "",
+                # ``similarity`` remains the legacy alias for pairing score;
+                # explicit columns prevent a rounded pairing score from being
+                # mistaken for exact content equality.
+                "similarity": f"{change.similarity:.6f}" if change.old_section and change.new_section else "",
+                "pair_similarity": f"{change.similarity:.6f}" if change.old_section and change.new_section else "",
+                "content_similarity": (
+                    f"{content_similarity:.6f}"
+                    if (content_similarity := _section_content_similarity(change)) is not None
+                    else ""
+                ),
+                "critical_content_equal": (
+                    "false" if _section_change_has_critical_delta(change) else "true"
+                ) if change.old_section and change.new_section else "",
                 "match_basis": change.match_basis,
                 "review_reason": getattr(change, "review_reason", ""),
                 "match_basis_label": _MATCH_BASIS_LABELS.get(
@@ -14011,8 +14154,8 @@ def _rows_for_table_csv(changes: list[TableChange]) -> list[dict[str, str]]:
                     "new_titles": _table_titles(change.new_tables),
                     "old_pages": _table_pages(change.old_tables),
                     "new_pages": _table_pages(change.new_tables),
-                    "pair_similarity": f"{_table_pairing_similarity(change):.3f}" if change.old_tables and change.new_tables else "",
-                    "content_similarity": f"{change.similarity:.3f}" if change.old_tables and change.new_tables else "",
+                    "pair_similarity": f"{_table_pairing_similarity(change):.6f}" if change.old_tables and change.new_tables else "",
+                    "content_similarity": f"{change.similarity:.6f}" if change.old_tables and change.new_tables else "",
                     "item": row_change.item,
                     "old_value": row_change.old_value,
                     "new_value": row_change.new_value,
@@ -14897,9 +15040,23 @@ def _change_to_dict(
         ),
         "old_pages": change.old_section.page_range if change.old_section else None,
         "new_pages": change.new_section.page_range if change.new_section else None,
+        # Keep the historical field as the pairing score and expose the
+        # complete-content score separately.  Consumers must not infer exact
+        # equality from a rounded pairing score.
         "similarity": round(change.similarity, 6),
+        "pair_similarity": round(change.similarity, 6),
+        "content_similarity": (
+            round(content_similarity, 6)
+            if (content_similarity := _section_content_similarity(change)) is not None
+            else None
+        ),
+        "critical_content_equal": (
+            not _section_change_has_critical_delta(change)
+            if change.old_section and change.new_section
+            else None
+        ),
         "match_basis": change.match_basis,
-                "review_reason": getattr(change, "review_reason", ""),
+        "review_reason": getattr(change, "review_reason", ""),
         "match_basis_label": _MATCH_BASIS_LABELS.get(
             change.match_basis,
             change.match_basis,

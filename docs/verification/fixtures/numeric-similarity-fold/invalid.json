@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "invalid-ambiguous-number",
+      "old": "The jitter is measured at fb /26450.",
+      "new": "The jitter is measured at fb /26560.",
+      "pair_similarity": 1.0,
+      "expected_main": 1,
+      "expected_appendix": 0
+    }
+  ]
+}

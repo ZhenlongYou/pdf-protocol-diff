@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "id": "boundary-exact-pair-score",
+      "old": "The jitter limit is 26450 mV.",
+      "new": "The jitter limit is 26560 mV.",
+      "pair_similarity": 1.0,
+      "expected_main": 1,
+      "expected_appendix": 0
+    }
+  ]
+}

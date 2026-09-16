@@ -19,6 +19,7 @@ from protocol_pdf_diff.screenshot_presentation import table_context_image
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
 from protocol_pdf_diff.prose_source_visuals import build_prose_source_visuals, _assign_snippets_to_pages, _SnippetHighlight
 from protocol_pdf_diff.accuracy_evaluation import _read_visible_html_evidence, _read_markdown_evidence, _read_text_evidence
+from protocol_pdf_diff import reporting as reporting_module
 
 
 def section(sid, body):
@@ -71,16 +72,18 @@ class ScreenshotFirstTests(unittest.TestCase):
             for key in ('html','markdown','text'):
                 value=out[key].read_text();self.assertNotIn('\ue123',value);self.assertIn('U+E123',value)
             self.assertIn('\ue123',out['json'].read_text())
-    def test_appendix_scopes_are_reviewable_in_all_formats_without_losing_values(self):
+    def test_numeric_one_score_stays_in_primary_formats_without_losing_values(self):
         with tempfile.TemporaryDirectory() as d:
             a,b=section('a','Limit 10 mV.'),section('b','Limit 12 mV.')
             c=SectionChange('modified',a,b,1.,replaced_snippets=[SnippetPair(a.body,b.body)])
             out=write_reports(DiffResult(Path('o'),Path('n'),[a],[b],[c],[]),d,DiffOptions())
             for key,reader in [('html',_read_visible_html_evidence),('markdown',_read_markdown_evidence),('text',_read_text_evidence)]:
                 blocks=dict(reader(out[key]).blocks)
-                self.assertIn('10 mV',blocks['A-C1']);self.assertIn('12 mV',blocks['A-C1'])
+                self.assertIn('10 mV', '\n'.join(blocks.values()))
+                self.assertIn('12 mV', '\n'.join(blocks.values()))
             self.assertNotIn('<details',out['text'].read_text())
-            self.assertIn('12 mV',out['similarity_review_csv'].read_text())
+            self.assertIn('12 mV',out['csv'].read_text())
+            self.assertEqual([], json.loads(out['json'].read_text())['similarity_review_changes'])
     def test_same_page_repeated_short_sentence_is_not_highlighted_twice(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);body='The receiver limit is 100 mV.'
@@ -119,23 +122,85 @@ class ScreenshotFirstTests(unittest.TestCase):
         self.assertFalse(table_context_image(replace(a,row_alignment_reliable=False),c,'old')[1])
         repeated=replace(a,context_words=(*a.context_words,('10',150,110,170,120)))
         self.assertFalse(table_context_image(repeated,replace(c,old_tables=(repeated,)),'old')[1])
-    def test_displayed_one_is_retained_in_appendix_not_primary_counts(self):
+    def test_numeric_near_one_is_retained_in_primary_counts(self):
         for score in (1.0,.9996,.9994):
             with self.subTest(score=score),tempfile.TemporaryDirectory() as d:
                 old,new=section('old','Limit is 10 mV.'),section('new','Limit is 12 mV.')
                 change=SectionChange('modified',old,new,score,replaced_snippets=[SnippetPair(old.body,new.body)])
                 out=write_reports(DiffResult(Path('old.pdf'),Path('new.pdf'),[old],[new],[change],[]),d,DiffOptions())
                 data=json.loads(out['json'].read_text());html=out['html'].read_text()
-                if score>=.9995:
-                    self.assertEqual([],data['content_changes'])
-                    self.assertEqual(1,len(data['similarity_review_changes']))
-                    self.assertIn('<details class="similarity-review-appendix"',html)
-                    text=re.sub('<[^>]+>', '', html)
-                    self.assertIn('10 mV',text);self.assertIn('12 mV',text)
-                    self.assertIsNotNone(data['changes'][0]['appendix_card_id'])
-                else:
-                    self.assertEqual(1,len(data['content_changes']))
-                    self.assertEqual([],data['similarity_review_changes'])
+                self.assertEqual(1,len(data['content_changes']))
+                self.assertEqual([],data['similarity_review_changes'])
+                self.assertNotIn('<details class="similarity-review-appendix"',html)
+                self.assertIsNone(data['changes'][0]['appendix_card_id'])
+
+    def test_long_section_numeric_delta_is_not_rounded_to_folded_one(self):
+        """A single parameter change in a long section must stay visible."""
+
+        with tempfile.TemporaryDirectory() as d:
+            stable = (
+                " The jitter is measured with a clock from a clock recovery unit "
+                "and the receiver shall preserve the specified operating conditions."
+            ) * 18
+            old_body = (
+                "The jitter is measured with a clock from a clock recovery unit "
+                "(CRU) (i.e., a first order golden PLL, with corner frequency at "
+                "fb /26450, and a 20 dB/decade slope, see Section 1.6) as the "
+                "trigger or reference clock."
+                + stable
+            )
+            new_body = old_body.replace("fb /26450", "fb /26560")
+            old,new=section('old',old_body),section('new',new_body)
+            change=SectionChange(
+                'modified', old, new, .999643,
+                replaced_snippets=[SnippetPair(old_body[:220], new_body[:220])],
+            )
+            out=write_reports(
+                DiffResult(Path('old.pdf'),Path('new.pdf'),[old],[new],[change],[]),
+                d, DiffOptions(),
+            )
+            data=json.loads(out['json'].read_text())
+            html=out['html'].read_text()
+            self.assertEqual(1, len(data['content_changes']))
+            self.assertEqual([], data['similarity_review_changes'])
+            visible=data['content_changes'][0]
+            self.assertAlmostEqual(.999643, visible['pair_similarity'], places=6)
+            self.assertLess(visible['content_similarity'], 1.0)
+            self.assertFalse(visible['critical_content_equal'])
+            self.assertIn('26450', html)
+            self.assertIn('26560', html)
+            self.assertIn('内容相似度', html)
+
+    def test_critical_identifier_and_operator_deltas_stay_in_primary_list(self):
+        """Identifiers and comparison operators are protected like numbers."""
+
+        cases = (
+            ("Mode=SAFE", "Mode=FAST"),
+            ("The limit <= 10 mV.", "The limit >= 10 mV."),
+        )
+        for old_text, new_text in cases:
+            with self.subTest(old_text=old_text), tempfile.TemporaryDirectory() as d:
+                old, new = section("old", old_text), section("new", new_text)
+                change = SectionChange(
+                    "modified", old, new, 1.0,
+                    replaced_snippets=[SnippetPair(old_text, new_text)],
+                )
+                out = write_reports(
+                    DiffResult(Path("old.pdf"), Path("new.pdf"), [old], [new], [change], []),
+                    d,
+                    DiffOptions(),
+                )
+                data = json.loads(out["json"].read_text())
+                self.assertEqual(1, len(data["content_changes"]))
+                self.assertEqual([], data["similarity_review_changes"])
+                self.assertFalse(data["content_changes"][0]["critical_content_equal"])
+
+    def test_critical_delta_without_local_snippet_is_not_marked_equal(self):
+        """The full-body fallback protects identifiers when snippets are absent."""
+
+        old, new = section("old", "Mode=SAFE"), section("new", "Mode=FAST")
+        change = SectionChange("modified", old, new, 1.0)
+        self.assertTrue(reporting_module._section_change_has_critical_delta(change))
     def test_added_default_one_remains_primary(self):
         with tempfile.TemporaryDirectory() as d:
             new=section('new','The receiver shall support 12 mV.')

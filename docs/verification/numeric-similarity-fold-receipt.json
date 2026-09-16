@@ -1,0 +1,1019 @@
+{
+  "allowed_verification_claim": "verified_scope_only",
+  "artifacts": [
+    {
+      "id": "ART-NUMERIC-REAL-REPORT",
+      "path": "work/numeric-similarity-fold-gate/public-artifact.json",
+      "producer_run_id": "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917",
+      "sha256": "a6d69f8086ccbe0425b1fb94bd095a1ccfd640f8d105ce5dd0604810224f622b",
+      "size_bytes": 146
+    }
+  ],
+  "blocking_acceptance_ids": [],
+  "computed_rows": {
+    "fault_detection": "PASS",
+    "independent_oracle": "PASS",
+    "input_design": "PASS",
+    "isolation": "PASS",
+    "real_path": "PASS",
+    "reproducibility": "PASS",
+    "requirement": "PASS",
+    "target_red": "PASS"
+  },
+  "created_at": "2026-09-16T20:53:59.083786+00:00",
+  "fresh_nonce": "41a85c3d-66e5-4e11-8a8f-921a7b793ef9",
+  "gate_id": "numeric-similarity-fold-20260917",
+  "gate_result": "EXECUTED_EVIDENCE_PASS",
+  "manifest_path": "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/docs/verification/numeric-similarity-fold-evidence.json",
+  "manifest_sha256": "43d32cef9db7d2e6b3949ea004f1ab3c3dbf24c128a4088f5def6dc8e3b84eb0",
+  "materials": [
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-INIT-PY",
+      "path": "src/protocol_pdf_diff/__init__.py",
+      "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+      "size_bytes": 367
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-ACCURACY-EVALUATION-PY",
+      "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+      "sha256": "ab04d71dc6f9baaebc395a3f7608f1852ba8c970b0def4b060bd4fd57b597d2c",
+      "size_bytes": 43864
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-BOUNDARY-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/bullet_boundary_evidence.py",
+      "sha256": "2f373546ee348857faa3f54826f73226f672bdb016f53d05b0ee320018a826c5",
+      "size_bytes": 2987
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-CONTEXT-REVIEW-PY",
+      "path": "src/protocol_pdf_diff/bullet_context_review.py",
+      "sha256": "21c9ee9cc94bc2e3318d1b39deea7dc1eadcf9c14548e83d2b82b7a0fda88d9d",
+      "size_bytes": 4593
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CATALOG-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/catalog_evidence.py",
+      "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
+      "size_bytes": 1808
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARE-PY",
+      "path": "src/protocol_pdf_diff/compare.py",
+      "sha256": "80ff1e5af897d2aa1856a4e313921d0e14a58a4cb2a4b6ba18c6ca75ca3828d0",
+      "size_bytes": 286432
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-JOB-PY",
+      "path": "src/protocol_pdf_diff/comparison_job.py",
+      "sha256": "ef6afe1e30254520c30cec6281e92b11661dc219559a1b11b891eeaeab066efb",
+      "size_bytes": 11997
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-SESSION-PY",
+      "path": "src/protocol_pdf_diff/comparison_session.py",
+      "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+      "size_bytes": 1338
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CONTENT-EQUIVALENCE-PY",
+      "path": "src/protocol_pdf_diff/content_equivalence.py",
+      "sha256": "a5aec0d0946b5cdc45cbd8a5f89139aeea718970032b90838e18e4716389c8fe",
+      "size_bytes": 3756
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-GUI-PY",
+      "path": "src/protocol_pdf_diff/desktop_gui.py",
+      "sha256": "1d51fc88b16876b170e59679569e66227c7fccb166e0f381da93fbaf09b6e13f",
+      "size_bytes": 65736
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-VISUALS-PY",
+      "path": "src/protocol_pdf_diff/desktop_visuals.py",
+      "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+      "size_bytes": 13003
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EVIDENCE-ALIGNMENT-PY",
+      "path": "src/protocol_pdf_diff/evidence_alignment.py",
+      "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+      "size_bytes": 15836
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-GLYPH-VIEW-PY",
+      "path": "src/protocol_pdf_diff/exact_glyph_view.py",
+      "sha256": "86781dc509acff7df4543841138d4eb9b6f704acba5e2aaf4eba430bf6d45e06",
+      "size_bytes": 4624
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-MATCH-PY",
+      "path": "src/protocol_pdf_diff/exact_match.py",
+      "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+      "size_bytes": 4055
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FIGURE-FILTERS-PY",
+      "path": "src/protocol_pdf_diff/figure_filters.py",
+      "sha256": "67806d4dd95e2b6a1a33d9430409ce79aea2cce9bee0e3c3f16c83f2a8519144",
+      "size_bytes": 4248
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-FORWARD-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/formula_forward_evidence.py",
+      "sha256": "20787f70d61281c6c0095deba623321c11cabb33b40a96365b2a220416c88072",
+      "size_bytes": 5007
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-BRIDGE-PY",
+      "path": "src/protocol_pdf_diff/formula_source_bridge.py",
+      "sha256": "d0d9c5b0c4bea185594cd41c4ab1871f7f29b610c5a72e8a474349e0b35b360b",
+      "size_bytes": 5598
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-PY",
+      "path": "src/protocol_pdf_diff/formula_source_review.py",
+      "sha256": "1727688fa94795699fe9c47585d465ac6fe117ef2348f0b1af7102adecad311b",
+      "size_bytes": 16702
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-EXPORT-PY",
+      "path": "src/protocol_pdf_diff/formula_source_review_export.py",
+      "sha256": "7b690f5f4c0b3a9b2ec2b85d4fad9cf35cd409dcdadea4a65af9e7f042c6c137",
+      "size_bytes": 3768
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-VISUALS-PY",
+      "path": "src/protocol_pdf_diff/formula_visuals.py",
+      "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+      "size_bytes": 14125
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-GLYPH-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/glyph_evidence.py",
+      "sha256": "e37af46d5b80e3a3b6a7c04a3ea3f6244123dc9549c9d46708c3f9e24da8d3d9",
+      "size_bytes": 6954
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-HEADING-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/heading_evidence.py",
+      "sha256": "bfc75ed8c404d92ed477fb62aa1481032e5b7571474291f3bd55c9c4d73d1ff3",
+      "size_bytes": 9641
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BACKEND-PY",
+      "path": "src/protocol_pdf_diff/layout_backend.py",
+      "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+      "size_bytes": 11020
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BLOCKS-PY",
+      "path": "src/protocol_pdf_diff/layout_blocks.py",
+      "sha256": "a5d90d28d4e403227a1d4e9120bb40f5304078aa807d72e04ef1f54e47de8626",
+      "size_bytes": 17605
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MODELS-PY",
+      "path": "src/protocol_pdf_diff/models.py",
+      "sha256": "afebf0097b0cc906311c98e77b9a5a798fa4670915fadebc5687909254c08ae1",
+      "size_bytes": 30545
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MONOTONIC-ALIGNMENT-PY",
+      "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+      "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+      "size_bytes": 2590
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-NATIVE-SUBSCRIPT-SOURCE-PY",
+      "path": "src/protocol_pdf_diff/native_subscript_source.py",
+      "sha256": "b6f75b7466cc1469258e45d8cb6baba4ffb2d735cbd54a210510981b26374356",
+      "size_bytes": 4639
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-FURNITURE-PY",
+      "path": "src/protocol_pdf_diff/page_furniture.py",
+      "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+      "size_bytes": 2847
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-OCR-PY",
+      "path": "src/protocol_pdf_diff/page_ocr.py",
+      "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+      "size_bytes": 9723
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PARSING-BENCHMARK-PY",
+      "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+      "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+      "size_bytes": 34623
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PDF-EXTRACT-PY",
+      "path": "src/protocol_pdf_diff/pdf_extract.py",
+      "sha256": "94774c32fa6ea7bf88ba59c91afec80b15d4a38fc4aaabbfdd4f25d7f5a6c938",
+      "size_bytes": 382712
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-NATIVE-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/physical_native_evidence.py",
+      "sha256": "deda5c27fabe77c9a84cae757418145e33902c41f4fbdd76ef28193c615d9930",
+      "size_bytes": 8576
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-TABLE-ROWS-PY",
+      "path": "src/protocol_pdf_diff/physical_table_rows.py",
+      "sha256": "d17d4afa780ad0f8fdbcba5f5a7558d8980ddfa62913e4056688b76ec5cf1267",
+      "size_bytes": 12539
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROGRESS-PY",
+      "path": "src/protocol_pdf_diff/progress.py",
+      "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+      "size_bytes": 2087
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROSE-SOURCE-VISUALS-PY",
+      "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+      "sha256": "66022fd52e999b90978b617398eece29d56bcb7b2a07736d314e80efe87418ef",
+      "size_bytes": 86123
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-QUALITY-PY",
+      "path": "src/protocol_pdf_diff/quality.py",
+      "sha256": "ae6070b6243f9a907773fab60791af1105eb5ed84c449d432bd6e31c12828d3a",
+      "size_bytes": 29378
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-READER-FOCUS-PY",
+      "path": "src/protocol_pdf_diff/reader_focus.py",
+      "sha256": "c363be65da26c0204e382061757282e80f77fabd4bf00c2ca1bf57db8428f1c0",
+      "size_bytes": 15840
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-REPORTING-PY",
+      "path": "src/protocol_pdf_diff/reporting.py",
+      "sha256": "2879abdf2de7c211aaf2eeb810c8f0763ba88edce579d22c917630eaf5b39b8d",
+      "size_bytes": 606679
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SAMPLE-DATA-PY",
+      "path": "src/protocol_pdf_diff/sample_data.py",
+      "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+      "size_bytes": 11394
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SCREENSHOT-PRESENTATION-PY",
+      "path": "src/protocol_pdf_diff/screenshot_presentation.py",
+      "sha256": "a90a0e1d750e5fd3af6d0867789213c031b696945d914017102ce7b62c91c372",
+      "size_bytes": 3936
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SECTIONING-PY",
+      "path": "src/protocol_pdf_diff/sectioning.py",
+      "sha256": "4b443d22bd6564a1a4349e5e01e3fc0a2a11fc938ae27c18d4276a281776768e",
+      "size_bytes": 154733
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-CHAR-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/source_char_evidence.py",
+      "sha256": "55aa6af8c57f2a64dbc58d633fb100b52bbcdc63006c886b52a20d0e0e00f2f3",
+      "size_bytes": 7135
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-REGIONS-PY",
+      "path": "src/protocol_pdf_diff/source_regions.py",
+      "sha256": "25408141b2c25bcadfe341e57f1de2d1861c261392ee19ba12d4d673fb23c1e6",
+      "size_bytes": 6040
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-TYPOGRAPHY-PY",
+      "path": "src/protocol_pdf_diff/source_typography.py",
+      "sha256": "3ae741f7b86247842873b19efa0afb72fb26c804e5e1b02114dab845086a3a83",
+      "size_bytes": 6298
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-ANNOTATIONS-PY",
+      "path": "src/protocol_pdf_diff/table_annotations.py",
+      "sha256": "5711f7a20afea5ebee77a2b78c2493e2916c7b81b3ad877d3c47a7f1f964b4f2",
+      "size_bytes": 5952
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-CODEC-PY",
+      "path": "src/protocol_pdf_diff/table_codec.py",
+      "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+      "size_bytes": 2329
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-VIEW-TRANSACTION-PY",
+      "path": "src/protocol_pdf_diff/table_view_transaction.py",
+      "sha256": "69ace563a9d19ae9b4913dbf6e60397c3ecaa5a88f5cdd76e19343a216c0ab84",
+      "size_bytes": 26342
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TEXT-UTILS-PY",
+      "path": "src/protocol_pdf_diff/text_utils.py",
+      "sha256": "6c6233b0d29c902e7ff190cc2be4f960e9e96581fd58063cb0ace3e261e2a8e0",
+      "size_bytes": 40561
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-UI-SHARED-PY",
+      "path": "src/protocol_pdf_diff/ui_shared.py",
+      "sha256": "4d6485ddf965bb9d9b555fe8f5020867dbd55a9aa1e787482b7ab6f75505a230",
+      "size_bytes": 4490
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-URL-LITERAL-EVIDENCE-PY",
+      "path": "src/protocol_pdf_diff/url_literal_evidence.py",
+      "sha256": "6010f4d59d553cf610ee126e2277d64e4f33ccbc59943ff7b3ba906f3c091f95",
+      "size_bytes": 6458
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VENV-BOOTSTRAP-PY",
+      "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+      "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+      "size_bytes": 3376
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-OWNERSHIP-PY",
+      "path": "src/protocol_pdf_diff/visual_ownership.py",
+      "sha256": "5034b60e7016c201bdc0cc28e00bb927bab2026b775057f93bfccb0038c0f761",
+      "size_bytes": 18723
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-PREVIEW-PY",
+      "path": "src/protocol_pdf_diff/visual_preview.py",
+      "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+      "size_bytes": 1985
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-WATCHDOG-PY",
+      "path": "src/protocol_pdf_diff/visual_watchdog.py",
+      "sha256": "a2c27298cc630375fe1efda4d030040b293084b828a578be535e593ddd65e622",
+      "size_bytes": 33821
+    },
+    {
+      "id": "SRC-SRC-PROTOCOL-PDF-DIFF-WEBVIEW-GUI-PY",
+      "path": "src/protocol_pdf_diff/webview_gui.py",
+      "sha256": "e5a5873e3a6f61970cb31e7f4085067a2a624ba4f26a8a5db575d65c9a3854ad",
+      "size_bytes": 24147
+    },
+    {
+      "id": "SRC-MAIN-PY",
+      "path": "main.py",
+      "sha256": "fe4b7d3e84154997c4e8ef0643f4b8dcdef71f37f1a04d818f1264f4bfd9a2ed",
+      "size_bytes": 11325
+    },
+    {
+      "id": "IN-NUMERIC-NOMINAL",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+      "sha256": "7b05bb9ebda765813b7358534677931e12cb8b4a776455e1b7ee3971b312dfe0",
+      "size_bytes": 246
+    },
+    {
+      "id": "IN-NUMERIC-BOUNDARY",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+      "sha256": "61d5706b871e057537d8f5cc462af1ff5fdd589d912b247265b5e665e2c0bb69",
+      "size_bytes": 251
+    },
+    {
+      "id": "IN-NUMERIC-INVALID",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+      "sha256": "6177cc4845a30fdff6f948aaf5d653edb30e8e8f78e981cd3752c4ff05b67d44",
+      "size_bytes": 264
+    },
+    {
+      "id": "IN-NUMERIC-ADVERSARIAL",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+      "sha256": "ee9acba4720a90a83971e021e2caddafb525a76b50ae887774100e68a9c30579",
+      "size_bytes": 758
+    },
+    {
+      "id": "IN-NUMERIC-REALISTIC",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+      "sha256": "60f13dc96f0d33d6aedfe272d3e3af70dd76588725b795a68c6fdab05baeae13",
+      "size_bytes": 621
+    },
+    {
+      "id": "IN-NUMERIC-KNOWN-FAILURE",
+      "path": "docs/verification/fixtures/numeric-similarity-fold/known-failure.json",
+      "sha256": "1f0dcc33c41fd4709f13b80a30a118650af9e3144c676ed2087b03269fead285",
+      "size_bytes": 253
+    },
+    {
+      "id": "PROBE-NUMERIC-SIMILARITY",
+      "path": "docs/verification/numeric_similarity_probe.py",
+      "sha256": "c1037a2656b077cbaf0d489acc3195f20353d9526481f643be3bfbfc0a964d08",
+      "size_bytes": 3931
+    },
+    {
+      "id": "ORACLE-NUMERIC-SIMILARITY",
+      "path": "docs/verification/numeric_similarity_oracle.py",
+      "sha256": "92d20a12a48a0a740479c9829f7156030ccb7bf4841c8c080b03ef5f3467fd03",
+      "size_bytes": 850
+    },
+    {
+      "id": "MUT-NUMERIC-LEGACY-FOLD",
+      "path": "work/numeric-similarity-fold-gate/baseline-reporting.py",
+      "sha256": "6b804401a46656e51337b3f999e538148955d1b2899f7fa8f6b687a2588d067a",
+      "size_bytes": 605545
+    },
+    {
+      "id": "LEDGER-NUMERIC-SIMILARITY",
+      "path": "work/numeric-similarity-fold-gate/escaped-defects.yaml",
+      "sha256": "0e4bf0e6ec50d1eefbfba978fd68463692ff0c9b3df488874d32c275f6caca99",
+      "size_bytes": 799
+    }
+  ],
+  "open_defect_ids": [],
+  "receipt_schema_version": 1,
+  "runner_sha256": "16dd4147dca846373d364491e1bd01ad5e45f95354e087701c84dc26f08f78cd",
+  "runs": [
+    {
+      "argv": [
+        "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+        "docs/verification/numeric_similarity_oracle.py",
+        "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+        "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+        "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+        "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+        "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+        "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+      ],
+      "cwd": ".",
+      "duration_ms": 70.721,
+      "environment": {
+        "declared_names": [],
+        "effective_value_sha256": {
+          "HOME": "49d6fbf76410c35ceff44d9073986a5eb9615ab095306b7000302746c714d93b",
+          "LANG": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "LC_ALL": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "PATH": "b1d5d061ea301430742a55bc6ae24edec24bac803f0b4ecc4f7be425b993fe21",
+          "PYTHONDONTWRITEBYTECODE": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "TMPDIR": "c5fa6871ba22edfd0ff4912f59455cbc51a1f094ab46ba06ea67faee87496353"
+        },
+        "policy": "minimal_allowlist_plus_manifest"
+      },
+      "executable": {
+        "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+        "size_bytes": 152624
+      },
+      "exit_code": 0,
+      "id": "RUN-NUMERIC-ORACLE",
+      "matched_assertions": [
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_ORACLE_OK",
+        "stdout:excludes:Traceback",
+        "stdout:excludes:0 tests",
+        "stderr:excludes:Traceback",
+        "stderr:excludes:ModuleNotFoundError"
+      ],
+      "role": "oracle",
+      "source_variant": {
+        "base": "source"
+      },
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 40,
+      "stdout_sha256": "86557d3a771a3f2f1bd777975d7a7cbb19ff32f1dd5336a403b38493a689d1b9",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "argv": [
+        "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+        "docs/verification/numeric_similarity_probe.py",
+        "docs/verification/fixtures/numeric-similarity-fold/nominal.json",
+        "docs/verification/fixtures/numeric-similarity-fold/boundary.json",
+        "docs/verification/fixtures/numeric-similarity-fold/invalid.json",
+        "docs/verification/fixtures/numeric-similarity-fold/adversarial.json",
+        "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+        "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+      ],
+      "cwd": ".",
+      "duration_ms": 744.266,
+      "environment": {
+        "declared_names": [],
+        "effective_value_sha256": {
+          "HOME": "26a4823553a2f0e90376e0462414324dc065184547047b615c4f12705a2fdb50",
+          "LANG": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "LC_ALL": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "PATH": "b1d5d061ea301430742a55bc6ae24edec24bac803f0b4ecc4f7be425b993fe21",
+          "PYTHONDONTWRITEBYTECODE": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "TMPDIR": "57950f0a5dc4e20d2773065ae1021a00fc5bca192ec10ad900c6b52e09edee6a"
+        },
+        "policy": "minimal_allowlist_plus_manifest"
+      },
+      "executable": {
+        "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+        "size_bytes": 152624
+      },
+      "exit_code": 0,
+      "id": "RUN-NUMERIC-SUITE",
+      "matched_assertions": [
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK",
+        "stdout:excludes:Traceback",
+        "stdout:excludes:0 tests",
+        "stderr:excludes:Traceback",
+        "stderr:excludes:ModuleNotFoundError"
+      ],
+      "role": "suite",
+      "source_variant": {
+        "base": "source"
+      },
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 75,
+      "stdout_sha256": "c6f6ec74569a5fcc73474d03d5dd0199d59d0cc21457ef0d1060133b30ce8839",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "argv": [
+        "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+        "docs/verification/numeric_similarity_probe.py",
+        "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+      ],
+      "cwd": ".",
+      "duration_ms": 583.431,
+      "environment": {
+        "declared_names": [],
+        "effective_value_sha256": {
+          "HOME": "21ef33aac511523ca984852033fe71160815a5d7c8f4bcc6862e6f1784408a2e",
+          "LANG": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "LC_ALL": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "PATH": "b1d5d061ea301430742a55bc6ae24edec24bac803f0b4ecc4f7be425b993fe21",
+          "PYTHONDONTWRITEBYTECODE": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "TMPDIR": "19e498e41d1d1f8ca6e1d4d3d39d590704427e97a3c7d56190cf6fc9f14a2477"
+        },
+        "policy": "minimal_allowlist_plus_manifest"
+      },
+      "executable": {
+        "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+        "size_bytes": 152624
+      },
+      "exit_code": 1,
+      "id": "RUN-NUMERIC-RED",
+      "matched_assertions": [
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_FAIL",
+        "stdout:excludes:Traceback",
+        "stdout:excludes:0 tests",
+        "stderr:excludes:Traceback",
+        "stderr:excludes:ModuleNotFoundError"
+      ],
+      "role": "target_red",
+      "source_variant": {
+        "mutation_id": "MUT-NUMERIC-LEGACY-FOLD"
+      },
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 130,
+      "stdout_sha256": "4e21346c2fe5132c3e5f60944adbfc32e9dc74e6c4bbfb74e703559ea852e674",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "argv": [
+        "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+        "docs/verification/numeric_similarity_probe.py",
+        "docs/verification/fixtures/numeric-similarity-fold/known-failure.json"
+      ],
+      "cwd": ".",
+      "duration_ms": 582.701,
+      "environment": {
+        "declared_names": [],
+        "effective_value_sha256": {
+          "HOME": "66fae913c5725499b8ca86e5c56e30f61dab19bc97d1ab3c3addd37062c0e779",
+          "LANG": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "LC_ALL": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "PATH": "b1d5d061ea301430742a55bc6ae24edec24bac803f0b4ecc4f7be425b993fe21",
+          "PYTHONDONTWRITEBYTECODE": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "TMPDIR": "bb38fbd851b2c802fe2f232a18c117d1babc806e0ea3347480d327b7a61cd446"
+        },
+        "policy": "minimal_allowlist_plus_manifest"
+      },
+      "executable": {
+        "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+        "size_bytes": 152624
+      },
+      "exit_code": 0,
+      "id": "RUN-NUMERIC-GREEN",
+      "matched_assertions": [
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK",
+        "stdout:excludes:Traceback",
+        "stdout:excludes:0 tests",
+        "stderr:excludes:Traceback",
+        "stderr:excludes:ModuleNotFoundError"
+      ],
+      "role": "target_green",
+      "source_variant": {
+        "base": "source"
+      },
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 75,
+      "stdout_sha256": "430a69071d64b0b6d95e471c745a21a3a1756e294ecb9a318ba43fdcc9cd6533",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "argv": [
+        "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/.venv/bin/python",
+        "docs/verification/numeric_similarity_probe.py",
+        "docs/verification/fixtures/numeric-similarity-fold/realistic.json",
+        "--artifact",
+        "work/numeric-similarity-fold-gate/public-artifact.json"
+      ],
+      "cwd": ".",
+      "duration_ms": 632.378,
+      "environment": {
+        "declared_names": [],
+        "effective_value_sha256": {
+          "HOME": "c615b1560f87f615064bbead16321c71d18ad1b7ce768cd11376beb24270931b",
+          "LANG": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "LC_ALL": "99fed2d548c2eb1022f4067f97fe838a2c3ea60ee0e0f53086788505c3ababad",
+          "PATH": "b1d5d061ea301430742a55bc6ae24edec24bac803f0b4ecc4f7be425b993fe21",
+          "PYTHONDONTWRITEBYTECODE": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+          "TMPDIR": "79b311075aad666ced5931527e98214b0d7d825d0b91a6a4566e75b5647dbe85"
+        },
+        "policy": "minimal_allowlist_plus_manifest"
+      },
+      "executable": {
+        "path": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+        "sha256": "e7bdd7770f59ff7fa58d4e1074481051a462b03d4c6a6e36e07549dce546fe03",
+        "size_bytes": 152624
+      },
+      "exit_code": 0,
+      "id": "RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917",
+      "matched_assertions": [
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_TEST",
+        "stdout:contains:PROSE_NUMERIC_NEAR_ONE_FOLD_CONTRACT_OK",
+        "stdout:excludes:Traceback",
+        "stdout:excludes:0 tests",
+        "stderr:excludes:Traceback",
+        "stderr:excludes:ModuleNotFoundError"
+      ],
+      "role": "real_path",
+      "source_variant": {
+        "base": "source"
+      },
+      "stderr_bytes": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_bytes": 75,
+      "stdout_sha256": "430a69071d64b0b6d95e471c745a21a3a1756e294ecb9a318ba43fdcc9cd6533",
+      "timed_out": false,
+      "timeout_seconds": 120
+    }
+  ],
+  "runtime": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python": "3.12.1"
+  },
+  "source": {
+    "files": [
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-INIT-PY",
+        "path": "src/protocol_pdf_diff/__init__.py",
+        "sha256": "730c788c3114a028e65083a660b6352b2e5d645d79a95fa12e467933c8d11d99",
+        "size_bytes": 367
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-ACCURACY-EVALUATION-PY",
+        "path": "src/protocol_pdf_diff/accuracy_evaluation.py",
+        "sha256": "ab04d71dc6f9baaebc395a3f7608f1852ba8c970b0def4b060bd4fd57b597d2c",
+        "size_bytes": 43864
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-BOUNDARY-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/bullet_boundary_evidence.py",
+        "sha256": "2f373546ee348857faa3f54826f73226f672bdb016f53d05b0ee320018a826c5",
+        "size_bytes": 2987
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-BULLET-CONTEXT-REVIEW-PY",
+        "path": "src/protocol_pdf_diff/bullet_context_review.py",
+        "sha256": "21c9ee9cc94bc2e3318d1b39deea7dc1eadcf9c14548e83d2b82b7a0fda88d9d",
+        "size_bytes": 4593
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CATALOG-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/catalog_evidence.py",
+        "sha256": "5c6ee54682b8a085eb8a2abb021c1e5b03786be1bf4e248bc72b080d3fe7e148",
+        "size_bytes": 1808
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARE-PY",
+        "path": "src/protocol_pdf_diff/compare.py",
+        "sha256": "80ff1e5af897d2aa1856a4e313921d0e14a58a4cb2a4b6ba18c6ca75ca3828d0",
+        "size_bytes": 286432
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-JOB-PY",
+        "path": "src/protocol_pdf_diff/comparison_job.py",
+        "sha256": "ef6afe1e30254520c30cec6281e92b11661dc219559a1b11b891eeaeab066efb",
+        "size_bytes": 11997
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-COMPARISON-SESSION-PY",
+        "path": "src/protocol_pdf_diff/comparison_session.py",
+        "sha256": "d8ee5d33851adfba975c0f9247c78613e3c5608f9c1792430f37f900be203a8f",
+        "size_bytes": 1338
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-CONTENT-EQUIVALENCE-PY",
+        "path": "src/protocol_pdf_diff/content_equivalence.py",
+        "sha256": "a5aec0d0946b5cdc45cbd8a5f89139aeea718970032b90838e18e4716389c8fe",
+        "size_bytes": 3756
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-GUI-PY",
+        "path": "src/protocol_pdf_diff/desktop_gui.py",
+        "sha256": "1d51fc88b16876b170e59679569e66227c7fccb166e0f381da93fbaf09b6e13f",
+        "size_bytes": 65736
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-DESKTOP-VISUALS-PY",
+        "path": "src/protocol_pdf_diff/desktop_visuals.py",
+        "sha256": "2808c9c13b8fa27f833ffb3358afb49ba570ceffb692a18287805692b583702b",
+        "size_bytes": 13003
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EVIDENCE-ALIGNMENT-PY",
+        "path": "src/protocol_pdf_diff/evidence_alignment.py",
+        "sha256": "00f68c21dd74e8548e8298dd9aa0e7a7a971c8bff403db136a81f1d9b64799ed",
+        "size_bytes": 15836
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-GLYPH-VIEW-PY",
+        "path": "src/protocol_pdf_diff/exact_glyph_view.py",
+        "sha256": "86781dc509acff7df4543841138d4eb9b6f704acba5e2aaf4eba430bf6d45e06",
+        "size_bytes": 4624
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-EXACT-MATCH-PY",
+        "path": "src/protocol_pdf_diff/exact_match.py",
+        "sha256": "30a01ef1bfc596016c0aef45b0eae5990140b74c6a0040836e9287985b34ad0e",
+        "size_bytes": 4055
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FIGURE-FILTERS-PY",
+        "path": "src/protocol_pdf_diff/figure_filters.py",
+        "sha256": "67806d4dd95e2b6a1a33d9430409ce79aea2cce9bee0e3c3f16c83f2a8519144",
+        "size_bytes": 4248
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-FORWARD-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/formula_forward_evidence.py",
+        "sha256": "20787f70d61281c6c0095deba623321c11cabb33b40a96365b2a220416c88072",
+        "size_bytes": 5007
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-BRIDGE-PY",
+        "path": "src/protocol_pdf_diff/formula_source_bridge.py",
+        "sha256": "d0d9c5b0c4bea185594cd41c4ab1871f7f29b610c5a72e8a474349e0b35b360b",
+        "size_bytes": 5598
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-PY",
+        "path": "src/protocol_pdf_diff/formula_source_review.py",
+        "sha256": "1727688fa94795699fe9c47585d465ac6fe117ef2348f0b1af7102adecad311b",
+        "size_bytes": 16702
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-SOURCE-REVIEW-EXPORT-PY",
+        "path": "src/protocol_pdf_diff/formula_source_review_export.py",
+        "sha256": "7b690f5f4c0b3a9b2ec2b85d4fad9cf35cd409dcdadea4a65af9e7f042c6c137",
+        "size_bytes": 3768
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-FORMULA-VISUALS-PY",
+        "path": "src/protocol_pdf_diff/formula_visuals.py",
+        "sha256": "87f6cdf48b75004156ca871bf4058de0e00ba1e3de7f4b3e7baa2d008f89f94b",
+        "size_bytes": 14125
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-GLYPH-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/glyph_evidence.py",
+        "sha256": "e37af46d5b80e3a3b6a7c04a3ea3f6244123dc9549c9d46708c3f9e24da8d3d9",
+        "size_bytes": 6954
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-HEADING-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/heading_evidence.py",
+        "sha256": "bfc75ed8c404d92ed477fb62aa1481032e5b7571474291f3bd55c9c4d73d1ff3",
+        "size_bytes": 9641
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BACKEND-PY",
+        "path": "src/protocol_pdf_diff/layout_backend.py",
+        "sha256": "1ee206b290bdb19539222d88f40e1c266e44a9dd59a57fe4cd7a7d7c6fc39e3c",
+        "size_bytes": 11020
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-LAYOUT-BLOCKS-PY",
+        "path": "src/protocol_pdf_diff/layout_blocks.py",
+        "sha256": "a5d90d28d4e403227a1d4e9120bb40f5304078aa807d72e04ef1f54e47de8626",
+        "size_bytes": 17605
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MODELS-PY",
+        "path": "src/protocol_pdf_diff/models.py",
+        "sha256": "afebf0097b0cc906311c98e77b9a5a798fa4670915fadebc5687909254c08ae1",
+        "size_bytes": 30545
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-MONOTONIC-ALIGNMENT-PY",
+        "path": "src/protocol_pdf_diff/monotonic_alignment.py",
+        "sha256": "20c6a5c629ae52251228c04e3a191ac4b97c0b49f386ad4ee9db08f0e0c51929",
+        "size_bytes": 2590
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-NATIVE-SUBSCRIPT-SOURCE-PY",
+        "path": "src/protocol_pdf_diff/native_subscript_source.py",
+        "sha256": "b6f75b7466cc1469258e45d8cb6baba4ffb2d735cbd54a210510981b26374356",
+        "size_bytes": 4639
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-FURNITURE-PY",
+        "path": "src/protocol_pdf_diff/page_furniture.py",
+        "sha256": "eb308ffdd413f32f3e49d9f571e24db0a68b998a32bff268b3947685948cb11c",
+        "size_bytes": 2847
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PAGE-OCR-PY",
+        "path": "src/protocol_pdf_diff/page_ocr.py",
+        "sha256": "a33f72f51335eebd40574f95388241b0cc151b8068a9307941c2fe0febcbd689",
+        "size_bytes": 9723
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PARSING-BENCHMARK-PY",
+        "path": "src/protocol_pdf_diff/parsing_benchmark.py",
+        "sha256": "b97776bbd999e43e448d2425a4d15df605f4093963ba8ad88cb97a8c137ee3af",
+        "size_bytes": 34623
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PDF-EXTRACT-PY",
+        "path": "src/protocol_pdf_diff/pdf_extract.py",
+        "sha256": "94774c32fa6ea7bf88ba59c91afec80b15d4a38fc4aaabbfdd4f25d7f5a6c938",
+        "size_bytes": 382712
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-NATIVE-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/physical_native_evidence.py",
+        "sha256": "deda5c27fabe77c9a84cae757418145e33902c41f4fbdd76ef28193c615d9930",
+        "size_bytes": 8576
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PHYSICAL-TABLE-ROWS-PY",
+        "path": "src/protocol_pdf_diff/physical_table_rows.py",
+        "sha256": "d17d4afa780ad0f8fdbcba5f5a7558d8980ddfa62913e4056688b76ec5cf1267",
+        "size_bytes": 12539
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROGRESS-PY",
+        "path": "src/protocol_pdf_diff/progress.py",
+        "sha256": "6e84839d028ebc512de0da147caf192f25bb442275eb08e5457e97f06e1581b6",
+        "size_bytes": 2087
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-PROSE-SOURCE-VISUALS-PY",
+        "path": "src/protocol_pdf_diff/prose_source_visuals.py",
+        "sha256": "66022fd52e999b90978b617398eece29d56bcb7b2a07736d314e80efe87418ef",
+        "size_bytes": 86123
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-QUALITY-PY",
+        "path": "src/protocol_pdf_diff/quality.py",
+        "sha256": "ae6070b6243f9a907773fab60791af1105eb5ed84c449d432bd6e31c12828d3a",
+        "size_bytes": 29378
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-READER-FOCUS-PY",
+        "path": "src/protocol_pdf_diff/reader_focus.py",
+        "sha256": "c363be65da26c0204e382061757282e80f77fabd4bf00c2ca1bf57db8428f1c0",
+        "size_bytes": 15840
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-REPORTING-PY",
+        "path": "src/protocol_pdf_diff/reporting.py",
+        "sha256": "2879abdf2de7c211aaf2eeb810c8f0763ba88edce579d22c917630eaf5b39b8d",
+        "size_bytes": 606679
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SAMPLE-DATA-PY",
+        "path": "src/protocol_pdf_diff/sample_data.py",
+        "sha256": "9217dd8606cdeaffdf5d78b6b00e59ca959b46e850e21cd26d1ea2209d684afd",
+        "size_bytes": 11394
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SCREENSHOT-PRESENTATION-PY",
+        "path": "src/protocol_pdf_diff/screenshot_presentation.py",
+        "sha256": "a90a0e1d750e5fd3af6d0867789213c031b696945d914017102ce7b62c91c372",
+        "size_bytes": 3936
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SECTIONING-PY",
+        "path": "src/protocol_pdf_diff/sectioning.py",
+        "sha256": "4b443d22bd6564a1a4349e5e01e3fc0a2a11fc938ae27c18d4276a281776768e",
+        "size_bytes": 154733
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-CHAR-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/source_char_evidence.py",
+        "sha256": "55aa6af8c57f2a64dbc58d633fb100b52bbcdc63006c886b52a20d0e0e00f2f3",
+        "size_bytes": 7135
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-REGIONS-PY",
+        "path": "src/protocol_pdf_diff/source_regions.py",
+        "sha256": "25408141b2c25bcadfe341e57f1de2d1861c261392ee19ba12d4d673fb23c1e6",
+        "size_bytes": 6040
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-SOURCE-TYPOGRAPHY-PY",
+        "path": "src/protocol_pdf_diff/source_typography.py",
+        "sha256": "3ae741f7b86247842873b19efa0afb72fb26c804e5e1b02114dab845086a3a83",
+        "size_bytes": 6298
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-ANNOTATIONS-PY",
+        "path": "src/protocol_pdf_diff/table_annotations.py",
+        "sha256": "5711f7a20afea5ebee77a2b78c2493e2916c7b81b3ad877d3c47a7f1f964b4f2",
+        "size_bytes": 5952
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-CODEC-PY",
+        "path": "src/protocol_pdf_diff/table_codec.py",
+        "sha256": "4c84b339a093834a1c0cdcd5e05c93574dfe132e9b480fdb781124cb0eec1a8a",
+        "size_bytes": 2329
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TABLE-VIEW-TRANSACTION-PY",
+        "path": "src/protocol_pdf_diff/table_view_transaction.py",
+        "sha256": "69ace563a9d19ae9b4913dbf6e60397c3ecaa5a88f5cdd76e19343a216c0ab84",
+        "size_bytes": 26342
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-TEXT-UTILS-PY",
+        "path": "src/protocol_pdf_diff/text_utils.py",
+        "sha256": "6c6233b0d29c902e7ff190cc2be4f960e9e96581fd58063cb0ace3e261e2a8e0",
+        "size_bytes": 40561
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-UI-SHARED-PY",
+        "path": "src/protocol_pdf_diff/ui_shared.py",
+        "sha256": "4d6485ddf965bb9d9b555fe8f5020867dbd55a9aa1e787482b7ab6f75505a230",
+        "size_bytes": 4490
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-URL-LITERAL-EVIDENCE-PY",
+        "path": "src/protocol_pdf_diff/url_literal_evidence.py",
+        "sha256": "6010f4d59d553cf610ee126e2277d64e4f33ccbc59943ff7b3ba906f3c091f95",
+        "size_bytes": 6458
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VENV-BOOTSTRAP-PY",
+        "path": "src/protocol_pdf_diff/venv_bootstrap.py",
+        "sha256": "facdc8fe4ce4d0100ebf227e3bcb862bb7db24e6e66cae58181e5184aef62469",
+        "size_bytes": 3376
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-OWNERSHIP-PY",
+        "path": "src/protocol_pdf_diff/visual_ownership.py",
+        "sha256": "5034b60e7016c201bdc0cc28e00bb927bab2026b775057f93bfccb0038c0f761",
+        "size_bytes": 18723
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-PREVIEW-PY",
+        "path": "src/protocol_pdf_diff/visual_preview.py",
+        "sha256": "b9b7728e03b54352d18d446d268c3e721c66eeb6fbe3393b1f027860c547db2c",
+        "size_bytes": 1985
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-VISUAL-WATCHDOG-PY",
+        "path": "src/protocol_pdf_diff/visual_watchdog.py",
+        "sha256": "a2c27298cc630375fe1efda4d030040b293084b828a578be535e593ddd65e622",
+        "size_bytes": 33821
+      },
+      {
+        "id": "SRC-SRC-PROTOCOL-PDF-DIFF-WEBVIEW-GUI-PY",
+        "path": "src/protocol_pdf_diff/webview_gui.py",
+        "sha256": "e5a5873e3a6f61970cb31e7f4085067a2a624ba4f26a8a5db575d65c9a3854ad",
+        "size_bytes": 24147
+      },
+      {
+        "id": "SRC-MAIN-PY",
+        "path": "main.py",
+        "sha256": "fe4b7d3e84154997c4e8ef0643f4b8dcdef71f37f1a04d818f1264f4bfd9a2ed",
+        "size_bytes": 11325
+      }
+    ],
+    "kind": "file_set",
+    "scope": "declared_files_only"
+  }
+}
