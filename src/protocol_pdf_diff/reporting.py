@@ -688,9 +688,15 @@ def write_reports(
         },  # 逐页解析事实单独输出，绝不把 PageText 或 DocumentBlock 原文放入审计记录。
     }
 
-    md_path = report_dir / "protocol_diff_report.md"
-    html_path = report_dir / "protocol_diff_report.html"
-    txt_path = report_dir / "protocol_diff_report.txt"
+    # Keep the human-facing report files discoverable from the imported PDF
+    # names.  The folder already carries the pair and timestamp; using the
+    # same pair label for the files prevents a generic ``protocol_diff_report``
+    # from hiding which two protocol revisions were compared when a user moves
+    # or shares an individual report.
+    report_stem = pair_label
+    md_path = report_dir / f"{report_stem}.md"
+    html_path = report_dir / f"{report_stem}.html"
+    txt_path = report_dir / f"{report_stem}.txt"
     csv_path = report_dir / "changes.csv"
     table_csv_path = report_dir / "table_changes.csv"
     json_path = report_dir / "protocol_diff_data.json"

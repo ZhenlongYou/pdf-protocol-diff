@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from protocol_pdf_diff.reporting import _report_pair_label
+from protocol_pdf_diff.compare import compare_extractions
+from protocol_pdf_diff.models import DiffOptions, ExtractionResult, PageText
+from protocol_pdf_diff.reporting import _report_pair_label, write_reports
 from protocol_pdf_diff.webview_gui import ProtocolDiffWebApi, load_web_ui, validate_web_ui_contract
 
 
@@ -16,6 +18,24 @@ class UserFacingSettingsTests(unittest.TestCase):
         )
         self.assertEqual("旧版_协议__vs_新版_协议_", label)
         self.assertNotRegex(label, r'[<>:"/\\|?*]')
+
+    def test_human_facing_report_files_use_imported_pair_label(self) -> None:
+        old_pdf = Path("/tmp/旧版协议.pdf")
+        new_pdf = Path("/tmp/新版协议.pdf")
+        options = DiffOptions(visual_watchdog=False)
+        result = compare_extractions(
+            ExtractionResult(old_pdf, [PageText(1, "1 Scope\nThe receiver shall support mode A.")]),
+            ExtractionResult(new_pdf, [PageText(1, "1 Scope\nThe receiver shall support mode B.")]),
+            options,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            outputs = write_reports(result, directory, options)
+
+        label = _report_pair_label(old_pdf, new_pdf)
+        self.assertEqual(f"{label}.html", outputs["html"].name)
+        self.assertEqual(f"{label}.md", outputs["markdown"].name)
+        self.assertEqual(f"{label}.txt", outputs["text"].name)
+        self.assertTrue(outputs["report_dir"].name.startswith(f"{label}_"))
 
     def test_webview_config_keeps_internal_strategy_fixed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
