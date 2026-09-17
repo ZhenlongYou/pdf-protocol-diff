@@ -124,21 +124,21 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-            self.assertIn('class="prose-source-visual-grid"', html)
-            self.assertIn("旧版原文区域", html)
-            self.assertIn("新版原文区域", html)
+            self.assertIn('class="page-evidence-source-grid"', html)
+            self.assertIn("旧版原页截图", html)
+            self.assertIn("新版原页截图", html)
             self.assertGreaterEqual(html.count("data:image/jpeg;base64,"), 2)
             self.assertNotIn('class="prose-source-details"', html)
             self.assertIn('class="prose-text-details"', html)
             self.assertIn("展开文字识别明细", html)
             self.assertIn("原文坐标浅色标注", html)
-            self.assertLess(html.index('class="prose-source-visual-grid"'), html.index('class="prose-text-details"'))
+            self.assertLess(html.index('class="page-evidence-source-grid"'), html.index('class="prose-text-details"'))
 
             first_view = _FirstViewText()
             first_view.feed(html)
             first_view.close()
             self.assertNotIn(old_steps[0], "".join(first_view.parts))
-            self.assertLess(html.index('class="prose-source-visual-grid"'), html.index('class="reader-focus"'))
+            self.assertLess(html.index('class="page-evidence-source-grid"'), html.index('class="reader-focus"'))
             self.assertIn("Calibration step 1 uses", html)
             self.assertIn("101", html)
 
@@ -169,7 +169,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
-            self.assertIn('class="prose-source-visual-grid"', html)
+            self.assertIn('class="page-evidence-source-grid"', html)
             self.assertNotIn('class="prose-source-details"', html)
             self.assertIn("100", html)
             self.assertIn("120", html)
@@ -1678,7 +1678,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
                     for warning in result.warnings
                 )
             )
-            self.assertNotIn('class="prose-source-visual-grid"', html)
+            self.assertNotIn('class="page-evidence-source-grid"', html)
             self.assertIn("Calibration item 1 keeps", html)
 
 

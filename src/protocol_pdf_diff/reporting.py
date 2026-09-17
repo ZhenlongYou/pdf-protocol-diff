@@ -1375,6 +1375,7 @@ def _render_html(
                     _section_change_visual_identity(change)
                 ),
                 source_visual_aliases=prose_source_aliases.get(f"change-{index}"),
+                render_source_visual=False,
             ),
             _section_change_page_pair(change),
             _visible_prose_source_pages(
@@ -1393,6 +1394,7 @@ def _render_html(
                 index,
                 change,
                 source_page_aliases=table_source_aliases.get(f"table-{index}"),
+                render_source_visual=False,
             ),
             _table_change_page_pair(change),
             _visible_table_source_pages(
@@ -1409,6 +1411,7 @@ def _render_html(
     page_ordered_cards = _render_page_evidence_groups(
         page_ordered_entries,
         page_source_candidates=page_source_candidates,
+        force_shared_source=True,
     )
     if not page_ordered_cards:
         empty_message = (
@@ -1992,6 +1995,7 @@ def _render_change_html(
     *,
     prose_source_visual: ProseSourceVisualGroup | None = None,
     source_visual_aliases: dict[tuple[str, int], str] | None = None,
+    render_source_visual: bool = True,
 ) -> str:
     """Render one change as a side-by-side HTML block."""
 
@@ -2043,15 +2047,24 @@ def _render_change_html(
         prose_source_visual = replace(prose_source_visual, change_type="review",
                                       old_visuals=context_raw(prose_source_visual.old_visuals),
                                       new_visuals=context_raw(prose_source_visual.new_visuals))
-    source_visual_html = (
-        _render_prose_source_visual_group(
-            prose_source_visual,
-            prefix=f"change-{index}-source",
-            source_visual_aliases=source_visual_aliases,
-        )
-        if prose_source_visual is not None
-        else ""
-    )
+    source_prefix = f"change-{index}-source"
+    source_visual_html = ""
+    if prose_source_visual is not None:
+        if render_source_visual:
+            source_visual_html = _render_prose_source_visual_group(
+                prose_source_visual,
+                prefix=source_prefix,
+                source_visual_aliases=source_visual_aliases,
+            )
+        else:
+            # Main page evidence owns the visible old/new page screenshots.
+            # Keep per-change source ids as invisible aliases so focus buttons
+            # still resolve to that shared page image instead of losing the
+            # coordinate-backed navigation target.
+            source_visual_html = _render_prose_page_source_aliases(
+                prose_source_visual,
+                prefix=source_prefix,
+            )
     focus = render_change_focus(change, prose_source_visual, f"change-{index}-source", _inline_tokens, _inline_diff_html, _unverified_pua_mapping_note, _focus_context_html, _focus_allows_deltas, _escape)
     text_detail = (
         '<details class="prose-text-details"><summary>展开文字识别明细</summary>'
@@ -2285,6 +2298,27 @@ def _render_prose_source_visual_group(
         f'<div class="prose-source-visual-grid">{old_side}{new_side}</div>'
         '</div>'
     )
+
+
+def _render_prose_page_source_aliases(
+    group: ProseSourceVisualGroup,
+    *,
+    prefix: str,
+) -> str:
+    """Keep focus targets while the page group owns visible source images."""
+
+    anchors: list[str] = []
+    for side, visuals in (("old", group.old_visuals), ("new", group.new_visuals)):
+        for index, visual in enumerate(visuals):
+            if not (visual.image_data_uri or visual.raw_image_data_uri):
+                continue
+            source_id = f"{prefix}-{side}-{index}"
+            target_id = f"page-source-{side}-{visual.page_number}"
+            anchors.append(
+                f'<span class="prose-source-alias-anchor" id="{_escape(source_id)}" '
+                f'data-source-alias="{_escape(target_id)}"></span>'
+            )
+    return "".join(anchors)
 
 
 def _render_figure_source_visual_groups(
@@ -4936,27 +4970,56 @@ def _render_table_change_html(
     change: TableChange,
     *,
     source_page_aliases: dict[tuple[str, int], str] | None = None,
+    render_source_visual: bool = True,
 ) -> str:
     """Render one changed logical table with auditable pairing metadata."""
 
     title = _table_change_title(change)
     source_prefix = f"table-change-{index}-source"
-    old_shot = _render_table_shot_group(
-        "旧版截图",
-        change.old_tables,
-        change=change,
-        side="old",
-        source_prefix=source_prefix,
-        source_page_aliases=source_page_aliases,
-    )
-    new_shot = _render_table_shot_group(
-        "新版截图",
-        change.new_tables,
-        change=change,
-        side="new",
-        source_prefix=source_prefix,
-        source_page_aliases=source_page_aliases,
-    )
+    if render_source_visual:
+        old_shot = _render_table_shot_group(
+            "旧版截图",
+            change.old_tables,
+            change=change,
+            side="old",
+            source_prefix=source_prefix,
+            source_page_aliases=source_page_aliases,
+        )
+        new_shot = _render_table_shot_group(
+            "新版截图",
+            change.new_tables,
+            change=change,
+            side="new",
+            source_prefix=source_prefix,
+            source_page_aliases=source_page_aliases,
+        )
+        source_shots = f'<div class="table-shot-grid">{old_shot}{new_shot}</div>'
+    else:
+        # The page evidence group owns one visible original screenshot per
+        # physical page. Keep stable hidden anchors for any downstream focus
+        # target, while leaving the table's complete row facts in this card.
+        source_aliases: list[str] = []
+        source_availability: list[str] = []
+        for side, tables in (("old", change.old_tables), ("new", change.new_tables)):
+            for visual_index, table in enumerate(tables):
+                if not (table.image_data_uri or table.context_image_data_uri):
+                    continue
+                source_id = f"{source_prefix}-{side}-{visual_index}"
+                target_id = f"page-source-{side}-{table.page_number}"
+                source_aliases.append(
+                    f'<span class="prose-source-alias-anchor table-source-alias-anchor" '
+                    f'id="{_escape(source_id)}" data-source-alias="{_escape(target_id)}"></span>'
+                )
+            if not tables:
+                # A one-sided table still needs an explicit audit fact. The
+                # page group carries the available original-page screenshot;
+                # this card records why the opposite table side has no crop.
+                source_availability.append(
+                    f'<div class="table-source-empty">'
+                    f'{_escape("旧版" if side == "old" else "新版")}无对应表格截图'
+                    "（对应页没有该表格）</div>"
+                )
+        source_shots = "".join(source_aliases) + "".join(source_availability)
     rows_html = _render_table_row_summary(change)
     label = _CHANGE_LABELS.get(change.change_type, change.change_type)
     similarity = ""
@@ -4970,7 +5033,7 @@ def _render_table_change_html(
           <h3><span class="badge badge-{change.change_type}">{_escape(label)}</span> {_escape(title)}</h3>
           <div class="table-status">旧表：{_escape(_table_side_description(change.old_tables))}<br>
           新表：{_escape(_table_side_description(change.new_tables))}{_escape(similarity)}</div>
-          <div class="table-shot-grid">{old_shot}{new_shot}</div>
+          {source_shots}
           <details open class="table-text-details"><summary>表格文字明细</summary>{rows_html}</details>
         </div>
     """
@@ -14240,17 +14303,6 @@ def _build_page_source_candidates(
     candidates: dict[
         tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]
     ] = {}
-    # A table occurrence can be text-only. Such a page still needs a source
-    # image when a prose card owns the page, so suppress prose candidates only
-    # when the table path can actually render an image for that side/page.
-    table_image_pages: set[tuple[str, int]] = {
-        (side, table.page_number)
-        for change in table_changes
-        for side, tables in (("old", change.old_tables), ("new", change.new_tables))
-        for table in tables
-        if table.image_data_uri or table.context_image_data_uri
-    }
-
     def add(
         side: str,
         page: int,
@@ -14265,6 +14317,19 @@ def _build_page_source_candidates(
         if previous is None or priority < previous[2]:
             candidates[key] = (uri, view_box, priority)
 
+    # Prefer a table's complete-page context image when one exists. A table
+    # card may own only a crop, while the page group must provide a symmetric
+    # old/new page view. If no complete context exists, the table crop remains
+    # a valid last-resort source candidate.
+    for change in table_changes:
+        for side, tables in (("old", change.old_tables), ("new", change.new_tables)):
+            for table in tables:
+                context_uri, _highlighted = table_context_image(table, change, side)
+                if context_uri:
+                    add(side, table.page_number, context_uri, table.context_bbox, 1)
+                elif table.image_data_uri:
+                    add(side, table.page_number, table.image_data_uri, None, 2)
+
     for change in prose_changes:
         group = prose_visual_lookup.get(_section_change_visual_identity(change))
         if group is None:
@@ -14274,9 +14339,14 @@ def _build_page_source_candidates(
                 add(
                     side,
                     visual.page_number,
-                    "" if (side, visual.page_number) in table_image_pages else (visual.image_data_uri or visual.raw_image_data_uri),
+                    # Prose crops cover the complete page for the current
+                    # source builder. Keep the annotated image first so the
+                    # shared screenshot still shows coordinate-backed text
+                    # differences; raw remains the fallback for review-only
+                    # or unlocalized visuals.
+                    visual.image_data_uri or visual.raw_image_data_uri,
                     visual.source_view_box,
-                    2,
+                    3,
                 )
     return candidates
 
@@ -14381,6 +14451,7 @@ def _render_page_evidence_groups(
     page_source_candidates: dict[
         tuple[str, int], tuple[str, tuple[float, float, float, float] | None, int]
     ] | None = None,
+    force_shared_source: bool = False,
 ) -> str:
     """Render one evidence block per old/new page pair.
 
@@ -14499,6 +14570,9 @@ def _render_page_evidence_groups(
     for index, page_pair in enumerate(order):
         components.setdefault(find(index), []).append(page_pair)
 
+    # Standalone callers may already render source images inside their cards.
+    # Preserve their incremental fallback behavior; the main report opts into
+    # the shared-source mode below and therefore does not use this ledger.
     global_visible_pages = {"old": set(), "new": set()}
     for metadata in pair_metadata.values():
         for side in ("old", "new"):
@@ -14537,29 +14611,35 @@ def _render_page_evidence_groups(
         ]
         component_cards = [card for card, _source_pages in component_items]
         card_count = len(component_cards)
-        # A group-level pair is only a fallback for cards that genuinely have
-        # no embedded image.  Reused source crops are represented by hidden
-        # aliases, so a page source is still rendered when no card can expose
-        # a visible image for this component.
-        visible_pages = {"old": set(), "new": set()}
         has_source_page_metadata = False
+        visible_pages = {"old": set(), "new": set()}
         for _card, source_pages in component_items:
             if source_pages is None:
                 continue
             has_source_page_metadata = True
             for side in ("old", "new"):
                 visible_pages[side].update(source_pages["visible"].get(side, ()))
-        if page_source_candidates and has_source_page_metadata:
+        if page_source_candidates and has_source_page_metadata and force_shared_source:
+            # Every page group is the visual comparison unit. Render all
+            # pages owned by the component once, before its complete list of
+            # table/text cards. This prevents a matched card from becoming a
+            # misleading one-sided screenshot merely because another card
+            # already claimed the same page.
+            source_html = _render_page_source_pair(
+                component,
+                page_source_candidates,
+                old_pages_override=old_pages,
+                new_pages_override=new_pages,
+            )
+        elif page_source_candidates and has_source_page_metadata:
             missing_old_pages = [
-                page
-                for page in old_pages
+                page for page in old_pages
                 if page not in visible_pages["old"]
                 and page not in global_visible_pages["old"]
                 and ("old", page) not in fallback_rendered_pages
             ]
             missing_new_pages = [
-                page
-                for page in new_pages
+                page for page in new_pages
                 if page not in visible_pages["new"]
                 and page not in global_visible_pages["new"]
                 and ("new", page) not in fallback_rendered_pages
@@ -14576,20 +14656,21 @@ def _render_page_evidence_groups(
                 if missing_old_pages or missing_new_pages
                 else ""
             )
-        else:
+        elif page_source_candidates:
             # Preserve the standalone helper's legacy behavior for callers
             # that provide only rendered cards and no source metadata.
             source_html = (
                 _render_page_source_pair(component, page_source_candidates)
-                if page_source_candidates
-                and not any("<img" in card for card in component_cards)
+                if not any("<img" in card for card in component_cards)
                 else ""
             )
+        else:
+            source_html = ""
         rendered.append(
             f'''<section class="page-evidence-group" id="page-evidence-{old_token}-{new_token}"
                 data-old-page="{_escape(old_token)}" data-new-page="{_escape(new_token)}">
               <h3 class="page-evidence-title">{_escape(title)}</h3>
-              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；左右原页截图直接展示，下面列出全部差异明细。</p>
+              <p class="page-evidence-note">本页共 {card_count} 项表格/正文证据；左右原页截图直接展示，原文坐标浅色标注，下面列出全部差异明细。</p>
               {source_html}
               {"".join(component_cards)}
             </section>'''

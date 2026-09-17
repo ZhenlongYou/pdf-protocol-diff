@@ -225,7 +225,82 @@ class ScreenshotFirstTests(unittest.TestCase):
                 group.new_visuals[0].raw_image_data_uri,
             )
             self.assertIn('<details class="prose-text-details">',html)
-            self.assertLess(html.index('class="prose-source-visual"'),html.index('<details class="prose-text-details">'))
+            # Main cards keep the text facts; the shared page group owns the
+            # visible old/new source screenshots above them.
+            self.assertLess(html.index('class="page-evidence-source-grid"'),html.index('<details class="prose-text-details">'))
+
+    def test_shared_page_group_keeps_both_sides_for_every_matched_card(self):
+        """Multiple matched findings share one old/new screenshot pair."""
+
+        def at_page(sid, title, body, page):
+            return Section(
+                sid,
+                title,
+                title,
+                1,
+                (title,),
+                ("1",),
+                page,
+                page,
+                body,
+            )
+
+        old_first = at_page("old-first", "1 First", "The limit is 100 mV.", 7)
+        new_first = at_page("new-first", "1 First", "The limit is 120 mV.", 9)
+        old_second = at_page("old-second", "2 Second", "The mode is legacy.", 7)
+        new_second = at_page("new-second", "2 Second", "The mode is revised.", 9)
+        changes = [
+            SectionChange(
+                "modified",
+                old_first,
+                new_first,
+                0.9,
+                replaced_snippets=[SnippetPair(old_first.body, new_first.body)],
+            ),
+            SectionChange(
+                "modified",
+                old_second,
+                new_second,
+                0.9,
+                replaced_snippets=[SnippetPair(old_second.body, new_second.body)],
+            ),
+        ]
+        old_visual = ProseSourceVisual(
+            7,
+            (0.0, 0.0, 100.0, 100.0),
+            "data:image/png;base64,old-shared",
+            1,
+            1,
+            source_view_box=(0.0, 0.0, 100.0, 100.0),
+        )
+        new_visual = replace(old_visual, page_number=9, image_data_uri="data:image/png;base64,new-shared")
+        visuals = [
+            ProseSourceVisualGroup("modified", "old-first", "new-first", (old_visual,), (new_visual,)),
+            ProseSourceVisualGroup("modified", "old-second", "new-second", (old_visual,), (new_visual,)),
+        ]
+        result = DiffResult(
+            Path("old.pdf"),
+            Path("new.pdf"),
+            [old_first, old_second],
+            [new_first, new_second],
+            changes,
+            [],
+            prose_source_visuals=visuals,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            html = write_reports(result, Path(temp_dir), DiffOptions())["html"].read_text()
+
+        self.assertEqual(1, html.count('class="page-evidence-source-grid"'))
+        self.assertEqual(1, html.count('id="page-source-old-7"'))
+        self.assertEqual(1, html.count('id="page-source-new-9"'))
+        self.assertEqual(1, html.count('src="data:image/png;base64,old-shared"'))
+        self.assertEqual(1, html.count('src="data:image/png;base64,new-shared"'))
+        for card_id in ("change-1", "change-2"):
+            start = html.index(f'<section class="change-card" id="{card_id}"')
+            end = html.index("</section>", start)
+            self.assertNotIn("<img", html[start:end])
+        self.assertIn("The limit is", html)
+        self.assertIn("The mode is", html)
 
     def test_sentence_punctuation_only_pdf_change_is_ignored_end_to_end(self):
         """Ordinary prose punctuation must not become a report-level delta."""

@@ -1,6 +1,15 @@
 schema_version: 1
 scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-READER-PAGE-GROUP-SOURCE-SYMMETRY-20260917
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "同一页面组中的旧版和新版内容被卡片级截图去重拆开，后续差异卡只剩单侧截图，无法直接完成新旧对比。"
+    discovered_via: user_counterexample
+    failure_mechanism: "来源图片在差异卡内部做全局复用，复用项只保留隐藏别名；页面组兜底只补缺页，不能把已被卡片占用的旧/新版来源重新组成对称的页面级截图对。"
+    red_green_pair_id: PAIR-READER-PAGE-GROUP-SOURCE-SYMMETRY
+    regression_test_id: READER_PAGE_GROUP_SHARED_SOURCE_TEST
+    public_path_rerun_id: RUN-READER-PAGE-GROUP-SYMMETRY-20260917
+    state: verified
   - id: DEF-READER-PAGE-SCREENSHOT-DEDUP-20260917
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
     user_symptom: "同一物理页被多个证据卡重复截图，跨页卡还可能再次插入页级截图；同一页组的一侧新版截图也可能缺失。"

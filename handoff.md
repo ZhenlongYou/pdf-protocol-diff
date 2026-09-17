@@ -1,5 +1,13 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：页面组左右截图对称与全部差异聚合（2026-09-17）
+
+- 用户最新反馈同一页组中只看到旧版单页截图，无法完成新旧内容对比。根因是上一轮把去重放在差异卡内部：首个卡片保留图片，后续卡片只保留别名；页面组兜底只补真正缺失的页，不能把每个页组重新组织成对称的左右原页证据。
+- canonical `reporting.py` 现由页面组统一持有可见截图：主报告关闭正文/表格卡内的重复截图，按页组把所有实际覆盖的旧版和新版物理页各渲染一次；卡片仍保留完整正文、表格行和隐藏来源锚点。表格单侧缺页继续以状态文字说明，真实无对应页才显示单侧页面证据。
+- 真实 1–20 页入口重跑产物：`/Users/mac/Documents/ProtocolPdfDiffReports/final_reader_page_group_symmetric_20260917/protocol_diff_0m5hvzeb/protocol_diff_report.html`。9 个页面组中 8 个双侧匹配组均有旧/新版截图；主区 17 个正文卡和 6 个表格卡均无重复内嵌图；44 张内嵌图片字节级无重复、DOM id 无重复，跳转/省略/截图不可用占位均为 0，表格明细 6 项默认展开。
+- 回归：完整 `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -q` 为 1764 项通过、1 项条件跳过；截图/页面组/正文/坐标定向套件 68 项通过；`py_compile`、`git diff --check` 和嵌入图片解码核验通过。新增 `READER_PAGE_GROUP_SHARED_SOURCE_TEST` 覆盖多张差异卡共享一对旧/新版截图。
+- 缺陷账本新增并验证 `DEF-READER-PAGE-GROUP-SOURCE-SYMMETRY-20260917`。报告整体识别状态仍为 `degraded / 需人工复核`；本次 1–20 页页窗验证不外推整本 PDF 的内容对应准确率。源码改动尚待本轮提交并推送。
+
 ## 当前任务：正文数值相似度误折叠（2026-09-17）
 
 - 用户指出真实报告把第 17 页正文 `26450 → 26560` 显示为“相似度 1.000”，后续按该值折叠会隐藏协议关键参数。根因是 `SectionChange.similarity` 只用于章节身份配对，长正文单个数值变化得到约 `0.9996`，旧展示层按三位小数判断 `1.000`。
