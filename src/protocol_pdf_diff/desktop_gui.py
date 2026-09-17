@@ -267,6 +267,16 @@ class ProtocolDiffDesktopApp:
         self._refresh_advanced_summary()
 
         self._last_outputs: dict[str, Path] | None = None
+        for observed_var in (
+            self.old_pdf_var,
+            self.new_pdf_var,
+            self.old_start_var,
+            self.old_end_var,
+            self.new_start_var,
+            self.new_end_var,
+            self.output_dir_var,
+        ):
+            observed_var.trace_add("write", self._on_comparison_input_changed)
         self._result_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.page_entry_widgets: dict[str, tk.Entry] = {}  # 保存四个原生页码输入框，供 smoke test 检查真实输入能力。
         self.file_browse_buttons: list[tk.Widget] = []  # 两个大选择区和输出目录按钮共用打包自检契约。
@@ -624,26 +634,18 @@ class ProtocolDiffDesktopApp:
         )
         self.advanced_bar.grid(row=2, column=0, sticky="ew", pady=(16, 0))
         self.advanced_bar.columnconfigure(3, weight=1)
+        # Keep the compatibility list for older embedders, but do not expose
+        # tuning controls that ordinary users cannot interpret safely.
         self.settings_chips: list[ttk.Frame] = []
-        for column, (key, label) in enumerate(
-            (("threshold", "阈值"), ("snippets", "每章"))
-        ):
+        for _key in ("threshold", "snippets"):
             chip = ttk.Frame(
                 self.advanced_bar, style="SectionBody.TFrame", padding=(12, 8)
             )
-            chip.grid(row=0, column=column, sticky="w", padx=(0 if column == 0 else 4, 4))
-            ttk.Label(chip, text=label, style="ProfileKey.TLabel").grid(
-                row=0, column=0, sticky="w", padx=(0, 7)
-            )
-            ttk.Label(
-                chip,
-                textvariable=self.profile_value_vars[key],
-                style="ProfileValue.TLabel",
-            ).grid(row=0, column=1, sticky="w")
+            chip.grid_remove()
             self.settings_chips.append(chip)
         self.advanced_toggle = RoundedButton(
             self.advanced_bar,
-            text="高级设置  ›",
+            text="报告设置  ›",
             command=self._toggle_advanced,
             font_family=self.ui_font,
             background=UI_THEME["canvas"],
@@ -662,7 +664,7 @@ class ProtocolDiffDesktopApp:
         self._apply_responsive_layout(self.design_window_size[0])
 
         self.advanced_body = self._create_elevated_section(
-            container, row=3, text="高级设置", pady=(14, 14)
+            container, row=3, text="报告设置", pady=(14, 14)
         )
         self.advanced_body.master.grid_remove()
         self._build_advanced_settings(self.advanced_body)
@@ -860,17 +862,11 @@ class ProtocolDiffDesktopApp:
         self._add_file_row(parent, 0, "输出目录", self.output_dir_var, self._browse_output_dir)
         settings_row = ttk.Frame(parent, style="SectionBody.TFrame")
         settings_row.grid(row=1, column=0, columnspan=3, sticky="ew", padx=2)
-        self._add_setting_entry(settings_row, 0, 0, "章节匹配阈值", self.min_similarity_var)
-        self._add_setting_entry(settings_row, 0, 2, "每章片段数", self.max_snippets_var)
-        unchanged = ttk.Checkbutton(
-            settings_row, text="列出未变化章节", variable=self.include_unchanged_var
-        )
-        unchanged.grid(row=0, column=4, sticky="w", padx=(10, 6), pady=10)
         auto_open = ttk.Checkbutton(
             settings_row, text="完成后自动打开报告", variable=self.auto_open_var
         )
-        auto_open.grid(row=0, column=5, sticky="w", padx=(10, 0), pady=10)
-        self.input_widgets.extend((unchanged, auto_open))
+        auto_open.grid(row=0, column=0, sticky="w", padx=(10, 0), pady=10)
+        self.input_widgets.append(auto_open)
 
     def _toggle_advanced(self) -> None:
         """Expand or collapse optional settings without changing their values."""
@@ -882,15 +878,17 @@ class ProtocolDiffDesktopApp:
             self.advanced_toggle.configure(text="收起  ▾")
         else:
             card.grid_remove()
-            self.advanced_toggle.configure(text="高级设置  ›")
+            self.advanced_toggle.configure(text="报告设置  ›")
         self._update_content_scrollregion()
 
     def _refresh_advanced_summary(self, *_trace_args: object) -> None:
-        """Keep the three decision-relevant setting chips synchronized."""
+        """Keep the output-directory summary synchronized."""
 
         output_path = self.output_dir_var.get().strip()
         output_name = Path(output_path).name if output_path else "未设置"
         self.profile_value_vars["output"].set(compact_display_name(output_name))
+        # These values remain available to embedders that construct the legacy
+        # Tk form programmatically; no corresponding user controls are laid out.
         self.profile_value_vars["threshold"].set(self.min_similarity_var.get())
         self.profile_value_vars["snippets"].set(self.max_snippets_var.get())
 
@@ -903,7 +901,27 @@ class ProtocolDiffDesktopApp:
             frame.grid()
         else:
             frame.grid_remove()
+        self._mark_result_stale()
         self._update_content_scrollregion()
+
+    def _on_comparison_input_changed(self, *_trace_args: object) -> None:
+        """Invalidate a completed result when a PDF or page range changes."""
+
+        self._mark_result_stale()
+
+    def _mark_result_stale(self) -> None:
+        """Hide actions for a result that no longer matches the current inputs."""
+
+        if self.is_running:
+            return
+        had_result = bool(self._last_outputs or self.summary_var.get() or self.report_path_var.get())
+        self._last_outputs = None
+        self.summary_var.set("")
+        self.report_path_var.set("")
+        self.open_html_button.grid_remove()
+        self.open_dir_button.grid_remove()
+        if had_result:
+            self.status_var.set("输入已修改，请重新比较。")
 
     def _apply_responsive_layout(self, width: int) -> None:
         """Keep the two documents dominant, stacking only on narrow windows."""
@@ -930,13 +948,6 @@ class ProtocolDiffDesktopApp:
         for chip in self.settings_chips:
             chip.grid_forget()
         self.advanced_toggle.grid_forget()
-        for column, chip in enumerate(self.settings_chips):
-            chip.grid(
-                row=0,
-                column=column,
-                sticky="w",
-                padx=(0 if column == 0 else 4, 4),
-            )
         self.advanced_toggle.grid(row=0, column=2, sticky="w", padx=(4, 0), pady=8)
         self.document_layout_mode = mode
 
@@ -1130,6 +1141,8 @@ class ProtocolDiffDesktopApp:
         )
 
         options = DiffOptions(
+            # The legacy Tk bridge keeps its programmatic configuration
+            # contract.  The supported WebView UI never sends these fields.
             min_section_match_similarity=parse_positive_float(
                 self.min_similarity_var.get(), "章节匹配阈值"
             ),

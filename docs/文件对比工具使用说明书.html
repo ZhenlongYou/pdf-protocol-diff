@@ -186,9 +186,9 @@
       <a href="#quick-start">2. 三分钟快速上手</a>
       <a href="#main-page">3. 主工作页详解</a>
       <a href="#page-range">4. 页面范围怎么选</a>
-      <a href="#advanced">5. 高级设置详解</a>
-      <a href="#threshold">6. 章节匹配阈值</a>
-      <a href="#snippets">7. 每章片段数</a>
+      <a href="#advanced">5. 报告设置详解</a>
+      <a href="#threshold">6. 章节匹配如何处理</a>
+      <a href="#snippets">7. 正文片段如何展示</a>
       <a href="#run">8. 开始比较与运行状态</a>
       <a href="#report">9. HTML 报告页详解</a>
       <a href="#outputs">10. 六种输出文件</a>
@@ -204,7 +204,7 @@
         <h2>1. 工具用途与界面结构</h2>
         <p class="lead">文件对比工具用于比较两份 PDF 的版本差异。它先识别章节和正文，再补充表格截图、Figure 原图和视觉漏检证据，最后生成适合人工审阅的 HTML 报告以及 CSV、JSON 等审计文件。</p>
         <div class="callout">
-          <strong>关于“页签”：</strong>当前桌面版没有传统的多页签界面。软件由一个主工作页和一个“高级设置”弹窗组成；比较完成后，HTML 报告在系统浏览器中作为独立页面打开。主界面中的“旧版 PDF”和“新版 PDF”是两张输入卡片，不是页签。
+          <strong>关于“页签”：</strong>当前桌面版没有传统的多页签界面。软件由一个主工作页和一个“报告设置”弹窗组成；比较完成后，HTML 报告在系统浏览器中作为独立页面打开。主界面中的“旧版 PDF”和“新版 PDF”是两张输入卡片，不是页签。
         </div>
         <p>工具关注的是技术文档审阅：正文按逻辑章节匹配，不强制把旧版第 N 页和新版第 N 页直接配对。因此，即使新版插入内容导致后续页码整体移动，同一章节仍有机会正确对应。</p>
         <p>自动结果用于定位和筛查，不能替代对源 PDF 的最终确认。尤其是公式、复杂多栏、扫描件和图形语义，需要结合报告给出的可信度与原文证据判断。</p>
@@ -216,7 +216,7 @@
           <div class="step"><strong>选择旧版 PDF。</strong>点击左侧“选择旧版 PDF”区域，选中作为比较基准的旧文件。</div>
           <div class="step"><strong>选择新版 PDF。</strong>点击右侧“选择新版 PDF”区域，选中要审阅的新文件。</div>
           <div class="step"><strong>确认页面范围。</strong>通常保持“全部页面”；只审阅某段内容时，再分别为旧、新 PDF 选择起止页。</div>
-          <div class="step"><strong>按需调整高级设置。</strong>第一次使用建议保持阈值 <code>0.72</code>、每章片段数 <code>20</code>。</div>
+          <div class="step"><strong>按需选择报告设置。</strong>可指定输出目录，也可选择比较完成后自动打开 HTML 报告；章节处理参数由工具自动保持稳定。</div>
           <div class="step"><strong>点击“开始比较”。</strong>等待状态栏依次显示读取、匹配、生成视觉证据和生成报告。</div>
           <div class="step"><strong>打开 HTML 报告。</strong>先看顶部“识别可信度”，再按左侧导航核对表格、正文和视觉复核项。</div>
         </div>
@@ -239,9 +239,7 @@
             </div>
           </div>
           <div class="ui-footer">
-            <span class="ui-pill"><span class="num">9</span>阈值 0.72</span>
-            <span class="ui-pill"><span class="num">10</span>每章 20</span>
-            <span class="ui-pill"><span class="num">11</span>高级设置 ›</span>
+            <span class="ui-pill"><span class="num">11</span>报告设置 ›</span>
             <span class="ui-run"><span class="num">12</span>开始比较</span>
           </div>
         </div>
@@ -251,9 +249,9 @@
           <div class="control"><h4>2、6　选择 PDF 区域</h4><p>点击后打开系统文件选择窗口，只允许选择 PDF。选定后，卡片中会显示文件名；再次点击可以替换当前选择。</p></div>
           <div class="control"><h4>3、7　全部页面</h4><p>比较整份 PDF。适合正式版本审阅，也是最容易理解报告范围的默认选择。</p></div>
           <div class="control"><h4>4、8　选择页面</h4><p>显示起始页和终止页输入框，只抽取所选范围。旧、新两侧的范围可以不同，以适应插页造成的页码漂移。</p></div>
-          <div class="control"><h4>9　阈值状态标签</h4><p>只显示当前章节匹配阈值，本身不可直接点击修改。要修改，请进入“高级设置”。</p></div>
-          <div class="control"><h4>10　每章状态标签</h4><p>显示每章最多在读者报告中展开的正文差异片段数。它不等于整份报告的差异总数。</p></div>
-          <div class="control"><h4>11　高级设置</h4><p>打开覆盖在主界面上的设置弹窗，可修改输出目录、阈值、每章片段数和两个复选项。</p></div>
+          <div class="control"><h4>9　报告设置</h4><p>打开覆盖在主界面上的设置弹窗，可选择输出目录，以及决定比较完成后是否自动打开 HTML 报告。</p></div>
+          <div class="control"><h4>10　内部比较策略</h4><p>章节配对、正文片段展示和未变化章节的处理由工具按固定策略完成，普通审阅流程不需要调参。</p></div>
+          <div class="control"><h4>11　报告设置弹窗</h4><p>点击右上角 <strong>×</strong> 或按 <kbd>Esc</kbd> 返回主工作页；已选 PDF 和页码范围会保留。</p></div>
           <div class="control"><h4>12　开始比较</h4><p>校验输入后启动比较。运行时文字变为“比较中”，其他按钮和输入框暂时禁用，防止中途改变配置。</p></div>
         </div>
 
@@ -262,7 +260,7 @@
           <thead><tr><th>按钮</th><th>作用</th><th>什么时候可用</th></tr></thead>
           <tbody>
             <tr><td><strong>打开 HTML 报告</strong></td><td>用系统默认浏览器打开本次生成的 <code>protocol_diff_report.html</code>。</td><td>本次比较成功生成报告后出现。</td></tr>
-            <tr><td><strong>打开输出目录</strong></td><td>打开本次带时间戳的报告文件夹，可查看全部六种输出文件。</td><td>本次比较成功生成报告后出现。</td></tr>
+            <tr><td><strong>打开输出目录</strong></td><td>打开按旧版与新版协议文件名命名的报告文件夹，可查看全部六种输出文件。</td><td>本次比较成功生成报告后出现。</td></tr>
           </tbody>
         </table>
 
@@ -287,52 +285,48 @@
       </section>
 
       <section id="advanced">
-        <h2>5. 高级设置详解</h2>
-        <p>点击主界面底部的“高级设置 ›”后，设置弹窗会覆盖主工作页。点击右上角 <strong>×</strong> 或按 <kbd>Esc</kbd> 可以关闭；关闭不会清空已经填写的值。</p>
+        <h2>5. 报告设置详解</h2>
+        <p>点击主界面底部的“报告设置 ›”后，设置弹窗会覆盖主工作页。点击右上角 <strong>×</strong> 或按 <kbd>Esc</kbd> 可以关闭；关闭不会清空已经填写的值。</p>
         <table>
           <thead><tr><th>控件</th><th>默认值</th><th>作用</th><th>建议</th></tr></thead>
           <tbody>
             <tr><td>输出目录</td><td><code>~/Documents/ProtocolPdfDiffReports</code></td><td>指定所有带时间戳报告文件夹的上级目录。既可直接输入路径，也可点击右侧“选择”。</td><td>使用空间充足、符合文档保密要求的位置。</td></tr>
             <tr><td>输出目录旁“选择”</td><td>—</td><td>打开系统目录选择窗口，不是选择具体文件。</td><td>不熟悉路径输入时使用。</td></tr>
-            <tr><td>章节匹配阈值</td><td><code>0.72</code></td><td>控制重命名或重编号章节进行模糊配对时所需的正文相似程度。</td><td>首次比较保持默认值。</td></tr>
-            <tr><td>每章片段数</td><td><code>20</code></td><td>限制每个章节在 HTML、Markdown、TXT 读者报告中展开的正文差异片段数。</td><td>日常审阅用 20；需要在 HTML 查看更多内容时调大。</td></tr>
-            <tr><td>列出未变化章节</td><td>关闭</td><td>开启后，报告也列出识别为未变化的章节。</td><td>一般关闭；核对章节覆盖范围时再开启。</td></tr>
             <tr><td>完成后自动打开报告</td><td>关闭</td><td>比较成功后自动用默认浏览器打开 HTML 报告。</td><td>连续人工审阅时可开启。</td></tr>
-            <tr><td>右上角 ×</td><td>—</td><td>关闭高级设置弹窗并返回主工作页。</td><td>等同按 <kbd>Esc</kbd>。</td></tr>
+            <tr><td>右上角 ×</td><td>—</td><td>关闭报告设置弹窗并返回主工作页。</td><td>等同按 <kbd>Esc</kbd>。</td></tr>
           </tbody>
         </table>
       </section>
 
       <section id="threshold">
-        <h2>6. 章节匹配阈值有什么用</h2>
-        <p><strong>章节匹配阈值不是“差异灵敏度”。</strong>它主要用于判断两个标题已改名、编号已变化的章节是否仍可能是同一个逻辑章节。正文中的数值、单位、否定词、标识符等细微变化不会因为把阈值调低就自动消失。</p>
+        <h2>6. 章节匹配如何处理</h2>
+        <p><strong>章节匹配不是“差异灵敏度”。</strong>工具会结合章节编号、标题、正文和页窗等证据判断两个章节是否仍是同一个逻辑章节；正文中的数值、单位、否定词和标识符变化会继续参加比较。相关内部参数保持固定，避免一次误调改变整份报告的章节结构。</p>
         <table>
-          <thead><tr><th>设置倾向</th><th>可能结果</th><th>典型现象</th></tr></thead>
+          <thead><tr><th>报告中的证据</th><th>含义</th><th>处理建议</th></tr></thead>
           <tbody>
-            <tr><td>较低</td><td>章节配对更积极。</td><td>可能减少“整章新增 + 整章删除”，但也增加把两个相似模板章节配错的风险。</td></tr>
-            <tr><td>默认 0.72</td><td>在当前工具中作为日常折中值。</td><td>适合大多数有稳定章节结构的协议 PDF。</td></tr>
-            <tr><td>较高</td><td>章节配对更谨慎。</td><td>可减少误配，但大幅改写或改名章节更容易被拆成新增和删除。</td></tr>
+            <tr><td>配对依据</td><td>报告会显示编号、标题、正文或页窗等实际采用的证据。</td><td>先核对配对依据，再阅读正文和源 PDF。</td></tr>
+            <tr><td>新增 / 删除成对出现</td><td>可能表示章节结构变化，也可能表示对应关系需要复核。</td><td>结合相邻章节、页码和原文截图判断。</td></tr>
+            <tr><td>需人工复核</td><td>当前抽取或配对证据不足以支持自动结论。</td><td>回到源 PDF 核对，不把相似度数字当成技术结论。</td></tr>
           </tbody>
         </table>
-        <p>可输入范围为大于 0 且不超过 1 的有限数字。若报告中大量本应对应的章节被拆成“新增/删除”，可以小幅降低后复跑；若两个明显无关章节被放在同一张修改卡中，可以小幅提高后复跑。</p>
         <div class="callout">
           <strong>不要只看相似度数字。</strong>同编号、父子章节关系、相邻章节和用户指定页窗等强结构证据，也可能成为配对依据。报告在相关卡片中会显示“配对依据”，供人工判断。
         </div>
       </section>
 
       <section id="snippets">
-        <h2>7. 每章片段数有什么用</h2>
-        <p>“每章片段数”控制<strong>每个章节在读者报告里最多展开多少条正文差异候选</strong>。新增、删除和替换三类合计占用这个额度；它不是整份 HTML 的总上限，也不限制章节匹配和完整比较。</p>
+        <h2>7. 正文片段如何展示</h2>
+        <p>为了让长文档报告保持可读，正文差异卡按固定上限展示优先级较高的片段；新增、删除和替换三类共用这个上限。整份章节比较仍会执行，完整审计内容仍写入 CSV 和 JSON。</p>
         <table>
           <thead><tr><th>示例</th><th>HTML 中看到什么</th><th>完整数据在哪里</th></tr></thead>
           <tbody>
-            <tr><td>某章共 12 条，设置 20</td><td>显示全部 12 条。</td><td>HTML、CSV、JSON 都有。</td></tr>
-            <tr><td>某章共 35 条，设置 20</td><td>展开优先级较高的 20 条，并提示“还有 15 处未展示”。</td><td><code>changes.csv</code> 和 <code>protocol_diff_data.json</code> 保留完整审计片段。</td></tr>
-            <tr><td>设置 0</td><td>正文差异片段不展开，只显示未展示数量和其他报告证据。</td><td>完整审计内容仍在 CSV/JSON。</td></tr>
+            <tr><td>片段数量未超过上限</td><td>HTML 展示全部候选。</td><td>HTML、CSV、JSON 都有。</td></tr>
+            <tr><td>片段数量超过上限</td><td>HTML 展示优先级较高的片段，并提示仍有未展示内容。</td><td><code>changes.csv</code> 和 <code>protocol_diff_data.json</code> 保留完整审计片段。</td></tr>
+            <tr><td>报告出现“未展示”</td><td>只表示读者页面做了长度控制，不表示章节没有完整比较。</td><td>转到同目录下的 CSV/JSON。</td></tr>
           </tbody>
         </table>
         <div class="callout danger">
-          <strong>未展示内容不能在当前 HTML 中展开。</strong>HTML 只告诉你未展示了多少条，不提供“展开剩余 15 条”的按钮。若希望继续在 HTML 中阅读，需要把“每章片段数”调大并重新生成报告；也可以直接查看 <code>changes.csv</code> 或 JSON。
+          <strong>未展示内容不能在当前 HTML 中展开。</strong>HTML 只告诉你未展示了多少条，不提供展开按钮；请直接查看同目录下的 <code>changes.csv</code> 或 JSON。
         </div>
         <p>该上限针对正文差异片段。表格卡、Figure 原图、视觉漏检核对项和各章节本身有独立的报告结构，不会简单地被这个数字截成整份报告只剩 20 项。</p>
       </section>
@@ -342,7 +336,7 @@
         <div class="diagram" aria-label="处理流程">
           <div>读取旧版</div><div>读取新版</div><div>匹配差异</div><div>生成视觉证据</div><div>生成报告</div>
         </div>
-        <p>点击“开始比较”后，软件先校验两个 PDF、输出目录、页面范围和高级参数。校验通过才会开始后台处理。状态栏会显示预扫描、读取、构建章节、章节匹配和报告生成等阶段。预扫描与读取显示页数；匹配显示已检查候选数或章节数。这些计数属于当前阶段，不是整项任务的完成百分比。</p>
+        <p>点击“开始比较”后，软件先校验两个 PDF、输出目录和页面范围。校验通过才会开始后台处理。状态栏会显示预扫描、读取、构建章节、章节匹配和报告生成等阶段。预扫描与读取显示页数；匹配显示已检查候选数或章节数。这些计数属于当前阶段，不是整项任务的完成百分比。</p>
         <p>运行期间，“开始比较”变为“比较中”，并显示已用时间，同时出现<strong>“终止比较”</strong>按钮。点击后显示“正在停止”，结束本次后台任务、清理本次临时文件，再恢复“开始比较”。其他按钮和输入框暂时禁用；关闭窗口也会先终止任务，清理完成后再关闭。只有完整报告才会出现在输出目录，取消不会覆盖或删除以前的报告。</p>
         <p>成功后，状态栏显示可信度及主要数量，并出现“打开 HTML 报告”和“打开输出目录”。如果处理失败，错误原因会直接显示在底部状态区域，输入控件恢复可用。</p>
       </section>
@@ -351,7 +345,7 @@
         <h2>9. HTML 报告页详解</h2>
         <p>HTML 是日常审阅的主要入口。它是一个可离线打开的独立页面，布局由顶部标题、可信度横幅、左侧导航和右侧证据区组成。</p>
         <div class="report-map" role="img" aria-label="HTML 报告布局示意图">
-          <div class="report-head"><strong>协议 PDF 差异报告</strong><br><small>生成时间 · 章节匹配阈值</small></div>
+          <div class="report-head"><strong>协议 PDF 差异报告</strong><br><small>生成时间 · 内部比较策略</small></div>
           <div class="report-body">
             <div class="report-nav">
               <strong>左侧差异导航</strong>
@@ -429,7 +423,7 @@
 
       <section id="outputs">
         <h2>10. 六种输出文件</h2>
-        <p>每次运行都会在输出目录下创建一个形如 <code>protocol_diff_YYYYMMDD_HHMMSS</code> 的新文件夹，不覆盖之前的报告。</p>
+        <p>每次运行都会在输出目录下创建一个按旧版与新版协议文件名组合命名、并附带时间的文件夹，例如 <code>旧版协议_vs_新版协议_20260917_153000</code>；同一目录下的历史报告不会被覆盖。</p>
         <div class="file-grid">
           <div class="file-card"><code>protocol_diff_report.html</code><br><strong>主要阅读报告</strong><p>包含导航、可信度、原文截图、正文差异、表格证据和视觉复核项，适合浏览器阅读。</p></div>
           <div class="file-card"><code>protocol_diff_report.md</code><br><strong>Markdown 报告</strong><p>适合放入文档系统、Wiki 或代码仓库，内容以文字证据为主。</p></div>
@@ -450,7 +444,7 @@
           <li><strong>确认输入和页窗。</strong>核对报告中的旧、新路径与选择页。</li>
           <li><strong>先看表格和视觉证据。</strong>这些区域位于报告正文之前，通常更容易暴露数值或图形变化。</li>
           <li><strong>按左侧导航逐章复核。</strong>旧版淡红代表被删除或替换的旧内容，新版淡绿代表新增或替换后的新内容。</li>
-          <li><strong>看到“未展示”时不要停止。</strong>根据任务需要调大片段数复跑，或转到 CSV/JSON 查看完整审计内容。</li>
+          <li><strong>看到“未展示”时不要停止。</strong>完整章节仍已比较；转到同目录下的 CSV/JSON 查看完整审计内容。</li>
           <li><strong>最终回到源 PDF。</strong>页码和截图是定位工具；规范性结论仍应以源文件为准。</li>
         </ol>
 
@@ -462,7 +456,7 @@
             <tr><td><span class="tag green">新增</span></td><td>新版出现了未找到对应旧章节的内容。</td></tr>
             <tr><td><span class="tag red">删除</span></td><td>旧版内容在新版中没有找到对应章节。</td></tr>
             <tr><td><span class="tag amber">复核</span></td><td>存在字符映射、布局顺序或结构证据不充分的问题，工具不自动认定为实质技术修改。</td></tr>
-            <tr><td>未变化</td><td>只有开启“列出未变化章节”时才会列出；默认隐藏以缩短报告。</td></tr>
+            <tr><td>未变化</td><td>按固定读者报告策略处理；完整章节覆盖和判断依据仍保存在机器审计数据中。</td></tr>
           </tbody>
         </table>
       </section>
@@ -494,12 +488,10 @@
           <thead><tr><th>界面提示</th><th>原因</th><th>处理方法</th></tr></thead>
           <tbody>
             <tr><td>请选择有效的旧版 / 新版 PDF</td><td>尚未选择、路径失效或文件已移动。</td><td>重新点击对应 PDF 选择区域。</td></tr>
-            <tr><td>输出目录不能为空</td><td>高级设置中的输出目录被清空。</td><td>输入有效目录，或点击“选择”。</td></tr>
+            <tr><td>输出目录不能为空</td><td>报告设置中的输出目录被清空。</td><td>输入有效目录，或点击“选择”。</td></tr>
             <tr><td>指定范围时必须填写起始页和终止页</td><td>选择了“选择页面”，但只填了一个页码。</td><td>两项都填写，或改回“全部页面”。</td></tr>
             <tr><td>起始页不能大于终止页</td><td>页码顺序写反。</td><td>交换两个数字。</td></tr>
             <tr><td>页码必须是正整数</td><td>输入了小数、文字、0 或负数。</td><td>填写从 1 开始的整数。</td></tr>
-            <tr><td>章节匹配阈值必须是数字 / 允许区间为 0 到 1</td><td>阈值格式或范围不正确。</td><td>填写大于 0 且不超过 1 的数字，例如 <code>0.72</code>。</td></tr>
-            <tr><td>每章片段数必须是整数 / 不能小于 0</td><td>输入了小数、文字或负数。</td><td>填写 0 或正整数。</td></tr>
             <tr><td>结束后台任务失败，正在重试清理</td><td>系统暂时未能结束本次任务或其识别进程。</td><td>程序会继续重试清理；清理完成前保持当前任务状态，不会并行启动另一项比较。</td></tr>
             <tr><td>无法打开 HTML 报告</td><td>报告被移动、删除，或默认浏览器设置异常。</td><td>点击“打开输出目录”，手动双击 HTML；若文件不存在则重新运行。</td></tr>
           </tbody>
@@ -508,9 +500,7 @@
 
       <section id="faq">
         <h2>14. 常见问题</h2>
-        <details class="faq"><summary>设置每章 20，整份 HTML 是否只能看到 20 条？</summary><div>不是。20 是每个章节的正文差异展开上限。不同章节各自计算，表格、Figure 和视觉核对项也有独立结构。</div></details>
-        <details class="faq"><summary>某章有 35 条差异，剩余 15 条能在 HTML 中展开吗？</summary><div>不能。HTML 只显示“还有 15 处未展示”。把每章片段数调大后重新生成，或查看 <code>changes.csv</code> / <code>protocol_diff_data.json</code>。</div></details>
-        <details class="faq"><summary>阈值调低会不会漏掉细小文字变化？</summary><div>章节匹配阈值主要决定两个章节是否配成一对，不是正文差异过滤阈值。技术数值、单位、否定词和标识符变化仍会参与比较。</div></details>
+        <details class="faq"><summary>为什么看不到章节阈值和片段数设置？</summary><div>这些参数会影响章节配对和报告长度，工具按固定策略处理，避免用户在不了解证据边界时误调。完整审计片段仍保存在同目录下的 CSV/JSON。</div></details>
         <details class="faq"><summary>为什么旧、新页面范围可以不一样？</summary><div>新版本插入或删除页面后，同一章节的物理页码会移动。两侧独立页窗可以让你准确指定各自的目标区域。</div></details>
         <details class="faq"><summary>为什么报告显示 0 项，却仍写“需人工复核”？</summary><div>0 只表示当前支持的抽取层没有检出读者差异；如果扫描、版面、OCR、视觉覆盖或章节识别存在风险，就不能据此确认一致。</div></details>
         <details class="faq"><summary>报告是否自动比较公式？</summary><div>不比较。公式自动差分已关闭，公式区域只用于避免正文或表格重复识别。复杂公式必须回到源 PDF 人工核对。</div></details>
@@ -522,9 +512,9 @@
         <h2>15. 版本依据</h2>
         <p>本说明书按以下本地权威源码快照编写。界面或算法升级后，按钮名称、默认值和报告结构可能变化，应以当前程序为准。</p>
         <ul class="source-list">
-          <li><code>src/protocol_pdf_diff/webui/index.html:175–355</code>：主界面、全部按钮、高级设置、运行状态和交互行为。</li>
+          <li><code>src/protocol_pdf_diff/webui/index.html:175–355</code>：主界面、全部按钮、报告设置、运行状态和交互行为。</li>
           <li><code>src/protocol_pdf_diff/webview_gui.py</code>：文件选择、输入校验、后台运行、报告打开、完成摘要和关闭保护。</li>
-          <li><code>src/protocol_pdf_diff/ui_shared.py:14–64</code>：默认输出目录、页码、阈值和每章片段数的输入规则。</li>
+          <li><code>src/protocol_pdf_diff/ui_shared.py:14–64</code>：默认输出目录、页码和内部比较策略的默认值。</li>
           <li><code>src/protocol_pdf_diff/compare.py:4180–4280, 6089–6127</code>：每章正文差异候选的合并计数、优先展示和未展示数量。</li>
           <li><code>src/protocol_pdf_diff/reporting.py:308–575</code>：六种输出文件、读者报告与完整审计数据的边界。</li>
           <li><code>src/protocol_pdf_diff/reporting.py:890–1678</code>：HTML 报告导航、汇总、正文、表格、Figure 和视觉复核区。</li>

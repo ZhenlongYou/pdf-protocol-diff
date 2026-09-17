@@ -660,7 +660,9 @@ def write_reports_transaction(bundle, output_dir, options):
                 raise ValueError("symlink report output")
             relative[key] = value.resolve().relative_to(source)
         # This empty destination is created by this transaction, never reused.
-        destination = Path(tempfile.mkdtemp(prefix="protocol_diff_", dir=root))
+        destination = Path(
+            tempfile.mkdtemp(prefix=f"{source.name}_", dir=root)
+        )
         try:
             os.replace(source, destination)
         except OSError:

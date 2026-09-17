@@ -161,7 +161,6 @@
       .card { min-height: 410px; }
       .status { left: 20px; }
       .run-track { width: 110px; }
-      .settings .chip:nth-child(-n+2) { display: none; }
       .advanced { inset: 68px 20px 72px; overflow-y: auto; }
       .advanced-grid { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
@@ -208,9 +207,7 @@
     </section>
     <footer class="foot">
       <div class="settings">
-        <span id="threshold-chip" class="chip">阈值 0.72</span>
-        <span id="snippets-chip" class="chip">每章 20</span>
-        <button id="advanced-toggle" class="chip" type="button">高级设置 ›</button>
+        <button id="advanced-toggle" class="chip" type="button">报告设置 ›</button>
       </div>
       <div class="actions">
         <div class="run-state" role="status"><span id="running-label">正在比较</span><div class="run-track"><i></i></div></div>
@@ -220,13 +217,10 @@
       </div>
     </footer>
     <div id="status" class="status" aria-live="polite"></div>
-    <section id="advanced" class="advanced" role="dialog" aria-modal="true" aria-label="高级设置">
-      <div class="advanced-head"><h3>高级设置</h3><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
+    <section id="advanced" class="advanced" role="dialog" aria-modal="true" aria-label="报告设置">
+      <div class="advanced-head"><h3>报告设置</h3><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
       <div class="advanced-grid">
         <label class="field full"><span>输出目录</span><span class="path-row"><input id="output-dir" type="text"><button id="choose-output" class="chip" type="button">选择</button></span></label>
-        <label class="field"><span>章节匹配阈值</span><input id="min-similarity" type="text" value="0.72"></label>
-        <label class="field"><span>每章片段数</span><input id="max-snippets" type="text" value="20"></label>
-        <label class="check"><input id="include-unchanged" type="checkbox"><span>列出未变化章节</span></label>
         <label class="check"><input id="auto-open" type="checkbox"><span>完成后自动打开报告</span></label>
       </div>
     </section>
@@ -246,11 +240,20 @@
       let timer = null;
       let startedAt = 0;
       let focusBeforeDialog = null;
+      const internalConfig = Object.freeze({ min_similarity: "0.72", max_snippets: "20", include_unchanged: false });
+
+      function invalidateResult(message = "输入已修改，请重新比较") {
+        if (state.running) return;
+        app.classList.remove("success");
+        status.textContent = message;
+      }
 
       function setMode(side, mode) {
+        const previous = state[`${side}_mode`];
         state[`${side}_mode`] = mode;
         document.querySelectorAll(`[data-mode^="${side}:"]`).forEach(button => button.classList.toggle("active", button.dataset.mode.endsWith(`:${mode}`)));
         document.querySelector(`#${side}-range`).classList.toggle("visible", mode === "range");
+        if (previous !== mode) invalidateResult();
       }
       function setRunning(running) {
         state.running = running; app.classList.toggle("running", running);
@@ -271,9 +274,9 @@
           old_start: document.querySelector("#old-start").value, old_end: document.querySelector("#old-end").value,
           new_start: document.querySelector("#new-start").value, new_end: document.querySelector("#new-end").value,
           output_dir: document.querySelector("#output-dir").value,
-          min_similarity: document.querySelector("#min-similarity").value,
-          max_snippets: document.querySelector("#max-snippets").value,
-          include_unchanged: document.querySelector("#include-unchanged").checked,
+          min_similarity: internalConfig.min_similarity,
+          max_snippets: internalConfig.max_snippets,
+          include_unchanged: internalConfig.include_unchanged,
           auto_open: document.querySelector("#auto-open").checked,
         };
       }
@@ -284,6 +287,7 @@
           if (response.cancelled) return;
           state[`${side}_pdf`] = response.path;
           document.querySelector(`#${side}-name`).textContent = response.name;
+          invalidateResult();
         } catch (_error) { status.textContent = "无法打开文件选择窗口。"; }
       }
       window.protocolDiff = {
@@ -354,11 +358,14 @@
         try {
           const response = await window.pywebview.api.choose_output_dir();
           if (!response.ok) { status.textContent = response.error || "无法选择输出目录。"; return; }
-          if (!response.cancelled) document.querySelector("#output-dir").value = response.path;
+          if (!response.cancelled) {
+            document.querySelector("#output-dir").value = response.path;
+            invalidateResult();
+          }
         } catch (_error) { status.textContent = "无法打开目录选择窗口。"; }
       });
-      document.querySelector("#min-similarity").addEventListener("input", event => document.querySelector("#threshold-chip").textContent = `阈值 ${event.target.value}`);
-      document.querySelector("#max-snippets").addEventListener("input", event => document.querySelector("#snippets-chip").textContent = `每章 ${event.target.value}`);
+      document.querySelectorAll(".range input").forEach(input => input.addEventListener("input", () => invalidateResult()));
+      document.querySelector("#output-dir").addEventListener("input", () => invalidateResult());
       document.querySelector("#start").addEventListener("click", async () => {
         if (state.running) return;
         runGeneration += 1;
@@ -382,8 +389,6 @@
         try {
           const defaults = await window.pywebview.api.get_defaults();
           document.querySelector("#output-dir").value = defaults.output_dir;
-          document.querySelector("#min-similarity").value = defaults.min_similarity;
-          document.querySelector("#max-snippets").value = defaults.max_snippets;
         } catch (_error) { status.textContent = "无法读取默认设置。"; }
       });
     })();

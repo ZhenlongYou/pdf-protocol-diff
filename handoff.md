@@ -1,5 +1,15 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：用户可见设置收敛、协议文件名报告目录与长 PDF 基线（2026-09-18）
+
+- 用户要求隐藏普通用户无法可靠解释的章节阈值、每章片段数和未变化章节开关，并要求生成报告不能比原版差。候选分支 `codex/pdf-user-facing-settings-20260917` 基于 canonical `6abf4f7fd80af1415404579517b264bd448e3a05`；canonical 分支仍有其他任务的 stale active claim，本候选未写入或覆盖 canonical。
+- WebView 与 Tk 界面均改为“报告设置”，只保留输出目录和完成后自动打开；WebView 比较请求固定使用 `min_similarity=0.72`、`max_snippets=20`、`include_unchanged=false`，旧 Tk 程序化字段仅为兼容保留。更换 PDF、模式、页码或输出目录后会使上一次结果失效，避免误打开与新输入不对应的报告。
+- 报告目录按导入文件名组合命名并做跨平台清理，例如 `old_protocol_demo_vs_new_protocol_demo_YYYYMMDD_HHMMSS`；目录内既有 `protocol_diff_report.html`、CSV、JSON 等固定文件名保持不变，兼容原有打开入口和脚本。
+- 小 PDF 同输入 A/B 已完成：候选与原版使用同一对内置 4/5 页协议和同一默认选项；章节数 `(6, 7)`、变化项 `7`、表格 `0`、视觉 `0`、可信度 `reliable` 一致；`changes.csv` 和 `table_changes.csv` 字节级一致，HTML/Markdown/TXT 与 JSON 去除时间戳和构建标识后完全一致。
+- 长 PDF 实测使用 `/Users/mac/Documents/ProtocolPdfDiffReports/stable_delivery_20260908/test-effectiveness/evidence/oif-source/old.pdf`（656 页）和 `new.pdf`（685 页）。仅文本抽取约 `622.41 s`、峰值常驻内存约 `3.22 GB`；完整候选比较与报告生成约 `1590.79 s`、峰值常驻内存约 `3.42 GB`，最终报告约 `244 MB`。结果为 `degraded / 需人工复核`：正文 180、表格 95、视觉 135，视觉哨兵只完成 `135/390` 对，另有 1722 条警告。该结果证明长文档存在明显吞吐、内存和证据覆盖压力；不能据此断言算法已经错误，也不能把整本长文档称为可靠自动结论。
+- 长 PDF 性能/取消/独立 oracle 检查和真实路径检查均通过：`LONG_PDF_CHECK_OK performance cases=14`、`cancel cases=7`、`oracle cases=17`、`LONG_PDF_REAL_PATH_OK`。这些门禁证明终止和局部性能保护仍在工作，不外推整本内容对应准确率。
+- 本轮用户可见设置测试 20 项、Tk 兼容定向测试 2 项、表格事务 26 项均通过（表格事务使用 `/tmp/pdf-userfix-deps` 提供 PyMuPDF）；候选分支完整回归 `1767` 项通过、`1` 项条件跳过（320.102 秒），最后一轮界面/桥接/事务定向 40 项也通过。A/B 和长文档实测记录在本轮交付说明中。提交前仍需执行最终 diff/编译检查、提交并推送候选分支，随后报告 canonical stale claim 阻塞集成。
+
 ## 当前任务：页面组左右截图对称与全部差异聚合（2026-09-17）
 
 - 用户最新反馈同一页组中只看到旧版单页截图，无法完成新旧内容对比。根因是上一轮把去重放在差异卡内部：首个卡片保留图片，后续卡片只保留别名；页面组兜底只补真正缺失的页，不能把每个页组重新组织成对称的左右原页证据。

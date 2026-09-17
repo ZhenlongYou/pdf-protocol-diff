@@ -7,7 +7,7 @@
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_bit_parallel_lcs_matches_independent_grid_oracle",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_exact_long_matching_blocks_equal_independent_difflib",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_long_repetitive_score_avoids_quadratic_aligner",
-    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_coordinate_cleanup_preserves_frozen_results_without_unused_scan"
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_coordinate_cleanup_without_ownership_is_linear_noop"
   ],
   "cancel": [
     "tests.test_comparison_job.ComparisonJobTests.test_real_desktop_async_cancel_then_success_and_unique_publication"
@@ -20,6 +20,6 @@
     "tests.test_comparison_job.ComparisonJobTests.test_real_desktop_async_cancel_then_success_and_unique_publication",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_exact_long_matching_blocks_equal_independent_difflib",
     "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_long_repetitive_score_avoids_quadratic_aligner",
-    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_coordinate_cleanup_preserves_frozen_results_without_unused_scan"
+    "tests.test_long_pdf_performance.LongPdfPerformanceTests.test_coordinate_cleanup_without_ownership_is_linear_noop"
   ]
 }

@@ -29,8 +29,6 @@ from .ui_shared import (
     default_output_dir,
     open_path,
     page_range_values,
-    parse_positive_float,
-    parse_positive_int,
     reported_reader_summary,
 )
 
@@ -50,7 +48,21 @@ REQUIRED_UI_TOKENS = (
     "backdrop-filter: blur",
     "radial-gradient",
 )
-FORBIDDEN_UI_TOKENS = ("交换旧/新", "尚未选择", "请选择两份 PDF")
+FORBIDDEN_UI_TOKENS = (
+    "交换旧/新",
+    "尚未选择",
+    "请选择两份 PDF",
+    "章节匹配阈值",
+    "每章片段数",
+    "列出未变化章节",
+)
+# Keep the reader-facing workflow deterministic.  These values are deliberately
+# kept in the bridge rather than exposed as controls in the shared desktop UI.
+INTERNAL_COMPARISON_OPTIONS = {
+    "min_section_match_similarity": 0.72,
+    "max_snippets_per_section": 20,
+    "include_unchanged_sections": False,
+}
 RENDERER_PROBE_SCRIPT = """
 (() => {
   const cardStyle = getComputedStyle(document.querySelector('.card'));
@@ -155,9 +167,17 @@ class ProtocolDiffWebApi:
     def get_defaults(self) -> dict[str, object]:
         return {
             "output_dir": str(default_output_dir()),
-            "min_similarity": "0.72",
-            "max_snippets": "20",
-            "include_unchanged": False,
+            # Retain these keys for bridge/API compatibility; the shared UI
+            # intentionally does not render them as user-editable controls.
+            "min_similarity": str(
+                INTERNAL_COMPARISON_OPTIONS["min_section_match_similarity"]
+            ),
+            "max_snippets": str(
+                INTERNAL_COMPARISON_OPTIONS["max_snippets_per_section"]
+            ),
+            "include_unchanged": INTERNAL_COMPARISON_OPTIONS[
+                "include_unchanged_sections"
+            ],
             "auto_open": False,
         }
 
@@ -399,13 +419,15 @@ class ProtocolDiffWebApi:
             "新版",
         )
         options = DiffOptions(
-            min_section_match_similarity=parse_positive_float(
-                str(config.get("min_similarity", "0.72")), "章节匹配阈值"
-            ),
-            max_snippets_per_section=parse_positive_int(
-                str(config.get("max_snippets", "20")), "每章片段数"
-            ),
-            include_unchanged_sections=bool(config.get("include_unchanged", False)),
+            min_section_match_similarity=INTERNAL_COMPARISON_OPTIONS[
+                "min_section_match_similarity"
+            ],
+            max_snippets_per_section=INTERNAL_COMPARISON_OPTIONS[
+                "max_snippets_per_section"
+            ],
+            include_unchanged_sections=INTERNAL_COMPARISON_OPTIONS[
+                "include_unchanged_sections"
+            ],
             old_start_page=old_start,
             old_end_page=old_end,
             new_start_page=new_start,

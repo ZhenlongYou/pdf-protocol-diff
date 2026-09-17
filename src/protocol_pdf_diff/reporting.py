@@ -12,6 +12,7 @@ import html as html_lib
 import json
 import math
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -310,6 +311,39 @@ class _NumberedTableRun:
     descriptor: str  # 去除严格表号后的长描述；短标题保持空串，不能充当锚点。
 
 
+_REPORT_COMPONENT_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def _safe_report_component(value: str, *, limit: int = 72) -> str:
+    """Turn one imported filename stem into a portable report name component."""
+
+    normalized = unicodedata.normalize("NFKC", str(value))
+    cleaned = _REPORT_COMPONENT_RE.sub("_", normalized)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    if not cleaned:
+        return "协议"
+    if cleaned.upper() in _WINDOWS_RESERVED_NAMES:
+        cleaned = f"{cleaned}_"
+    cleaned = cleaned[:limit].rstrip(" .")
+    return cleaned or "协议"
+
+
+def _report_pair_label(old_pdf: str | Path, new_pdf: str | Path) -> str:
+    """Return the user-facing report directory label for one PDF pair."""
+
+    old_name = _safe_report_component(Path(old_pdf).stem)
+    new_name = _safe_report_component(Path(new_pdf).stem)
+    return f"{old_name}_vs_{new_name}"
+
+
 @comparison_session
 def write_reports(
     result: DiffResult,
@@ -327,7 +361,8 @@ def write_reports(
 
     base_dir = Path(output_dir).expanduser().resolve()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_dir = base_dir / f"protocol_diff_{timestamp}"
+    pair_label = _report_pair_label(result.old_pdf, result.new_pdf)
+    report_dir = base_dir / f"{pair_label}_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
     table_groups = _paired_table_visuals(
@@ -9403,7 +9438,7 @@ def _empty_change_message(change: SectionChange) -> str:
     if change.change_type == "unchanged":
         return "该章节未发现正文或标题变化。"
     if change.old_section and change.new_section:
-        return "该章节发生变化，但当前报告只展示了有限数量的片段；可在工具设置中提高每章展示数量后重新生成。"
+        return "该章节发生变化，但当前报告按固定展示上限收录正文片段；完整审计片段请查看同目录下的 CSV 或 JSON。"
     return "该章节没有可展示的正文片段，请回到源 PDF 对应页复核。"
 
 
@@ -13209,7 +13244,7 @@ def _render_omitted_html(omitted_count: int) -> str:
 def _omitted_snippet_message(omitted_count: int) -> str:
     """Explain that more substantive differences exist than are displayed."""
 
-    return f"另有 {omitted_count} 条差异片段未展示；完整章节已比较，可在工具设置中提高每章展示数量后重新生成。"
+    return f"另有 {omitted_count} 条差异片段未展示；完整章节已比较，完整审计片段请查看同目录下的 CSV 或 JSON。"
 
 
 def _inline_diff_html(old_text: str, new_text: str) -> tuple[str, str]:
