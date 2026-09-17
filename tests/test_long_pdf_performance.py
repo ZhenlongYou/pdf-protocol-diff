@@ -161,8 +161,36 @@ class LongPdfPerformanceTests(unittest.TestCase):
         from protocol_pdf_diff import exact_match
         # Independent expected value: the sole common run contains 12000 a's.
         with patch.object(exact_match, "SequenceMatcher", side_effect=AssertionError("quadratic long alignment")):
+            self.assertEqual(1.0, exact_match.ratio("same", "same"))
             self.assertEqual(2.0 * 12000 / 24001, exact_match.ratio("a" * 12000, "a" * 12000 + "b"))
             self.assertEqual(1.0, exact_match.ratio("a" * 12000, "a" * 12000))
+
+    def test_fully_exact_outline_skips_noop_rescue_scans(self):
+        from protocol_pdf_diff.models import Section, DiffOptions
+
+        def section(index):
+            return Section(
+                f"section-{index}",
+                f"{index} Stable clause",
+                "Stable clause",
+                1,
+                (f"{index} Stable clause",),
+                (str(index),),
+                index,
+                index,
+                "The receiver shall preserve this stable requirement.",
+            )
+
+        old = [section(index) for index in range(1, 5)]
+        new = [section(index) for index in range(1, 5)]
+        with comparison_scope(), \
+                patch.object(compare, "_structural_identity_rescue_pairs",
+                              side_effect=AssertionError("rescue pass must be a no-op")), \
+                patch.object(compare, "_shifted_section_rescue_pairs",
+                              side_effect=AssertionError("rescue pass must be a no-op")):
+            actual = compare._match_sections(old, new, DiffOptions())
+        self.assertEqual(4, len(actual))
+        self.assertTrue(all(left is not None and right is not None for left, right, *_ in actual))
 
     def test_coordinate_cleanup_without_ownership_is_linear_noop(self):
         from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
@@ -191,6 +219,24 @@ class LongPdfPerformanceTests(unittest.TestCase):
                     bounded = compare._section_similarity_for_threshold(left, right, threshold)
                     if bounded is None: self.assertLess(exact, threshold)
                     else: self.assertEqual(exact, bounded)
+
+    def test_long_pair_upper_bound_skips_only_impossible_gate(self):
+        # The overlap factor is still applied after the exact score.  These
+        # long units share two anchors but their remaining payload cannot reach
+        # the existing 0.45 pairing gate, so exact alignment is unnecessary.
+        left = "alpha beta " + "x" * 1200
+        right = "alpha beta " + "y" * 1200
+        with comparison_scope(), \
+                patch.object(compare, "_review_similarity",
+                              side_effect=AssertionError("exact score must be skipped")), \
+                patch.object(compare, "_similarity",
+                              side_effect=AssertionError("exact score must be skipped")):
+            self.assertEqual(0.0, compare._unit_pair_score(left, right))
+
+        # A short pair continues to use the original exact score path; the
+        # length guard above is the only new pruning condition.
+        with comparison_scope():
+            self.assertGreater(compare._unit_pair_score("alpha beta x", "alpha beta y"), 0.45)
 
     def test_cache_lifetime_exception_and_thread_isolation(self):
         calls = []

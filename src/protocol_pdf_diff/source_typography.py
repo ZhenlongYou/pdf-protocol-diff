@@ -25,15 +25,22 @@ def source_superscript_receipts(extraction):
     """Keep complete native-line evidence; offsets refer to nonspace characters."""
     receipts = []
     from collections import Counter, defaultdict
+    page_metadata = []
     for page in extraction.pages:
-        if page.ocr_used:
-            continue
         page_key = ''.join(page.text.split())
+        block_counts = Counter()
+        if page.ocr_used:
+            # OCR pages still participate in the second pass as explicit
+            # blockers; they simply cannot contribute a positive receipt.
+            page_metadata.append((page.page_number, page_key, block_counts, True))
+            continue
         for block in page.blocks:
             words, styles = _source_line_parts(block, page)
+            block_key = ''.join(''.join(w[0].split()) for w in words)
+            block_counts[block_key] += 1
             if len(words) != len(styles) or len(words) < 2:
                 continue
-            key = ''.join(''.join(w[0].split()) for w in words)
+            key = block_key
             if len(key) < 20 or page_key.count(key) != 1:
                 continue
             if len({tuple(w[1:]) for w in words}) != len(words):
@@ -64,6 +71,7 @@ def source_superscript_receipts(extraction):
                 offset += length
             if spans:
                 receipts.append((page.page_number, key, tuple(spans)))
+        page_metadata.append((page.page_number, page_key, block_counts, page.ocr_used))
     # Do not discard valid lines because another chapter repeats them. Keep
     # page-local evidence, including explicit blockers for unstyled or repeated
     # occurrences; only the caller knows the current section's page scope.
@@ -72,18 +80,21 @@ def source_superscript_receipts(extraction):
         proven[(page_number, key)].append(spans)
     keys = {key for _, key, _ in receipts}
     scoped = []
-    for page in extraction.pages:
-        page_key = ''.join(page.text.split())
-        block_counts = Counter(''.join(''.join(w[0].split()) for w in _source_line_parts(b, page)[0])
-                               for b in page.blocks)
-        for key in sorted(keys):
+    ordered_keys = tuple(sorted(keys))
+    for page_number, page_key, block_counts, ocr_used in page_metadata:
+        page_chars = set(page_key)
+        for key in ordered_keys:
+            # These are exact zero-count proofs and avoid calling str.count for
+            # impossible page/key pairs without changing the ambiguity rules.
+            if len(key) > len(page_key) or key[0] not in page_chars:
+                continue
             count = page_key.count(key)
             if not count and not block_counts[key]:
                 continue
-            matches = proven[(page.page_number, key)]
+            matches = proven[(page_number, key)]
             spans = (matches[0] if count == block_counts[key] == len(matches) == 1
-                     and not page.ocr_used else ())
-            scoped.append((page.page_number, key, spans))
+                     and not ocr_used else ())
+            scoped.append((page_number, key, spans))
     return tuple(scoped)
 
 

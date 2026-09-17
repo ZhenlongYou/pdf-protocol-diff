@@ -281,6 +281,8 @@ def compare_extractions(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,
     options: DiffOptions,
+    *,
+    source_typography_receipts: tuple[tuple, tuple] | None = None,
 ) -> DiffResult:
     """Compare two already-extracted PDFs.
 
@@ -315,14 +317,22 @@ def compare_extractions(
         original_tables=old_extraction.table_visuals,
         repaired_tables=old_table_visuals,
     )
-    old_sections = section_document(old_comparison_extraction)
+    old_sections = (
+        old_reconciliation_sections
+        if _page_texts_unchanged(old_extraction, old_comparison_extraction)
+        else section_document(old_comparison_extraction)
+    )
     report_progress("sectioning", 3, 4, unit="轮")
     new_comparison_extraction = _extraction_without_page_bound_table_captions(
         new_extraction,
         original_tables=new_extraction.table_visuals,
         repaired_tables=new_table_visuals,
     )
-    new_sections = section_document(new_comparison_extraction)  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
+    new_sections = (
+        new_reconciliation_sections
+        if _page_texts_unchanged(new_extraction, new_comparison_extraction)
+        else section_document(new_comparison_extraction)
+    )  # 读者比较只消费同页同次数、已有视觉表证明的 caption；精确表重建仍使用未消费的原始审计单元。
     report_progress("sectioning", 4, 4, unit="轮")
     old_header_section = _running_header_section(old_extraction)
     new_header_section = _running_header_section(new_extraction)
@@ -396,6 +406,14 @@ def compare_extractions(
         warnings.append(f"{new_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     from .url_literal_evidence import extraction_url_receipts
     from .source_typography import source_superscript_receipts
+    if source_typography_receipts is None:
+        old_superscript_receipts = source_superscript_receipts(old_extraction)
+        new_superscript_receipts = source_superscript_receipts(new_extraction)
+    else:
+        # The table projection keeps the original native blocks and geometry;
+        # reusing the first pass's immutable source receipts avoids rescanning
+        # every long-document page while retaining the same source proof.
+        old_superscript_receipts, new_superscript_receipts = source_typography_receipts
     return DiffResult(
         old_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in old_comparison_extraction.pages if p.caption_source_spans),
         new_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in new_comparison_extraction.pages if p.caption_source_spans),
@@ -423,8 +441,8 @@ def compare_extractions(
         old_extraction_audit=snapshot_page_extraction_audit(old_extraction),  # 压缩为标量快照后释放旧页面/块正文的长生命周期引用。
         old_url_literal_receipts=extraction_url_receipts(old_extraction),
         new_url_literal_receipts=extraction_url_receipts(new_extraction),
-        old_superscript_receipts=source_superscript_receipts(old_extraction),
-        new_superscript_receipts=source_superscript_receipts(new_extraction),
+        old_superscript_receipts=old_superscript_receipts,
+        new_superscript_receipts=new_superscript_receipts,
         new_extraction_audit=snapshot_page_extraction_audit(new_extraction),  # 新版同样只保留报告审计所需字段，不改变比较正文结果。
     )
 
@@ -690,6 +708,19 @@ def _extraction_without_page_bound_table_captions(
             kept_lines.append(line)
         pages.append(replace(page, text="\n".join(kept_lines), caption_source_spans=tuple(mapped_spans), caption_removed_spans=tuple(removed_spans)))
     return replace(extraction, pages=pages)
+
+
+def _page_texts_unchanged(
+    original: ExtractionResult,
+    projected: ExtractionResult,
+) -> bool:
+    """Return True when a projection changed no sectioning-visible page text."""
+
+    return len(original.pages) == len(projected.pages) and all(
+        old_page.page_number == new_page.page_number
+        and old_page.text == new_page.text
+        for old_page, new_page in zip(original.pages, projected.pages)
+    )
 
 
 def _cross_page_caption_source_line_indexes(
@@ -2385,6 +2416,15 @@ def _match_sections(
             matches.append((old_index, new_index, leaf_similarity,
                             "structural_leaf_body_anchor"))
 
+    # Once every section on both sides has a one-to-one match, all remaining
+    # rescue passes are provably no-ops: they only inspect unmatched sections.
+    # Preserve the exact match list and progress contract while avoiding the
+    # quadratic fallback/rescue scans on long documents with stable outlines.
+    if len(matched_old) == len(old_sections) and len(matched_new) == len(new_sections):
+        report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
+        report_progress("match_rescue", detail="核对章节对应关系")
+        return matches
+
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
     old_title_counts = Counter(
@@ -3913,6 +3953,8 @@ _MAX_WHOLE_BODY_REVIEW_KEY_CHARS = 2048  # 只在短正文分句数量漂移时�
 def _section_similarity(left: str, right: str) -> float:
     """Return a bounded similarity score for section matching and reporting."""
 
+    if left == right:
+        return 1.0
     left_sample = _sample_section_text(left)  # 采样保留章节开头和结尾，兼顾标题、定义和表格续行。
     right_sample = _sample_section_text(right)  # 两边使用同样采样策略，分数才可比较。
     return _similarity(left_sample, right_sample)  # 章节粗匹配走轻量相似度，重规范化留给片段级差异。
@@ -3927,6 +3969,9 @@ def _normalized_section_sample(text: str) -> str:
 def _section_similarity_for_threshold(left: str, right: str, threshold: float) -> float | None:
     """Return the original score, or None only when an upper bound rejects it."""
     left_norm, right_norm = _normalized_section_sample(left), _normalized_section_sample(right)
+    if left_norm == right_norm:
+        # The normalized score is exactly one; no alignment can reject it.
+        return 1.0
     matcher = difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False)
     if matcher.real_quick_ratio() < threshold or matcher.quick_ratio() < threshold:
         return None
@@ -3967,6 +4012,8 @@ def _section_matching_body(body: str, suppressed_table_unit_keys: set[str]) -> s
 def _exact_identity_similarity(left: str, right: str) -> float | None:
     """Score same-identity sections without penalizing proven spelling equivalence."""
 
+    if left == right:
+        return 1.0
     left_sample = _sample_section_text(left)
     right_sample = _sample_section_text(right)
     raw_score = _similarity(left_sample, right_sample)
@@ -4091,12 +4138,16 @@ def _sample_section_text(value: str) -> str:
 def _review_similarity(left: str, right: str) -> float:
     """Return a similarity score after display-only punctuation is normalized."""
 
+    if left == right:
+        return 1.0
     left_norm = _review_unit_key(left)
     right_norm = _review_unit_key(right)
     if not left_norm and not right_norm:
         return 1.0
     if not left_norm or not right_norm:
         return 0.0
+    if left_norm == right_norm:
+        return 1.0
     return exact_sequence_ratio(left_norm, right_norm)
 
 
@@ -4400,12 +4451,16 @@ def _unit_has_unproven_label_syntax(value: str) -> bool:
 def _similarity(left: str, right: str) -> float:
     """Return normalized SequenceMatcher ratio for two text values."""
 
+    if left == right:
+        return 1.0
     left_norm = normalize_for_similarity(left)
     right_norm = normalize_for_similarity(right)
     if not left_norm and not right_norm:
         return 1.0
     if not left_norm or not right_norm:
         return 0.0
+    if left_norm == right_norm:
+        return 1.0
     return exact_sequence_ratio(left_norm, right_norm)
 
 
@@ -4519,6 +4574,8 @@ def _section_heading_changed(old_section: Section, new_section: Section) -> bool
     """Detect same-number section title changes that would otherwise be missed."""
 
     if _both_page_fallback_sections(old_section, new_section):
+        return False
+    if old_section.heading == new_section.heading:
         return False
     return _review_unit_key(old_section.heading) != _review_unit_key(new_section.heading)
 
@@ -6349,6 +6406,7 @@ def _unequal_replace_delta_candidates(
     return [candidate for _order, _kind_order, _sequence, candidate in sorted(events)]
 
 
+@memoize_comparison(maxsize=16384)
 def _unit_pair_score(old_unit: str, new_unit: str) -> float:
     """Score whether two unequal units are safe to show as a replacement pair."""
 
@@ -6365,11 +6423,48 @@ def _unit_pair_score(old_unit: str, new_unit: str) -> float:
     new_words = _meaningful_review_words(new_unit)
     if old_words and new_words and not (old_words & new_words):
         return 0.0
-    base_score = max(_review_similarity(old_unit, new_unit), _similarity(old_unit, new_unit))
+    overlap_factor = 1.0
     if old_words and new_words:
         overlap = len(old_words & new_words) / min(len(old_words), len(new_words))
-        return base_score * (0.75 + overlap * 0.25)
+        overlap_factor = 0.75 + overlap * 0.25
+
+    # ``_unequal_replace_delta_candidates`` only accepts scores at or above
+    # this fixed existing gate.  A quick-ratio result is a proven upper bound
+    # for the exact score, so long pairs that cannot reach the gate need no
+    # quadratic alignment.  Pairs that remain possible still use the original
+    # exact scorers below, preserving both the score and tie ordering.
+    if max(len(old_unit), len(new_unit)) > 512:
+        required_base_score = _MIN_UNEQUAL_REPLACE_PAIR_SCORE / overlap_factor
+        review_left = _review_unit_key(old_unit)
+        review_right = _review_unit_key(new_unit)
+        review_upper = _sequence_ratio_upper_bound(review_left, review_right)
+        similarity_left = normalize_for_similarity(old_unit)
+        similarity_right = normalize_for_similarity(new_unit)
+        similarity_upper = _sequence_ratio_upper_bound(similarity_left, similarity_right)
+        if max(review_upper, similarity_upper) < required_base_score:
+            return 0.0
+
+    review_score = _review_similarity(old_unit, new_unit)
+    # A normalized review score of one is already the maximum possible value;
+    # do not run the second exact alignment for the same pair.
+    base_score = review_score if review_score >= 1.0 else max(
+        review_score,
+        _similarity(old_unit, new_unit),
+    )
+    if old_words and new_words:
+        return base_score * overlap_factor
     return base_score
+
+
+def _sequence_ratio_upper_bound(left: str, right: str) -> float:
+    """Return a cheap upper bound for the exact sequence ratio."""
+
+    if left == right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
+    return min(matcher.real_quick_ratio(), matcher.quick_ratio())
 
 
 def _table_unit_pair_score(old_unit: str, new_unit: str) -> float | None:
@@ -6394,6 +6489,7 @@ def _is_table_review_unit(value: str) -> bool:
     return bool(_TABLE_REVIEW_PREFIX_RE.match(normalize_line(value)))  # 内部行和用户可见兜底表格文字都走同一判断。
 
 
+@memoize_comparison(maxsize=8192)
 def _table_row_identity(value: str) -> str:
     """Build a stable identity key for one structured table row."""
 
@@ -6468,6 +6564,7 @@ def _looks_like_table_identity_cell(value: str) -> bool:
     return bool(re.search(r"[A-Za-z\u4e00-\u9fff]", normalized))
 
 
+@memoize_comparison(maxsize=8192)
 def _meaningful_review_words(value: str) -> set[str]:
     """Return non-boilerplate word anchors for pairing changed units."""
 
@@ -6476,6 +6573,7 @@ def _meaningful_review_words(value: str) -> set[str]:
     return {word for word in words if word not in _REVIEW_STOP_WORDS}
 
 
+@memoize_comparison(maxsize=8192)
 def _review_candidate_tokens(value: str) -> set[str]:
     """Return bounded-search anchors without treating them as semantic proof."""
 

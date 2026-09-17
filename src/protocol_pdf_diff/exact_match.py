@@ -97,8 +97,10 @@ def matching_blocks(a: str, b: str) -> list[Match]:
 
 def ratio(a: str, b: str) -> float:
     """Preserve difflib's exact score; accelerate only long strings."""
-    if max(len(a), len(b)) <= 4096:
-        return SequenceMatcher(None, a, b, autojunk=False).ratio()
+    # Equality already proves the exact score.  Keep this before the length
+    # branch so short unchanged sections avoid constructing SequenceMatcher.
     if a == b:
         return 1.0
+    if max(len(a), len(b)) <= 4096:
+        return SequenceMatcher(None, a, b, autojunk=False).ratio()
     return 2.0 * sum(block.size for block in matching_blocks(a, b)) / (len(a) + len(b))

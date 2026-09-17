@@ -1,5 +1,14 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：长文档候选优化（2026-09-18）
+
+- 本轮所有代码只在候选分支 `codex/pdf-long-doc-optimization-20260918`、worktree `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc` 上修改；canonical `project/pdf-protocol-diff`（`6abf4f7fd80af1415404579517b264bd448e3a05`）未写入、未覆盖。因旧任务的持久 WIP/legacy 协调保护仍不能建立正常 claim，本轮按用户授权保留为候选分支，不宣称已合入生产。
+- 比对层加入完全相同正文/章节的快速证明、全章节已一一对应时跳过无效 rescue 扫描；长句候选只在 quick-ratio 上界已证明达不到原有 `0.45` 配对门槛时提前丢弃，其余候选仍使用原精确分数和排序；纯函数缓存仅覆盖同一比较会话。章节阈值和用户可见高级设置均未开放或改写。
+- 抽取层每页完成后释放 pdfplumber 页面缓存；来源字体证据在首次比较后传给表格候选投影，避免长文档重复扫描；表格投影正文未变化时复用已完成的章节结果。所有正文、表格、坐标和审计字段在释放前已复制。
+- 内置小 PDF 真实桌面 API A/B：候选与基线均为正文 7、修改 4、增加 2、删除 1、表格 0、视觉 0、可靠；`changes.csv`、`table_changes.csv`、`physical_table_records.csv`、两个相似度 CSV 均字节一致，JSON 仅临时输入路径不同。候选报告：`/private/tmp/pdf-longopt-small-current-final/out/old_protocol_demo_vs_new_protocol_demo_20260918_021408_d9t88okl/protocol_diff_report.html`；基线报告在相邻 `pdf-longopt-small-baseline-final` 目录。
+- 真实 OIF 1–80 页同页窗 A/B：候选 `extract 87.16 s / compare 129.74 s / RSS 968 MB`，基线 `extract 76.96 s / compare 137.95 s / RSS 1.15 GB`；双方章节 `45/45`、变更 `9`、表格视觉 `80`、告警 `162`、状态 `degraded`。抽取时间受冷缓存和机器状态影响，不能把总耗时差异视为稳定提升；比对阶段约减少 6%，峰值内存约减少 16%。完整 656/685 页历史结果仍是 `degraded / 需人工复核`，本轮不外推整本语义对应准确率。
+- 验证：完整 `unittest discover -s tests -q` 为 `1769` 项通过、`1` 项条件跳过；`LONG_PDF_CHECK_OK performance cases=14`、`cancel cases=7`、`oracle cases=17`、`LONG_PDF_REAL_PATH_OK`；`compileall` 和 `git diff --check` 通过。候选提交 `daee1da` 已推送到 `origin/codex/pdf-long-doc-optimization-20260918`，canonical 分支仍保持 `6abf4f7`。
+
 ## 当前任务：用户可见设置收敛、协议文件名报告目录与长 PDF 基线（2026-09-18）
 
 - 用户要求隐藏普通用户无法可靠解释的章节阈值、每章片段数和未变化章节开关，并要求生成报告不能比原版差。候选分支 `codex/pdf-user-facing-settings-20260917` 基于 canonical `6abf4f7fd80af1415404579517b264bd448e3a05`；canonical 分支仍有其他任务的 stale active claim，本候选未写入或覆盖 canonical。

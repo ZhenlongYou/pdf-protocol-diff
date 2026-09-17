@@ -433,6 +433,14 @@ def _extract_pdf_text_with_pdfplumber(
                     total_pages=selected_page_count,
                 ),
             )
+            # All data needed by the returned PageText/TableVisual objects has
+            # been copied at this point.  Flush pdfplumber's per-page layout,
+            # chars and table caches before moving on; retaining every parsed
+            # page until the finalizer makes peak memory grow with document
+            # length even though pages are processed independently.
+            if isinstance(page, EvidencePage):
+                page.close()
+                selected_pages[completed_page_count - 1] = (index, None)
     finally:
         try:
             for _index, page in selected_pages:

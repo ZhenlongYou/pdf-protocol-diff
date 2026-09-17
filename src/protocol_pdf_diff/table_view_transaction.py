@@ -315,7 +315,14 @@ def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
         for ex in (old, new)
     )
     notify_progress(progress_observer, ProgressEvent(stage="match_diff", detail="完整候选视图比较"))
-    candidate = compare_extractions(*projected, options)
+    candidate = compare_extractions(
+        *projected,
+        options,
+        source_typography_receipts=(
+            original.old_superscript_receipts,
+            original.new_superscript_receipts,
+        ),
+    )
     # Equality of complete section pairing, not only matched changed cards.
     section_map = lambda r: [
         [
