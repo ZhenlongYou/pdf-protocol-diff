@@ -6,6 +6,7 @@
 - 界面调整为更清晰的“标题—双文件卡—页码模式—开始比较”层级：加入基准/目标文件标识、页卡序号、本机处理状态和报告文件名提示；选择文件后显示已选状态并提供“点击更换文件”提示，页码模式同步维护 `aria-pressed`。
 - 报告设置继续只保留输出目录与完成后自动打开；弹层改为带遮罩、淡入和焦点回收的无障碍对话框，阈值、章节片段数和未变化章节仍由桥接层固定，不向用户暴露。交互动效控制在约 140–190 ms，并加入悬停设备、减少动态效果、减少透明度和高对比度适配。
 - 验证：相关单元回归 55 项通过；`main.py --gui-smoke-test` 通过；独立冻结包 `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiffOptimized.app` 的真实 WKWebView `--smoke-test` 通过，探针确认双栏 `548px 548px`、`backdrop-filter: blur(20px)`、渐变背景、`run-slide` 动画和无横向溢出，嵌入 HTML 与源码 SHA 一致。CUA 截图复核因 macOS 锁屏暂未执行，需解锁后补做，不影响源码/渲染器门禁。
+- 界面提交已推送为 `d6e5441fd2e6972517ead2445b2fee5936b70330`，远端 `origin/codex/pdf-long-doc-optimization-20260918` 已核对同一 OID；canonical `project/pdf-protocol-diff` 仍为 `6abf4f7fd80af1415404579517b264bd448e3a05`。
 
 - 本轮所有代码只在候选分支 `codex/pdf-long-doc-optimization-20260918`、worktree `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc` 上修改；canonical `project/pdf-protocol-diff`（`6abf4f7fd80af1415404579517b264bd448e3a05`）未写入、未覆盖。因旧任务的持久 WIP/legacy 协调保护仍不能建立正常 claim，本轮按用户授权保留为候选分支，不宣称已合入生产。
 - 报告目录继续按 `旧版文件名_vs_新版文件名_时间` 命名；本轮补齐目录内的主要 HTML、Markdown 和 TXT 文件名，分别为 `旧版文件名_vs_新版文件名.html/.md/.txt`，机器审计 JSON/CSV 文件名保持兼容。独立冻结应用已从该 worktree 构建并启动：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiff.app`，窗口标题为 `Protocol Comparison Tool`。
