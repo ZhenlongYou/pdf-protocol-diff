@@ -9,15 +9,21 @@
   <style>
     :root {
       color-scheme: dark;
-      --ink: #f7f5ff;
-      --soft: #aaa6bc;
+      --ink: #f8f7ff;
+      --soft: #aaa8be;
+      --muted: #858197;
       --line: rgba(231, 228, 255, .16);
-      --glass: rgba(255, 255, 255, .060);
-      --glass-strong: rgba(255, 255, 255, .090);
+      --line-strong: rgba(231, 228, 255, .28);
+      --glass: rgba(255, 255, 255, .055);
+      --glass-strong: rgba(255, 255, 255, .085);
       --violet: #8273ff;
       --pink: #ef75bd;
       --cyan: #8bdef8;
       --bg: #17182b;
+      --ease-out: cubic-bezier(.23, 1, .32, 1);
+      --ease-in-out: cubic-bezier(.77, 0, .175, 1);
+      --motion-fast: 140ms;
+      --motion-standard: 190ms;
     }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
@@ -25,19 +31,31 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
       background: #11121f;
       color: var(--ink);
+      font-size: 14px;
+      line-height: 1.45;
       -webkit-font-smoothing: antialiased;
       user-select: none;
     }
     button, input { font: inherit; }
-    button { color: inherit; }
+    button { color: inherit; appearance: none; }
+    button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 3px;
+    }
+    button:disabled { cursor: default; }
     .app {
-      height: 100%; padding: 28px 30px 24px; display: grid;
-      grid-template-rows: 64px minmax(0, 1fr) 58px; gap: 18px;
+      height: 100%; padding: 26px 30px 22px; display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto; gap: 16px;
       position: relative; overflow: hidden;
       background:
         radial-gradient(620px 360px at 31% 5%, rgba(133, 102, 216, .30), transparent 70%),
         radial-gradient(520px 340px at 83% 72%, rgba(61, 89, 178, .16), transparent 70%),
         linear-gradient(135deg, #18192d 0%, #20213a 54%, #111322 100%);
+    }
+    .app::before {
+      content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+      background: rgba(7, 8, 20, .46); opacity: 0;
+      transition: opacity var(--motion-standard) var(--ease-out);
     }
     .app::after {
       content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -48,40 +66,55 @@
       mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .34), transparent 70%);
       -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, .34), transparent 70%);
     }
-    .head, .stage, .foot { position: relative; z-index: 1; }
-    .head { display: flex; align-items: center; }
-    .brand { display: flex; align-items: center; gap: 13px; }
-    .mark { position: relative; width: 36px; height: 38px; flex: 0 0 auto; }
+    .app.dialog-open::before { opacity: 1; }
+    .head, .stage, .foot, .status { position: relative; z-index: 1; }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-width: 0; }
+    .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .mark { position: relative; width: 38px; height: 40px; flex: 0 0 auto; }
     .mark i { position: absolute; width: 24px; height: 29px; border-radius: 7px; transform: rotate(-4deg); }
     .mark i:first-child { left: 2px; top: 2px; background: linear-gradient(150deg, #9a86ff, #6f62e7); }
     .mark i:last-child { right: 1px; bottom: 1px; background: linear-gradient(150deg, #ff94cf, #e660ae); transform: rotate(4deg); }
-    h1 { margin: 0; font-size: 26px; line-height: 1.15; letter-spacing: -.02em; }
-    .stage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 78px; min-height: 0; }
-    .card {
-      min-width: 0; padding: 25px 26px 22px; display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 18px;
-      border: 1px solid var(--line); border-radius: 28px;
-      background: linear-gradient(145deg, var(--glass-strong), rgba(255, 255, 255, .035));
-      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05), 0 24px 80px rgba(3, 4, 16, .16);
+    .brand-copy { min-width: 0; display: grid; gap: 2px; }
+    .brand-kicker, .card-kicker {
+      color: var(--soft); font-size: 10px; line-height: 1.2;
+      letter-spacing: .10em; text-transform: uppercase;
     }
-    .card h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    h1 { margin: 0; font-size: 25px; line-height: 1.12; letter-spacing: -.025em; }
+    .subtitle { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.3; }
+    .local-note { display: flex; align-items: center; gap: 7px; color: var(--soft); font-size: 11px; white-space: nowrap; }
+    .local-note i { width: 7px; height: 7px; border-radius: 50%; background: #77e1bf; box-shadow: 0 0 0 4px rgba(119, 225, 191, .10); }
+    .stage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; min-height: 0; }
+    .card {
+      min-width: 0; padding: 20px 22px 18px; display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 14px;
+      border: 1px solid var(--line); border-radius: 23px;
+      background: linear-gradient(145deg, var(--glass-strong), rgba(255, 255, 255, .035));
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 22px 58px rgba(3, 4, 16, .18);
+    }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .card h2 { margin: 2px 0 0; font-size: 20px; line-height: 1.2; letter-spacing: -.025em; }
+    .card-index { color: rgba(235, 232, 255, .38); font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: .08em; }
     .drop {
-      min-height: 0; border: 1px dashed rgba(225, 221, 255, .24); border-radius: 22px;
+      min-height: 0; border: 1px dashed rgba(225, 221, 255, .24); border-radius: 19px;
       background: rgba(17, 18, 36, .36); position: relative; overflow: hidden;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px;
-      cursor: pointer; outline: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      cursor: pointer; outline: none; isolation: isolate;
+      transition: transform var(--motion-standard) var(--ease-out), border-color var(--motion-standard) ease, background-color var(--motion-standard) ease, box-shadow var(--motion-standard) ease;
     }
     .drop::before {
       content: ""; position: absolute; width: 260px; height: 180px; border-radius: 50%;
       filter: blur(55px); opacity: .23;
+      z-index: -1;
     }
     .old .drop::before { background: var(--violet); }
     .new .drop::before { background: var(--pink); }
-    .drop:hover, .drop:focus-visible { border-color: rgba(139, 222, 248, .72); background: rgba(25, 27, 52, .56); }
+    .drop:focus-visible { border-color: rgba(139, 222, 248, .82); box-shadow: 0 0 0 4px rgba(139, 222, 248, .12); }
+    .drop.has-file { border-color: rgba(139, 222, 248, .54); background: rgba(25, 27, 52, .52); }
     .file-glyph {
-      width: 82px; height: 102px; border-radius: 22px; position: relative;
-      box-shadow: 0 18px 35px rgba(0, 0, 0, .25);
+      width: 76px; height: 94px; border-radius: 20px; position: relative;
+      box-shadow: 0 16px 30px rgba(0, 0, 0, .25);
+      transition: transform var(--motion-standard) var(--ease-out), opacity var(--motion-standard) var(--ease-out);
     }
     .old .file-glyph { background: linear-gradient(145deg, #9a89ff, #6759dc); }
     .new .file-glyph { background: linear-gradient(145deg, #ff96d1, #d958a6); }
@@ -90,19 +123,25 @@
       background: rgba(255, 255, 255, .72); clip-path: polygon(0 0, 100% 100%, 0 100%); border-radius: 0 18px 0 0;
     }
     .file-glyph::after {
-      content: ""; position: absolute; left: 24px; top: 46px; width: 34px; height: 21px;
+      content: ""; position: absolute; left: 22px; top: 42px; width: 32px; height: 20px;
       border-top: 3px solid white; border-bottom: 3px solid white; opacity: .9;
     }
-    .drop strong { font-size: 15px; position: relative; max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .drop small { color: #9f9bb1; font-size: 11px; position: relative; }
+    .drop-copy { display: grid; justify-items: center; gap: 3px; max-width: 82%; min-width: 0; }
+    .drop strong { font-size: 15px; line-height: 1.3; position: relative; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drop small { color: #9f9bb1; font-size: 11px; line-height: 1.3; position: relative; }
+    .drop.has-file .file-glyph { transform: translateY(-2px); }
+    .drop.has-file .drop-copy strong { color: #ffffff; }
+    .drop-arrow { position: absolute; right: 16px; bottom: 14px; color: rgba(235, 232, 255, .42); font-size: 16px; line-height: 1; transform: rotate(-45deg); }
     .page-controls { display: flex; align-items: center; gap: 8px; }
     .chip, .page-chip {
       border: 1px solid rgba(255, 255, 255, .12); background: rgba(255, 255, 255, .055);
       color: #d1cede; border-radius: 16px; padding: 8px 13px; font-size: 11px;
-      white-space: nowrap;
+      white-space: nowrap; transition: transform var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out), border-color var(--motion-fast) ease, background-color var(--motion-fast) ease;
     }
     button.chip, .page-chip { cursor: pointer; }
     .page-chip.active { border-color: rgba(139, 222, 248, .68); background: rgba(74, 123, 153, .26); color: var(--ink); }
+    .chip:active, .page-chip:active { transform: scale(.97); }
+    .page-chip:disabled, .chip:disabled { opacity: .56; }
     .range { display: none; align-items: center; gap: 8px; }
     .range.visible { display: flex; }
     .range label { color: var(--soft); font-size: 11px; }
@@ -111,10 +150,11 @@
       background: rgba(12, 13, 27, .66); color: var(--ink); outline: none; padding: 0 10px;
     }
     .range input:focus, .advanced input:focus { border-color: var(--cyan); }
-    .foot { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-    .settings, .actions { display: flex; align-items: center; gap: 8px; }
-    .settings .chip { cursor: default; }
-    #advanced-toggle { cursor: pointer; }
+    .foot { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 52px; }
+    .settings, .actions { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .settings-note { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    #advanced-toggle { cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+    .settings-arrow { color: var(--cyan); font-size: 14px; line-height: 1; transform: translateY(-1px); }
     .run-state { display: none; align-items: center; gap: 10px; margin-right: 8px; }
     .app.running .run-state { display: flex; }
     .run-state span { color: #d5d2e2; font-size: 12px; white-space: nowrap; }
@@ -122,28 +162,32 @@
     .run-track i {
       display: block; width: 42%; height: 100%; border-radius: inherit;
       background: linear-gradient(90deg, transparent, #8ddff9 40%, #a084ff 75%, transparent);
-      animation: run-slide 1.25s ease-in-out infinite;
+      animation: run-slide 1.25s linear infinite;
     }
     @keyframes run-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(250%); } }
     .primary {
       height: 46px; min-width: 126px; padding: 0 24px; border: 0; border-radius: 15px;
       background: linear-gradient(110deg, #8edff8, #9c83ff); color: #15182a; font-weight: 700;
       box-shadow: 0 14px 35px rgba(115, 189, 246, .24); cursor: pointer;
+      transition: transform var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) ease;
     }
+    .primary:active { transform: scale(.97); }
     .primary:disabled { opacity: .70; box-shadow: none; cursor: default; }
     .result-actions { display: none; gap: 8px; }
     .app.success .result-actions { display: flex; }
     .status {
-      position: absolute; left: 30px; bottom: 8px; z-index: 2; color: var(--soft); font-size: 11px;
+      position: absolute; left: 30px; bottom: 7px; z-index: 2; color: var(--soft); font-size: 11px;
       max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .advanced {
-      display: none; position: absolute; inset: 88px 30px 78px; z-index: 5; padding: 22px;
+      visibility: hidden; opacity: 0; pointer-events: none; position: absolute; inset: 84px 30px 74px; z-index: 5; padding: 22px;
       border: 1px solid var(--line); border-radius: 24px; background: rgba(24, 25, 45, .96);
       backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
       box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+      transform: translateY(-8px) scale(.985);
+      transition: opacity var(--motion-standard) var(--ease-out), transform var(--motion-standard) var(--ease-out), visibility 0s linear var(--motion-standard);
     }
-    .advanced.visible { display: block; }
+    .advanced.visible { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0) scale(1); transition-delay: 0s; }
     .advanced-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
     .advanced h3 { margin: 0; font-size: 17px; }
     .advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 22px; }
@@ -153,37 +197,65 @@
     .field input[type="text"] { width: 100%; }
     .path-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .check { display: flex; align-items: center; gap: 8px; }
-    .close { border: 0; background: transparent; color: var(--soft); cursor: pointer; font-size: 20px; }
+    .close { border: 0; background: transparent; color: var(--soft); cursor: pointer; font-size: 20px; line-height: 1; transition: transform var(--motion-fast) var(--ease-out), color var(--motion-fast) ease; }
     @media (max-width: 899px) {
       html, body { overflow: hidden; }
-      .app { padding: 20px 20px 18px; grid-template-rows: 54px minmax(0, 1fr) 58px; gap: 12px; }
+      .app { padding: 20px 20px 18px; gap: 12px; }
+      .local-note, .settings-note { display: none; }
       .stage { grid-template-columns: 1fr; gap: 14px; overflow-y: auto; padding-right: 4px; }
-      .card { min-height: 410px; }
+      .card { min-height: 380px; }
       .status { left: 20px; }
       .run-track { width: 110px; }
-      .advanced { inset: 68px 20px 72px; overflow-y: auto; }
+      .advanced { inset: 66px 20px 68px; overflow-y: auto; }
       .advanced-grid { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
     }
+    @media (hover: hover) and (pointer: fine) {
+      .drop:hover { transform: translateY(-2px); border-color: rgba(139, 222, 248, .72); background: rgba(25, 27, 52, .56); box-shadow: 0 14px 34px rgba(6, 8, 26, .16); }
+      .chip:hover, .page-chip:hover { border-color: var(--line-strong); background: rgba(255, 255, 255, .09); }
+      .primary:hover { transform: translateY(-1px); box-shadow: 0 17px 38px rgba(115, 189, 246, .30); }
+      .close:hover { color: var(--ink); transform: scale(1.05); }
+    }
     @media (prefers-reduced-motion: reduce) {
       .run-track i { animation: none; transform: translateX(70%); }
+      .drop, .file-glyph, .chip, .page-chip, .primary, .advanced, .close { transition-duration: 1ms; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      .card, .advanced { background: rgba(24, 25, 45, .98); backdrop-filter: none; -webkit-backdrop-filter: none; }
+    }
+    @media (prefers-contrast: more) {
+      .card, .advanced { border-color: rgba(255, 255, 255, .40); }
+      .drop { border-color: rgba(255, 255, 255, .48); }
     }
   </style>
 </head>
 <body>
   <main id="app" class="app">
     <header class="head">
-      <div class="brand"><div class="mark"><i></i><i></i></div><h1>Protocol Comparison Tool</h1></div>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><i></i><i></i></div>
+        <div class="brand-copy">
+          <span class="brand-kicker">Protocol Comparison Tool</span>
+          <h1>协议 PDF 对比</h1>
+          <p class="subtitle">按页核对版本变化，报告保留原始文件名</p>
+        </div>
+      </div>
+      <div class="local-note" aria-label="本机处理"><i aria-hidden="true"></i><span>在本机处理</span></div>
     </header>
     <section class="stage">
       <article class="card old" data-side="old">
-        <h2>旧版 PDF</h2>
-        <button class="drop" type="button" data-choose="old">
-          <span class="file-glyph"></span><strong id="old-name">选择旧版 PDF</strong><small>点击选择文件</small>
+        <div class="card-head">
+          <div><span class="card-kicker">基准文件</span><h2>旧版 PDF</h2></div>
+          <span class="card-index" aria-hidden="true">01</span>
+        </div>
+        <button class="drop" type="button" data-choose="old" aria-label="选择旧版 PDF">
+          <span class="file-glyph" aria-hidden="true"></span>
+          <span class="drop-copy"><strong id="old-name">选择旧版 PDF</strong><small>点击选择文件</small></span>
+          <span class="drop-arrow" aria-hidden="true">↗</span>
         </button>
         <div class="page-controls">
-          <button class="page-chip active" type="button" data-mode="old:all">全部页面</button>
-          <button class="page-chip" type="button" data-mode="old:range">选择页面</button>
+          <button class="page-chip active" type="button" data-mode="old:all" aria-pressed="true">全部页面</button>
+          <button class="page-chip" type="button" data-mode="old:range" aria-pressed="false">选择页面</button>
         </div>
         <div id="old-range" class="range">
           <label for="old-start">起始页</label><input id="old-start" inputmode="numeric">
@@ -191,13 +263,18 @@
         </div>
       </article>
       <article class="card new" data-side="new">
-        <h2>新版 PDF</h2>
-        <button class="drop" type="button" data-choose="new">
-          <span class="file-glyph"></span><strong id="new-name">选择新版 PDF</strong><small>点击选择文件</small>
+        <div class="card-head">
+          <div><span class="card-kicker">目标文件</span><h2>新版 PDF</h2></div>
+          <span class="card-index" aria-hidden="true">02</span>
+        </div>
+        <button class="drop" type="button" data-choose="new" aria-label="选择新版 PDF">
+          <span class="file-glyph" aria-hidden="true"></span>
+          <span class="drop-copy"><strong id="new-name">选择新版 PDF</strong><small>点击选择文件</small></span>
+          <span class="drop-arrow" aria-hidden="true">↗</span>
         </button>
         <div class="page-controls">
-          <button class="page-chip active" type="button" data-mode="new:all">全部页面</button>
-          <button class="page-chip" type="button" data-mode="new:range">选择页面</button>
+          <button class="page-chip active" type="button" data-mode="new:all" aria-pressed="true">全部页面</button>
+          <button class="page-chip" type="button" data-mode="new:range" aria-pressed="false">选择页面</button>
         </div>
         <div id="new-range" class="range">
           <label for="new-start">起始页</label><input id="new-start" inputmode="numeric">
@@ -207,7 +284,8 @@
     </section>
     <footer class="foot">
       <div class="settings">
-        <button id="advanced-toggle" class="chip" type="button">报告设置 ›</button>
+        <button id="advanced-toggle" class="chip" type="button" aria-controls="advanced" aria-expanded="false"><span>报告设置</span><span class="settings-arrow" aria-hidden="true">↗</span></button>
+        <span class="settings-note">比较策略自动保持一致</span>
       </div>
       <div class="actions">
         <div class="run-state" role="status"><span id="running-label">正在比较</span><div class="run-track"><i></i></div></div>
@@ -217,8 +295,8 @@
       </div>
     </footer>
     <div id="status" class="status" aria-live="polite"></div>
-    <section id="advanced" class="advanced" role="dialog" aria-modal="true" aria-label="报告设置">
-      <div class="advanced-head"><h3>报告设置</h3><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
+    <section id="advanced" class="advanced" role="dialog" aria-modal="true" aria-labelledby="advanced-title" aria-hidden="true">
+      <div class="advanced-head"><div><span class="card-kicker">输出</span><h3 id="advanced-title">报告设置</h3></div><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
       <div class="advanced-grid">
         <label class="field full"><span>输出目录</span><span class="path-row"><input id="output-dir" type="text"><button id="choose-output" class="chip" type="button">选择</button></span></label>
         <label class="check"><input id="auto-open" type="checkbox"><span>完成后自动打开报告</span></label>
@@ -251,7 +329,11 @@
       function setMode(side, mode) {
         const previous = state[`${side}_mode`];
         state[`${side}_mode`] = mode;
-        document.querySelectorAll(`[data-mode^="${side}:"]`).forEach(button => button.classList.toggle("active", button.dataset.mode.endsWith(`:${mode}`)));
+        document.querySelectorAll(`[data-mode^="${side}:"]`).forEach(button => {
+          const active = button.dataset.mode.endsWith(`:${mode}`);
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
         document.querySelector(`#${side}-range`).classList.toggle("visible", mode === "range");
         if (previous !== mode) invalidateResult();
       }
@@ -286,7 +368,13 @@
           if (!response.ok) { status.textContent = response.error || "无法选择 PDF。"; return; }
           if (response.cancelled) return;
           state[`${side}_pdf`] = response.path;
+          const drop = document.querySelector(`[data-choose="${side}"]`);
           document.querySelector(`#${side}-name`).textContent = response.name;
+          if (drop) {
+            drop.classList.add("has-file");
+            const hint = drop.querySelector("small");
+            if (hint) hint.textContent = "点击更换文件";
+          }
           invalidateResult();
         } catch (_error) { status.textContent = "无法打开文件选择窗口。"; }
       }
@@ -338,6 +426,9 @@
         const dialog = document.querySelector("#advanced");
         document.querySelectorAll(".head, .stage, .foot, #status").forEach(region => { region.inert = open; });
         dialog.classList.toggle("visible", open);
+        app.classList.toggle("dialog-open", open);
+        dialog.setAttribute("aria-hidden", String(!open));
+        document.querySelector("#advanced-toggle").setAttribute("aria-expanded", String(open));
         if (open) { focusBeforeDialog = document.activeElement; document.querySelector("#advanced-close").focus(); }
         else if (focusBeforeDialog) focusBeforeDialog.focus();
       }

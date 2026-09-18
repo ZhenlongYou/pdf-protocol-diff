@@ -2,6 +2,11 @@
 
 ## 当前任务：长文档候选优化（2026-09-18）
 
+- 本轮按最新界面设计 skill（Emil design engineering、Apple material layer、engineering GUI）优化共享 WebView 外壳，仍只在本候选分支修改；比较逻辑、内部固定策略、报告命名和 canonical 分支均未改动。
+- 界面调整为更清晰的“标题—双文件卡—页码模式—开始比较”层级：加入基准/目标文件标识、页卡序号、本机处理状态和报告文件名提示；选择文件后显示已选状态并提供“点击更换文件”提示，页码模式同步维护 `aria-pressed`。
+- 报告设置继续只保留输出目录与完成后自动打开；弹层改为带遮罩、淡入和焦点回收的无障碍对话框，阈值、章节片段数和未变化章节仍由桥接层固定，不向用户暴露。交互动效控制在约 140–190 ms，并加入悬停设备、减少动态效果、减少透明度和高对比度适配。
+- 验证：相关单元回归 55 项通过；`main.py --gui-smoke-test` 通过；独立冻结包 `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiffOptimized.app` 的真实 WKWebView `--smoke-test` 通过，探针确认双栏 `548px 548px`、`backdrop-filter: blur(20px)`、渐变背景、`run-slide` 动画和无横向溢出，嵌入 HTML 与源码 SHA 一致。CUA 截图复核因 macOS 锁屏暂未执行，需解锁后补做，不影响源码/渲染器门禁。
+
 - 本轮所有代码只在候选分支 `codex/pdf-long-doc-optimization-20260918`、worktree `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc` 上修改；canonical `project/pdf-protocol-diff`（`6abf4f7fd80af1415404579517b264bd448e3a05`）未写入、未覆盖。因旧任务的持久 WIP/legacy 协调保护仍不能建立正常 claim，本轮按用户授权保留为候选分支，不宣称已合入生产。
 - 报告目录继续按 `旧版文件名_vs_新版文件名_时间` 命名；本轮补齐目录内的主要 HTML、Markdown 和 TXT 文件名，分别为 `旧版文件名_vs_新版文件名.html/.md/.txt`，机器审计 JSON/CSV 文件名保持兼容。独立冻结应用已从该 worktree 构建并启动：`/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiff.app`，窗口标题为 `Protocol Comparison Tool`。
 - 比对层加入完全相同正文/章节的快速证明、全章节已一一对应时跳过无效 rescue 扫描；长句候选只在 quick-ratio 上界已证明达不到原有 `0.45` 配对门槛时提前丢弃，其余候选仍使用原精确分数和排序；纯函数缓存仅覆盖同一比较会话。章节阈值和用户可见高级设置均未开放或改写。
