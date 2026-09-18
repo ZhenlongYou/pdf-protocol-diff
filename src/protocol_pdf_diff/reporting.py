@@ -1560,7 +1560,12 @@ def _render_html(
       height: 100vh;
       overflow: auto;
     }}
-    main {{ padding: 22px; max-width: 1180px; width: 100%; }}
+    main {{
+      min-width: 0;
+      width: 100%;
+      max-width: none;
+      padding: 22px;
+    }}
     .summary {{
       display: grid;
       grid-template-columns: repeat(4, minmax(120px, 1fr));

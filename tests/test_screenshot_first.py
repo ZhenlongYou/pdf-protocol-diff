@@ -26,6 +26,22 @@ def section(sid, body):
     return Section(sid,'1 Receiver','Receiver',1,('1 Receiver',),('1',),1,1,body)
 
 class ScreenshotFirstTests(unittest.TestCase):
+    def test_report_html_expands_main_content_when_window_is_maximized(self):
+        """The report body must use the available browser width after maximizing."""
+
+        with tempfile.TemporaryDirectory() as d:
+            old, new = section("old", "Limit is 10 mV."), section("new", "Limit is 12 mV.")
+            change = SectionChange("modified", old, new, .8, replaced_snippets=[SnippetPair(old.body, new.body)])
+            html = write_reports(
+                DiffResult(Path("old.pdf"), Path("new.pdf"), [old], [new], [change], []),
+                d,
+                DiffOptions(),
+            )["html"].read_text(encoding="utf-8")
+
+        self.assertIn("min-width: 0;", html)
+        self.assertIn("max-width: none;", html)
+        self.assertNotIn("max-width: 1180px", html)
+
     def test_isolated_unchanged_number_cannot_outrank_complete_sentence_context(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)

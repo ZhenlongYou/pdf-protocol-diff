@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：报告 HTML 最大化自适应（2026-09-18）
+
+- 用户反馈生成的报告 HTML 在浏览器最大化后仍保持窄内容区。根因是报告模板 `main` 固定 `max-width: 1180px`，宽窗口右侧留下空白；这只影响报告展示布局，不改变 PDF 比较、报告数据或证据内容。
+- 候选分支 `codex/report-responsive-20260918` 基于 `codex/pdf-long-doc-optimization-20260918`，将 `main` 改为 `min-width: 0; width: 100%; max-width: none`，保留 860px 以下的窄屏单列和图片/表格溢出约束；canonical 分支未修改。
+- 验证：`tests.test_screenshot_first` 16/16 通过；完整 `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -q` 为 1772 项通过、1 项条件跳过；真实 OIF 报告重生成到 `/tmp/pdf_report_responsive_actual_20260918/oif2024.532.04_vs_oif2024.532.05_20260918_113224/oif2024.532.04_vs_oif2024.532.05.html`，确认不再含 `max-width: 1180px`。
+
 ## 当前任务：长文档候选优化（2026-09-18）
 
 - 2026-09-18 Windows 报告失败已定位并修复：`table_view_transaction.write_reports_transaction` 原先先用 `mkdtemp` 创建空发布目录，再以 `os.replace(源目录, 空目录)` 替换；POSIX 可行，但 Windows 会因目标目录已存在返回 `ERROR_ALREADY_EXISTS`（WinError 183），使比较完成后在报告发布阶段失败。现在使用 UUID 生成不存在的同卷兄弟路径，并在极少数名称碰撞时重试，再执行原子 `os.replace`；报告内容、选项和比较算法未改动。
