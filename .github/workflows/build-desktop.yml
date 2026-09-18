@@ -78,7 +78,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python build_desktop.py --clean --onefile
+          # Keep the existing onedir native UI gate and smoke the all-in-one
+          # artifact after it; argument order preserves the workflow contract
+          # that identifies the onedir command above.
+          python build_desktop.py --onefile --clean
           .\dist\ProtocolPdfDiff.exe --smoke-test
 
       - name: Upload artifact
