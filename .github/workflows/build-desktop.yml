@@ -74,6 +74,13 @@ jobs:
         shell: pwsh
         run: ./scripts/capture_windows_ui.ps1 -Executable ./dist/ProtocolPdfDiff/ProtocolPdfDiff.exe -OutputPath ./artifacts/windows-webview2.png -ProbePath ./artifacts/windows-renderer-probe.json
 
+      - name: Build Windows onefile artifact and smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python build_desktop.py --clean --onefile
+          .\dist\ProtocolPdfDiff.exe --smoke-test
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
