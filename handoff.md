@@ -2,6 +2,9 @@
 
 ## 当前任务：长文档候选优化（2026-09-18）
 
+- 用户随后要求恢复 UI 修改前的设计；共享 WebView `src/protocol_pdf_diff/webui/index.html` 已精确恢复到 UI 提交 `d6e5441` 的父版本，长文档优化、报告按导入文件名命名和内部固定策略均保留。恢复后的独立应用已重新打包至 `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiffOptimized.app`。
+- 恢复验证：界面契约/用户设置 21 项通过，`main.py --gui-smoke-test` 通过，恢复包真实 WKWebView `--smoke-test` 通过；探针确认标题、双栏、`backdrop-filter: blur(18px)`、渐变背景、`run-slide` 动画和无横向溢出。源码与冻结包 HTML SHA 一致。
+
 - 本轮按最新界面设计 skill（Emil design engineering、Apple material layer、engineering GUI）优化共享 WebView 外壳，仍只在本候选分支修改；比较逻辑、内部固定策略、报告命名和 canonical 分支均未改动。
 - 界面调整为更清晰的“标题—双文件卡—页码模式—开始比较”层级：加入基准/目标文件标识、页卡序号、本机处理状态和报告文件名提示；选择文件后显示已选状态并提供“点击更换文件”提示，页码模式同步维护 `aria-pressed`。
 - 报告设置继续只保留输出目录与完成后自动打开；弹层改为带遮罩、淡入和焦点回收的无障碍对话框，阈值、章节片段数和未变化章节仍由桥接层固定，不向用户暴露。交互动效控制在约 140–190 ms，并加入悬停设备、减少动态效果、减少透明度和高对比度适配。
