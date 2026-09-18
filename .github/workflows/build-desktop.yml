@@ -26,6 +26,11 @@ on:
       - "scripts/capture_windows_ui.ps1"
       - ".github/workflows/build-desktop.yml"
 
+env:
+  # Reports and fixtures are UTF-8. Keep Windows test discovery on the same
+  # encoding as macOS/Linux instead of the runner's legacy cp1252 locale.
+  PYTHONUTF8: "1"
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
