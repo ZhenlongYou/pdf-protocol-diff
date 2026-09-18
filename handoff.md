@@ -2,6 +2,8 @@
 
 ## 当前任务：长文档候选优化（2026-09-18）
 
+- 用户要求基于 Windows 生成 all-in-one EXE；当前主机为 macOS，未安装 Windows/Wine/虚拟机构建环境，PyInstaller 不能跨系统编译。`build_windows.bat` 和 `build_desktop.py --clean --onefile` 已核对会嵌入 Python、依赖、界面资源和 DPI manifest，并执行冻结后 smoke test；Windows 仍需系统 WebView2 Runtime。现有 GitHub Actions Windows job 也因账户支付/额度问题在 runner 启动前失败（run `35174084427`），本轮没有宣称已生成 EXE。恢复方式：在 Windows 主机运行 `build_windows.bat`，或修复 Actions 账户限制后触发 Windows 构建并下载 `dist\\ProtocolPdfDiff.exe`。
+
 - 用户随后要求恢复 UI 修改前的设计；共享 WebView `src/protocol_pdf_diff/webui/index.html` 已精确恢复到 UI 提交 `d6e5441` 的父版本，长文档优化、报告按导入文件名命名和内部固定策略均保留。恢复后的独立应用已重新打包至 `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiffOptimized.app`。
 - 恢复验证：界面契约/用户设置 21 项通过，`main.py --gui-smoke-test` 通过，恢复包真实 WKWebView `--smoke-test` 通过；探针确认标题、双栏、`backdrop-filter: blur(18px)`、渐变背景、`run-slide` 动画和无横向溢出。源码与冻结包 HTML SHA 一致。
 
