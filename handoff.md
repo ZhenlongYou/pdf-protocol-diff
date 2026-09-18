@@ -2,6 +2,9 @@
 
 ## 当前任务：长文档候选优化（2026-09-18）
 
+- 2026-09-18 Windows 报告失败已定位并修复：`table_view_transaction.write_reports_transaction` 原先先用 `mkdtemp` 创建空发布目录，再以 `os.replace(源目录, 空目录)` 替换；POSIX 可行，但 Windows 会因目标目录已存在返回 `ERROR_ALREADY_EXISTS`（WinError 183），使比较完成后在报告发布阶段失败。现在使用 UUID 生成不存在的同卷兄弟路径，并在极少数名称碰撞时重试，再执行原子 `os.replace`；报告内容、选项和比较算法未改动。
+- 本地用“Windows 拒绝已有目录”的替身复现了旧路径的 `FileExistsError [Errno 183]`，修复后的同一真实小 PDF 报告链路通过；表格事务、隔离比较、WebView 桥接和用户设置定向回归 `56` 项通过。尚未在真实 Windows EXE 上运行，仍需 Windows 主机或恢复 Actions 额度做原生验证。
+
 - 用户要求基于 Windows 生成 all-in-one EXE；当前主机为 macOS，未安装 Windows/Wine/虚拟机构建环境，PyInstaller 不能跨系统编译。`build_windows.bat` 和 `build_desktop.py --clean --onefile` 已核对会嵌入 Python、依赖、界面资源和 DPI manifest，并执行冻结后 smoke test；Windows 仍需系统 WebView2 Runtime。现有 GitHub Actions Windows job 也因账户支付/额度问题在 runner 启动前失败（run `35174084427`），本轮没有宣称已生成 EXE。恢复方式：在 Windows 主机运行 `build_windows.bat`，或修复 Actions 账户限制后触发 Windows 构建并下载 `dist\\ProtocolPdfDiff.exe`。
 
 - 用户随后要求恢复 UI 修改前的设计；共享 WebView `src/protocol_pdf_diff/webui/index.html` 已精确恢复到 UI 提交 `d6e5441` 的父版本，长文档优化、报告按导入文件名命名和内部固定策略均保留。恢复后的独立应用已重新打包至 `/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff_longdoc/dist/ProtocolPdfDiffOptimized.app`。

@@ -1,5 +1,6 @@
 import copy
 import io
+import os
 import pickle
 import tempfile
 import unittest
@@ -407,6 +408,27 @@ class ExclusivePublicationTests(unittest.TestCase):
             self.assertNotEqual(a.outputs["report_dir"], b.outputs["report_dir"])
             self.assertTrue(a.outputs["html"].exists())
             self.assertTrue(b.outputs["html"].exists())
+
+    def test_publication_works_when_windows_rejects_existing_directory(self):
+        """The destination must be absent before a cross-platform directory rename."""
+
+        real_replace = os.replace
+        destination_existed = []
+
+        def windows_directory_replace(source, destination):
+            existed = Path(destination).exists()
+            destination_existed.append(existed)
+            if existed:
+                raise FileExistsError(183, "destination already exists")
+            return real_replace(source, destination)
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "os.replace", side_effect=windows_directory_replace
+        ):
+            outcome = t.write_reports_transaction(self.bundle, directory, self.options)
+            self.assertTrue(outcome.outputs["html"].is_file())
+
+        self.assertEqual([False], destination_existed)
 
     def test_publish_failure_only_removes_owned_reservation(self):
         with tempfile.TemporaryDirectory() as directory:

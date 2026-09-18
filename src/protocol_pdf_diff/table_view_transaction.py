@@ -7,6 +7,7 @@ import json
 import math
 import re
 import unicodedata
+import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -666,16 +667,27 @@ def write_reports_transaction(bundle, output_dir, options):
             if value.is_symlink():
                 raise ValueError("symlink report output")
             relative[key] = value.resolve().relative_to(source)
-        # This empty destination is created by this transaction, never reused.
-        destination = Path(
-            tempfile.mkdtemp(prefix=f"{source.name}_", dir=root)
-        )
-        try:
-            os.replace(source, destination)
-        except OSError:
-            # Only remove our own empty reservation; staging is cleaned by its owner.
-            destination.rmdir()
-            raise
+        # Windows cannot replace an existing directory with another directory,
+        # even when the destination is empty (ERROR_ALREADY_EXISTS).  Publish
+        # into a fresh, non-existent sibling instead; os.replace remains an
+        # atomic same-volume rename on both Windows and POSIX.  A UUID keeps
+        # retries and repeated reports independent without pre-creating a
+        # destination directory that Windows would reject.
+        destination = None
+        for _ in range(8):
+            candidate = root / f"{source.name}_{uuid.uuid4().hex}"
+            if candidate.exists():
+                continue
+            try:
+                os.replace(source, candidate)
+            except FileExistsError:
+                # A vanishingly rare name collision can happen between the
+                # existence check and the rename; choose another name safely.
+                continue
+            destination = candidate
+            break
+        if destination is None:
+            raise FileExistsError("无法为报告分配唯一发布目录。")
         return ReportOutcome(
             outcome.selected_result,
             {key: destination / path for key, path in relative.items()},
