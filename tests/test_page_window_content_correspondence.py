@@ -48,6 +48,7 @@ from protocol_pdf_diff.reporting import (
     _proven_publication_header_section_change,
     _reader_section_change,
     _reader_table_changes,
+    _selected_single_page_window_review_pairs,
     _selected_window_folio_page_pairs,
     _selected_window_single_page_visual_bridges,
     _table_change_has_rendered_equal_sources,
@@ -604,13 +605,38 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
             result = run_diff(paths[0], paths[1], options)
             reports = write_reports(result, root / "reports", options)
             payload = json.loads(reports["json"].read_text(encoding="utf-8"))
-            reader_table_changes = json.dumps(
-                payload["content_table_changes"],
+            html = reports["html"].read_text(encoding="utf-8")
+            reader_table_findings = [
+                *payload["content_table_changes"],
+                *payload["similarity_review_table_changes"],
+            ]
+            reader_table_changes = json.dumps(reader_table_findings, ensure_ascii=False)
+            source_table_rows = json.dumps(
+                [*payload["old_table_visuals"], *payload["new_table_visuals"]],
                 ensure_ascii=False,
             )
 
+            self.assertIn("Rise Time", source_table_rows)
             self.assertIn(values[0], reader_table_changes)
             self.assertIn(values[1], reader_table_changes)
+            self.assertIn("similarity-review-appendix", html)
+            self.assertIn(values[0], html)
+            self.assertIn(values[1], html)
+            self.assertEqual(
+                ["review"],
+                [change["change_type"] for change in reader_table_findings],
+                "同一单页中同框、同一唯一参数标签的无题表格不能误报为整表删除和新增",
+            )
+            row_changes = reader_table_findings[0]["row_changes"]
+            self.assertTrue(
+                any(
+                    values[0] in row["old_value"]
+                    and values[1] in row["new_value"]
+                    and row["change_type"] == "需人工复核"
+                    for row in row_changes
+                ),
+                row_changes,
+            )
 
     def test_single_page_line_number_style_change_keeps_the_actual_value_delta(self) -> None:
         """A left/right gray print-line gutter must not become technical prose."""
@@ -1478,6 +1504,10 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         ]
         self.assertTrue(version_header_audit)
         self.assertTrue(all(change.get("reader_suppression_reason") for change in version_header_audit))
+        self.assertTrue(
+            all(change.get("role") == "document_metadata" for change in version_header_audit),
+            version_header_audit,
+        )
         self.assertFalse(any(
             change.get("old_location") == "运行页眉（坐标证据）"
             for change in unchanged_extra_line["content_changes"]
@@ -1508,6 +1538,14 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         ]
         self.assertTrue(any("Name Role" in snippet for snippet in changed_header_text))
         self.assertTrue(any("Name Affiliation" in snippet for snippet in changed_header_text))
+        changed_header_audit = [
+            change
+            for change in changed_extra_line["changes"]
+            if change.get("old_location") == "运行页眉（坐标证据）"
+            or change.get("new_location") == "运行页眉（坐标证据）"
+        ]
+        self.assertTrue(changed_header_audit)
+        self.assertTrue(any(change.get("role") == "technical" for change in changed_header_audit))
 
         for ambiguous_case, expected_text, identity_was_proven in (
             (invalid_prefix, "ALPHA-1.0-PUB", False),
@@ -1893,6 +1931,50 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         )
         self.assertEqual({}, _selected_window_folio_page_pairs(mismatched))
 
+    def test_single_page_review_mapping_requires_distinct_inputs_and_exact_audits(self) -> None:
+        """A positional review locator cannot map pages from one PDF or duplicate audit rows."""
+
+        old_start, new_start = 131, 135
+        old_path, new_path = Path("old-one-page.pdf"), Path("new-one-page.pdf")
+        provenance = DiffProvenance(
+            package_version="test",
+            build_commit="test",
+            supported_profile="native text test fixture",
+            old_input=InputProvenance(old_path, "a" * 64, old_start, old_start),
+            new_input=InputProvenance(new_path, "b" * 64, new_start, new_start),
+            effective_thresholds=EffectiveThresholds(0.72, 20, 500, 0.2),
+        )
+        result = DiffResult(
+            old_pdf=old_path,
+            new_pdf=new_path,
+            old_sections=[],
+            new_sections=[],
+            changes=[],
+            warnings=[],
+            old_selected_start_page=old_start,
+            old_selected_end_page=old_start,
+            new_selected_start_page=new_start,
+            new_selected_end_page=new_start,
+            provenance=provenance,
+            old_extraction_audit=(self._page_audit(old_start),),
+            new_extraction_audit=(self._page_audit(new_start),),
+        )
+
+        self.assertEqual({old_start: new_start}, _selected_single_page_window_review_pairs(result))
+        same_source = replace(
+            result,
+            provenance=replace(
+                provenance,
+                new_input=InputProvenance(new_path, "a" * 64, new_start, new_start),
+            ),
+        )
+        self.assertEqual({}, _selected_single_page_window_review_pairs(same_source))
+        duplicated_audit = replace(
+            result,
+            old_extraction_audit=(self._page_audit(old_start), self._page_audit(old_start)),
+        )
+        self.assertEqual({}, _selected_single_page_window_review_pairs(duplicated_audit))
+
     def test_same_position_table_content_change_is_reviewed_not_added_and_deleted(self) -> None:
         """A same-box candidate with changed values needs a visible review card."""
 
@@ -1951,6 +2033,94 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                         and "Table 7-271" in row.new_value
                         for row in reader_changes[0].row_changes
                     ))
+
+    def test_single_page_window_reviews_unique_same_box_singleton_table(self) -> None:
+        """A one-page comparison may locate a same-box singleton, but cannot confirm its identity."""
+
+        bbox = (147.0, 317.0, 393.0, 373.0)
+        old = self._window_table(
+            131,
+            1,
+            bbox,
+            "Parameter=Rise Time | Value=35 ps",
+        )
+        new = self._window_table(
+            135,
+            1,
+            bbox,
+            "Parameter=Rise Time | Value=40 ps",
+        )
+
+        groups = _paired_table_visuals(
+            [old],
+            [new],
+            single_page_window_pairs={131: 135},
+        )
+
+        self.assertEqual(1, len(groups))
+        self.assertTrue(groups[0].review_only)
+        self.assertEqual("same-position-content-change", groups[0].review_reason)
+        self.assertTrue(groups[0].old_tables and groups[0].new_tables)
+        changes = _build_table_changes(
+            DiffResult(
+                old_pdf=Path("old-one-page.pdf"),
+                new_pdf=Path("new-one-page.pdf"),
+                old_sections=[],
+                new_sections=[],
+                changes=[],
+                warnings=[],
+            ),
+            table_groups=groups,
+        )
+        self.assertEqual(["review"], [change.change_type for change in changes])
+        self.assertTrue(
+            any(
+                "35 ps" in row.old_value and "40 ps" in row.new_value
+                for row in changes[0].row_changes
+            )
+        )
+
+    def test_single_page_window_does_not_pair_ambiguous_untitled_tables(self) -> None:
+        """Changed identity or multiple candidates must not receive a weak singleton match."""
+
+        bbox = (147.0, 317.0, 393.0, 373.0)
+        old = self._window_table(
+            131,
+            1,
+            bbox,
+            "Parameter=Rise Time | Value=35 ps",
+        )
+        changed_identity = self._window_table(
+            135,
+            1,
+            bbox,
+            "Parameter=Fall Time | Value=40 ps",
+        )
+        changed_identity_groups = _paired_table_visuals(
+            [old],
+            [changed_identity],
+            single_page_window_pairs={131: 135},
+        )
+        self.assertFalse(any(group.review_only for group in changed_identity_groups))
+
+        another_old = self._window_table(
+            131,
+            2,
+            (400.0, 317.0, 500.0, 373.0),
+            "Parameter=Fall Time | Value=12 ps",
+        )
+        another_new = self._window_table(
+            135,
+            2,
+            (400.0, 317.0, 500.0, 373.0),
+            "Parameter=Fall Time | Value=14 ps",
+        )
+        multiple_groups = _paired_table_visuals(
+            [old, another_old],
+            [changed_identity, another_new],
+            single_page_window_pairs={131: 135},
+        )
+        self.assertFalse(any(group.review_only for group in multiple_groups))
 
     def test_same_position_candidate_with_unreadable_rows_stays_reviewable(self) -> None:
         """Missing extraction on one side cannot turn a same-box candidate into a deletion/addition."""

@@ -407,7 +407,11 @@ def _selected_window_folio_page_pairs(result: DiffResult) -> dict[int, int]:
         return {}
     old_input = provenance.old_input
     new_input = provenance.new_input
-    if not old_input.sha256 or not new_input.sha256:
+    if (
+        not old_input.sha256
+        or not new_input.sha256
+        or old_input.sha256 == new_input.sha256
+    ):
         return {}
     if (
         old_input.selected_start_page != old_start
@@ -501,6 +505,46 @@ def _selected_window_locator_table_page_pairs(
         for old_page, new_page in _selected_window_folio_page_pairs(result).items()
         if old_page not in already_mapped
     }
+
+
+def _selected_single_page_window_review_pairs(result: DiffResult) -> dict[int, int]:
+    """Map an explicitly compared one-page window for review-only table candidates."""
+
+    old_start = result.old_selected_start_page
+    old_end = result.old_selected_end_page
+    new_start = result.new_selected_start_page
+    new_end = result.new_selected_end_page
+    provenance = result.provenance
+    if not all((old_start, old_end, new_start, new_end)) or provenance is None:
+        return {}
+    if old_start != old_end or new_start != new_end:
+        return {}  # 单页的相对位置只用于复核，不推广到多页页窗的逐页硬配。
+    old_input = provenance.old_input
+    new_input = provenance.new_input
+    if (
+        not old_input.sha256
+        or not new_input.sha256
+        or old_input.sha256 == new_input.sha256
+    ):
+        return {}
+    if (
+        old_input.selected_start_page != old_start
+        or old_input.selected_end_page != old_end
+        or new_input.selected_start_page != new_start
+        or new_input.selected_end_page != new_end
+    ):
+        return {}
+    if (
+        len(result.old_extraction_audit) != 1
+        or result.old_extraction_audit[0].page_number != old_start
+    ):
+        return {}
+    if (
+        len(result.new_extraction_audit) != 1
+        or result.new_extraction_audit[0].page_number != new_start
+    ):
+        return {}
+    return {old_start: new_start}
 
 
 def _proven_publication_header_section_change(
@@ -708,6 +752,7 @@ def write_reports(
         identical_body_page_pairs,
         window_table_review_pairs,
     )
+    single_page_window_pairs = _selected_single_page_window_review_pairs(result)
     table_groups = _paired_table_visuals(
         result.old_table_visuals,
         result.new_table_visuals,
@@ -715,6 +760,7 @@ def write_reports(
         new_sections=result.new_sections,
         page_pairs=window_table_review_pairs,
         locator_page_pairs=locator_table_page_pairs,
+        single_page_window_pairs=single_page_window_pairs,
     )  # 读者正文去重需要全部已配对表，包括因内容完全相同而不生成变化卡的表。
     table_changes = _ordered_table_changes(_build_table_changes(result, table_groups=table_groups))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
     # 读者表格只中和完整值中的定位编号，任何其它字符变化仍保留该行。
@@ -915,6 +961,11 @@ def write_reports(
                         replaced_snippets=[],
                         review_replaced_snippets=[],
                         omitted_snippet_count=0,
+                    ),
+                    role_override=(
+                        "document_metadata"
+                        if _proven_publication_header_section_change(change, result)
+                        else None
                     ),
                 ),
                 "reader_card_id": reader_change_card_ids.get(
@@ -2278,6 +2329,7 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
                 exact_page_pairs,
                 bridge_page_pairs,
             ),
+            single_page_window_pairs=_selected_single_page_window_review_pairs(result),
         )
     groups = table_groups
     for group in groups:
@@ -2582,6 +2634,7 @@ def _paired_table_visuals(
     new_sections: list[Section] | None = None,
     page_pairs: dict[int, int] | None = None,
     locator_page_pairs: dict[int, int] | None = None,
+    single_page_window_pairs: dict[int, int] | None = None,
 ) -> list[_TableVisualGroup]:
     """Pair table visuals by logical table group without forcing weak matches."""
 
@@ -2776,6 +2829,15 @@ def _paired_table_visuals(
             groups,
             locator_page_pairs,
         )  # 页窗、精确页脚、同框唯一候选和受限行文本归一共同成立时只列复核。
+    if single_page_window_pairs:
+        _pair_single_page_window_table_geometry(
+            old_tables,
+            new_tables,
+            old_unused,
+            new_unused,
+            groups,
+            single_page_window_pairs,
+        )  # 单页显式对比只允许同框、同标签唯一单行候选进入人工复核。
     for old_index in sorted(old_unused):
         groups.append(_TableVisualGroup((old_tables[old_index],), ()))
     for new_index in sorted(new_unused):
@@ -3063,6 +3125,73 @@ def _pair_locator_renumbered_table_geometry(
                     review_reason=reason,
                 )
             )
+
+
+def _pair_single_page_window_table_geometry(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    page_pairs: dict[int, int],
+) -> None:
+    """Keep a changed uncaptioned singleton visible as review, never as table add/delete."""
+
+    for old_page, new_page in sorted(page_pairs.items()):
+        old_indexes = [
+            index
+            for index in sorted(old_unused)
+            if old_tables[index].page_number == old_page
+        ]
+        new_indexes = [
+            index
+            for index in sorted(new_unused)
+            if new_tables[index].page_number == new_page
+        ]
+        if len(old_indexes) != 1 or len(new_indexes) != 1:
+            continue  # 多表页没有足够的单页定位信息来决定候选对应关系。
+        old_index, new_index = old_indexes[0], new_indexes[0]
+        old_table, new_table = old_tables[old_index], new_tables[new_index]
+        if (
+            old_table.title.strip()
+            or new_table.title.strip()
+            or len(old_table.row_texts) != 1
+            or len(new_table.row_texts) != 1
+            or not _table_visual_has_valid_bbox(old_table)
+            or not _table_visual_has_valid_bbox(new_table)
+        ):
+            continue
+        if tuple(round(float(value), 1) for value in old_table.bbox) != tuple(
+            round(float(value), 1) for value in new_table.bbox
+        ):
+            continue  # 只接受唯一且精确同框候选；近邻位置不足以指认单行表格。
+        old_fields = _table_row_fields(old_table.row_texts[0])
+        new_fields = _table_row_fields(new_table.row_texts[0])
+        old_identity = _table_row_relaxed_primary_identity(old_table.row_texts[0])
+        new_identity = _table_row_relaxed_primary_identity(new_table.row_texts[0])
+        if (
+            not old_identity
+            or old_identity != new_identity
+            or set(old_fields) != set(new_fields)
+        ):
+            continue  # 同一单行参数身份和字段结构缺一不可，且结果仍只进入复核。
+        old_unit = _first_table_field(old_fields, ("unit", "units"))
+        new_unit = _first_table_field(new_fields, ("unit", "units"))
+        if compact_inline(old_unit).casefold() != compact_inline(new_unit).casefold():
+            continue  # 单位变化会改变行语义，不能仅凭页窗位置将候选配在一起。
+        reason = _table_candidate_row_correspondence_reason(old_table, new_table)
+        if reason != "same-position-content-change":
+            continue
+        old_unused.remove(old_index)
+        new_unused.remove(new_index)
+        groups.append(
+            _TableVisualGroup(
+                (old_table,),
+                (new_table,),
+                review_only=True,
+                review_reason=reason,
+            )
+        )
 
 
 def _mutual_unique_non_crossing_table_pairs(
@@ -14319,6 +14448,7 @@ def _change_to_dict(
     change: SectionChange,
     *,
     display_change: SectionChange | None = None,
+    role_override: str | None = None,
 ) -> dict[str, object]:
     """Serialize raw audit facts plus one reader-safe display projection."""
 
@@ -14329,7 +14459,7 @@ def _change_to_dict(
     return {
         "change_type": change.change_type,
         "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
-        "role": change.role,
+        "role": role_override or change.role,
         "report_location": change.report_location,
         "display_report_location": _display_change_location(change),
         "old_location": change.old_section.location if change.old_section else None,

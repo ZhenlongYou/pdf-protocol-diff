@@ -6729,6 +6729,36 @@ class ProtocolDiffTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             markdown = outputs["markdown"].read_text(encoding="utf-8")
             text_report = outputs["text"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        table_audit = next(
+            change
+            for change in payload["table_changes"]
+            if any("Table 31-4" in title for title in change["old_titles"])
+        )
+        audit_rows = {row["item"]: row for row in table_audit["row_changes"]}
+        for item, value, condition in (
+            ("JH4u", "0.118 UI", "31.3.13"),
+            ("EOJ03", "0.025 UI", "31.3.13"),
+        ):
+            self.assertEqual("需人工复核", audit_rows[item]["change_type"])
+            self.assertIn(value, audit_rows[item]["old_value"])
+            self.assertIn(value, audit_rows[item]["new_value"])
+            self.assertIn(condition, audit_rows[item]["old_value"])
+            self.assertIn("31.3.14", audit_rows[item]["new_value"])
+
+        reader_table_audit = json.dumps(
+            payload["content_table_changes"],
+            ensure_ascii=False,
+        )
+        self.assertNotIn("JH4u", reader_table_audit)
+        self.assertNotIn("EOJ03", reader_table_audit)
+        table_html = html.split(
+            '<section class="table-visuals" id="table-changes">',
+            1,
+        )[1].split("</section>", 1)[0]
+        self.assertIn("Table 31-4.", table_html)
+        self.assertGreaterEqual(table_html.count("<img"), 2)
 
         for kind, rendered in {
             "html": html,
@@ -6736,10 +6766,11 @@ class ProtocolDiffTests(unittest.TestCase):
             "text": text_report,
         }.items():
             with self.subTest(kind=kind):
+                self.assertIn("Table 31-4.", rendered)
                 self.assertNotIn("JH - 0.118 UI 4u", rendered)
                 self.assertNotIn("EOJ - 0.025 UI 03", rendered)
-                self.assertIn("JH4u", rendered)
-                self.assertIn("EOJ03", rendered)
+                self.assertNotIn("JH4u", rendered)
+                self.assertNotIn("EOJ03", rendered)
 
     @unittest.skipUnless(
         Path("/Users/mac/Documents/文件对比工具/oif2024.532.04.pdf").is_file()
@@ -7281,15 +7312,38 @@ class ProtocolDiffTests(unittest.TestCase):
         "本地 OIF 058 双版本样本不存在",
     )
     def test_real_058_table_renumbering_has_one_contextual_sentence(self) -> None:
-        """Table 32-9/10 renumbering stays inside its complete explanatory sentence."""
+        """Table 32-9/10 renumbering stays in its source sentence without gutter fragments."""
+
+        import pymupdf
+
+        old_path = Path("/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf")
+        new_path = Path("/Users/mac/Documents/文件对比工具/oif2024.058.13.pdf")
+        with pymupdf.open(old_path) as document:
+            old_source = re.sub(r"\s+", " ", document[17].get_text("text"))
+        with pymupdf.open(new_path) as document:
+            new_source = re.sub(r"\s+", " ", document[17].get_text("text"))
+
+        self.assertIn(
+            "Further receiver electrical requirements at test point R",
+            old_source,
+        )
+        self.assertIn(
+            "specified in Table 32-9, with the receiver interference tolerance parameters specified in Table 32-10",
+            old_source,
+        )
+        self.assertIn(
+            "specified in Table 32-7, with the receiver interference tolerance parameters specified in Table 32-8",
+            new_source,
+        )
+        self.assertNotIn("9 10 Table 32-7.", new_source)
 
         old_extraction = extract_pdf_text(
-            "/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf",
+            old_path,
             start_page=18,
             end_page=18,
         )
         new_extraction = extract_pdf_text(
-            "/Users/mac/Documents/文件对比工具/oif2024.058.13.pdf",
+            new_path,
             start_page=18,
             end_page=18,
         )
@@ -7315,7 +7369,11 @@ class ProtocolDiffTests(unittest.TestCase):
             for change in result.changes
             for snippet in (*change.added_snippets, *change.removed_snippets)
         ]
-        self.assertIn("9 10 Table 32-7.", raw_single_side)
+        self.assertFalse(any("9 10 Table 32-7." in snippet for snippet in raw_single_side))
+        self.assertTrue(
+            any("Table 32-7" in table.title for table in new_extraction.table_visuals),
+            [table.title for table in new_extraction.table_visuals],
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, DiffOptions())
@@ -7324,16 +7382,28 @@ class ProtocolDiffTests(unittest.TestCase):
                 for kind in ("html", "markdown", "text")
             }
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
-        self.assertTrue(
-            any("9 10 Table 32-7." in change["added_snippets"] for change in payload["changes"])
+        self.assertFalse(
+            any(
+                "9 10 Table 32-7." in snippet
+                for change in payload["changes"]
+                for snippet in (*change["added_snippets"], *change["removed_snippets"])
+            )
         )
+        contextual_audit = [
+            pair
+            for change in payload["changes"]
+            for pair in change["replaced_snippets"]
+            if "Further receiver electrical requirements" in pair["old"]
+        ]
+        self.assertEqual(1, len(contextual_audit))
+        self.assertIn("Table 32-9", contextual_audit[0]["old"])
+        self.assertIn("Table 32-10", contextual_audit[0]["old"])
+        self.assertIn("Table 32-7", contextual_audit[0]["new"])
+        self.assertIn("Table 32-8", contextual_audit[0]["new"])
         for kind, rendered in rendered_reports.items():
             with self.subTest(kind=kind):
                 self.assertNotIn("9 10 Table 32-7.", rendered)
-        self.assertEqual(
-            2,
-            rendered_reports["html"].count("Further receiver electrical requirements"),
-        )
+                self.assertNotIn("Further receiver electrical requirements", rendered)
 
     @unittest.skipUnless(
         Path("/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf").is_file()
