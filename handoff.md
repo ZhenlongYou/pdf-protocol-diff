@@ -2,12 +2,12 @@
 
 ## 当前任务：跨版式短页窗内容忠实度（2026-09-25）
 
-- task_id `pdf-random-window-fidelity-20260925`；owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`，代码提交 `f6959949193ff6975a912b4cde8a2b7d480123b5`，起点 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`。canonical `project/pdf-protocol-diff` 未更新。
+- task_id `pdf-random-window-fidelity-20260925`；owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925` 当前 HEAD `7b531c1a94ebf5cb66abaa0ea14b3bf3b250eb81`；解析修复提交 `f6959949193ff6975a912b4cde8a2b7d480123b5`，新增本机语料入口测试为 `7b531c1`。起点 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；canonical `project/pdf-protocol-diff` 未更新。
 - 本轮将 OIF CEI 5.1/05.3 的同一对用户 PDF（SHA-256 分别为 `3bc6c387…e2bd5` 和 `1fa2417c…3e2f72`）加入忽略追踪的本机 manifest：`corpus/local/manifest-random-oif-cei-slices-20260925.json`。固定种子下 9 个三页窗，加上 105↔109 单页 Figure 压力窗，共 `10/10 PASS, 0 skip`；所有结果都保持 `degraded`，这只覆盖清单里的页窗。
 - 修复单页灰色行号栏漏滤：单页需要近完整的连续数字网格、空白编号基线，以及至少 8 个基线上的灰色行号/深色正文反差；普通黑色编号列表保留。修复法律版权/草案页脚的 `is/are` 误触发：只豁免明确的法律草案句式，技术单位、阈值或规范性词语仍阻止删栏。修复无题图内一行网格伪表：只有候选位于闭合的大型矢量图框、前有 Figure 图题、且没有近邻 Table 图题或技术表格字段时才归入图形。
 - 真实 `main.py` 页窗报告：CEI p105↔p109 为 `degraded`、读者正文/表格确认变化均为 0，Figure 2-21 两侧原图仍保留；HTML 在 `/Users/mac/Documents/ProtocolPdfDiffReports/random_slices_20260925/oif_cei_single_figure_window_f695994/protocol_diff_20260925_203904/protocol_diff_report.html`。OIF 235.12↔.13 p13 仍报告 `+/-50 ppm` 波特率公差变化，版权/网址未混入读者差异；HTML 在 `/Users/mac/Documents/ProtocolPdfDiffReports/random_slices_20260925/oif235_page13_footer_f695994/protocol_diff_20260925_203902/protocol_diff_report.html`。两份 provenance 均绑定代码提交 `f695994…`，状态保持 `degraded`。
-- 本机独立 PyMuPDF 源页字词清单核对 CEI p105↔p109：Figure 图题相同，图框内 15 词与图外正文 103 词的多重集在两侧相同；这只核验选中的两个页面。受影响模块 `test_coordinate_page_furniture` + `test_page_window_content_correspondence` 为 `78/78 PASS`。
-- 新增缺陷记录见 `docs/verification/escaped-defects.yaml`。严格 v2 计划与完整测试仍待本提交闭环；旧 OID 的 `receipt-final12.json` 不适用于本轮源码。计划按真实 Base 35 页、OIF 10 窗口、OIF 235 p13、独立源页 oracle、RED/GREEN 变异与完整项目套件执行。
+- 本机独立 PyMuPDF 源页字词清单核对 CEI p105↔p109：Figure 图题相同，图框内 15 词与图外正文 103 词的多重集在两侧相同；这只核验选中的两个页面。受影响模块上一轮 `78/78 PASS`；把该 OIF 测试改为从项目本地语料目录读取后，单项真实页窗测试 `1/1 PASS`。
+- 新增缺陷记录见 `docs/verification/escaped-defects.yaml`。严格 v2 计划已生成并通过 schema-only 检查；完整测试与执行型收据尚待运行。旧 OID 的 `receipt-final12.json` 不适用于本轮源码。计划按真实 Base 35 页、OIF 10 窗口、OIF 235 p13、独立源页 oracle、RED/GREEN 变异与完整项目套件执行。
 - 集成仍受仓库预检阻塞：canonical `project/pdf-protocol-diff` 超前候选基线 45 个提交，存在 `pdf_extract.py` / `reporting.py` 冲突；两个未登记分支和三个 `prunable` worktree 记录仍需其 owner 或仓库库存流程处理。未移动 canonical refs；不得清理他人状态。完成候选门禁后再由原 owner 重试集成与 `source_regions.py` scope 扩展。
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
