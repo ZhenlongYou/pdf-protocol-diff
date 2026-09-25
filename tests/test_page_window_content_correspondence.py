@@ -471,6 +471,8 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                         ),
                         page.insert_text((72, 742), "www.oiforum.com", fontsize=8),
                     ),
+                    "4.2 V",
+                    "4.8 V",
                 ),
                 (
                     "value_inside_footer_cluster",
@@ -487,13 +489,42 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                         ),
                         page.insert_text((72, 735), "www.oiforum.com", fontsize=8),
                     ),
+                    "4.2 V",
+                    "4.8 V",
+                ),
+                (
+                    "normative_body_inside_legal_footer_cluster",
+                    lambda page, modal: (
+                        page.insert_text(
+                            (72, 705),
+                            "Optical Internetworking Forum - Clause 32: Link Requirements",
+                            fontsize=8,
+                        ),
+                        page.insert_text(
+                            (72, 720),
+                            f"The receiver {modal} support the declared operating mode.",
+                            fontsize=8,
+                        ),
+                        page.insert_text(
+                            (72, 735),
+                            "Copyright © 2025 Optical Internetworking Forum",
+                            fontsize=8,
+                        ),
+                        page.insert_text(
+                            (72, 750),
+                            "This is a draft and not to be shared before publication approval.",
+                            fontsize=8,
+                        ),
+                    ),
+                    "shall",
+                    "may",
                 ),
             )
-            for case_name, draw_footer in cases:
+            for case_name, draw_footer, old_value, new_value in cases:
                 case_root = root / case_name
                 case_root.mkdir()
                 paths = (case_root / "old.pdf", case_root / "new.pdf")
-                values = ("4.2 V", "4.8 V")
+                values = (old_value, new_value)
                 for path, value in zip(paths, values, strict=True):
                     document = fitz.open()
                     page = document.new_page(width=612, height=792)
@@ -522,6 +553,64 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                 self.assertTrue(
                     any(change["change_type"] == "modified" for change in payload["content_changes"])
                 )
+
+    def test_open_vector_curve_preserves_unstructured_table_in_public_comparison(self) -> None:
+        """A curve bbox cannot make a real one-row technical grid disappear."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = (root / "old.pdf", root / "new.pdf")
+            values = ("35 ps", "40 ps")
+            for path, value in zip(paths, values, strict=True):
+                document = fitz.open()
+                page = document.new_page(width=612, height=792)
+                page.insert_text((170, 140), "Figure 1. Example response curve", fontsize=12)
+                page.draw_bezier(
+                    (80, 180),
+                    (540, 180),
+                    (80, 580),
+                    (540, 580),
+                    color=(0, 0, 0),
+                    width=1,
+                )  # 大型开放曲线覆盖整幅图，但不构成闭合框。
+                for y in (320, 370):
+                    page.draw_line((150, y), (390, y), color=(0, 0, 0), width=1)
+                for x in (150, 270, 390):
+                    page.draw_line((x, 320), (x, 370), color=(0, 0, 0), width=1)
+                for index in range(5):
+                    x = 90 + index * 25
+                    page.draw_line(
+                        (x, 220),
+                        (x + 10, 223),
+                        color=(0, 0, 0),
+                        width=1,
+                    )  # 使表格候选通过页面几何预筛，但不提供闭合框证据。
+                page.insert_text((158, 342), "Rise Time", fontsize=10)
+                page.insert_text((280, 342), value, fontsize=10)
+                document.save(path)
+                document.close()
+
+            extracted = [extract_pdf_text(path, 1, 1) for path in paths]
+            for extraction, value in zip(extracted, values, strict=True):
+                self.assertEqual(1, len(extraction.table_visuals))
+                self.assertIn(value, " ".join(extraction.table_visuals[0].row_texts))
+
+            options = DiffOptions(
+                old_start_page=1,
+                old_end_page=1,
+                new_start_page=1,
+                new_end_page=1,
+            )
+            result = run_diff(paths[0], paths[1], options)
+            reports = write_reports(result, root / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+            reader_table_changes = json.dumps(
+                payload["content_table_changes"],
+                ensure_ascii=False,
+            )
+
+            self.assertIn(values[0], reader_table_changes)
+            self.assertIn(values[1], reader_table_changes)
 
     def test_single_page_line_number_style_change_keeps_the_actual_value_delta(self) -> None:
         """A left/right gray print-line gutter must not become technical prose."""

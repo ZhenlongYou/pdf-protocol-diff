@@ -137,6 +137,9 @@ _SECTION_ANCHOR_MIN_MOVED_CHARACTERS = 120  # 少量词序/空格差异不足以
 _SECTION_ANCHOR_NORMATIVE_PROSE_RE = re.compile(
     r"(?i)\b(?:shall|must|should|required|requirements?|specified|不得|必须|应当|要求|规定)\b"
 )  # 锚点重排的否决门禁独立于通用图块分类器，保护句首规范条款。
+_NORMATIVE_FURNITURE_RE = re.compile(
+    r"(?i)\b(?:shall|must|should|may|required|prohibited)\b|(?:不得|必须|应当|要求|规定)"
+)  # 页脚整簇识别必须保护规范性正文，但不把“Requirements”标题误当条款。
 _SIGNED_RATIONAL_SUBSCRIPT_RE = re.compile(
     r"[+\-−]?\d+(?:/\d+)?"
 )  # 仅供坐标已证明的视觉下标；不在普通文字层做形状替换。
@@ -387,6 +390,10 @@ def _extract_pdf_text_with_pdfplumber(
                 ((), None),
             )
             vector_graphic_bboxes = _page_vector_graphic_bboxes(page)
+            vector_graphic_frame_bboxes = _page_closed_vector_graphic_frame_bboxes(
+                page,
+                page_bounds(page),
+            )  # 曲线包络不能单独授权丢弃图内候选；只保留闭合矩形或闭合边框证据。
             publication_footer_boxes, publication_footer_texts = (
                 publication_footer_evidence_by_page.get(index, ((), ()))
             )
@@ -426,6 +433,7 @@ def _extract_pdf_text_with_pdfplumber(
                 document_folio_boxes=folio_boxes,
                 document_footer_identity_boxes=publication_footer_boxes,
                 vector_graphic_bboxes=vector_graphic_bboxes,
+                vector_graphic_frame_bboxes=vector_graphic_frame_bboxes,
             )
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
@@ -517,11 +525,13 @@ def _extract_pdf_text_with_pdfplumber(
 
 def _page_vector_graphic_bboxes(
     page: object,
+    *,
+    attributes: tuple[str, ...] = ("rects", "curves", "lines"),
 ) -> tuple[tuple[float, float, float, float], ...]:
     """保留原生 PDF 矩形、曲线和线段的有效包络，拒绝文字启发式伪造图形。"""
 
     bboxes: list[tuple[float, float, float, float]] = []
-    for attribute in ("rects", "curves", "lines"):
+    for attribute in attributes:
         objects = getattr(page, attribute, ())
         if not isinstance(objects, list | tuple):
             continue
@@ -543,6 +553,38 @@ def _page_vector_graphic_bboxes(
     # PDF 常为同一描边/叠画重复发出完全相同对象；重复 bbox 不能虚增图形证据。
     return tuple(dict.fromkeys(bboxes))
 
+
+def _page_closed_vector_graphic_frame_bboxes(
+    page: object,
+    page_bbox: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Return only native closed rectangles and frames reconstructed from straight edges."""
+
+    rectangles: list[tuple[float, float, float, float]] = []
+    for item in getattr(page, "rects", ()) or ():
+        if not isinstance(item, dict):
+            continue
+        if not item.get("stroke") or item.get("fill"):
+            continue  # 只有明确描边且未填充的矩形可直接证明框；填充底色不授予表格删除权。
+        try:
+            box = (
+                float(item.get("x0")),
+                float(item.get("top")),
+                float(item.get("x1")),
+                float(item.get("bottom")),
+            )
+        except (TypeError, ValueError):
+            continue
+        if all(math.isfinite(value) for value in box) and box[2] > box[0] and box[3] > box[1]:
+            rectangles.append(box)
+
+    straight_edge_bboxes = _page_vector_graphic_bboxes(
+        page,
+        attributes=("rects", "lines"),
+    )
+    reconstructed = _vector_graphic_frame_bboxes(straight_edge_bboxes, page_bbox)
+    return tuple(dict.fromkeys((*rectangles, *reconstructed)))
+
 def _extract_pdfplumber_page_text(
     page: object,
     pdf_name: str,
@@ -559,6 +601,7 @@ def _extract_pdfplumber_page_text(
     document_folio_boxes: tuple[tuple[float, float, float, float], ...] = (),
     document_footer_identity_boxes: tuple[tuple[float, float, float, float], ...] = (),
     vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    vector_graphic_frame_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[
     str,
     list[str],
@@ -686,6 +729,7 @@ def _extract_pdfplumber_page_text(
             geometry_words=comparison_coordinate_words,
             page_text=text,
             vector_graphic_bboxes=vector_graphic_bboxes,
+            vector_graphic_frame_bboxes=vector_graphic_frame_bboxes,
         )
         warnings.extend(table_warnings)  # 表格失败不阻塞正文比较。
     else:
@@ -2341,11 +2385,11 @@ def _proven_running_footer_boxes(
     # not grant removal authority over a technical value elsewhere in the same
     # tightly packed cluster. Leave the whole cluster intact when it contains
     # a value-bearing or normative line.
-    cluster_has_technical_fact = any(
-        _contains_technical_footer_fact_for_furniture(text)
+    cluster_has_protected_content = any(
+        _contains_protected_footer_content(text)
         for _top, _bottom, text, _line_words in footer_cluster
     )
-    if cluster_has_technical_fact:
+    if cluster_has_protected_content:
         return generic_boxes
 
     selected_word_ids = {
@@ -2384,8 +2428,8 @@ def _is_explicit_copyright_footer_line(text: str) -> bool:
     )
 
 
-def _contains_technical_footer_fact_for_furniture(text: str) -> bool:
-    """Ignore only the false-positive copula in an explicit legal draft notice."""
+def _contains_protected_footer_content(text: str) -> bool:
+    """Retain technical values and normative statements within footer-like text."""
 
     candidate = normalize_line(text)
     if _is_explicit_draft_share_notice(candidate):
@@ -2400,7 +2444,7 @@ def _contains_technical_footer_fact_for_furniture(text: str) -> bool:
             "not to be",
             candidate,
         )
-    return contains_technical_footer_fact(candidate)
+    return bool(_NORMATIVE_FURNITURE_RE.search(candidate)) or contains_technical_footer_fact(candidate)
 
 
 def _physical_page_folio_candidate(
@@ -2827,7 +2871,7 @@ def _document_publication_footer_evidence(
                 and bottom - top <= height * 0.035
                 and line_width >= width * 0.25
                 and _is_explicit_copyright_footer_line(text)
-                and not _contains_technical_footer_fact_for_furniture(text)
+                and not _contains_protected_footer_content(text)
             ):
                 selected[index] = (display_line_text(line_words), line_words)
             if (
@@ -2835,7 +2879,7 @@ def _document_publication_footer_evidence(
                 and bottom - top <= height * 0.035
                 and line_width >= width * 0.55
                 and _is_explicit_draft_share_notice(folded)
-                and not _contains_technical_footer_fact_for_furniture(folded)
+                and not _contains_protected_footer_content(folded)
             ):
                 selected[index] = (display_line_text(line_words), line_words)
             if (
@@ -2985,7 +3029,7 @@ def _looks_like_running_footer_marker(line_text: str) -> bool:
     """Recognize a short legal/status/title line that can anchor a footer cluster."""
 
     candidate = normalize_line(line_text).casefold()
-    if _contains_technical_footer_fact_for_furniture(candidate):
+    if _contains_protected_footer_content(candidate):
         return False
     if re.match(r"^(?:copyright\b|©)", candidate):
         return True
@@ -4175,6 +4219,7 @@ def _extract_table_lines_and_visuals(
     geometry_words: list[dict[str, object]] | None = None,
     page_text: str | None = None,
     vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    vector_graphic_frame_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[
     list[str],
     list[TableVisual],
@@ -4250,6 +4295,7 @@ def _extract_table_lines_and_visuals(
             title=title,
             page_characters=getattr(page, "chars", ()) or (),
             vector_graphic_bboxes=vector_graphic_bboxes,
+            vector_graphic_frame_bboxes=vector_graphic_frame_bboxes,
             page_bbox=_table_page_bbox(page),
         ) or _table_bbox_is_plot_axis_label(
             bbox, table_lines, geometry_words, title=title,
@@ -5143,6 +5189,7 @@ def _table_bbox_belongs_to_captioned_figure(
     title: str = "",
     page_characters: Iterable[dict[str, object]] = (),
     vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    vector_graphic_frame_bboxes: tuple[tuple[float, float, float, float], ...] | None = None,
     page_bbox: tuple[float, float, float, float] | None = None,
 ) -> bool:
     """Reject a tiny grid embedded in a coordinate-proven figure region.
@@ -5165,10 +5212,19 @@ def _table_bbox_belongs_to_captioned_figure(
     ):
         return False
     word_lines = _word_line_records(geometry_words)
+    closed_frame_bboxes = (
+        vector_graphic_frame_bboxes
+        if vector_graphic_frame_bboxes is not None
+        else (
+            _vector_graphic_frame_bboxes(vector_graphic_bboxes, page_bbox)
+            if page_bbox is not None
+            else ()
+        )
+    )
     if _table_bbox_inside_captioned_vector_figure(
         bbox,
         word_lines,
-        vector_graphic_bboxes=vector_graphic_bboxes,
+        vector_graphic_frame_bboxes=closed_frame_bboxes,
         page_bbox=page_bbox,
     ):
         return True  # 无题且缺少表格字段的小网格若完整落入图题所辖的大图框，应归为图内文字。
@@ -5317,22 +5373,19 @@ def _table_bbox_inside_captioned_vector_figure(
         tuple[float, float, str, tuple[dict[str, object], ...]]
     ],
     *,
-    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+    vector_graphic_frame_bboxes: tuple[tuple[float, float, float, float], ...],
     page_bbox: tuple[float, float, float, float] | None,
 ) -> bool:
     """Prove an uncaptioned tiny table candidate belongs inside a Figure frame."""
 
-    if not word_lines or page_bbox is None or not vector_graphic_bboxes:
+    if not word_lines or page_bbox is None or not vector_graphic_frame_bboxes:
         return False
     page_width = page_bbox[2] - page_bbox[0]
     page_height = page_bbox[3] - page_bbox[1]
     page_area = page_width * page_height
     if page_width <= 0 or page_height <= 0 or page_area <= 0:
         return False
-    graphic_regions = (
-        *vector_graphic_bboxes,
-        *_vector_graphic_frame_bboxes(vector_graphic_bboxes, page_bbox),
-    )
+    graphic_regions = vector_graphic_frame_bboxes
     captions = [
         (bottom, text, _word_span_horizontal_bounds(words))
         for _top, bottom, text, words in word_lines

@@ -32,6 +32,7 @@ from protocol_pdf_diff.pdf_extract import (
     _document_proven_line_number_gutter_boxes,
     _extract_pdfplumber_page_text,
     _filtered_layout_page,
+    _page_closed_vector_graphic_frame_bboxes,
     _page_may_contain_table,
     _table_bbox_belongs_to_captioned_figure,
 )
@@ -125,6 +126,54 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
                 words,
                 vector_graphic_bboxes=vector_edges,
                 page_bbox=page_bbox,
+            )
+        )
+
+    def test_open_vector_curve_does_not_hide_technical_table_inside_figure(self) -> None:
+        """An open curve's broad bbox is not proof that a technical grid is Figure text."""
+
+        table_bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        # One open curve can span the whole plot, but its bounding box does not
+        # establish a closed frame that owns a separately detected technical grid.
+        open_curve_bbox = ((79.74, 174.24, 540.24, 567.90),)
+        page = mock.Mock()
+        page.rects = []
+        page.lines = []
+        page.curves = [
+            {
+                "x0": open_curve_bbox[0][0],
+                "top": open_curve_bbox[0][1],
+                "x1": open_curve_bbox[0][2],
+                "bottom": open_curve_bbox[0][3],
+            }
+        ]
+        closed_frames = _page_closed_vector_graphic_frame_bboxes(
+            page,
+            (0.0, 0.0, 612.0, 792.0),
+        )
+        technical_grid_row = [
+            "表格行: T1 | Column 1=Rise Time | Column 2=35 ps"
+        ]
+
+        self.assertEqual((), closed_frames)
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                table_bbox,
+                technical_grid_row,
+                words,
+                vector_graphic_bboxes=open_curve_bbox,
+                vector_graphic_frame_bboxes=closed_frames,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
             )
         )
 

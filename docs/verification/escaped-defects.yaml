@@ -35,7 +35,7 @@ escaped_defects:
     failure_mechanism: "The existing document-level line-grid gate required three selected pages. Single-page windows now need a near-complete geometric reset grid plus repeated gray-number/dark-body contrast; black numbered lists remain fail-open."
     red_green_pair_id: PAIR-SINGLE-PAGE-GRAY-GUTTER
     regression_test_id: SINGLE_PAGE_GRAY_GRID_STYLE_CONTRAST_TEST
-    public_path_rerun_id: RUN-OIF-CEI-SINGLE-FIGURE-REAL
+    public_path_rerun_id: RUN-OIF-FIGURE-REAL
     state: verified
   - id: DEF-PAGE-WINDOW-COPYRIGHT-DRAFT-FOOTER-20260925
     acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
@@ -53,7 +53,25 @@ escaped_defects:
     failure_mechanism: "A one-row grid detector mistook a label inside a large, closed vector Figure frame for a table; the resulting table bbox also blocked Figure text review."
     red_green_pair_id: PAIR-OIF-CEI-CAPTIONED-VECTOR-FIGURE
     regression_test_id: OIF_CEI_SINGLE_FIGURE_WINDOW_TEST
-    public_path_rerun_id: RUN-OIF-CEI-SINGLE-FIGURE-REAL
+    public_path_rerun_id: RUN-OIF-FIGURE-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-SIGNED-FOOTER-NORMATIVE-LINE-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A normative sentence between a Forum/Clause marker, copyright line, and legal draft notice could be removed from the comparison."
+    discovered_via: independent_review
+    failure_mechanism: "The signed footer-cluster guard rejected numeric/value-bearing text but did not protect shall/must/should/may statements."
+    red_green_pair_id: PAIR-SIGNED-FOOTER-NORMATIVE-LINE
+    regression_test_id: SIGNED_FOOTER_NORMATIVE_BODY_PRESERVED_TEST
+    public_path_rerun_id: RUN-NORMATIVE-FOOTER-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-OPEN-CURVE-TECHNICAL-GRID-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A large open vector curve and Figure caption could cause a genuine technical grid inside the Figure to be dropped."
+    discovered_via: independent_review
+    failure_mechanism: "A raw open-curve bounding box was accepted as a closed Figure frame and granted ownership over a separate one-row grid."
+    red_green_pair_id: PAIR-OPEN-CURVE-TECHNICAL-GRID
+    regression_test_id: OPEN_CURVE_TECHNICAL_GRID_PRESERVED_TEST
+    public_path_rerun_id: RUN-OPEN-CURVE-REAL
     state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
