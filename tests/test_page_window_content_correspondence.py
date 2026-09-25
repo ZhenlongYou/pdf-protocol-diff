@@ -402,46 +402,53 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         self.assertFalse(body_only_result.pages[0].running_footer_texts)
 
     def test_forum_clause_footer_filter_preserves_bottom_technical_limit(self) -> None:
-        """A bottom Forum/Clause sentence with a changed voltage stays comparable."""
+        """Bottom Forum/Clause sentences retain voltage and SerDes baud deltas."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            paths = (root / "old.pdf", root / "new.pdf")
-            for path, value in zip(paths, ("4.2 V", "4.8 V"), strict=True):
-                document = fitz.open()
-                page = document.new_page(width=612, height=792)
-                page.insert_text((54, 120), "11 Receiver Input Limits", fontsize=12)
-                page.insert_text((54, 150), "The receiver input voltage is measured at point R.", fontsize=10)
-                page.insert_text(
-                    (72, 725),
-                    f"Optical Internetworking Forum Clause 11: Maximum receiver input is {value}",
-                    fontsize=8,
-                )
-                # A separated edge number resembles a footer folio. It must not
-                # grant deletion authority to a line that contains a technical value.
-                page.insert_text((540, 725), "1", fontsize=8)
-                document.save(path)
-                document.close()
-
-            extracted = [extract_pdf_text(path, 1, 1) for path in paths]
-            options = DiffOptions(
-                old_start_page=1,
-                old_end_page=1,
-                new_start_page=1,
-                new_end_page=1,
+            cases = (
+                ("voltage", "Maximum receiver input is", "4.2 V", "4.8 V"),
+                ("baud", "CEI supports", "112 GBd", "116 GBd"),
             )
-            result = run_diff(paths[0], paths[1], options)
-            reports = write_reports(result, root / "reports", options)
-            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+            for case_name, prefix, old_value, new_value in cases:
+                case_root = root / case_name
+                case_root.mkdir()
+                paths = (case_root / "old.pdf", case_root / "new.pdf")
+                for path, value in zip(paths, (old_value, new_value), strict=True):
+                    document = fitz.open()
+                    page = document.new_page(width=612, height=792)
+                    page.insert_text((54, 120), "11 Technical Values", fontsize=12)
+                    page.insert_text((54, 150), "The stated value is checked at the receiver.", fontsize=10)
+                    page.insert_text(
+                        (72, 725),
+                        f"Optical Internetworking Forum Clause 11: {prefix} {value}",
+                        fontsize=8,
+                    )
+                    # A separated edge number resembles a footer folio. It must not
+                    # grant deletion authority to a line that contains a technical value.
+                    page.insert_text((540, 725), "1", fontsize=8)
+                    document.save(path)
+                    document.close()
 
-        for item, value in zip(extracted, ("4.2 V", "4.8 V"), strict=True):
-            self.assertIn(value, item.pages[0].text)
-        reader_changes = json.dumps(payload["content_changes"], ensure_ascii=False)
-        self.assertIn("4.2 V", reader_changes)
-        self.assertIn("4.8 V", reader_changes)
-        self.assertTrue(
-            any(change["change_type"] == "modified" for change in payload["content_changes"])
-        )
+                extracted = [extract_pdf_text(path, 1, 1) for path in paths]
+                options = DiffOptions(
+                    old_start_page=1,
+                    old_end_page=1,
+                    new_start_page=1,
+                    new_end_page=1,
+                )
+                result = run_diff(paths[0], paths[1], options)
+                reports = write_reports(result, case_root / "reports", options)
+                payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+                reader_changes = json.dumps(payload["content_changes"], ensure_ascii=False)
+
+                self.assertIn(old_value, extracted[0].pages[0].text)
+                self.assertIn(new_value, extracted[1].pages[0].text)
+                self.assertIn(old_value, reader_changes)
+                self.assertIn(new_value, reader_changes)
+                self.assertTrue(
+                    any(change["change_type"] == "modified" for change in payload["content_changes"])
+                )
 
     def test_repeated_forum_clause_footer_requires_stable_folio_backing(self) -> None:
         """Two consecutive folio-backed Forum/Clause captions prove a footer."""

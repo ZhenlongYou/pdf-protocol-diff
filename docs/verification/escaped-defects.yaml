@@ -14,7 +14,7 @@ escaped_defects:
     acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
     user_symptom: "A changed bottom-of-page technical line containing Forum and Clause text could be treated as publication footer and disappear from the comparison."
     discovered_via: independent_review
-    failure_mechanism: "A broad bottom-position Forum/Clause marker granted footer deletion authority without a page folio or repeated footer geometry; page-local folio removal also accepted measurement-bearing text."
+    failure_mechanism: "A broad bottom-position Forum/Clause marker granted footer deletion authority without a page folio or repeated footer geometry; page-local folio removal also accepted measurement-bearing voltage and baud-rate text."
     red_green_pair_id: PAIR-BOTTOM-FORUM-CLAUSE-TECHNICAL-LINE
     regression_test_id: BOTTOM_FORUM_CLAUSE_TECHNICAL_LINE_RETAINED_TEST
     public_path_rerun_id: RUN-FOOTER-REAL

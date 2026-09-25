@@ -16,6 +16,8 @@ _TECHNICAL_FOOTER_FACT = re.compile(
     r"(?<![A-Za-z0-9_])[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*"
     r"(?:%|(?:[fpnumkMGTµμ]?V|[fpnumkMGTµμ]?A|[fpnumkMGTµμ]?W|"
     r"[fpnumµμ]?s|[fpnumkMGTµμ]?Hz|[kMGT]?bps|[kMGT]?b/s|"
+    r"[kMGT]?Bd|[kMGT]?baud|(?:kilo|mega|giga|tera)?baud|"
+    r"[kMGT]?sym(?:bols?)?/s|"
     r"UI|dB(?:m|c)?|[kMGT]?Ω|ppm|°C)(?=$|[^A-Za-z0-9_]))"
 )
 
