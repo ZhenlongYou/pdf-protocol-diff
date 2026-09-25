@@ -10,6 +10,7 @@ section context, but final sign-off should still inspect the source PDFs.
 from __future__ import annotations
 
 import difflib
+from math import isfinite
 from types import MappingProxyType
 import re
 from collections import Counter, defaultdict
@@ -966,17 +967,25 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
 
     visuals = list(table_visuals)  # 保留真实截图表格，新增兜底只补未覆盖行。
     covered_by_page: dict[int, Counter[str]] = {}
-    visible_cells_by_page: dict[int, list[tuple[str, ...]]] = {}
+    visible_tables_by_page: dict[
+        int,
+        list[tuple[TableVisual, list[tuple[str, ...]]]],
+    ] = {}
     for table in visuals:
         page_counter = covered_by_page.setdefault(table.page_number, Counter())
-        visible_cells = visible_cells_by_page.setdefault(table.page_number, [])
+        visible_cells = [
+            cell
+            for row in table.row_texts
+            for cell in _table_row_cell_payload_tokens(row)
+        ]
+        visible_tables_by_page.setdefault(table.page_number, []).append(
+            (table, visible_cells)
+        )
         page_counter.update(
             _review_unit_key(row)
             for row in table.row_texts
             if _is_table_review_unit(row)
         )  # 截图覆盖只在同一页按出现次数消费；同文行出现在别页仍须生成独立证据。
-        for row in table.row_texts:
-            visible_cells.extend(_table_row_cell_payload_tokens(row))
     next_table_number = max((table.table_number for table in visuals), default=0) + 1  # 兜底表号接在真实表之后。
     for page in pages:
         page_counter = covered_by_page.get(page.page_number, Counter())
@@ -990,7 +999,8 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
                 continue
             if _is_short_cell_fragment_of_visible_table(
                 line,
-                visible_cells_by_page.get(page.page_number, []),
+                page,
+                visible_tables_by_page.get(page.page_number, []),
             ):
                 continue  # 同页截图表已完整呈现的拆分单元格词不另造一张无截图“表格”。
             rows.append(compact_inline(line))
@@ -1032,9 +1042,10 @@ def _table_row_cell_payload_tokens(row: str) -> list[tuple[str, ...]]:
 
 def _is_short_cell_fragment_of_visible_table(
     row: str,
-    visible_cells: list[tuple[str, ...]],
+    page: PageText,
+    visible_tables: list[tuple[TableVisual, list[tuple[str, ...]]]],
 ) -> bool:
-    """Suppress only a one- or two-word edge fragment already shown inside a same-page cell."""
+    """Suppress a short fragment only when its source block is proven inside that table."""
 
     payloads = _table_row_cell_payload_tokens(row)
     if len(payloads) != 1:
@@ -1042,10 +1053,82 @@ def _is_short_cell_fragment_of_visible_table(
     fragment = payloads[0]
     if not 1 <= len(fragment) <= 2:
         return False
-    return any(
-        len(cell) > len(fragment)
-        and (cell[: len(fragment)] == fragment or cell[-len(fragment) :] == fragment)
-        for cell in visible_cells
+    for table, visible_cells in visible_tables:
+        if not any(
+            len(cell) > len(fragment)
+            and (cell[: len(fragment)] == fragment or cell[-len(fragment) :] == fragment)
+            for cell in visible_cells
+        ):
+            continue
+        if _page_blocks_prove_fragment_inside_table(page, table, fragment):
+            return True
+    return False
+
+
+def _page_blocks_prove_fragment_inside_table(
+    page: PageText,
+    table: TableVisual,
+    fragment: tuple[str, ...],
+) -> bool:
+    """Require both table-source text and a contained coordinate block for suppression."""
+
+    table_tokens = _short_fragment_text_tokens(table.source_text)
+    if not _contains_ordered_tokens(table_tokens, fragment):
+        return False  # 结构化行相似度不能替代该截图表自身的源字证据。
+    try:
+        table_box = tuple(float(value) for value in table.bbox)
+    except (TypeError, ValueError):
+        return False
+    if len(table_box) != 4 or not all(isfinite(value) for value in table_box):
+        return False
+    left, top, right, bottom = table_box
+    if right <= left or bottom <= top:
+        return False
+    tolerance = 1.5
+    for block in page.blocks:
+        if block.page_number != page.page_number:
+            continue
+        block_tokens = _short_fragment_text_tokens(block.text)
+        if not _contains_ordered_tokens(block_tokens, fragment):
+            continue
+        try:
+            block_left, block_top, block_right, block_bottom = (
+                float(value) for value in block.bbox
+            )
+        except (TypeError, ValueError):
+            continue
+        if not all(
+            isfinite(value)
+            for value in (block_left, block_top, block_right, block_bottom)
+        ):
+            continue
+        if (
+            block_left >= left - tolerance
+            and block_top >= top - tolerance
+            and block_right <= right + tolerance
+            and block_bottom <= bottom + tolerance
+        ):
+            return True
+    return False
+
+
+def _short_fragment_text_tokens(text: str) -> tuple[str, ...]:
+    return tuple(
+        re.findall(
+            r"[a-z0-9]+|[\u3400-\u9fff]+",
+            normalize_line(text).casefold(),
+        )
+    )
+
+
+def _contains_ordered_tokens(
+    source: tuple[str, ...],
+    fragment: tuple[str, ...],
+) -> bool:
+    width = len(fragment)
+    return bool(width) and any(
+        source[start : start + width] == fragment
+        for start in range(len(source) - width + 1)
     )
 
 

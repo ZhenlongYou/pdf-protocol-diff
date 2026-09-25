@@ -9350,6 +9350,11 @@ def _table_line_key(line: str) -> str:
     return re.sub(r"\s+", " ", line).casefold().strip()
 
 
+_OrderedTableCell = tuple[tuple[str, ...], tuple[str, ...]]
+_OrderedTableRow = tuple[_OrderedTableCell, ...]
+_OrderedTableContent = tuple[bool, tuple[_OrderedTableRow, ...]]
+
+
 def _deduplicate_nested_captioned_table_visuals(
     table_visuals: list[TableVisual],
 ) -> list[TableVisual]:
@@ -9366,9 +9371,72 @@ def _deduplicate_nested_captioned_table_visuals(
             return None
         return box  # type: ignore[return-value]
 
-    def payload_words(table: TableVisual) -> set[str]:
-        payload = " ".join(_table_line_visual_payload(row) for row in table.row_texts)
-        return set(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", payload.casefold()))
+    def ordered_rows(
+        table: TableVisual,
+    ) -> _OrderedTableContent:
+        rows: list[_OrderedTableRow] = []
+        has_semantic_labels = False
+        for row in table.row_texts:
+            text = normalize_line(row)
+            if text.startswith(_TABLE_ROW_PREFIX):
+                text = text[len(_TABLE_ROW_PREFIX) :].strip()
+            text = re.sub(r"^T\d+\s*\|\s*", "", text, flags=re.I)
+            cells = split_table_cells(text)
+            parsed_cells: list[_OrderedTableCell] = []
+            for cell in cells:
+                field = split_table_field(cell)
+                label = normalize_line(field[0]) if field else ""
+                value = field[1] if field else decode_table_cell(cell)
+                label_tokens = tuple(
+                    re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", label.casefold())
+                )
+                if re.fullmatch(r"(?:column\s*\d+|列\s*\d+)", label, flags=re.I):
+                    label_tokens = ()  # 自动生成的列号不是行列身份字段。
+                elif label_tokens:
+                    has_semantic_labels = True
+                value_tokens = tuple(
+                    re.findall(
+                        r"[a-z0-9]+|[\u3400-\u9fff]+",
+                        normalize_line(value).casefold(),
+                    )
+                )
+                if label_tokens or value_tokens:
+                    parsed_cells.append((label_tokens, value_tokens))
+            if parsed_cells:
+                rows.append(tuple(parsed_cells))
+        return has_semantic_labels, tuple(rows)
+
+    def content_is_ordered_subset(
+        child_content: _OrderedTableContent,
+        parent_content: _OrderedTableContent,
+    ) -> bool:
+        child_has_labels, child_rows = child_content
+        parent_has_labels, parent_rows = parent_content
+        if not child_rows or not parent_rows:
+            return False
+        if child_has_labels:
+            if not parent_has_labels or len(child_rows) > len(parent_rows):
+                return False
+            width = len(child_rows)
+            return any(
+                parent_rows[start : start + width] == child_rows
+                for start in range(len(parent_rows) - width + 1)
+            )  # 标签化数据须保持每行的字段和值关联及行顺序。
+
+        child_tokens = tuple(
+            token
+            for row in child_rows
+            for _label, value_tokens in row
+            for token in value_tokens
+        )
+        if not child_tokens or parent_has_labels:
+            return False
+        return any(
+            tuple(value_tokens[start : start + len(child_tokens)]) == child_tokens
+            for row in parent_rows
+            for _label, value_tokens in row
+            for start in range(len(value_tokens) - len(child_tokens) + 1)
+        )  # 无语义列名的碎片只在父表同一单元格中按原顺序出现时去重。
 
     def is_strict_parent(
         parent_box: tuple[float, float, float, float],
@@ -9384,16 +9452,20 @@ def _deduplicate_nested_captioned_table_visuals(
         )
 
     boxes = [bbox_values(table) for table in table_visuals]
-    word_sets = [payload_words(table) for table in table_visuals]
+    ordered_content = [ordered_rows(table) for table in table_visuals]
     removed: set[int] = set()
     for child_index, child in enumerate(table_visuals):
         child_box = boxes[child_index]
-        child_words = word_sets[child_index]
+        child_content = ordered_content[child_index]
         title_key = re.sub(r"\s+", " ", normalize_line(child.title)).strip().casefold()
         if (
             child_box is None
             or not title_key
-            or len(child_words) < 2
+            or sum(
+                len(tokens)
+                for row in child_content[1]
+                for _label, tokens in row
+            ) < 2
             or not child.row_texts
         ):
             continue
@@ -9415,7 +9487,10 @@ def _deduplicate_nested_captioned_table_visuals(
             parent_area = (parent_box[2] - parent_box[0]) * (parent_box[3] - parent_box[1])
             if child_area <= 0 or child_area / parent_area > 0.35:
                 continue
-            if child_words <= word_sets[parent_index]:
+            if content_is_ordered_subset(
+                child_content,
+                ordered_content[parent_index],
+            ):
                 parents.append(parent_index)
         if len(parents) == 1:
             removed.add(child_index)

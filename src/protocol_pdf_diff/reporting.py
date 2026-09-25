@@ -5185,7 +5185,6 @@ def _pair_unique_descriptive_caption_renumberings(
         if old_box is None or new_box is None:
             continue  # 缺少有限的页内几何时，唯一 caption 仍不足以确定它是同一表。
         if overlap_ratio(old_box, new_box) < 0.72:
-            context_is_exact = bool(old_context and old_context == new_context)
             context_is_weak = bool(
                 not old_context
                 or not new_context
@@ -5194,6 +5193,11 @@ def _pair_unique_descriptive_caption_renumberings(
                 or _table_context_is_weak_numeric_heading(old_context)
                 or _table_context_is_weak_numeric_heading(new_context)
             )
+            context_is_exact = bool(
+                old_context
+                and old_context == new_context
+                and not context_is_weak
+            )  # 相同的页眉/页脚或页窗回退线索不是章节锚点。
             if not context_is_exact and not context_is_weak:
                 continue  # 两侧章节线索都明确且冲突时，唯一同题也不足以配对。
             old_indexes = (

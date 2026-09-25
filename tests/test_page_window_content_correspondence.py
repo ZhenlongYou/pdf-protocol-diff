@@ -16,7 +16,12 @@ import fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from protocol_pdf_diff.compare import compare_extractions, compare_sections, run_diff
+from protocol_pdf_diff.compare import (
+    _table_visuals_with_text_fallbacks,
+    compare_extractions,
+    compare_sections,
+    run_diff,
+)
 from protocol_pdf_diff.models import (
     DiffOptions,
     DiffResult,
@@ -34,6 +39,7 @@ from protocol_pdf_diff.models import (
     VisualWatchdogAudit,
 )
 from protocol_pdf_diff.pdf_extract import (
+    _deduplicate_nested_captioned_table_visuals,
     _document_physical_page_folio_evidence,
     _physical_page_folio_candidate,
     extract_pdf_text,
@@ -175,6 +181,175 @@ def _extraction(path: Path, digest: str, pages: list[PageText]) -> ExtractionRes
 
 
 class PageWindowContentCorrespondenceTests(unittest.TestCase):
+    def test_short_table_fragment_does_not_hide_an_independent_same_page_value(self) -> None:
+        visible = TableVisual(
+            page_number=10,
+            table_number=1,
+            title="Table 1: Receiver Output",
+            bbox=(50.0, 100.0, 200.0, 160.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=["表格行: T1 | Description=Receiver output level 10 V"],
+            grid_summary="visible table",
+            source_text="Receiver output level 10 V",
+        )
+        separate_row = DocumentBlock(
+            page_number=10,
+            bbox=(250.0, 120.0, 350.0, 140.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Value=10 V",
+            reading_order=1,
+            source_engine="pdfplumber",
+        )
+        page = PageText(
+            page_number=10,
+            text="表格行: T2 | Value=10 V",
+            blocks=(separate_row,),
+        )
+
+        result = _table_visuals_with_text_fallbacks([visible], [page])
+
+        self.assertEqual(2, len(result))
+        self.assertEqual(["表格行: T2 | Value=10 V"], result[1].row_texts)
+
+    def test_short_fragment_inside_proven_table_source_stays_covered(self) -> None:
+        visible = TableVisual(
+            page_number=10,
+            table_number=1,
+            title="Table 1: Receiver Output",
+            bbox=(50.0, 100.0, 200.0, 160.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=["表格行: T1 | Description=Receiver output level 10 V"],
+            grid_summary="visible table",
+            source_text="Receiver output level 10 V",
+        )
+        same_table_row = DocumentBlock(
+            page_number=10,
+            bbox=(60.0, 110.0, 190.0, 145.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Value=10 V",
+            reading_order=1,
+            source_engine="pdfplumber",
+        )
+        page = PageText(
+            page_number=10,
+            text="表格行: T2 | Value=10 V",
+            blocks=(same_table_row,),
+        )
+
+        result = _table_visuals_with_text_fallbacks([visible], [page])
+
+        self.assertEqual([visible], result)
+
+    def test_nested_captioned_table_with_reordered_values_is_preserved(self) -> None:
+        parent = TableVisual(
+            page_number=52,
+            table_number=1,
+            title="Table 4-2: Power Supply Rail Requirements",
+            bbox=(50.0, 50.0, 550.0, 700.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T1 | Parameter=A | Value=1",
+                "表格行: T1 | Parameter=B | Value=2",
+                "表格行: T1 | Parameter=C | Value=3",
+            ],
+            grid_summary="parent grid",
+        )
+        nested = TableVisual(
+            page_number=52,
+            table_number=2,
+            title=parent.title,
+            bbox=(100.0, 100.0, 250.0, 200.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T2 | Parameter=A | Value=2",
+                "表格行: T2 | Parameter=B | Value=1",
+            ],
+            grid_summary="nested candidate",
+        )
+
+        result = _deduplicate_nested_captioned_table_visuals([parent, nested])
+
+        self.assertEqual([parent, nested], result)
+
+    def test_nested_wrapped_header_fragment_still_deduplicates_by_ordered_content(self) -> None:
+        parent = TableVisual(
+            page_number=52,
+            table_number=1,
+            title="Table 4-2: Power Supply Rail Requirements",
+            bbox=(50.0, 50.0, 550.0, 700.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T1 | Column 1=Power\\nRail | Column 2=Connector",
+                "表格行: T1 | Column 1=+12V | Column 2=75 W",
+                "表格行: T1 | Column 1=+48V | Column 2=600 W",
+            ],
+            grid_summary="parent grid",
+        )
+        nested = TableVisual(
+            page_number=52,
+            table_number=2,
+            title=parent.title,
+            bbox=(100.0, 100.0, 250.0, 200.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T2 | Column 1=Power",
+                "表格行: T2 | Column 1=Rail",
+            ],
+            grid_summary="wrapped header fragment",
+        )
+
+        result = _deduplicate_nested_captioned_table_visuals([parent, nested])
+
+        self.assertEqual([parent], result)
+
+    def test_identical_runtime_header_context_is_not_reported_as_same_section(self) -> None:
+        def table(page: int, title: str, bbox: tuple[float, float, float, float]) -> TableVisual:
+            return TableVisual(
+                page_number=page,
+                table_number=1,
+                title=title,
+                bbox=bbox,
+                image_data_uri="data:image/jpeg;base64,",
+                row_texts=["表格行: T1 | Parameter=Link Width | Value=16"],
+                grid_summary="structured source grid",
+                page_bbox=_PAGE_BBOX,
+            )
+
+        def weak_context_section(section_id: str, page: int) -> Section:
+            return Section(
+                section_id=section_id,
+                heading="运行页眉（坐标证据）",
+                title="运行页眉（坐标证据）",
+                level=0,
+                heading_path=("运行页眉（坐标证据）",),
+                number_path=(),
+                start_page=page,
+                end_page=page,
+                body="",
+            )
+
+        old = table(
+            35,
+            "Table 4-1: Power Supply Rail Requirements",
+            (210.48, 480.36, 420.78, 631.14),
+        )
+        new = table(
+            42,
+            "Table 5: Power Supply Rail Requirements",
+            (69.0, 87.36, 601.56, 301.68),
+        )
+
+        groups = _paired_table_visuals(
+            [old],
+            [new],
+            old_sections=[weak_context_section("old-header", 35)],
+            new_sections=[weak_context_section("new-header", 42)],
+        )
+
+        self.assertEqual(1, len(groups))
+        self.assertEqual("descriptive-caption-weak-context", groups[0].review_reason)
+        self.assertTrue(groups[0].review_only)
+
     def test_unmapped_private_glyph_on_figure_page_is_review_not_confirmed_text(self) -> None:
         """Formula/diagram glyph mapping on a Figure page cannot become a confirmed prose edit."""
 
