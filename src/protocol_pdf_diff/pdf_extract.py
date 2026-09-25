@@ -9350,6 +9350,17 @@ def _table_line_key(line: str) -> str:
     return re.sub(r"\s+", " ", line).casefold().strip()
 
 
+def _ordered_table_identity_tokens(text: str) -> tuple[str, ...]:
+    """Keep numeric sign, decimal precision, and engineering unit glyphs in table identity."""
+
+    return tuple(
+        re.findall(
+            r"[+\-−±]?\d+(?:\.\d+)?(?:[eE][+\-−]?\d+)?|[a-z0-9]+|[\u3400-\u9fff]+|[^\s]",
+            normalize_line(text).casefold(),
+        )
+    )
+
+
 _OrderedTableCell = tuple[tuple[str, ...], tuple[str, ...]]
 _OrderedTableRow = tuple[_OrderedTableCell, ...]
 _OrderedTableContent = tuple[bool, tuple[_OrderedTableRow, ...]]
@@ -9387,19 +9398,12 @@ def _deduplicate_nested_captioned_table_visuals(
                 field = split_table_field(cell)
                 label = normalize_line(field[0]) if field else ""
                 value = field[1] if field else decode_table_cell(cell)
-                label_tokens = tuple(
-                    re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", label.casefold())
-                )
+                label_tokens = _ordered_table_identity_tokens(label)
                 if re.fullmatch(r"(?:column\s*\d+|列\s*\d+)", label, flags=re.I):
                     label_tokens = ()  # 自动生成的列号不是行列身份字段。
                 elif label_tokens:
                     has_semantic_labels = True
-                value_tokens = tuple(
-                    re.findall(
-                        r"[a-z0-9]+|[\u3400-\u9fff]+",
-                        normalize_line(value).casefold(),
-                    )
-                )
+                value_tokens = _ordered_table_identity_tokens(value)
                 if label_tokens or value_tokens:
                     parsed_cells.append((label_tokens, value_tokens))
             if parsed_cells:

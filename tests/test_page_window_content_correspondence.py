@@ -240,6 +240,36 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
 
         self.assertEqual([visible], result)
 
+    def test_short_table_fragment_with_opposite_sign_and_unit_is_not_hidden(self) -> None:
+        visible = TableVisual(
+            page_number=10,
+            table_number=1,
+            title="Table 1: Receiver Output",
+            bbox=(50.0, 100.0, 200.0, 160.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=["表格行: T1 | Description=Receiver output level +10 µV"],
+            grid_summary="visible table",
+            source_text="Receiver output level +10 µV",
+        )
+        opposite_value = DocumentBlock(
+            page_number=10,
+            bbox=(60.0, 110.0, 190.0, 145.0),
+            kind=DocumentBlockKind.TEXT,
+            text="Value=−10 V",
+            reading_order=1,
+            source_engine="pdfplumber",
+        )
+        page = PageText(
+            page_number=10,
+            text="表格行: T2 | Value=−10 V",
+            blocks=(opposite_value,),
+        )
+
+        result = _table_visuals_with_text_fallbacks([visible], [page])
+
+        self.assertEqual(2, len(result))
+        self.assertEqual(["表格行: T2 | Value=−10 V"], result[1].row_texts)
+
     def test_nested_captioned_table_with_reordered_values_is_preserved(self) -> None:
         parent = TableVisual(
             page_number=52,
@@ -263,6 +293,68 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
             row_texts=[
                 "表格行: T2 | Parameter=A | Value=2",
                 "表格行: T2 | Parameter=B | Value=1",
+            ],
+            grid_summary="nested candidate",
+        )
+
+        result = _deduplicate_nested_captioned_table_visuals([parent, nested])
+
+        self.assertEqual([parent, nested], result)
+
+    def test_nested_table_with_opposite_signed_units_is_preserved(self) -> None:
+        parent = TableVisual(
+            page_number=52,
+            table_number=1,
+            title="Table 4-2: Power Supply Rail Requirements",
+            bbox=(50.0, 50.0, 550.0, 700.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T1 | Parameter=A | Value=+1.25 µV",
+                "表格行: T1 | Parameter=B | Value=−2.0 V",
+                "表格行: T1 | Parameter=C | Value=3",
+            ],
+            grid_summary="parent grid",
+        )
+        nested = TableVisual(
+            page_number=52,
+            table_number=2,
+            title=parent.title,
+            bbox=(100.0, 100.0, 250.0, 200.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T2 | Parameter=A | Value=−1.25 V",
+                "表格行: T2 | Parameter=B | Value=+2.0 V",
+            ],
+            grid_summary="nested candidate",
+        )
+
+        result = _deduplicate_nested_captioned_table_visuals([parent, nested])
+
+        self.assertEqual([parent, nested], result)
+
+    def test_nested_table_decimal_separator_is_not_normalized_away(self) -> None:
+        parent = TableVisual(
+            page_number=52,
+            table_number=1,
+            title="Table 4-2: Power Supply Rail Requirements",
+            bbox=(50.0, 50.0, 550.0, 700.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T1 | Parameter=A | Value=1.25 V",
+                "表格行: T1 | Parameter=B | Value=2.0 V",
+                "表格行: T1 | Parameter=C | Value=3",
+            ],
+            grid_summary="parent grid",
+        )
+        nested = TableVisual(
+            page_number=52,
+            table_number=2,
+            title=parent.title,
+            bbox=(100.0, 100.0, 250.0, 200.0),
+            image_data_uri="data:image/jpeg;base64,",
+            row_texts=[
+                "表格行: T2 | Parameter=A | Value=1-25 V",
+                "表格行: T2 | Parameter=B | Value=2.0 V",
             ],
             grid_summary="nested candidate",
         )

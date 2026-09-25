@@ -1034,7 +1034,7 @@ def _table_row_cell_payload_tokens(row: str) -> list[tuple[str, ...]]:
     for cell in cells:
         field = split_table_field(cell)
         payload = field[1] if field else decode_table_cell(cell)
-        tokens = tuple(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", normalize_line(payload).casefold()))
+        tokens = _short_fragment_text_tokens(payload)
         if tokens:
             payloads.append(tokens)
     return payloads
@@ -1115,7 +1115,7 @@ def _page_blocks_prove_fragment_inside_table(
 def _short_fragment_text_tokens(text: str) -> tuple[str, ...]:
     return tuple(
         re.findall(
-            r"[a-z0-9]+|[\u3400-\u9fff]+",
+            r"[+\-−±]?\d+(?:\.\d+)?(?:[eE][+\-−]?\d+)?|[a-z0-9]+|[\u3400-\u9fff]+|[^\s]",
             normalize_line(text).casefold(),
         )
     )
