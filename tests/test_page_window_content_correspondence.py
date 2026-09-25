@@ -61,8 +61,11 @@ _PROVEN_FURNITURE_BOXES = (
     (0.0, 0.0, 612.0, 35.0),
     (470.0, 750.0, 612.0, 792.0),
 )
-_REAL_OIF_CEI_51 = Path("/Users/mac/Desktop/OIF-CEI-5.1.pdf")
-_REAL_OIF_CEI_053 = Path("/Users/mac/Desktop/OIF-CEI-05.3.pdf")
+_LOCAL_OIF_INPUT_ROOT = (
+    Path(__file__).resolve().parents[1] / "work/page-window-gate/input_root/Desktop"
+)
+_REAL_OIF_CEI_51 = _LOCAL_OIF_INPUT_ROOT / "OIF-CEI-5.1.pdf"
+_REAL_OIF_CEI_053 = _LOCAL_OIF_INPUT_ROOT / "OIF-CEI-05.3.pdf"
 
 
 def _write_pages(path: Path, masthead: str, folios: list[str], bodies: list[str]) -> str:
