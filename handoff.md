@@ -8,8 +8,9 @@
 - 严格 v2 回执 `work/page-window-gate/receipt-final20.json` 为 `EXECUTED_EVIDENCE_PASS / verified_scope_only`：65 个源绑定运行完成、八行全 PASS，包括完整回归、24 窗 CEI corpus、三份真实 CLI、独立来源 oracle，以及跨表/弱上下文/正负号/单位/小数分隔符/U+F020 的 RED/GREEN 变异。较早 `receipt-final19.json` 因 PUA 变异绑定过宽而 `BLOCKED`，保留不覆盖。
 - 最新 `6dce141e` 的三份 CLI 报告均通过合同并由隔离 Chromium 以 1280×720 实际复核：CEM 1.1→R4 SHA `cde0794f6090a08866cde02b72a61cdecbbe3e920b54e14244851ea96e73b619`；CEM R4→R5.1 SHA `d5059b7658545015c8a11f6c70e54fba390ec7e4dc99a5c34c914801c53f3008`；OIF CEI 4.0→5.1 SHA `bfe43c5fae92f9e42f3b4392cd54d4ac4b89e3882f0f7f2f0cdd94294fcc8cac`。三份都保持“需人工复核”；CEM 1.1→R4 的 25→75 正文变化仍无可靠定位，OIF 两组页对未完成像素比较，报告没有把“未检出差异”写成确认相同。截图位于 `work/page-window-gate/results/report-visual-review-final20-20260926/`。
 - 独立代码审查通过并对行为提交 `6dce141e218fc078e27b11ee49852d1be4f017f4` attestation；记录位于 `.git/codex-coordination-v1/reviews/pdf-random-window-fidelity-20260925/01a0da45-6983-70a1-9e02-4f477d205bf8--6dce141e218fc078e27b11ee49852d1be4f017f4.json`。
+- 2026-09-26 尝试获取集成 lease 时，preflight 在改任何引用/索引前失败：存在未登记分支 `codex/pdf-long-doc-optimization-20260918`、`codex/report-responsive-20260918` 及对应 `/private/tmp/pdf-longdoc-windows-20260918`、`/private/tmp/pdf-longopt-baseline-20260918-a`、`/private/tmp/pdf-report-responsive-20260918` worktree（`git worktree list` 标记为 prunable）；协调器未授 lease，任务仍是 `working`。未清理这些其他任务工作区。canonical `main`/`origin/main` 仍为 `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`，持久项目分支/远端仍为 `6abf4f7fd80af1415404579517b264bd448e3a05`，本候选未集成。
 - OIF 既有跨 OIF/PCIe `10/10`、跨样式 `7/7`、MR/LR/Linear 新页窗 `3/3` 都是以前的切片记录，不代表整本或任意 PDF 准确率。对 canonical `6abf4f7` 的离线统计覆盖 29 个切片、185 个章节配对：没有观测到页序逆转，但 19 个配对的同层最佳与次佳原始分差小于 0.10（13 个小于 0.05）；来源为 `work/page-window-gate/results/canonical-6ab-pairing-stats-20260926.json`。它没有逐节人工真值，不能据此定阈值。主章节求解仍是全局贪心、置信度未进入结论。
-- 下一步：按 RinysProject 集成流程核对分支关系和集成占用，再决定是否安全更新 canonical `main` 与持久项目分支。即使此候选完成集成，单调章节求解、配对置信清单/报告投影、整体错配自检及整本跨 PDF 家族准确率仍未解决。用户 PDF 和切片保留在 ignored 语料，不提交。
+- 下一步：先由各自任务 owner 或仓库维护流程登记/清理上述被判为未登记的分支/worktree，再重试集成 preflight；不可由本任务删除或覆盖这些工作区。即使此候选完成集成，单调章节求解、配对置信清单/报告投影、整体错配自检及整本跨 PDF 家族准确率仍未解决。用户 PDF 和切片保留在 ignored 语料，不提交。
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
 
