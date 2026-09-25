@@ -28,6 +28,33 @@ escaped_defects:
     regression_test_id: FORUM_CLAUSE_URL_CLUSTER_VALUE_PRESERVED_TEST
     public_path_rerun_id: RUN-FOOTER-REAL
     state: verified
+  - id: DEF-PAGE-WINDOW-SINGLE-PAGE-GRAY-GUTTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A one-page comparison could treat light-gray printed line numbers as protocol text when an edition moved the gutter to the opposite page edge."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "The existing document-level line-grid gate required three selected pages. Single-page windows now need a near-complete geometric reset grid plus repeated gray-number/dark-body contrast; black numbered lists remain fail-open."
+    red_green_pair_id: PAIR-SINGLE-PAGE-GRAY-GUTTER
+    regression_test_id: SINGLE_PAGE_GRAY_GRID_STYLE_CONTRAST_TEST
+    public_path_rerun_id: RUN-OIF-CEI-SINGLE-FIGURE-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-COPYRIGHT-DRAFT-FOOTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A copyright and draft-footer layout change could appear as a confirmed body edit because the legal notice's word 'is' triggered the technical-fact guard."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "The footer guard treated the copula in a narrowly recognized legal draft notice as a technical statement. Only those legal copulas are now exempt; units, thresholds, and normative facts stay fail-open."
+    red_green_pair_id: PAIR-SINGLE-PAGE-COPYRIGHT-DRAFT-FOOTER
+    regression_test_id: SINGLE_PAGE_COPYRIGHT_FOOTER_METADATA_TEST
+    public_path_rerun_id: RUN-OIF-235-PAGE13-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-CAPTIONED-VECTOR-FIGURE-PSEUDOTABLE-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "OIF CEI page 105 versus 109 reported the same Figure 2-21 label fragments as body edits and an uncaptioned table add/delete."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "A one-row grid detector mistook a label inside a large, closed vector Figure frame for a table; the resulting table bbox also blocked Figure text review."
+    red_green_pair_id: PAIR-OIF-CEI-CAPTIONED-VECTOR-FIGURE
+    regression_test_id: OIF_CEI_SINGLE_FIGURE_WINDOW_TEST
+    public_path_rerun_id: RUN-OIF-CEI-SINGLE-FIGURE-REAL
+    state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"

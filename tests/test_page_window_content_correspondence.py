@@ -61,6 +61,8 @@ _PROVEN_FURNITURE_BOXES = (
     (0.0, 0.0, 612.0, 35.0),
     (470.0, 750.0, 612.0, 792.0),
 )
+_REAL_OIF_CEI_51 = Path("/Users/mac/Desktop/OIF-CEI-5.1.pdf")
+_REAL_OIF_CEI_053 = Path("/Users/mac/Desktop/OIF-CEI-05.3.pdf")
 
 
 def _write_pages(path: Path, masthead: str, folios: list[str], bodies: list[str]) -> str:
@@ -517,6 +519,183 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                 self.assertTrue(
                     any(change["change_type"] == "modified" for change in payload["content_changes"])
                 )
+
+    def test_single_page_line_number_style_change_keeps_the_actual_value_delta(self) -> None:
+        """A left/right gray print-line gutter must not become technical prose."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = (root / "left-gutter.pdf", root / "right-gutter.pdf")
+            blank_rows = {2, 7, 12, 17, 22, 27, 32, 37, 42, 47}
+
+            def write_numbered_page(path: Path, side: str, value: str) -> None:
+                document = fitz.open()
+                page = document.new_page(width=612, height=792)
+                for line_number in range(1, 50):
+                    baseline = 92 + (line_number - 1) * 12.4
+                    number_text = str(line_number)
+                    if side == "left":
+                        x = 61 - fitz.get_text_length(number_text, fontname="helv", fontsize=8)
+                    else:
+                        x = 552
+                    page.insert_text(
+                        (x, baseline),
+                        number_text,
+                        fontsize=8,
+                        color=(0.6, 0.6, 0.6),
+                    )
+                    if line_number in blank_rows:
+                        continue
+                    if line_number == 1:
+                        text = "2.9.4 Transmitter Signal Quality Test"
+                    elif line_number == 18:
+                        text = f"The receiver input limit is {value}."
+                    else:
+                        text = f"The test procedure records a stable waveform at step {line_number}."
+                    page.insert_text((72, baseline), text, fontsize=8)
+                page.insert_text(
+                    (72, 742),
+                    "Optical Internetworking Forum - Clause 33: CEI Test Interface",
+                    fontsize=7,
+                )
+                page.insert_text((550, 742), "1", fontsize=7)
+                document.save(path)
+                document.close()
+
+            write_numbered_page(paths[0], "left", "4.2 V")
+            write_numbered_page(paths[1], "right", "4.8 V")
+            old_extract = extract_pdf_text(paths[0], 1, 1)
+            new_extract = extract_pdf_text(paths[1], 1, 1)
+            options = DiffOptions(
+                old_start_page=1,
+                old_end_page=1,
+                new_start_page=1,
+                new_end_page=1,
+            )
+            result = run_diff(paths[0], paths[1], options)
+            reports = write_reports(result, root / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+            reader_changes = json.dumps(payload["changes"], ensure_ascii=False)
+
+        self.assertFalse(old_extract.pages[0].ambiguous_line_number_sides)
+        self.assertFalse(new_extract.pages[0].ambiguous_line_number_sides)
+        self.assertNotIn("\n1 2.9.4", "\n" + old_extract.pages[0].text)
+        self.assertIn("2.9.4 Transmitter Signal Quality Test", old_extract.pages[0].text)
+        self.assertIn("2.9.4 Transmitter Signal Quality Test", new_extract.pages[0].text)
+        self.assertIn("4.2 V", reader_changes)
+        self.assertIn("4.8 V", reader_changes)
+        self.assertEqual(["modified"], [change["change_type"] for change in payload["changes"]])
+
+    def test_single_page_copyright_footer_style_change_is_not_technical_content(self) -> None:
+        """A publisher URL/legal notice swap at page bottom stays metadata."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_path = root / "old-footer.pdf"
+            new_path = root / "new-footer.pdf"
+            shared_body = (
+                "32.4 References",
+                "The test method preserves the specified receiver limit.",
+            )
+            old = fitz.open()
+            old_page = old.new_page(width=612, height=792)
+            old_page.insert_text((72, 160), shared_body[0], fontsize=10)
+            old_page.insert_text((72, 190), shared_body[1], fontsize=10)
+            old_page.insert_text(
+                (72, 725),
+                "Optical Internetworking Forum - Clause 32: CEI-224G-MR Interface",
+                fontsize=8,
+            )
+            old_page.insert_text((72, 740), "www.oiforum.com", fontsize=8)
+            old_page.insert_text(
+                (72, 755),
+                "This is a draft and not to be shared before publication approval.",
+                fontsize=7,
+            )
+            old.save(old_path)
+            old.close()
+            new = fitz.open()
+            new_page = new.new_page(width=612, height=792)
+            new_page.insert_text((72, 160), shared_body[0], fontsize=10)
+            new_page.insert_text((72, 190), shared_body[1], fontsize=10)
+            new_page.insert_text(
+                (72, 725),
+                "Optical Internetworking Forum - Clause 32: CEI-224G-MR Interface",
+                fontsize=8,
+            )
+            new_page.insert_text(
+                (72, 740),
+                "Copyright © 2026 Optical Internetworking Forum",
+                fontsize=8,
+            )
+            new_page.insert_text(
+                (72, 755),
+                "This is a draft and not to be shared before publication approval.",
+                fontsize=7,
+            )
+            new.save(new_path)
+            new.close()
+            options = DiffOptions(
+                old_start_page=1,
+                old_end_page=1,
+                new_start_page=1,
+                new_end_page=1,
+            )
+            result = run_diff(old_path, new_path, options)
+            reports = write_reports(result, root / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+            reader_changes = json.dumps(payload["content_changes"], ensure_ascii=False)
+
+        self.assertFalse(payload["content_changes"], reader_changes)
+        self.assertNotIn("oiforum.com", reader_changes.casefold())
+        self.assertNotIn("copyright © 2026", reader_changes.casefold())
+
+    @unittest.skipUnless(
+        _REAL_OIF_CEI_51.is_file() and _REAL_OIF_CEI_053.is_file(),
+        "local OIF CEI 5.1/5.3 PDFs are unavailable",
+    )
+    def test_real_oif_single_page_figure_text_reflow_is_not_a_confirmed_change(self) -> None:
+        """The one-page window keeps an identical Figure as visual review, not prose/table edits."""
+
+        options = DiffOptions(
+            old_start_page=105,
+            old_end_page=105,
+            new_start_page=109,
+            new_end_page=109,
+        )
+        result = run_diff(_REAL_OIF_CEI_51, _REAL_OIF_CEI_053, options)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reports = write_reports(result, Path(temp_dir), options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+
+        figure_groups = [
+            group
+            for group in payload["prose_source_visuals"]
+            if group["change_type"] == "figure"
+        ]
+        self.assertEqual("degraded", payload["assessment"]["state"])
+        extraction_warnings = [
+            *payload["assessment"]["old_document"]["extraction_warnings"],
+            *payload["assessment"]["new_document"]["extraction_warnings"],
+        ]
+        self.assertFalse(
+            any("至少三页" in warning for warning in extraction_warnings),
+            extraction_warnings,
+        )
+        self.assertEqual([], payload["content_changes"])
+        self.assertEqual([], payload["content_table_changes"])
+        self.assertTrue(
+            any(
+                group["old_figure_pages"] == [105]
+                and group["new_figure_pages"] == [109]
+                and group["old_figure_captions"]
+                == ["Figure 2-21. Varying the Receiver Sampling Point"]
+                and group["new_figure_captions"]
+                == ["Figure 2-21. Varying the Receiver Sampling Point"]
+                for group in figure_groups
+            ),
+            json.dumps(figure_groups, ensure_ascii=False),
+        )
 
     def test_repeated_forum_clause_footer_requires_stable_folio_backing(self) -> None:
         """Two consecutive folio-backed Forum/Clause captions prove a footer."""

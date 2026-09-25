@@ -33,6 +33,7 @@ from protocol_pdf_diff.pdf_extract import (
     _extract_pdfplumber_page_text,
     _filtered_layout_page,
     _page_may_contain_table,
+    _table_bbox_belongs_to_captioned_figure,
 )
 from protocol_pdf_diff.reporting import write_reports
 
@@ -93,6 +94,113 @@ def _version_with_running_footer(name: str, revision: str) -> ExtractionResult:
 
 
 class CoordinatePageFurnitureTests(unittest.TestCase):
+    def test_unstructured_table_inside_captioned_vector_figure_is_not_a_table(self) -> None:
+        """A closed vector Figure frame owns a captionless pseudo-table within it."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        page_bbox = (0.0, 0.0, 612.0, 792.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        unstructured_row = [
+            "表格行: T1 | Column 1=p | Column 2=df(Am | Column 3=plitude)"
+        ]
+
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                unstructured_row,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=page_bbox,
+            )
+        )
+
+    def test_technical_table_schema_is_retained_inside_captioned_vector_figure(self) -> None:
+        """An explicit parameter/value schema keeps table authority over a figure frame."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        technical_rows = [
+            "表格行: T1 | Parameter=Receiver Input | Value=4.2 V"
+        ]
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                technical_rows,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
+            )
+        )
+
+    def test_nearer_table_caption_overrides_the_captioned_figure_frame(self) -> None:
+        """A Table caption between a Figure and its inner grid preserves that candidate."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            },
+            {
+                "text": "Table 7-2. Receiver Limits",
+                "x0": 170.0,
+                "x1": 305.0,
+                "top": 188.0,
+                "bottom": 198.0,
+            },
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        unstructured_row = [
+            "表格行: T1 | Column 1=p | Column 2=df(Am | Column 3=plitude)"
+        ]
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                unstructured_row,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
+            )
+        )
+
     def test_full_page_single_column_capture_stays_in_prose_not_table_cards(self) -> None:
         """A page-sized one-cell detector result must not replace the source prose."""
 
@@ -915,6 +1023,46 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             {},
             _document_proven_line_number_gutter_boxes(pages, words_by_page),
         )  # 无空白编号基线时必须 fail-open，不能被“三页 + 1..49”门槛误删。
+
+    def test_single_page_black_numbered_rows_do_not_pass_as_printed_gutter(self) -> None:
+        """A one-page window needs gray-vs-body style evidence beyond a numeric grid."""
+
+        page = mock.Mock()
+        page.width = 612.0
+        page.height = 792.0
+        words: list[dict[str, object]] = []
+        page.chars = []
+        for value in range(1, 50):
+            top = 78.0 + (value - 1) * 13.0
+            label = str(value)
+            x1 = 60.0
+            number_word = {
+                "text": label,
+                "x0": x1 - len(label) * 6.0,
+                "x1": x1,
+                "top": top,
+                "bottom": top + 11.0,
+            }
+            words.append(number_word)
+            page.chars.append({**number_word, "non_stroking_color": (0.0,)})
+            if value % 5 == 0:
+                continue
+            body_word = {
+                "text": f"Requirement{value}",
+                "x0": 72.0,
+                "x1": 160.0,
+                "top": top,
+                "bottom": top + 11.0,
+            }
+            words.append(body_word)
+            page.chars.append({**body_word, "non_stroking_color": (0.0,)})
+
+        gutter_boxes = _document_proven_line_number_gutter_boxes(
+            [(1, page)],
+            {1: words},
+        )
+
+        self.assertEqual({}, gutter_boxes)
 
     def test_preserved_gutter_like_numbers_mark_the_page_as_layout_risk(self) -> None:
         """保留疑似行号后必须降级，不能把歧义页面伪装成可靠正文。"""

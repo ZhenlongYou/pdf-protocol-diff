@@ -386,6 +386,7 @@ def _extract_pdf_text_with_pdfplumber(
                 index,
                 ((), None),
             )
+            vector_graphic_bboxes = _page_vector_graphic_bboxes(page)
             publication_footer_boxes, publication_footer_texts = (
                 publication_footer_evidence_by_page.get(index, ((), ()))
             )
@@ -424,6 +425,7 @@ def _extract_pdf_text_with_pdfplumber(
                 header_boxes=header_boxes_by_page.get(index, ()),
                 document_folio_boxes=folio_boxes,
                 document_footer_identity_boxes=publication_footer_boxes,
+                vector_graphic_bboxes=vector_graphic_bboxes,
             )
             warnings.extend(page_warnings)  # 单页表格或文本抽取失败不应中断整份报告。
             table_visuals.extend(page_visuals)  # 表格截图单独积累，不混入普通正文。
@@ -474,7 +476,7 @@ def _extract_pdf_text_with_pdfplumber(
                         *(("Page",) if folio_text else ()),
                         *publication_footer_texts,
                     ))),
-                    vector_graphic_bboxes=_page_vector_graphic_bboxes(page),
+                    vector_graphic_bboxes=vector_graphic_bboxes,
                     source_blank_glyphs=blank_glyph_proof,
                     formula_bboxes=tuple(formula.bbox for formula in page_formulas),
                 )
@@ -556,6 +558,7 @@ def _extract_pdfplumber_page_text(
     header_boxes: tuple[tuple[float, float, float, float], ...] | None = None,
     document_folio_boxes: tuple[tuple[float, float, float, float], ...] = (),
     document_footer_identity_boxes: tuple[tuple[float, float, float, float], ...] = (),
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[
     str,
     list[str],
@@ -624,8 +627,8 @@ def _extract_pdfplumber_page_text(
         )
     if gutter_boxes:
         warnings.append(
-            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由至少三页的连续重置数字序列 "
-            "稳定网格与空白编号基线共同证明为打印行号；"
+            f"{pdf_name}: 第 {page_number} 页的窄边数字列已由近完整的连续重置网格、"
+            "空白编号基线与独立版式证据共同证明为打印行号；"
             "已证明并从比较文本过滤，原始坐标块仍保留供审计。"
         )
     elif ambiguous_line_number_column:
@@ -682,6 +685,7 @@ def _extract_pdfplumber_page_text(
             page_number,
             geometry_words=comparison_coordinate_words,
             page_text=text,
+            vector_graphic_bboxes=vector_graphic_bboxes,
         )
         warnings.extend(table_warnings)  # 表格失败不阻塞正文比较。
     else:
@@ -1709,8 +1713,36 @@ def _document_proven_line_number_gutter_boxes(
     available for audit.
     """
 
+    if not pages:
+        return {}
+
     if len(pages) < _DOCUMENT_LINE_NUMBER_MIN_PAGES:
-        return {}  # 单页或两页无法排除规则排版的合法长列表。
+        if len(pages) != 1:
+            return {}  # 两页仍不足以消除规则排版的合法长列表歧义。
+        page_number, page = pages[0]
+        page_warnings, page_error = (coordinate_issues_by_page or {}).get(
+            page_number,
+            ([], None),
+        )
+        if not _coordinate_issues_preserve_line_number_grid_evidence(
+            page_warnings,
+            page_error,
+        ):
+            return {}  # 坐标缺失可能伪造空白基线，单页证据必须完整。
+        page_evidence = _page_printed_line_number_grid_evidence(
+            page,
+            words=words_by_page.get(page_number, []),
+        )
+        if len(page_evidence) != 1:
+            return {}  # 多个同等强数字列仍有歧义。
+        boxes, _origin, pitch = page_evidence[0]
+        if not _single_page_line_number_grid_has_gray_contrast(
+            page,
+            boxes=boxes,
+            pitch=pitch * float(getattr(page, "height", 0) or 0),
+        ):
+            return {}  # 单页只接受行号字形与正文有明显颜色反差的打印网格。
+        return {page_number: boxes}
 
     evidence_by_page: dict[
         int,
@@ -1759,6 +1791,93 @@ def _document_proven_line_number_gutter_boxes(
         page_number: evidence[0]
         for page_number, evidence in stable_evidence.items()
     }  # 只返回网格中实际参与证明的数字词 bbox；列带内其他技术数值不得被带走。
+
+
+def _single_page_line_number_grid_has_gray_contrast(
+    page: object,
+    *,
+    boxes: tuple[tuple[float, float, float, float], ...],
+    pitch: float,
+) -> bool:
+    """Require an independent light-gray-vs-dark-body cue for one-page windows."""
+
+    width = float(getattr(page, "width", 0) or 0)
+    characters = getattr(page, "chars", ()) or ()
+    if width <= 0 or pitch <= 0 or not boxes or not characters:
+        return False
+
+    def luminance(character: dict[str, object]) -> float | None:
+        color = character.get("non_stroking_color")
+        if isinstance(color, (int, float)):
+            channels = [float(color)]
+        elif isinstance(color, (tuple, list)) and color:
+            if not all(isinstance(channel, (int, float)) for channel in color):
+                return None
+            channels = [float(channel) for channel in color]
+            if len(channels) not in (1, 3, 4):
+                return None
+        else:
+            return None
+        if max(channels) > 1.0:
+            channels = [channel / 255.0 for channel in channels]
+        if any(channel < 0.0 or channel > 1.0 for channel in channels):
+            return None
+        if len(channels) == 4:
+            cyan, magenta, yellow, black = channels
+            channels = [
+                (1.0 - cyan) * (1.0 - black),
+                (1.0 - magenta) * (1.0 - black),
+                (1.0 - yellow) * (1.0 - black),
+            ]
+        if len(channels) == 1:
+            return channels[0]
+        red, green, blue = channels
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+    number_color_bands: list[tuple[float, float]] = []
+    for x0, top, x1, bottom in boxes:
+        center_y = (top + bottom) / 2.0
+        line_chars = [
+            character
+            for character in characters
+            if float(character.get("x0", -1)) >= x0 - 1.5
+            and float(character.get("x1", -1)) <= x1 + 1.5
+            and abs(
+                (float(character.get("top", 0)) + float(character.get("bottom", 0)))
+                / 2.0
+                - center_y
+            )
+            <= max(2.0, pitch * 0.18)
+        ]
+        line_luminance = [value for character in line_chars if (value := luminance(character)) is not None]
+        if not line_luminance:
+            continue
+        body_chars = [
+            character
+            for character in characters
+            if width * 0.12 <= float(character.get("x0", -1))
+            and float(character.get("x1", width + 1)) <= width * 0.88
+            and abs(
+                (float(character.get("top", 0)) + float(character.get("bottom", 0)))
+                / 2.0
+                - center_y
+            )
+            <= max(2.0, pitch * 0.18)
+        ]
+        body_luminance = [value for character in body_chars if (value := luminance(character)) is not None]
+        if body_luminance:
+            number_color_bands.append((median(line_luminance), median(body_luminance)))
+
+    contrasted_bands = [
+        number_color >= 0.45
+        and body_color <= 0.25
+        and number_color - body_color >= 0.25
+        for number_color, body_color in number_color_bands
+    ]
+    return (
+        len(contrasted_bands) >= _DOCUMENT_LINE_NUMBER_MIN_ORPHAN_BASELINES
+        and sum(contrasted_bands) >= math.ceil(len(contrasted_bands) * 0.75)
+    )
 
 
 def _coordinate_issues_preserve_line_number_grid_evidence(
@@ -2186,7 +2305,21 @@ def _proven_running_footer_boxes(
         for word in bottom_words
         if id(word) in generic_words
     )
-    if not marker_lines or not clustered_url_lines:
+    explicit_copyright = any(
+        _is_explicit_copyright_footer_line(line[2]) for line in bottom_lines
+    )
+    explicit_draft_notice = any(
+        _is_explicit_draft_share_notice(line[2]) for line in bottom_lines
+    )
+    explicit_clause_caption = any(
+        "forum" in line[2].casefold()
+        and re.search(r"\bclause\s+\d", line[2], flags=re.IGNORECASE)
+        for line in bottom_lines
+    )
+    has_signed_legal_cluster = (
+        explicit_copyright and explicit_draft_notice and explicit_clause_caption
+    )
+    if not marker_lines or (not clustered_url_lines and not has_signed_legal_cluster):
         return generic_boxes
 
     proof_lines = [*marker_lines, *clustered_url_lines]
@@ -2209,7 +2342,7 @@ def _proven_running_footer_boxes(
     # tightly packed cluster. Leave the whole cluster intact when it contains
     # a value-bearing or normative line.
     cluster_has_technical_fact = any(
-        contains_technical_footer_fact(text)
+        _contains_technical_footer_fact_for_furniture(text)
         for _top, _bottom, text, _line_words in footer_cluster
     )
     if cluster_has_technical_fact:
@@ -2225,6 +2358,49 @@ def _proven_running_footer_boxes(
         for word in bottom_words
         if id(word) in selected_word_ids or id(word) in generic_words
     )
+
+
+def _is_explicit_draft_share_notice(text: str) -> bool:
+    """Recognize a narrow legal draft notice while retaining any technical value."""
+
+    folded = normalize_line(text).casefold()
+    return (
+        "this is a draft" in folded
+        and "not to be shared" in folded
+        and ("publication" in folded or "approval" in folded)
+    )
+
+
+def _is_explicit_copyright_footer_line(text: str) -> bool:
+    """Recognize a publisher copyright line that includes a publication year."""
+
+    candidate = normalize_line(text)
+    return bool(
+        re.search(
+            r"(?i)(?:copyright\s*(?:©\s*)?|©\s*)(?:19|20)\d{2}(?:\s*[-–]\s*(?:19|20)?\d{2})?.*"
+            r"\b(?:forum|consortium|working\s+group|standards?\s+(?:body|organization))\b",
+            candidate,
+        )
+    )
+
+
+def _contains_technical_footer_fact_for_furniture(text: str) -> bool:
+    """Ignore only the false-positive copula in an explicit legal draft notice."""
+
+    candidate = normalize_line(text)
+    if _is_explicit_draft_share_notice(candidate):
+        candidate = re.sub(
+            r"(?i)\bthis\s+is\s+a\s+draft\b",
+            "this draft",
+            candidate,
+            count=1,
+        )
+        candidate = re.sub(
+            r"(?i)\bis\s+not\s+to\s+be\s+(?:shared|removed|distributed|published)\b",
+            "not to be",
+            candidate,
+        )
+    return contains_technical_footer_fact(candidate)
 
 
 def _physical_page_folio_candidate(
@@ -2643,15 +2819,23 @@ def _document_publication_footer_evidence(
                             selected[date_index] = (display_line_text(date[3]), date[3])
 
             folded = text.casefold()
+            line_width = max(float(word["x1"]) for word in line_words) - min(
+                float(word["x0"]) for word in line_words
+            )
             if (
                 top >= height * 0.90
                 and bottom - top <= height * 0.035
-                and (max(float(word["x1"]) for word in line_words)
-                     - min(float(word["x0"]) for word in line_words)) >= width * 0.55
-                and "this is a draft" in folded
-                and "not to be shared" in folded
-                and "watermark" in folded
-                and ("publication" in folded or "approval" in folded)
+                and line_width >= width * 0.25
+                and _is_explicit_copyright_footer_line(text)
+                and not _contains_technical_footer_fact_for_furniture(text)
+            ):
+                selected[index] = (display_line_text(line_words), line_words)
+            if (
+                top >= height * 0.90
+                and bottom - top <= height * 0.035
+                and line_width >= width * 0.55
+                and _is_explicit_draft_share_notice(folded)
+                and not _contains_technical_footer_fact_for_furniture(folded)
             ):
                 selected[index] = (display_line_text(line_words), line_words)
             if (
@@ -2801,7 +2985,7 @@ def _looks_like_running_footer_marker(line_text: str) -> bool:
     """Recognize a short legal/status/title line that can anchor a footer cluster."""
 
     candidate = normalize_line(line_text).casefold()
-    if contains_technical_footer_fact(candidate):
+    if _contains_technical_footer_fact_for_furniture(candidate):
         return False
     if re.match(r"^(?:copyright\b|©)", candidate):
         return True
@@ -3990,6 +4174,7 @@ def _extract_table_lines_and_visuals(
     *,
     geometry_words: list[dict[str, object]] | None = None,
     page_text: str | None = None,
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> tuple[
     list[str],
     list[TableVisual],
@@ -4064,6 +4249,8 @@ def _extract_table_lines_and_visuals(
             geometry_words,
             title=title,
             page_characters=getattr(page, "chars", ()) or (),
+            vector_graphic_bboxes=vector_graphic_bboxes,
+            page_bbox=_table_page_bbox(page),
         ) or _table_bbox_is_plot_axis_label(
             bbox, table_lines, geometry_words, title=title,
             grid_bboxes=grid_bboxes,
@@ -4955,6 +5142,8 @@ def _table_bbox_belongs_to_captioned_figure(
     *,
     title: str = "",
     page_characters: Iterable[dict[str, object]] = (),
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    page_bbox: tuple[float, float, float, float] | None = None,
 ) -> bool:
     """Reject a tiny grid embedded in a coordinate-proven figure region.
 
@@ -4976,6 +5165,13 @@ def _table_bbox_belongs_to_captioned_figure(
     ):
         return False
     word_lines = _word_line_records(geometry_words)
+    if _table_bbox_inside_captioned_vector_figure(
+        bbox,
+        word_lines,
+        vector_graphic_bboxes=vector_graphic_bboxes,
+        page_bbox=page_bbox,
+    ):
+        return True  # 无题且缺少表格字段的小网格若完整落入图题所辖的大图框，应归为图内文字。
     cluster_records: list[
         tuple[float, float, str, tuple[dict[str, object], ...]]
     ] = []
@@ -5113,6 +5309,142 @@ def _table_bbox_belongs_to_captioned_figure(
             continue  # 已进入规范正文时，更远的 Figure 不得删除后续小表。
         return True
     return False
+
+
+def _table_bbox_inside_captioned_vector_figure(
+    bbox: tuple[float, float, float, float],
+    word_lines: list[
+        tuple[float, float, str, tuple[dict[str, object], ...]]
+    ],
+    *,
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+    page_bbox: tuple[float, float, float, float] | None,
+) -> bool:
+    """Prove an uncaptioned tiny table candidate belongs inside a Figure frame."""
+
+    if not word_lines or page_bbox is None or not vector_graphic_bboxes:
+        return False
+    page_width = page_bbox[2] - page_bbox[0]
+    page_height = page_bbox[3] - page_bbox[1]
+    page_area = page_width * page_height
+    if page_width <= 0 or page_height <= 0 or page_area <= 0:
+        return False
+    graphic_regions = (
+        *vector_graphic_bboxes,
+        *_vector_graphic_frame_bboxes(vector_graphic_bboxes, page_bbox),
+    )
+    captions = [
+        (bottom, text, _word_span_horizontal_bounds(words))
+        for _top, bottom, text, words in word_lines
+        if _looks_like_figure_caption(text)
+    ]
+    for graphic in graphic_regions:
+        if not _finite_positive_layout_box(graphic[0], graphic[2], graphic[1], graphic[3]):
+            continue
+        graphic_width = graphic[2] - graphic[0]
+        graphic_height = graphic[3] - graphic[1]
+        if (
+            graphic_width < max(180.0, page_width * 0.30)
+            or graphic_height < max(100.0, page_height * 0.14)
+            or graphic_width * graphic_height < page_area * 0.10
+            or graphic[0] > bbox[0] + 1.0
+            or graphic[1] > bbox[1] + 1.0
+            or graphic[2] < bbox[2] - 1.0
+            or graphic[3] < bbox[3] - 1.0
+        ):
+            continue  # 小图形/单条曲线不能给附近表格候选授予图内归属。
+        captioned_above = False
+        for bottom, _text, caption_span in captions:
+            if caption_span is None or not 0.0 <= graphic[1] - bottom <= 80.0:
+                continue
+            nearer_table_caption = any(
+                bottom < line_bottom <= bbox[1] + 1.0
+                and (
+                    _looks_like_table_caption(line_text)
+                    or _looks_like_table_context_caption(line_text)
+                )
+                and _horizontal_span_belongs_to_bbox(
+                    _word_span_horizontal_bounds(line_words),
+                    bbox,
+                )
+                for _line_top, line_bottom, line_text, line_words in word_lines
+            )
+            if nearer_table_caption:
+                continue  # 图题与候选表格之间出现同栏表题时，保留表格候选。
+            caption_overlap = min(caption_span[1], graphic[2]) - max(
+                caption_span[0], graphic[0]
+            )
+            if caption_overlap < min(caption_span[1] - caption_span[0], graphic_width) * 0.35:
+                continue
+            if any(
+                line_bottom <= graphic[1] + 1.0
+                and line_bottom > bottom
+                and _looks_like_table_caption(line_text)
+                and _horizontal_span_belongs_to_bbox(
+                    _word_span_horizontal_bounds(line_words),
+                    graphic,
+                )
+                for _line_top, line_bottom, line_text, line_words in word_lines
+            ):
+                continue  # 图内或图上更近的 Table 标题优先，不把真实表格误删。
+            captioned_above = True
+            break
+        if captioned_above:
+            return True
+    return False
+
+
+def _vector_graphic_frame_bboxes(
+    vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...],
+    page_bbox: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Reconstruct only closed, page-scaled frames from native vector edges."""
+
+    page_width = page_bbox[2] - page_bbox[0]
+    page_height = page_bbox[3] - page_bbox[1]
+    if page_width <= 0 or page_height <= 0:
+        return ()
+    edge_tolerance = max(1.0, page_width * 0.004)
+    horizontal_edges = [
+        box
+        for box in vector_graphic_bboxes
+        if box[3] - box[1] <= max(2.0, page_height * 0.003)
+        and box[2] - box[0] >= page_width * 0.30
+    ]
+    vertical_edges = [
+        box
+        for box in vector_graphic_bboxes
+        if box[2] - box[0] <= max(2.0, page_width * 0.004)
+        and box[3] - box[1] >= page_height * 0.25
+    ]
+    frames: set[tuple[float, float, float, float]] = set()
+    for top in horizontal_edges:
+        for bottom in horizontal_edges:
+            frame_height = bottom[3] - top[1]
+            if (
+                bottom[1] <= top[3]
+                or frame_height < page_height * 0.14
+                or abs(top[0] - bottom[0]) > edge_tolerance
+                or abs(top[2] - bottom[2]) > edge_tolerance
+            ):
+                continue
+            left_edges = [
+                edge
+                for edge in vertical_edges
+                if abs(edge[0] - top[0]) <= edge_tolerance
+                and edge[1] <= top[3] + edge_tolerance
+                and edge[3] >= bottom[1] - edge_tolerance
+            ]
+            right_edges = [
+                edge
+                for edge in vertical_edges
+                if abs(edge[2] - top[2]) <= edge_tolerance
+                and edge[1] <= top[3] + edge_tolerance
+                and edge[3] >= bottom[1] - edge_tolerance
+            ]
+            if left_edges and right_edges:
+                frames.add((top[0], top[1], top[2], bottom[3]))
+    return tuple(sorted(frames))
 
 
 def _looks_like_compact_figure_abbreviation(value: str) -> bool:
