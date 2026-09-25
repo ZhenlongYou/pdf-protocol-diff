@@ -1748,45 +1748,60 @@ def _document_proven_line_number_gutter_boxes(
 ) -> dict[int, tuple[tuple[float, float, float, float], ...]]:
     """Return edge boxes only for a document-wide printed reset line grid.
 
-    A long aligned list is still semantic content.  Destructive comparison-text
-    filtering therefore needs independent evidence that lists do not provide:
-    at least three pages, high selected-page coverage, a nearly complete observed
-    reset grid on every supporting page, stable vertical pitch/origin, and several
-    numbered baselines that contain no body text at all.  Raw coordinate blocks
-    are built before these boxes are applied, so the source evidence remains
-    available for audit.
+    A long aligned list is still semantic content.  Longer windows therefore need
+    at least three pages, high selected-page coverage, a near-complete reset grid,
+    stable pitch/origin, and blank numbered baselines. One- and two-page windows
+    require those same page-local grid checks plus gray-vs-body contrast on every
+    page; two-page grids must share normalized pitch and origin, while facing-page
+    gutters may alternate sides. Raw coordinate blocks remain available for audit.
     """
 
     if not pages:
         return {}
 
     if len(pages) < _DOCUMENT_LINE_NUMBER_MIN_PAGES:
-        if len(pages) != 1:
-            return {}  # 两页仍不足以消除规则排版的合法长列表歧义。
-        page_number, page = pages[0]
-        page_warnings, page_error = (coordinate_issues_by_page or {}).get(
-            page_number,
-            ([], None),
-        )
-        if not _coordinate_issues_preserve_line_number_grid_evidence(
-            page_warnings,
-            page_error,
-        ):
-            return {}  # 坐标缺失可能伪造空白基线，单页证据必须完整。
-        page_evidence = _page_printed_line_number_grid_evidence(
-            page,
-            words=words_by_page.get(page_number, []),
-        )
-        if len(page_evidence) != 1:
-            return {}  # 多个同等强数字列仍有歧义。
-        boxes, _origin, pitch = page_evidence[0]
-        if not _single_page_line_number_grid_has_gray_contrast(
-            page,
-            boxes=boxes,
-            pitch=pitch * float(getattr(page, "height", 0) or 0),
-        ):
-            return {}  # 单页只接受行号字形与正文有明显颜色反差的打印网格。
-        return {page_number: boxes}
+        if len(pages) not in {1, 2}:
+            return {}
+        short_window_evidence: dict[
+            int,
+            tuple[tuple[tuple[float, float, float, float], ...], float, float],
+        ] = {}
+        for page_number, page in pages:
+            page_warnings, page_error = (coordinate_issues_by_page or {}).get(
+                page_number,
+                ([], None),
+            )
+            if not _coordinate_issues_preserve_line_number_grid_evidence(
+                page_warnings,
+                page_error,
+            ):
+                return {}  # 坐标缺失可能伪造空白基线，短窗必须逐页有完整坐标。
+            page_evidence = _page_printed_line_number_grid_evidence(
+                page,
+                words=words_by_page.get(page_number, []),
+            )
+            if len(page_evidence) != 1:
+                return {}  # 多个同等强数字列仍有歧义。
+            boxes, origin, pitch = page_evidence[0]
+            if not _single_page_line_number_grid_has_gray_contrast(
+                page,
+                boxes=boxes,
+                pitch=pitch * float(getattr(page, "height", 0) or 0),
+            ):
+                return {}  # 短窗的每页都必须有独立的浅灰行号/深色正文反差。
+            short_window_evidence[page_number] = (boxes, origin, pitch)
+        if len(short_window_evidence) == 2:
+            origins = [evidence[1] for evidence in short_window_evidence.values()]
+            pitches = [evidence[2] for evidence in short_window_evidence.values()]
+            if (
+                abs(origins[0] - origins[1]) > _DOCUMENT_LINE_NUMBER_GRID_ORIGIN_TOLERANCE
+                or abs(pitches[0] - pitches[1]) > _DOCUMENT_LINE_NUMBER_GRID_PITCH_TOLERANCE
+            ):
+                return {}  # 两页须呈现同一归一化网格；左右外边交替不影响其身份。
+        return {
+            page_number: evidence[0]
+            for page_number, evidence in short_window_evidence.items()
+        }
 
     evidence_by_page: dict[
         int,
@@ -1985,10 +2000,9 @@ def _printed_line_number_grid_metrics(
 
     value_words: dict[int, list[dict[str, object]]] = {}
     for word in cluster:
-        text = str(word.get("text", "")).strip()
-        if not text.isdigit():
+        value = _gutter_line_number_value(word.get("text", ""))
+        if value is None:
             return None
-        value = int(text)
         if not 1 <= value <= 100:
             return None  # 与后面的每页 1%-3% 行距约束一致，排除任意大技术数值。
         value_words.setdefault(value, []).append(word)
@@ -2176,7 +2190,7 @@ def _split_missing_grid_number_fragment_boxes(
         if (
             combined != str(value)
             or max(centers) - min(centers) > center_tolerance
-            or not -0.5 <= horizontal_gap <= x_tolerance
+            or not -x_tolerance <= horizontal_gap <= x_tolerance
             or abs(float(first["x0"]) - column_left) > x_tolerance
             or abs(float(second["x1"]) - column_right) > x_tolerance
         ):
@@ -2189,7 +2203,7 @@ def _split_missing_grid_number_fragment_boxes(
                 float(word["bottom"]),
             )
             for word in fragments
-        )
+        )  # 保留每个已证明数字字形的独立精确框；联合覆盖在布局对象过滤时派生。
     return tuple(recovered)
 
 
@@ -3599,7 +3613,7 @@ def _layout_object_inside_any_box(
 ) -> bool:
     """Return whether a PDF character lies inside a proven filtered-layout box."""
 
-    if not boxes or (digits_only and not str(obj.get("text", "")).isdigit()):
+    if not boxes or (digits_only and not _layout_object_text_is_digits(obj.get("text", ""))):
         return False
     try:
         x0 = float(obj["x0"])
@@ -3609,13 +3623,71 @@ def _layout_object_inside_any_box(
     except (KeyError, TypeError, ValueError):
         return False
     tolerance = 0.5
-    return any(
+    if any(
         x0 >= left - tolerance
         and x1 <= right + tolerance
         and top >= upper - tolerance
         and bottom <= lower + tolerance
         for left, upper, right, lower in boxes
+    ):
+        return True
+    if not digits_only:
+        return False
+    return any(
+        x0 >= left - tolerance
+        and x1 <= right + tolerance
+        and top >= upper - tolerance
+        and bottom <= lower + tolerance
+        for left, upper, right, lower in _adjacent_digit_box_unions(boxes)
     )
+
+
+def _adjacent_digit_box_unions(
+    boxes: tuple[tuple[float, float, float, float], ...],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Join exactly two touching same-baseline digit boxes for a split layout span."""
+
+    ordered = sorted(boxes, key=lambda box: ((box[1] + box[3]) / 2.0, box[0]))
+    rows: list[list[tuple[float, float, float, float]]] = []
+    for box in ordered:
+        center = (box[1] + box[3]) / 2.0
+        if not rows:
+            rows.append([box])
+            continue
+        row_center = median((item[1] + item[3]) / 2.0 for item in rows[-1])
+        if abs(center - row_center) <= 1.8:
+            rows[-1].append(box)
+        else:
+            rows.append([box])
+    unions: list[tuple[float, float, float, float]] = []
+    for row in rows:
+        if len(row) != 2:
+            continue  # 多个同行候选即使紧邻也不允许合并来授权过滤。
+        first, second = sorted(row, key=lambda box: box[0])
+        gap = second[0] - first[2]
+        joined_width = second[2] - first[0]
+        if -0.5 <= gap <= 1.8 and joined_width <= 18.0:
+            unions.append(
+                (
+                    first[0],
+                    min(first[1], second[1]),
+                    second[2],
+                    max(first[3], second[3]),
+                )
+            )
+    return tuple(unions)
+
+
+def _layout_object_text_is_digits(value: object) -> bool:
+    """Accept a gutter number whose digit glyphs were split by spacing or a PUA pad."""
+
+    text = str(value)
+    digits = [
+        character
+        for character in text
+        if not character.isspace() and character != "\uf020"
+    ]
+    return bool(digits) and all(character.isdigit() for character in digits)
 
 
 def _layout_object_center_inside_any_box(
@@ -4019,10 +4091,9 @@ def _gutter_inner_bound(words: list[dict[str, object]], key: str, *, high_side: 
 def _is_gutter_line_number(word: dict[str, object], width: float, height: float, *, side: str) -> bool:
     """Return True for a numeric word that sits in a likely line-number gutter."""
 
-    text = str(word.get("text", "")).strip()  # pdfplumber 词对象里的原始文本。
-    if not text.isdigit():  # 行号候选必须是纯数字。
+    value = _gutter_line_number_value(word.get("text", ""))
+    if value is None:  # 行号候选必须是纯数字，可带 PDF 私用字形的尾部空格填充。
         return False
-    value = int(text)  # 转成整数后可以排除页码或异常大数。
     if value < 1 or value > 120:  # 协议行号通常在几十以内，过大数值更可能是正文。
         return False
     top = float(word.get("top", 0) or 0)  # 词的上边界，用于排除页眉页脚页码。
@@ -4034,10 +4105,28 @@ def _is_gutter_line_number(word: dict[str, object], width: float, height: float,
     return float(word.get("x0", 0) or 0) >= width * 0.84  # 右行号栏靠近页面右侧。
 
 
+def _gutter_line_number_value(value: object) -> int | None:
+    """Parse digits with only trailing private-use padding, never embedded symbols."""
+
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    without_private_padding = text.rstrip("\uf020").strip()
+    if without_private_padding != text and without_private_padding.isdigit():
+        return int(without_private_padding)
+    return None
+
+
 def _looks_like_line_number_sequence(words: list[dict[str, object]], height: float) -> bool:
     """Check whether gutter candidates form a real vertical line-number run."""
 
-    values = sorted({int(str(word["text"]).strip()) for word in words})  # 去重后按数字顺序检查连续性。
+    values = sorted(
+        {
+            value
+            for word in words
+            if (value := _gutter_line_number_value(word.get("text", ""))) is not None
+        }
+    )  # 去重后按数字顺序检查连续性。
     if len(values) < _LINE_NUMBER_MIN_COUNT:  # 重复抽取不能抬高证据；1..20 这类正文列表一律保留。
         return False
     longest_run = _longest_consecutive_run(values)  # 连续行号比零散数字更可信。
@@ -5579,13 +5668,25 @@ def _table_lines_are_single_column_note_box(table_lines: list[str], *, title: st
         for observation in observations
         if observation is not None and observation[1]
     }
-    if len(populated_columns) > 1:
-        return False  # 真实多列表格可能每行恰好只填一个不同字段；只有固定单列才能证明是占位框。
     payloads = [observation[1] for observation in observations if observation is not None]
     joined = " ".join(payload for payload in payloads if payload)  # 汇总整块说明文本，判断是否是 Note 框。
-    content_starts_note = bool(re.search(r"(?i)^\s*(?:note|notes)\s*[:.]", joined))
-    title_is_note = bool(re.fullmatch(r"(?i)notes?\s*[:.]?", normalize_line(title)))
-    return content_starts_note or title_is_note  # Note 可在首个单元格，也可能只出现在边框上方标题。
+    content_starts_note = bool(
+        re.match(r"(?i)^\s*(?:implementation\s+)?notes?(?=\s|[:.]|$)", joined)
+    )
+    title_is_note = bool(
+        re.fullmatch(
+            r"(?i)(?:implementation\s+)?notes?\s*[:.]?",
+            normalize_line(title),
+        )
+    )
+    split_heading_is_implementation_note = bool(
+        re.match(r"(?i)^\s*implementation\s+notes?(?=\s|[:.]|$)", joined)
+    ) or bool(
+        re.fullmatch(r"(?i)implementation\s+notes?\s*[:.]?", normalize_line(title))
+    )
+    if len(populated_columns) > 1 and not split_heading_is_implementation_note:
+        return False  # 真实多列表格可按行稀疏；跨列单值框仅对 Implementation Note 标题放行。
+    return content_starts_note or title_is_note  # Note 或 Implementation Note 可出现在框内首行或独立标题。
 
 
 def _single_value_table_payload(line: str) -> tuple[str, str] | None:
@@ -9249,6 +9350,78 @@ def _table_line_key(line: str) -> str:
     return re.sub(r"\s+", " ", line).casefold().strip()
 
 
+def _deduplicate_nested_captioned_table_visuals(
+    table_visuals: list[TableVisual],
+) -> list[TableVisual]:
+    """Drop a same-caption candidate only when one larger table fully contains its source words."""
+
+    def bbox_values(table: TableVisual) -> tuple[float, float, float, float] | None:
+        try:
+            box = tuple(float(value) for value in table.bbox)
+        except (TypeError, ValueError):
+            return None
+        if len(box) != 4 or not all(math.isfinite(value) for value in box):
+            return None
+        if box[2] <= box[0] or box[3] <= box[1]:
+            return None
+        return box  # type: ignore[return-value]
+
+    def payload_words(table: TableVisual) -> set[str]:
+        payload = " ".join(_table_line_visual_payload(row) for row in table.row_texts)
+        return set(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", payload.casefold()))
+
+    def is_strict_parent(
+        parent_box: tuple[float, float, float, float],
+        child_box: tuple[float, float, float, float],
+    ) -> bool:
+        tolerance = 1.5  # pdfplumber/table screenshot padding can move a detected edge by a point.
+        return bool(
+            parent_box[0] <= child_box[0] + tolerance
+            and parent_box[1] <= child_box[1] + tolerance
+            and parent_box[2] >= child_box[2] - tolerance
+            and parent_box[3] >= child_box[3] - tolerance
+            and parent_box != child_box
+        )
+
+    boxes = [bbox_values(table) for table in table_visuals]
+    word_sets = [payload_words(table) for table in table_visuals]
+    removed: set[int] = set()
+    for child_index, child in enumerate(table_visuals):
+        child_box = boxes[child_index]
+        child_words = word_sets[child_index]
+        title_key = re.sub(r"\s+", " ", normalize_line(child.title)).strip().casefold()
+        if (
+            child_box is None
+            or not title_key
+            or len(child_words) < 2
+            or not child.row_texts
+        ):
+            continue
+        child_area = (child_box[2] - child_box[0]) * (child_box[3] - child_box[1])
+        parents: list[int] = []
+        for parent_index, parent in enumerate(table_visuals):
+            parent_box = boxes[parent_index]
+            if (
+                parent_index == child_index
+                or parent_index in removed
+                or parent.page_number != child.page_number
+                or not parent_box
+                or re.sub(r"\s+", " ", normalize_line(parent.title)).strip().casefold()
+                != title_key
+                or not is_strict_parent(parent_box, child_box)
+                or len(parent.row_texts) <= len(child.row_texts)
+            ):
+                continue
+            parent_area = (parent_box[2] - parent_box[0]) * (parent_box[3] - parent_box[1])
+            if child_area <= 0 or child_area / parent_area > 0.35:
+                continue
+            if child_words <= word_sets[parent_index]:
+                parents.append(parent_index)
+        if len(parents) == 1:
+            removed.add(child_index)
+    return [table for index, table in enumerate(table_visuals) if index not in removed]
+
+
 def _finalize_extraction_result(
     *,
     path: Path,
@@ -9286,7 +9459,7 @@ def _finalize_extraction_result(
         total_pages=total_pages,
         selected_start_page=selected_start,
         selected_end_page=selected_end,
-        table_visuals=list(table_visuals or []),
+        table_visuals=_deduplicate_nested_captioned_table_visuals(list(table_visuals or [])),
         formula_visuals=list(formula_visuals or []),
         source_sha256=source_sha256,
         outline_heading_paths=outline_heading_paths,

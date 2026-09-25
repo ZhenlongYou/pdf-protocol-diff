@@ -2353,6 +2353,42 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
                     review_item = "同位置无题表格候选"
                     old_review = "旧版候选行文字在空白规整后与新版对应位置相同；表格身份仍需核对。"
                     new_review = "新版候选行文字在空白规整后与旧版对应位置相同；页面像素不同，请复核原页。"
+                elif group.review_reason == "descriptive-caption-same-section":
+                    review_item = "同章节同题表格候选"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版在同一章节有唯一同描述表题，但页内位置差异较大；"
+                        "编号、列结构和行对应关系请结合截图核实。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版在同一章节有唯一同描述表题，但页内位置差异较大；"
+                        "编号、列结构和行对应关系请结合截图核实。"
+                    )
+                elif group.review_reason == "descriptive-caption-weak-context":
+                    review_item = "同描述表题候选复核"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版存在唯一同描述表题，但章节或页窗线索不足以确认身份；"
+                        "请对照两侧源页截图核实编号、列结构和行对应关系。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版存在唯一同描述表题，但章节或页窗线索不足以确认身份；"
+                        "请对照两侧源页截图核实编号、列结构和行对应关系。"
+                    )
+                elif group.review_reason == "descriptive-caption-multipart":
+                    review_item = "同题多表拆分候选"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版在同一章节把相同表题核心拆成多张表；"
+                        "这里只保留整组复核线索，不建立逐行对应。请逐表查看原页。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版有同一表题核心的多张表；"
+                        "编号和结构变化较大，逐表身份及数据差异需要对照原页确认。"
+                    )
                 else:
                     review_item = "页窗表格候选对应"
                     old_review = "旧版候选框与对应原页位置一致；表格身份与行归属仍需核实。"
@@ -2642,6 +2678,15 @@ def _paired_table_visuals(
     new_unused = set(range(len(new_tables)))  # 未匹配新表索引。
     groups: list[_TableVisualGroup] = []  # 输出旧/新逻辑表格组。
     _pair_same_caption_table_groups(
+        old_tables,
+        new_tables,
+        old_unused,
+        new_unused,
+        groups,
+        old_sections=old_sections,
+        new_sections=new_sections,
+    )
+    _pair_unique_caption_core_multipart_groups(
         old_tables,
         new_tables,
         old_unused,
@@ -4869,6 +4914,182 @@ def _table_visual_caption_descriptor_key(table: TableVisual) -> str:
     return descriptor
 
 
+def _pair_unique_caption_core_multipart_groups(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    *,
+    old_sections: list[Section] | None,
+    new_sections: list[Section] | None,
+) -> None:
+    """Keep a localized table split/merge as one review candidate when captions share a unique core."""
+
+    def caption_tokens(table: TableVisual) -> tuple[str, ...]:
+        descriptor = _table_visual_caption_descriptor_key(table)
+        return tuple(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", descriptor.casefold()))
+
+    def contains_core(words: tuple[str, ...], core: tuple[str, ...]) -> bool:
+        width = len(core)
+        return any(words[start : start + width] == core for start in range(len(words) - width + 1))
+
+    old_words = {index: caption_tokens(old_tables[index]) for index in sorted(old_unused)}
+    new_words = {index: caption_tokens(new_tables[index]) for index in sorted(new_unused)}
+    descriptors = tuple(old_words.values()) + tuple(new_words.values())
+    possible_cores: set[tuple[str, ...]] = set()
+    for words in descriptors:
+        for width in range(len(words), 3, -1):  # at least four ordered words are needed for a caption core.
+            possible_cores.update(
+                words[start : start + width]
+                for start in range(len(words) - width + 1)
+            )
+
+    mappings: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]] = {}
+    for core in possible_cores:
+        old_indexes = tuple(
+            index for index, words in old_words.items() if contains_core(words, core)
+        )
+        new_indexes = tuple(
+            index for index, words in new_words.items() if contains_core(words, core)
+        )
+        if not (2 <= len(old_indexes) <= 3 and 2 <= len(new_indexes) <= 3):
+            continue  # 只处理小型局部拆分/合并；更宽的组保留单侧候选。
+        key = (old_indexes, new_indexes)
+        previous = mappings.get(key)
+        if previous is None or len(core) > len(previous):
+            mappings[key] = core
+    if len(mappings) != 1:
+        return  # 多种候选映射无法唯一确定时，不用共享词串强制分组。
+
+    (old_indexes, new_indexes), _core = next(iter(mappings.items()))
+    old_group = [old_tables[index] for index in old_indexes]
+    new_group = [new_tables[index] for index in new_indexes]
+    all_tables = [*old_group, *new_group]
+    if len({compact_inline(table.title).casefold() for table in all_tables}) != len(all_tables):
+        return  # 重复表题仍有歧义，即使抽取候选已局部去重也不猜身份。
+
+    old_contexts = {
+        _table_visual_section_context(table, old_sections or [])
+        for table in old_group
+    }
+    new_contexts = {
+        _table_visual_section_context(table, new_sections or [])
+        for table in new_group
+    }
+    old_strong_contexts = {
+        context
+        for context in old_contexts
+        if context
+        and not _table_context_is_page_fallback(context)
+        and not _table_context_is_weak_numeric_heading(context)
+    }
+    new_strong_contexts = {
+        context
+        for context in new_contexts
+        if context
+        and not _table_context_is_page_fallback(context)
+        and not _table_context_is_weak_numeric_heading(context)
+    }
+    if len(old_strong_contexts) != 1 or old_strong_contexts != new_strong_contexts:
+        return  # 至少需要一个唯一且两侧相同的强章节锚点。
+
+    old_pages = sorted({table.page_number for table in old_group})
+    new_pages = sorted({table.page_number for table in new_group})
+    if old_pages[-1] - old_pages[0] > 1 or new_pages[-1] - new_pages[0] > 1:
+        return  # 不跨越较长范围拼接同题表。
+
+    for index in old_indexes:
+        old_unused.remove(index)
+    for index in new_indexes:
+        new_unused.remove(index)
+    groups.append(
+        _TableVisualGroup(
+            tuple(old_group),
+            tuple(new_group),
+            review_only=True,
+            review_reason="descriptive-caption-multipart",
+        )
+    )  # 标题核心只授权收拢复核截图，不授权表格等价或逐行数据对应。
+
+
+def _table_context_is_weak_numeric_heading(context: str) -> bool:
+    """Recognize only a page-window context whose sole heading number looks like a line index."""
+
+    path = _table_context_number_path(context)
+    return bool(re.fullmatch(r"\d{3,}", path))
+
+
+def _captioned_table_adjacent_continuation_indexes(
+    tables: list[TableVisual],
+    unused: set[int],
+    caption_index: int,
+) -> tuple[int, ...]:
+    """Attach one same-schema, repeated-header page-edge continuation to its captioned table."""
+
+    captioned = tables[caption_index]
+    if (
+        not captioned.row_texts
+        or captioned.page_bbox is None
+        or not _table_visual_has_valid_bbox(captioned)
+    ):
+        return ()
+    page_x0, _page_top, page_x1, _page_bottom = captioned.page_bbox
+    page_width = page_x1 - page_x0
+    if page_width <= 0:
+        return ()
+    caption_x0 = (captioned.bbox[0] - page_x0) / page_width
+    caption_x1 = (captioned.bbox[2] - page_x0) / page_width
+    caption_width = caption_x1 - caption_x0
+    if caption_width <= 0:
+        return ()
+    boundary_rows = {
+        key
+        for row in captioned.row_texts
+        if (key := _table_row_pairing_key(row))
+    }
+    candidates: list[int] = []
+    for index in sorted(unused):
+        if index == caption_index:
+            continue
+        continuation = tables[index]
+        if not (
+            continuation.is_continuation
+            and not continuation.title.strip()
+            and continuation.table_number == captioned.table_number
+            and continuation.page_number == captioned.page_number + 1
+            and continuation.row_texts
+            and continuation.page_bbox is not None
+            and _table_visual_has_valid_bbox(continuation)
+        ):
+            continue
+        page_x0, page_top, page_x1, page_bottom = continuation.page_bbox
+        page_width = page_x1 - page_x0
+        page_height = page_bottom - page_top
+        if page_width <= 0 or page_height <= 0:
+            continue
+        top_gap = (continuation.bbox[1] - page_top) / page_height
+        if not 0.0 <= top_gap <= _TABLE_PAGE_EDGE_MAX_FRACTION:
+            continue
+        continuation_x0 = (continuation.bbox[0] - page_x0) / page_width
+        continuation_x1 = (continuation.bbox[2] - page_x0) / page_width
+        continuation_width = continuation_x1 - continuation_x0
+        overlap = max(
+            0.0,
+            min(caption_x1, continuation_x1) - max(caption_x0, continuation_x0),
+        )
+        if (
+            continuation_width <= 0
+            or overlap / min(caption_width, continuation_width) < 0.9
+            or min(caption_width, continuation_width) / max(caption_width, continuation_width) < 0.85
+        ):
+            continue
+        if _table_row_pairing_key(continuation.row_texts[0]) not in boundary_rows:
+            continue  # 页序号和同列位置仍不足；首行必须逐字重现已检测表格中的一行。
+        candidates.append(index)
+    return tuple(candidates) if len(candidates) == 1 else ()
+
+
 def _pair_unique_descriptive_caption_renumberings(
     old_tables: list[TableVisual],
     new_tables: list[TableVisual],
@@ -4959,11 +5180,57 @@ def _pair_unique_descriptive_caption_renumberings(
             continue
         old_box = normalized_bbox(old_table)
         new_box = normalized_bbox(new_table)
-        if old_box is None or new_box is None or overlap_ratio(old_box, new_box) < 0.72:
-            continue  # 编号格式变化还须有同页相对位置证据，单靠相同措辞不够。
-
         old_context = _table_visual_section_context(old_table, old_sections or [])
         new_context = _table_visual_section_context(new_table, new_sections or [])
+        if old_box is None or new_box is None:
+            continue  # 缺少有限的页内几何时，唯一 caption 仍不足以确定它是同一表。
+        if overlap_ratio(old_box, new_box) < 0.72:
+            context_is_exact = bool(old_context and old_context == new_context)
+            context_is_weak = bool(
+                not old_context
+                or not new_context
+                or _table_context_is_page_fallback(old_context)
+                or _table_context_is_page_fallback(new_context)
+                or _table_context_is_weak_numeric_heading(old_context)
+                or _table_context_is_weak_numeric_heading(new_context)
+            )
+            if not context_is_exact and not context_is_weak:
+                continue  # 两侧章节线索都明确且冲突时，唯一同题也不足以配对。
+            old_indexes = (
+                old_index,
+                *_captioned_table_adjacent_continuation_indexes(
+                    old_tables,
+                    old_unused,
+                    old_index,
+                ),
+            )
+            new_indexes = (
+                new_index,
+                *_captioned_table_adjacent_continuation_indexes(
+                    new_tables,
+                    new_unused,
+                    new_index,
+                ),
+            )
+            old_unused.remove(old_index)
+            new_unused.remove(new_index)
+            for index in old_indexes[1:]:
+                old_unused.remove(index)
+            for index in new_indexes[1:]:
+                new_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    tuple(old_tables[index] for index in old_indexes),
+                    tuple(new_tables[index] for index in new_indexes),
+                    review_only=True,
+                    review_reason=(
+                        "descriptive-caption-same-section"
+                        if context_is_exact
+                        else "descriptive-caption-weak-context"
+                    ),
+                )
+            )  # 低重合只保留唯一同题候选；弱上下文不授权确定差异或行映射。
+            continue
         if old_context and new_context and old_context != new_context:
             old_path = _table_context_number_path(old_context)
             new_path = _table_context_number_path(new_context)
@@ -5016,7 +5283,11 @@ def _table_context_is_page_fallback(context: str) -> bool:
         _path, separator, raw_title = context.partition("\x1ftitle:")
         return bool(separator and _is_physical_page_fallback_title(raw_title))
     if context.startswith("heading:"):
-        return _is_physical_page_fallback_title(context.removeprefix("heading:"))
+        heading = context.removeprefix("heading:")
+        return _is_physical_page_fallback_title(heading) or heading in {
+            "运行页眉（坐标证据）",
+            "运行页脚（坐标证据）",
+        }
     return False
 
 

@@ -2,12 +2,12 @@
 
 ## 当前任务：不同 PDF 风格下的短页窗稳定性（2026-09-26）
 
-- 目标：用本机 OIF/PCIe 文档的短页切片扩充测试，减少换版式或 PDF 生成器后识别失准。task_id `pdf-random-window-fidelity-20260925`，owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；最新代码提交 `cd9d1b14ab9c04ee4fb39d985002fb42a84a5465`。main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久项目分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 均未移动，候选未集成。
-- 用户的 CEI 5.1/05.3 PDF 与本机切片语料 SHA-256 分别为 `3bc6c38731ac20f9bf8c6a2c7e9c4baccbab34dc3d43ad645ee18bb2cf2e1bd5`、`1fa2417c96f06bc8115bcc79b7d2f7a160e35b8cc5bbebe7051fd446833e2f72`。CEI `24/24`、随机跨 OIF/PCIe `10/10`、跨样式 `7/7` 均通过；运行结果分别在 `work/page-window-gate/receipt-final18.json`、`work/page-window-gate/results/random-aligned-final.json` 和 `work/page-window-gate/results/style-generalization-final.json`。这些页窗的报告状态仍为 `degraded`，只证明所测切片，不代表整本或任意 PDF 的准确率。
-- 本轮再加 3 组未覆盖的版本窗：OIF MR 5.3→5.4 p14–16、LR 5.3→5.4 p14–16，以及跨生成器 Linear 0.6 FrameMaker p15–17→0.7 Print-to-PDF p15–18。`corpus/local/manifest-new-oif-pairs-20260926.json` 对应 `3/3 PASS, 0 skip`；原页渲染已查看，三组均保留措辞/章节变化，表格均抽到且未误报行变化；状态都为 `degraded`。输入 SHA、页数和页窗已记在 `work/page-window-gate/results/new-oif-pairs-20260926-inputs.json`，源页渲染在 `work/page-window-gate/results/new-slices-20260926/source-renders/`。这是 final18 严格回执之外的附加切片证据。
-- 修复：单页对比中，只有两侧输入不同、页审计完整、无题单行表唯一且同框、行标签/字段/单位一致时，才把变化列作一条人工复核；不确认表格身份，标签不同或候选重复时不强配。PDF Title 和限定版本前缀确证的出版页眉，在 JSON 原始审计中标为 `document_metadata`；未确证的动态技术页眉仍为 `technical`。OIF 058/532 的旧断言已按源页和报告规则修正。
-- 验证：受影响测试模块 `210 项通过`；严格回执 `receipt-final18.json` 为 `EXECUTED_EVIDENCE_PASS`，八行全 PASS，结论限定 `verified_scope_only`。两项新变异各自均出现预期 RED 并在当前源码 GREEN；24 窗 CEI 语料通过；全套 `1378` 项通过、1 项条件跳过。较早的 `receipt-final17.json` 保留为 BLOCKED；隔离环境的全套重放及新的 final18 均通过。
-- 下一步：继续从其他 OIF/PCIe 修订和生成器抽短窗，优先查章节重排、正文跨页移动、表格行增删、公式/图表和页眉页脚噪声；每个失败先核对源页，再补回归。达到充分跨家族覆盖并完成独立代码审查前，保持候选未集成，不宣称通用 PDF 准确率。用户 PDF 和私有切片输入留在本机 ignored 语料，不提交。
+- 目标：用本机 OIF/PCIe 真实短页窗查找跨版式、跨生成器误报，并保护识别出的真实内容变化。task_id `pdf-random-window-fidelity-20260925`，owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；本轮工作基于 `c86fb462a3b1616dbc3ca00efd1d8f420156488e`，行为改动与测试尚待提交。main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久项目分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动；候选未集成。
+- 本轮修复已复现的两类版式问题：OIF CEI 4.0→5.1 两页灰色打印行号栏曾被混入正文；CEM R4→R5.1 的 Word 导出把一张表内标题碎片重复识别成嵌套表；CEM 1.1→R4 的 Implementation Note 盒被误识别为表格。拆分的两位数行号仍保留逐字形精确框，仅对紧邻同基线数字框组成的完整数字文本块做过滤；非数字、越界和三框候选均不放行。多个同题表的合并只生成 review 候选，不确认行映射或语义等价。
+- OIF 用户 CEI 5.1/05.3 源文件 SHA-256 为 `3bc6c38731ac20f9bf8c6a2c7e9c4baccbab34dc3d43ad645ee18bb2cf2e1bd5`、`1fa2417c96f06bc8115bcc79b7d2f7a160e35b8cc5bbebe7051fd446833e2f72`。CEI 随机页窗在本轮行为改动后 `24/24 PASS, 0 skip`，状态均 `degraded`；既有跨 OIF/PCIe `10/10`、跨样式 `7/7` 和新增 MR/LR/Linear `3/3` 记录仍在结果目录。这些是切片证据，不代表整本或任意 PDF 准确率。
+- 本轮当前工作树完整测试最终为 `1387` 项通过、1 项条件跳过，日志 `work/page-window-gate/results/full-final-post-style-fixes-r2-20260926.log`。中间一次全套发现精确框数量断言不符；未改弱断言，而是改为保留分开的字形框，并新增紧邻数字文本块的联合覆盖正负测试。OIF 4.0→5.1 实际页窗、24 窗 CEI 语料和三份独立来源锚点 oracle 均通过。最终提交后还需从公开 CLI 重新生成 CEM 1.1→R4、CEM R4→R5.1、OIF CEI 4.0→5.1 报告，完成报告视觉复核与严格 v2 门禁。
+- 对 canonical `6abf4f7` 的离线统计覆盖 29 个切片、185 个章节配对：没有观测到页序逆转，但 19 个配对的同层最佳与次佳原始分差小于 0.10（13 个小于 0.05）；来源为 `work/page-window-gate/results/canonical-6ab-pairing-stats-20260926.json`。它没有逐节人工真值，分差只是诊断，不能据此定阈值。主章节求解仍是全局贪心、置信度未进入结论；本轮没有改这部分，需后续用有真值的页窗设计单调求解和歧义拒配测试。
+- 下一步：保存当前行为候选，再绑定精确提交号执行三个公开报告场景、独立视觉审阅和严格 v2 门禁；候选未集成前不得称全工具稳定。章节配对架构、配对置信清单/报告投影、整本文档错配自检仍未解决。真实 PDF 和本机切片保留在 ignored 语料，不提交。
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
 

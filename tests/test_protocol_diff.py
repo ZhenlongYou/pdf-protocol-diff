@@ -2298,8 +2298,28 @@ class ProtocolDiffTests(unittest.TestCase):
             "表格行: T1 | Column 1=Note: required for mode A | Column 2=",
             "表格行: T1 | Column 1= | Column 2=20 mV",
         ]
+        implementation_note_box_rows = [
+            "表格行: T1 | Column 1=IMPLEMENTATION NOTE",
+            "表格行: T1 | Column 1=PCI Express Slot Requirements",
+            "表格行: T1 | Column 1=The 75 W slot requirements are defined in this specification.",
+            "表格行: T1 | Column 1=150 W / 225 W / 300 W add-in cards must accommodate the voltage variation.",
+        ]
+        split_heading_note_box_rows = [
+            "表格行: T1 | Column 1= | Column 2=IMPLEMENTATION NOTE",
+            "表格行: T1 | Column 1=Power, Thermal Mechanical, and Labeling Considerations | Column 2=",
+            "表格行: T1 | Column 1=Implementers should pay special attention to the following: | Column 2=",
+            "表格行: T1 | Column 1=After a card is reset, the initial slot power limit may change. | Column 2=",
+        ]
 
         self.assertTrue(_should_skip_detected_table("", split_note_rows))
+        self.assertTrue(
+            _should_skip_detected_table("", implementation_note_box_rows),
+            "single-column Implementation Note callouts must remain prose, not added tables",
+        )
+        self.assertTrue(
+            _should_skip_detected_table("", split_heading_note_box_rows),
+            "a one-cell note heading may occupy a separate icon column while body rows remain prose",
+        )
         self.assertTrue(_should_skip_detected_table("Notes", title_led_note_rows))
         self.assertFalse(_should_skip_detected_table("", real_single_column_rows))
         self.assertFalse(_should_skip_detected_table("", sparse_real_table_rows))

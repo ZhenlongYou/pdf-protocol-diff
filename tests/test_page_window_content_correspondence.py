@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 import hashlib
 import io
 import json
@@ -67,6 +68,13 @@ _LOCAL_OIF_INPUT_ROOT = (
 )
 _REAL_OIF_CEI_51 = _LOCAL_OIF_INPUT_ROOT / "OIF-CEI-5.1.pdf"
 _REAL_OIF_CEI_053 = _LOCAL_OIF_INPUT_ROOT / "OIF-CEI-05.3.pdf"
+_REAL_OIF_CEI_40 = _LOCAL_OIF_INPUT_ROOT / "OIF-CEI-04.0.pdf"
+_LOCAL_PCIE_INPUT_ROOT = (
+    Path(__file__).resolve().parents[1] / "work/page-window-gate/input_root/PCIe"
+)
+_REAL_PCIE_CEM_11 = _LOCAL_PCIE_INPUT_ROOT / "pci_cem_1_1.pdf"
+_REAL_PCIE_CEM_R4 = _LOCAL_PCIE_INPUT_ROOT / "pcie_cem_r4.pdf"
+_REAL_PCIE_CEM_R51 = _LOCAL_PCIE_INPUT_ROOT / "pcie_cem_r51.pdf"
 
 
 def _write_pages(path: Path, masthead: str, folios: list[str], bodies: list[str]) -> str:
@@ -325,6 +333,355 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         )
         self.assertTrue(any("eight power pins" in row for group in groups for table in group.old_tables for row in table.row_texts))
         self.assertTrue(any("nine power pins" in row for group in groups for table in group.new_tables for row in table.row_texts))
+
+    def test_unique_caption_same_section_table_expansion_stays_review_only_without_bbox_overlap(self) -> None:
+        """An expanded table with a unique caption in the same section cannot become delete/add when it moves."""
+
+        def table(page: int, title: str, bbox, rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=page,
+                table_number=1,
+                title=title,
+                bbox=bbox,
+                image_data_uri="data:image/jpeg;base64,",
+                row_texts=rows,
+                grid_summary="structured source grid",
+                page_bbox=_PAGE_BBOX,
+                content_fully_represented=False,
+                row_alignment_reliable=False,
+                data_rows_fully_represented=False,
+            )
+
+        old = table(
+            35,
+            "Table 4-1: Power Supply Rail Requirements",
+            (210.48, 480.36, 420.78, 631.14),
+            [
+                "表格行: T1 | Power Rail=+3.3V | 10 W Slot=±9% / 3.0 A | 25 W Slot=±9% / 3.0 A",
+                "表格行: T1 | Power Rail=+12V | 10 W Slot=±8% / 0.5 A | 25 W Slot=±8% / 2.1 A",
+            ],
+        )
+        new = table(
+            42,
+            "Table 5: Power Supply Rail Requirements",
+            (69.0, 87.36, 601.56, 301.68),
+            [
+                "表格行: T1 | Power Rail=+3.3V | 10 W Slot=±9% / 3.0 A | 25 W Slot=±9% / 3.0 A | 2 x 3 Connector=N/A",
+                "表格行: T1 | Power Rail=+12V | 10 W Slot=±8% / 0.5 A | 25 W Slot=±8% / 2.1 A | 2 x 3 Connector=+5%/-8%",
+            ],
+        )
+        old_section = Section(
+            section_id="old-4-1",
+            heading="4.1. Power Supply Requirements",
+            title="Power Supply Requirements",
+            level=2,
+            heading_path=("4. Electrical Requirements", "4.1. Power Supply Requirements"),
+            number_path=("4", "4.1"),
+            start_page=35,
+            end_page=35,
+            body="Power delivery requirements are listed in the Power Supply Rail Requirements table.",
+        )
+        new_section = replace(
+            old_section,
+            section_id="new-4-1",
+            start_page=42,
+            end_page=42,
+        )
+
+        groups = _paired_table_visuals(
+            [old],
+            [new],
+            old_sections=[old_section],
+            new_sections=[new_section],
+        )
+
+        self.assertEqual(1, len(groups))
+        self.assertTrue(groups[0].review_only)
+        self.assertEqual("descriptive-caption-same-section", groups[0].review_reason)
+        self.assertEqual(old, groups[0].old_tables[0])
+        self.assertEqual(new, groups[0].new_tables[0])
+
+        conflicting_section = replace(
+            new_section,
+            heading="4.2. Power Consumption",
+            title="Power Consumption",
+            heading_path=("4. Electrical Requirements", "4.2. Power Consumption"),
+            number_path=("4", "4.2"),
+        )
+        unpaired = _paired_table_visuals(
+            [old],
+            [new],
+            old_sections=[old_section],
+            new_sections=[conflicting_section],
+        )
+        self.assertEqual(2, len(unpaired))
+        self.assertFalse(any(group.review_only for group in unpaired))
+
+    @unittest.skipUnless(
+        _REAL_PCIE_CEM_11.is_file() and _REAL_PCIE_CEM_R4.is_file(),
+        "本机 PCIe CEM 1.1/R4 样本不存在",
+    )
+    def test_real_cem_expanded_power_table_is_one_review_candidate(self) -> None:
+        """The same uniquely captioned CEM power table must not become whole-table delete/add."""
+
+        options = DiffOptions(
+            old_start_page=35,
+            old_end_page=36,
+            new_start_page=42,
+            new_end_page=42,
+        )
+        result = run_diff(_REAL_PCIE_CEM_11, _REAL_PCIE_CEM_R4, options)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reports = write_reports(result, Path(temp_dir) / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+            html = reports["html"].read_text(encoding="utf-8")
+
+        table_findings = [
+            *payload["content_table_changes"],
+            *payload["similarity_review_table_changes"],
+        ]
+        expanded_table = [
+            change
+            for change in table_findings
+            if any("Table 4-1" in title for title in change["old_titles"])
+            and any("Table 5:" in title for title in change["new_titles"])
+        ]
+        self.assertEqual(1, len(expanded_table), table_findings)
+        self.assertEqual("review", expanded_table[0]["change_type"])
+        self.assertEqual([35, 36], expanded_table[0]["old_pages"])
+        self.assertEqual([42], expanded_table[0]["new_pages"])
+        self.assertIn("同描述表题候选复核", json.dumps(expanded_table, ensure_ascii=False))
+        self.assertIn("Table 4-1", html)
+        self.assertIn("Table 5:", html)
+        self.assertGreaterEqual(html.count("<img"), 3)
+
+        with fitz.open(_REAL_PCIE_CEM_11) as old_doc, fitz.open(_REAL_PCIE_CEM_R4) as new_doc:
+            old_source = " ".join(old_doc[34].get_text("text").split())
+            new_source = " ".join(new_doc[41].get_text("text").split())
+        self.assertIn("Table 4-1: Power Supply Rail Requirements", old_source)
+        self.assertIn("Table 5: Power Supply Rail Requirements", new_source)
+        self.assertIn("2 x 3 Connector", new_source)
+
+    @unittest.skipUnless(
+        _REAL_PCIE_CEM_11.is_file() and _REAL_PCIE_CEM_R4.is_file(),
+        "本机 PCIe CEM 1.1/R4 样本不存在",
+    )
+    def test_real_cem_table_to_prose_conversion_keeps_power_changes_visible(self) -> None:
+        """Removing a table is acceptable only when its rewritten prose remains in the body diff."""
+
+        options = DiffOptions(
+            old_start_page=35,
+            old_end_page=37,
+            new_start_page=41,
+            new_end_page=44,
+        )
+        result = run_diff(_REAL_PCIE_CEM_11, _REAL_PCIE_CEM_R4, options)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reports = write_reports(result, Path(temp_dir) / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+
+        deleted_table = [
+            change
+            for change in payload["content_table_changes"]
+            if change["change_type"] == "deleted"
+            and any("Table 4-2: Add-in Card Power Dissipation" in title for title in change["old_titles"])
+        ]
+        self.assertEqual(1, len(deleted_table), payload["content_table_changes"])
+        self.assertEqual([36], deleted_table[0]["old_pages"])
+
+        prose_rewrite = [
+            change
+            for change in payload["content_changes"]
+            if change["change_type"] == "modified"
+            and change["old_pages"] == "36"
+            and change["new_pages"] == "43-44"
+        ]
+        self.assertEqual(1, len(prose_rewrite), payload["content_changes"])
+        rewrite_evidence = json.dumps(prose_rewrite[0], ensure_ascii=False).casefold()
+        for anchor in (
+            "x1 low profile card",
+            "25 w maximum power dissipation",
+            "75 w maximum power dissipation",
+        ):
+            self.assertIn(anchor, rewrite_evidence)
+        old_table_context = json.dumps(
+            prose_rewrite[0]["display_removed_snippets"], ensure_ascii=False
+        ).casefold()
+        self.assertIn("standard height", old_table_context)
+        self.assertIn("10 w", old_table_context)
+
+        with fitz.open(_REAL_PCIE_CEM_11) as old_doc, fitz.open(_REAL_PCIE_CEM_R4) as new_doc:
+            old_source = " ".join(old_doc[35].get_text("text").split())
+            new_source = " ".join(new_doc[42].get_text("text").split())
+        self.assertIn("Table 4-2: Add-in Card Power Dissipation", old_source)
+        self.assertIn("x1 low profile card", new_source)
+        self.assertIn("25 W maximum power dissipation", new_source)
+        self.assertIn("75 W maximum power dissipation", new_source)
+
+    @unittest.skipUnless(
+        _REAL_PCIE_CEM_R4.is_file(),
+        "本机 PCIe CEM R4 样本不存在",
+    )
+    def test_real_cem_implementation_note_boxes_remain_prose(self) -> None:
+        """Word callout boxes labelled IMPLEMENTATION NOTE must not be added as tables."""
+
+        extraction = extract_pdf_text(_REAL_PCIE_CEM_R4, start_page=43, end_page=44)
+        note_pages = {43, 44}
+        self.assertFalse(
+            any(
+                table.page_number in note_pages and not table.title.strip()
+                for table in extraction.table_visuals
+            ),
+            [
+                (table.page_number, table.title, table.row_texts[:2])
+                for table in extraction.table_visuals
+            ],
+        )
+        self.assertTrue(
+            any(
+                table.page_number == 43 and table.title.startswith("Table 6:")
+                for table in extraction.table_visuals
+            )
+        )
+        extracted_text = " ".join(page.text for page in extraction.pages)
+        self.assertIn("IMPLEMENTATION NOTE", extracted_text)
+        self.assertIn("The 75 W slot requirements are defined in this specification", extracted_text)
+        self.assertIn("Power, Thermal Mechanical, and Labeling Considerations", extracted_text)
+
+    @unittest.skipUnless(
+        _REAL_PCIE_CEM_R4.is_file() and _REAL_PCIE_CEM_R51.is_file(),
+        "本机 PCIe CEM R4/R5.1 样本不存在",
+    )
+    def test_real_cem_power_table_split_is_one_review_group_without_nested_fragments(self) -> None:
+        """A new revision splits power tables; duplicate nested header fragments must not inflate additions."""
+
+        new_extraction = extract_pdf_text(_REAL_PCIE_CEM_R51, start_page=51, end_page=52)
+        titled_tables = [table for table in new_extraction.table_visuals if table.title.strip()]
+        self.assertEqual(
+            [
+                "Table 4-1: Power Supply Rail Requirements- PCI Express CEM Connector / Edge-Finger",
+                "Table 4-2: Power Supply Rail Requirements - Auxiliary Power Connectors",
+            ],
+            [table.title for table in titled_tables],
+        )
+
+        options = DiffOptions(
+            old_start_page=42,
+            old_end_page=43,
+            new_start_page=51,
+            new_end_page=52,
+        )
+        result = run_diff(_REAL_PCIE_CEM_R4, _REAL_PCIE_CEM_R51, options)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reports = write_reports(result, Path(temp_dir) / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+
+        new_visuals = [
+            table
+            for table in payload["new_table_visuals"]
+            if table["page_number"] in {51, 52}
+        ]
+        self.assertEqual(2, len(new_visuals), new_visuals)
+
+        findings = [
+            *payload["content_table_changes"],
+            *payload["similarity_review_table_changes"],
+        ]
+        split_candidate = [
+            change
+            for change in findings
+            if {"Table 5: Power Supply Rail Requirements", "Table 6: 150 W / 225 W / 300 W Power Supply Rail Requirements"}
+            <= set(change["old_titles"])
+            and {
+                "Table 4-1: Power Supply Rail Requirements- PCI Express CEM Connector / Edge-Finger",
+                "Table 4-2: Power Supply Rail Requirements - Auxiliary Power Connectors",
+            }
+            <= set(change["new_titles"])
+        ]
+        self.assertEqual(1, len(split_candidate), findings)
+        self.assertEqual("review", split_candidate[0]["change_type"])
+        self.assertEqual([42, 43], split_candidate[0]["old_pages"])
+        self.assertEqual([51, 52], split_candidate[0]["new_pages"])
+
+        with fitz.open(_REAL_PCIE_CEM_R4) as old_doc, fitz.open(_REAL_PCIE_CEM_R51) as new_doc:
+            old_source = " ".join(
+                " ".join(old_doc[page].get_text("text").split())
+                for page in (41, 42)
+            )
+            new_source = " ".join(
+                " ".join(new_doc[page].get_text("text").split())
+                for page in (50, 51)
+            )
+        for anchor in (
+            "Table 5: Power Supply Rail Requirements",
+            "Table 6: 150 W / 225 W / 300 W Power Supply Rail Requirements",
+        ):
+            self.assertIn(anchor, old_source)
+        for anchor in (
+            "Table 4-1: Power Supply Rail Requirements",
+            "Table 4-2: Power Supply Rail Requirements - Auxiliary Power Connectors",
+            "12V-2x6 Connector",
+        ):
+            self.assertIn(anchor, new_source)
+
+    def test_multipart_caption_core_does_not_override_conflicting_section_identity(self) -> None:
+        """A repeated caption core cannot merge tables when all strong section contexts conflict."""
+
+        def table(page: int, number: int, title: str, value: str) -> TableVisual:
+            return TableVisual(
+                page_number=page,
+                table_number=number,
+                title=title,
+                bbox=(72.0, 100.0, 540.0, 300.0),
+                image_data_uri="data:image/jpeg;base64,",
+                grid_summary="structured source grid",
+                row_texts=[f"表格行: T{number} | Parameter=Unique Value | Value={value} | Unit=W"],
+                page_bbox=_PAGE_BBOX,
+                content_fully_represented=False,
+                row_alignment_reliable=False,
+                data_rows_fully_represented=False,
+            )
+
+        def section(section_id: str, heading: str, number_path: tuple[str, ...], page: int) -> Section:
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=heading,
+                level=2,
+                heading_path=number_path,
+                number_path=number_path,
+                start_page=page,
+                end_page=page,
+                body=f"Independent section {heading}.",
+            )
+
+        old_sections = [
+            section("old-4-1", "4.1 Slot Power", ("4", "4.1"), 35),
+            section("old-4-2", "4.2 Auxiliary Power", ("4", "4.2"), 36),
+        ]
+        new_sections = [
+            section("new-5-1", "5.1 Slot Power", ("5", "5.1"), 51),
+            section("new-5-2", "5.2 Auxiliary Power", ("5", "5.2"), 52),
+        ]
+        old_tables = [
+            table(35, 1, "Table 5: Power Supply Rail Requirements - legacy slot", "old-slot-17"),
+            table(36, 1, "Table 6: 150 W / 225 W / 300 W Power Supply Rail Requirements - legacy auxiliary", "old-aux-29"),
+        ]
+        new_tables = [
+            table(51, 1, "Table 4-1: Power Supply Rail Requirements - revised edge finger", "new-edge-31"),
+            table(52, 1, "Table 4-2: Power Supply Rail Requirements - revised connectors", "new-connectors-43"),
+        ]
+
+        groups = _paired_table_visuals(
+            old_tables,
+            new_tables,
+            old_sections=old_sections,
+            new_sections=new_sections,
+        )
+
+        self.assertEqual(4, len(groups))
+        self.assertFalse(any(group.review_only for group in groups))
+        self.assertTrue(all(bool(group.old_tables) != bool(group.new_tables) for group in groups))
 
     def test_flat_to_nested_duplicate_caption_is_not_paired_by_position(self) -> None:
         """A repeated description cannot disambiguate which flat table was renumbered."""
@@ -814,6 +1171,64 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
             ),
             json.dumps(figure_groups, ensure_ascii=False),
         )
+
+    @unittest.skipUnless(
+        _REAL_OIF_CEI_40.is_file() and _REAL_OIF_CEI_51.is_file(),
+        "local OIF CEI 4.0/5.1 PDFs are unavailable",
+    )
+    def test_real_oif_ce40_to_ce51_two_page_gutter_style_does_not_report_body_changes(self) -> None:
+        """Two facing-page line-number gutters must not become reader prose changes."""
+
+        options = DiffOptions(
+            old_start_page=224,
+            old_end_page=225,
+            new_start_page=238,
+            new_end_page=239,
+        )
+        result = run_diff(_REAL_OIF_CEI_40, _REAL_OIF_CEI_51, options)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reports = write_reports(result, Path(temp_dir) / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+
+        self.assertEqual("degraded", payload["assessment"]["state"])
+        self.assertEqual([], payload["content_changes"], payload["content_changes"])
+        self.assertEqual([], payload["content_table_changes"])
+        self.assertFalse(
+            any(
+                change["change_type"] in {"added", "deleted", "modified"}
+                for change in payload["table_changes"]
+            ),
+            payload["table_changes"],
+        )
+
+        def clipped_source_word_bag(document: fitz.Document, page_number: int) -> Counter[str]:
+            page = document[page_number - 1]
+            words = Counter(
+                word[4].casefold()
+                for word in page.get_text("words", clip=fitz.Rect(70, 60, 545, 730))
+            )
+            if words["t"] and words["ransmitter"]:
+                words["t"] -= 1
+                words["ransmitter"] -= 1
+                words["transmitter"] += 1  # old PDF splits this caption word across distant text blocks.
+                if not words["t"]:
+                    del words["t"]
+                if not words["ransmitter"]:
+                    del words["ransmitter"]
+            return words
+
+        with fitz.open(_REAL_OIF_CEI_40) as old_doc, fitz.open(_REAL_OIF_CEI_51) as new_doc:
+            for old_page, new_page in ((224, 238), (225, 239)):
+                self.assertEqual(
+                    clipped_source_word_bag(old_doc, old_page),
+                    clipped_source_word_bag(new_doc, new_page),
+                    f"source body/table words differ on old p.{old_page} and new p.{new_page}",
+                )
+            old_caption_text = old_doc[223].get_text("text")
+            new_caption_text = new_doc[237].get_text("text")
+            self.assertIn("Table 10-6. T", old_caption_text)
+            self.assertIn("ransmitter Electrical Output Specification", old_caption_text)
+            self.assertIn("Table 10-6. Transmitter Electrical Output Specification", new_caption_text)
 
     def test_repeated_forum_clause_footer_requires_stable_folio_backing(self) -> None:
         """Two consecutive folio-backed Forum/Clause captions prove a footer."""

@@ -32,6 +32,7 @@ from protocol_pdf_diff.pdf_extract import (
     _document_proven_line_number_gutter_boxes,
     _extract_pdfplumber_page_text,
     _filtered_layout_page,
+    _layout_object_inside_any_box,
     _page_closed_vector_graphic_frame_bboxes,
     _page_may_contain_table,
     _table_bbox_belongs_to_captioned_figure,
@@ -879,7 +880,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
                     words_by_page,
                 )
 
-                self.assertEqual({}, gutter_boxes)  # 两页重复只证明排版相似，不能证明数字属于可删除页边栏。
+                self.assertEqual({}, gutter_boxes)  # 两页没有独立灰度对比证据时，重复数字仍须保留。
                 for page_number, page in pages:
                     self.assertIs(
                         page,
@@ -1113,6 +1114,106 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
 
         self.assertEqual({}, gutter_boxes)
 
+    def test_split_digit_layout_span_uses_only_adjacent_proven_numeric_boxes(self) -> None:
+        fragments = (
+            (548.0, 100.0, 552.9, 110.0),
+            (553.0, 100.4, 558.0, 110.4),
+        )
+        split_number = {
+            "text": "1 5\uf020",
+            "x0": 548.0,
+            "x1": 558.0,
+            "top": 100.0,
+            "bottom": 110.4,
+        }
+
+        self.assertTrue(
+            _layout_object_inside_any_box(split_number, fragments, digits_only=True)
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {**split_number, "text": "15V"}, fragments, digits_only=True
+            )
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {**split_number, "x1": 558.75}, fragments, digits_only=True
+            )
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {
+                    "text": "1 5 6",
+                    "x0": 548.0,
+                    "x1": 565.0,
+                    "top": 100.0,
+                    "bottom": 110.4,
+                },
+                (*fragments, (558.1, 100.0, 565.0, 110.0)),
+                digits_only=True,
+            )
+        )
+
+    def test_two_page_gray_line_number_grid_requires_each_page_and_stable_pitch(self) -> None:
+        """Two short-window pages can prove a facing-page gutter only with gray contrast on both sides."""
+
+        def make_page(side: str, *, gray: bool = True, private_padding: bool = False):
+            page = mock.Mock()
+            page.width = 612.0
+            page.height = 792.0
+            page.chars = []
+            words: list[dict[str, object]] = []
+            blank_rows = {2, 7, 12, 17, 22, 27, 32, 37, 42, 47}
+            for value in range(1, 50):
+                top = 80.0 + (value - 1) * 13.0
+                token = f"{value}\uf020" if private_padding else str(value)
+                width = 6.7 * len(str(value))
+                x0 = 60.0 - width if side == "left" else 554.0
+                x1 = x0 + width
+                number_word = {
+                    "text": token,
+                    "x0": x0,
+                    "x1": x1,
+                    "top": top,
+                    "bottom": top + 10.0,
+                }
+                words.append(number_word)
+                page.chars.append(
+                    {
+                        **number_word,
+                        "text": str(value),
+                        "non_stroking_color": (0.6, 0.6, 0.6) if gray else (0.0, 0.0, 0.0),
+                    }
+                )
+                if value in blank_rows:
+                    continue
+                body_word = {
+                    "text": f"Requirement{value}",
+                    "x0": 90.0,
+                    "x1": 180.0,
+                    "top": top,
+                    "bottom": top + 10.0,
+                }
+                words.append(body_word)
+                page.chars.append({**body_word, "non_stroking_color": (0.0, 0.0, 0.0)})
+            page.extract_words.return_value = words
+            return page, words
+
+        left_page, left_words = make_page("left")
+        right_page, right_words = make_page("right", private_padding=True)
+        proven = _document_proven_line_number_gutter_boxes(
+            [(224, left_page), (225, right_page)],
+            {224: left_words, 225: right_words},
+        )
+        self.assertEqual({224, 225}, set(proven))
+
+        black_right_page, black_right_words = make_page("right", gray=False)
+        rejected = _document_proven_line_number_gutter_boxes(
+            [(224, left_page), (225, black_right_page)],
+            {224: left_words, 225: black_right_words},
+        )
+        self.assertEqual({}, rejected)
+
     def test_preserved_gutter_like_numbers_mark_the_page_as_layout_risk(self) -> None:
         """保留疑似行号后必须降级，不能把歧义页面伪装成可靠正文。"""
 
@@ -1197,7 +1298,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             {1: [*gutter_words, *body_words], 2: repeated_gutter_words},
         )
 
-        self.assertEqual({}, gutter_boxes)  # 跨页重复不能证明数字是装饰性行号。
+        self.assertEqual({}, gutter_boxes)  # 跨页重复但缺少每页的灰色字体证据时，不能删除疑似行号。
         self.assertIs(
             page,
             _filtered_layout_page(

@@ -966,13 +966,17 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
 
     visuals = list(table_visuals)  # 保留真实截图表格，新增兜底只补未覆盖行。
     covered_by_page: dict[int, Counter[str]] = {}
+    visible_cells_by_page: dict[int, list[tuple[str, ...]]] = {}
     for table in visuals:
         page_counter = covered_by_page.setdefault(table.page_number, Counter())
+        visible_cells = visible_cells_by_page.setdefault(table.page_number, [])
         page_counter.update(
             _review_unit_key(row)
             for row in table.row_texts
             if _is_table_review_unit(row)
         )  # 截图覆盖只在同一页按出现次数消费；同文行出现在别页仍须生成独立证据。
+        for row in table.row_texts:
+            visible_cells.extend(_table_row_cell_payload_tokens(row))
     next_table_number = max((table.table_number for table in visuals), default=0) + 1  # 兜底表号接在真实表之后。
     for page in pages:
         page_counter = covered_by_page.get(page.page_number, Counter())
@@ -984,6 +988,11 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
             if page_counter[key] > 0:
                 page_counter[key] -= 1
                 continue
+            if _is_short_cell_fragment_of_visible_table(
+                line,
+                visible_cells_by_page.get(page.page_number, []),
+            ):
+                continue  # 同页截图表已完整呈现的拆分单元格词不另造一张无截图“表格”。
             rows.append(compact_inline(line))
         if not rows:
             continue
@@ -1000,6 +1009,44 @@ def _table_visuals_with_text_fallbacks(table_visuals: list[TableVisual], pages: 
         )  # 没有截图时仍进入报告的表格摘要区，而不是正文差异卡片。
         next_table_number += 1
     return visuals
+
+
+def _table_row_cell_payload_tokens(row: str) -> list[tuple[str, ...]]:
+    """Return normalized non-empty cell words from one structured table row."""
+
+    text = normalize_line(row)
+    if text.startswith("表格行:"):
+        text = text[len("表格行:") :].strip()
+    cells = split_table_cells(text)
+    if cells and re.fullmatch(r"T\d+", cells[0], flags=re.I):
+        cells = cells[1:]
+    payloads: list[tuple[str, ...]] = []
+    for cell in cells:
+        field = split_table_field(cell)
+        payload = field[1] if field else decode_table_cell(cell)
+        tokens = tuple(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", normalize_line(payload).casefold()))
+        if tokens:
+            payloads.append(tokens)
+    return payloads
+
+
+def _is_short_cell_fragment_of_visible_table(
+    row: str,
+    visible_cells: list[tuple[str, ...]],
+) -> bool:
+    """Suppress only a one- or two-word edge fragment already shown inside a same-page cell."""
+
+    payloads = _table_row_cell_payload_tokens(row)
+    if len(payloads) != 1:
+        return False
+    fragment = payloads[0]
+    if not 1 <= len(fragment) <= 2:
+        return False
+    return any(
+        len(cell) > len(fragment)
+        and (cell[: len(fragment)] == fragment or cell[-len(fragment) :] == fragment)
+        for cell in visible_cells
+    )
 
 
 def _reconcile_exact_cross_side_table_text(
