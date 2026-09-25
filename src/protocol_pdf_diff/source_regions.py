@@ -10,6 +10,19 @@ from .models import DocumentBlockKind
 
 CAPTION = re.compile(r'(?i)^(?:figure|fig\.|table|图|表)\s*(?:\d+|[A-Z])(?:[.\-–]\w+)*(?:[.：:]|\s)')
 FURNITURE = re.compile(r'(?i)\b(?:clause|consortium|copyright|draft|edition|forum|page|revision|specification|standard|version|working\s+group|www\.|https?://)\b|©')
+_TECHNICAL_FOOTER_FACT = re.compile(
+    r"(?i)\b(?:maximum|minimum|limit|limits|threshold|value|values|is|are)\b|"
+    r"[<>]=?|"
+    r"(?<![A-Za-z0-9_])[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*"
+    r"(?:%|(?:[fpnumkMGTµμ]?V|[fpnumkMGTµμ]?A|[fpnumkMGTµμ]?W|"
+    r"[fpnumµμ]?s|[fpnumkMGTµμ]?Hz|[kMGT]?bps|[kMGT]?b/s|"
+    r"UI|dB(?:m|c)?|[kMGT]?Ω|ppm|°C)(?=$|[^A-Za-z0-9_]))"
+)
+
+
+def contains_technical_footer_fact(text):
+    """Keep value-bearing or normative text out of page-furniture removal."""
+    return bool(_TECHNICAL_FOOTER_FACT.search(text))
 
 
 def bounds(words):
@@ -41,7 +54,8 @@ def running_footer_folio(words, page_bbox):
     left, top, right, bottom = bounds([(w, None) for w in words])
     width, height = page_bbox[2]-page_bbox[0], page_bbox[3]-page_bbox[1]
     if (top < page_bbox[1]+height*.9 or bottom-top > height*.035
-            or re.search(r'(?i)\b(?:shall|must|should|required|prohibited)\b', text)):
+            or re.search(r'(?i)\b(?:shall|must|should|required|prohibited)\b', text)
+            or contains_technical_footer_fact(text)):
         return None
     for at_start in (True, False):
         folio = words[0] if at_start else words[-1]

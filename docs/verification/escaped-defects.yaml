@@ -8,7 +8,16 @@ escaped_defects:
     failure_mechanism: "A page-filling one-column pdfplumber candidate captured most native page text and was published as a table despite having no caption or structured columns."
     red_green_pair_id: PAIR-PAGE-WINDOW-TABLE-WRAPPER
     regression_test_id: FULL_PAGE_SINGLE_COLUMN_CAPTURE_TEST
-    public_path_rerun_id: RUN-BASE-755-775-AND-RANDOM-8
+    public_path_rerun_id: RUN-BASE-WINDOW-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-FORUM-FOOTER-OVERFILTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A changed bottom-of-page technical line containing Forum and Clause text could be treated as publication footer and disappear from the comparison."
+    discovered_via: independent_review
+    failure_mechanism: "A broad bottom-position Forum/Clause marker granted footer deletion authority without a page folio or repeated footer geometry; page-local folio removal also accepted measurement-bearing text."
+    red_green_pair_id: PAIR-BOTTOM-FORUM-CLAUSE-TECHNICAL-LINE
+    regression_test_id: BOTTOM_FORUM_CLAUSE_TECHNICAL_LINE_RETAINED_TEST
+    public_path_rerun_id: RUN-FOOTER-REAL
     state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS

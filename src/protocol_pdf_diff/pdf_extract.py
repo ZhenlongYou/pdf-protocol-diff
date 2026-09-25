@@ -24,7 +24,11 @@ from collections.abc import Iterable
 from pathlib import Path
 from statistics import median
 
-from .source_regions import running_footer_words, running_footer_folio
+from .source_regions import (
+    contains_technical_footer_fact,
+    running_footer_words,
+    running_footer_folio,
+)
 from .formula_visuals import extract_formula_visuals
 from .layout_blocks import (
     build_pdfplumber_text_blocks,
@@ -2509,6 +2513,10 @@ def _document_publication_footer_evidence(
     page_identity_line_re = re.compile(
         r"(?i)^(?P<title>.+?)\s*\|\s*(?:page\s*)?(?P<folio>\d+)$"
     )
+    repeated_clause_footer_lines = _stable_forum_clause_footer_word_ids(
+        pages,
+        words_by_page,
+    )
     for page_number, page in pages:
         width = float(getattr(page, "width", 0) or 0)
         height = float(getattr(page, "height", 0) or 0)
@@ -2632,11 +2640,9 @@ def _document_publication_footer_evidence(
             ):
                 selected[index] = (display_line_text(line_words), line_words)
             if (
-                top >= height * 0.88
-                and "forum" in folded
-                and re.search(r"\bclause\s+\d", folded)
-                and not re.search(r"\b(?:shall|must|should|required|prohibited)\b", folded)
-            ):
+                page_number,
+                frozenset(id(word) for word in line_words),
+            ) in repeated_clause_footer_lines:
                 selected[index] = (display_line_text(line_words), line_words)
 
         if not selected:
@@ -2652,6 +2658,115 @@ def _document_publication_footer_evidence(
         )
         evidence[page_number] = (boxes, texts)
     return evidence
+
+
+def _stable_forum_clause_footer_word_ids(
+    pages: list[tuple[int, object]],
+    words_by_page: dict[int, list[dict[str, object]]],
+) -> set[tuple[int, frozenset[int]]]:
+    """Authorize a Forum/Clause footer only from repeated folio-backed lines.
+
+    A bottom position and a publication name alone are not enough: real technical
+    statements can contain both. Require an isolated printed folio matching the
+    physical page, a stable footer baseline/left edge, and the same caption on at
+    least two consecutive pages. The folio may sit beside the caption at an outer
+    edge even when ordinary word spacing is insufficient for page-local proof.
+    Value-bearing or normative lines fail open.
+    """
+
+    candidates: dict[
+        str,
+        list[tuple[int, float, float, float, frozenset[int]]],
+    ] = {}
+    for page_number, page in pages:
+        width = float(getattr(page, "width", 0) or 0)
+        height = float(getattr(page, "height", 0) or 0)
+        if width <= 0 or height <= 0:
+            continue
+        bottom_words = [
+            word
+            for word in words_by_page.get(page_number, ())
+            if float(word.get("top", -1)) >= height * 0.88
+        ]
+        for top, bottom, raw_text, line_words in _word_line_records(bottom_words):
+            text = normalize_line(raw_text)
+            folded = text.casefold()
+            if (
+                bottom - top > height * 0.035
+                or "forum" not in folded
+                or re.search(r"\bclause\s+\d", folded) is None
+                or re.search(r"\b(?:shall|must|should|required|prohibited)\b", folded)
+                or contains_technical_footer_fact(folded)
+            ):
+                continue
+            left = min(float(word["x0"]) for word in line_words)
+            right = max(float(word["x1"]) for word in line_words)
+            if right - left < width * 0.35:
+                continue
+            source_words = [
+                (
+                    str(word.get("text", "")),
+                    float(word["x0"]),
+                    float(word["top"]),
+                    float(word["x1"]),
+                    float(word["bottom"]),
+                )
+                for word in sorted(line_words, key=lambda item: float(item["x0"]))
+            ]
+            folio = running_footer_folio(source_words, page_bounds(page))
+            if folio is None:
+                edge_folios = [
+                    word
+                    for word in (source_words[0], source_words[-1])
+                    if word[0].isdecimal()
+                    and (
+                        float(word[1]) <= width * 0.15
+                        or float(word[3]) >= width * 0.85
+                    )
+                    and int(word[0]) == page_number
+                ]
+                folio = edge_folios[0] if len(edge_folios) == 1 else None
+            if folio is None or not folio[0].isdecimal():
+                continue
+            try:
+                if int(folio[0]) != page_number:
+                    continue
+            except ValueError:
+                continue
+            title_words = [word[0] for word in source_words if word != folio]
+            title = normalize_line(" ".join(title_words))
+            if len(title) < 24:
+                continue
+            title_positions = [word for word in source_words if word != folio]
+            # Footer text can reverse its left/right components on odd/even pages.
+            # Compare the full word inventory while keeping repeated terms.
+            identity = " ".join(sorted(re.findall(r"\w+", title.casefold())))
+            candidates.setdefault(identity, []).append(
+                (
+                    page_number,
+                    top / height,
+                    min(float(word[1]) for word in title_positions),
+                    max(float(word[3]) for word in title_positions),
+                    frozenset(id(word) for word in line_words),
+                )
+            )
+
+    proven: set[tuple[int, frozenset[int]]] = set()
+    for records in candidates.values():
+        by_page = {record[0]: record for record in records}
+        for start_page in sorted(by_page):
+            window = [by_page.get(start_page + offset) for offset in range(2)]
+            if any(record is None for record in window):
+                continue
+            complete = [record for record in window if record is not None]
+            if (
+                max(record[1] for record in complete) - min(record[1] for record in complete) > 0.006
+                or max(record[2] for record in complete) - min(record[2] for record in complete) > 12.0
+                or max(record[3] for record in complete) - min(record[3] for record in complete) > 24.0
+            ):
+                continue
+            proven.update((record[0], record[4]) for record in complete)
+    return proven
 
 
 def _footer_source_texts(page, words, *, omit_proven_folio=False):

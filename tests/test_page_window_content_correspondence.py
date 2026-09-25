@@ -401,6 +401,90 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         self.assertIn("Revision 6.0", body_only_result.pages[0].text)
         self.assertFalse(body_only_result.pages[0].running_footer_texts)
 
+    def test_forum_clause_footer_filter_preserves_bottom_technical_limit(self) -> None:
+        """A bottom Forum/Clause sentence with a changed voltage stays comparable."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            paths = (root / "old.pdf", root / "new.pdf")
+            for path, value in zip(paths, ("4.2 V", "4.8 V"), strict=True):
+                document = fitz.open()
+                page = document.new_page(width=612, height=792)
+                page.insert_text((54, 120), "11 Receiver Input Limits", fontsize=12)
+                page.insert_text((54, 150), "The receiver input voltage is measured at point R.", fontsize=10)
+                page.insert_text(
+                    (72, 725),
+                    f"Optical Internetworking Forum Clause 11: Maximum receiver input is {value}",
+                    fontsize=8,
+                )
+                # A separated edge number resembles a footer folio. It must not
+                # grant deletion authority to a line that contains a technical value.
+                page.insert_text((540, 725), "1", fontsize=8)
+                document.save(path)
+                document.close()
+
+            extracted = [extract_pdf_text(path, 1, 1) for path in paths]
+            options = DiffOptions(
+                old_start_page=1,
+                old_end_page=1,
+                new_start_page=1,
+                new_end_page=1,
+            )
+            result = run_diff(paths[0], paths[1], options)
+            reports = write_reports(result, root / "reports", options)
+            payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+
+        for item, value in zip(extracted, ("4.2 V", "4.8 V"), strict=True):
+            self.assertIn(value, item.pages[0].text)
+        reader_changes = json.dumps(payload["content_changes"], ensure_ascii=False)
+        self.assertIn("4.2 V", reader_changes)
+        self.assertIn("4.8 V", reader_changes)
+        self.assertTrue(
+            any(change["change_type"] == "modified" for change in payload["content_changes"])
+        )
+
+    def test_repeated_forum_clause_footer_requires_stable_folio_backing(self) -> None:
+        """Two consecutive folio-backed Forum/Clause captions prove a footer."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "oif-footer.pdf"
+            document = fitz.open()
+            for page_number in range(1, 3):
+                page = document.new_page(width=612, height=792)
+                page.insert_text((54, 120), f"11.3 Requirement {page_number}", fontsize=12)
+                page.insert_text((54, 150), "The receiver shall preserve the declared limit.", fontsize=10)
+                if page_number % 2:
+                    page.insert_text(
+                        (80, 725),
+                        "Optical Internetworking Forum - Clause 11: CEI-25G-LR Interface",
+                        fontsize=8,
+                    )
+                    page.insert_text((540, 725), str(page_number), fontsize=8)
+                else:
+                    page.insert_text((72, 725), str(page_number), fontsize=8)
+                    page.insert_text(
+                        (91.5, 725),
+                        "Optical Internetworking Forum - Clause 11: CEI-25G-LR Interface",
+                        fontsize=8,
+                    )
+            document.save(path)
+            document.close()
+            result = extract_pdf_text(path, 1, 2)
+
+        self.assertTrue(
+            all(
+                "Optical Internetworking Forum" not in page.text
+                for page in result.pages
+            )
+        )
+        self.assertTrue(
+            all(
+                any("Optical Internetworking Forum" in footer for footer in page.running_footer_texts)
+                for page in result.pages
+            )
+        )
+
     def test_explicit_bottom_draft_sharing_notice_is_metadata_not_body(self) -> None:
         """Only the distinctive bottom-margin OIF draft notice is split from body text."""
 
