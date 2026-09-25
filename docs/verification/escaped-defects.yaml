@@ -1,6 +1,15 @@
 schema_version: 1
-scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
+scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; page-window content fidelity; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
+  - id: DEF-PAGE-WINDOW-TABLE-WRAPPER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "PCIe Base 6.4/6.5 short-window reports showed ordinary page prose as deleted and added tables, so the compared content was misleading."
+    discovered_via: user_counterexample
+    failure_mechanism: "A page-filling one-column pdfplumber candidate captured most native page text and was published as a table despite having no caption or structured columns."
+    red_green_pair_id: PAIR-PAGE-WINDOW-TABLE-WRAPPER
+    regression_test_id: FULL_PAGE_SINGLE_COLUMN_CAPTURE_TEST
+    public_path_rerun_id: RUN-BASE-755-775-AND-RANDOM-8
+    state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"

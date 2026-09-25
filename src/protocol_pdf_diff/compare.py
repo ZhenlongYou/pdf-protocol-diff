@@ -1960,6 +1960,31 @@ def compare_sections(
                 )
             )
 
+    if source_extractions is not None:
+        old_start = source_extractions[0].selected_start_page or 1
+        new_start = source_extractions[1].selected_start_page or 1
+        if old_start > 1 or new_start > 1:
+            changes = [
+                replace(
+                    change,
+                    change_type="review",
+                    review_reason=(
+                        "页窗起点的前序文本缺少双侧章节/段落身份对应；"
+                        "保留原文供核对，不确认新增或删除。"
+                    ),
+                )
+                if (
+                    change.change_type in {"added", "deleted", "modified"}
+                    and any(
+                        section is not None
+                        and section.location == "范围起始页前序内容"
+                        for section in (change.old_section, change.new_section)
+                    )
+                )
+                else change
+                for change in changes
+            ]  # 窗口起点切断的段落不能仅凭所选页窗证明对侧整份文档不存在。
+
     report_progress("compare_text", len(matches), len(matches), unit="章节对")
     return sorted(changes, key=_change_sort_key)
 

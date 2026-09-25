@@ -172,6 +172,49 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertEqual([], payload['content_table_changes'])
         # 2026-09-09 用户要求：同文表格只保留 JSON 质量取证，不占内容差异卡或 CSV。
 
+    def test_whitespace_only_cell_reflow_is_review_not_a_confirmed_table_edit(self) -> None:
+        """Lost PDF spaces can alter a cell's tokenization without changing its source meaning."""
+
+        old_table = TableVisual(
+            page_number=261,
+            table_number=1,
+            title="Table 11-12. Receiver Electrical Input Specifications",
+            bbox=(76.7, 219.0, 543.8, 424.0),
+            image_data_uri="",
+            row_texts=[
+                "表格行: T1 | Symbol=R_SCC11 | Value=-6 dB | Condition=Below 10 GHz"
+            ],
+            grid_summary="structured rows",
+        )
+        new_table = TableVisual(
+            **{
+                **old_table.__dict__,
+                "page_number": 265,
+                "row_texts": [
+                    "表格行: T1 | Symbol=R_SCC11 | Value=-6 dB | Condition=Below10GHz"
+                ],
+            }
+        )
+        result = DiffResult(
+            old_pdf=Path("old.pdf"),
+            new_pdf=Path("new.pdf"),
+            old_sections=[],
+            new_sections=[],
+            changes=[],
+            warnings=[],
+            old_table_visuals=[old_table],
+            new_table_visuals=[new_table],
+        )
+
+        changes = reporting._build_table_changes(result)
+
+        self.assertEqual(1, len(changes))
+        self.assertEqual("review", changes[0].change_type)
+        self.assertTrue(changes[0].row_changes)
+        self.assertTrue(
+            all(row.change_type == "需人工复核" for row in changes[0].row_changes)
+        )
+
     def test_identical_snapshot_window_has_no_table_review_cards(self) -> None:
         """Identical source bytes cannot contain a semantic table difference."""
 

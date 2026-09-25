@@ -22709,8 +22709,9 @@ class ProtocolDiffTests(unittest.TestCase):
             outputs = write_reports(result, Path(temp_dir), DiffOptions())
             report_md = outputs["markdown"].read_text(encoding="utf-8")
 
-        self.assertIn("新增: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertIn("需复核: 新选择范围第 20 页的章节前内容", report_md)
         self.assertIn("新位置: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertNotIn("新增: 新选择范围第 20 页的章节前内容", report_md)
         self.assertNotIn("范围起始页前序内容", report_md)
 
     def test_invalid_explicit_paths_do_not_fall_back_to_demo(self) -> None:

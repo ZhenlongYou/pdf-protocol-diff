@@ -93,6 +93,58 @@ def _version_with_running_footer(name: str, revision: str) -> ExtractionResult:
 
 
 class CoordinatePageFurnitureTests(unittest.TestCase):
+    def test_full_page_single_column_capture_stays_in_prose_not_table_cards(self) -> None:
+        """A page-sized one-cell detector result must not replace the source prose."""
+
+        body = (
+            "The receiver shall preserve ordering for every posted request. "
+            "The device must complete interrupt messages without waiting for the CPU. "
+        ) * 18
+        page = mock.Mock()
+        page.width = 612.0
+        page.height = 792.0
+        page.bbox = (0.0, 0.0, 612.0, 792.0)
+        page.chars = []
+        page.lines = []
+        page.rects = []
+        page.images = []
+        page.extract_text.return_value = body
+        page.crop.return_value.extract_text.return_value = body
+        table = mock.Mock()
+        table.bbox = (6.0, 7.0, 608.0, 792.0)
+        table.rows = []
+        table.extract.return_value = [[body]]
+        page.find_tables.return_value = [table]
+
+        with (
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._assess_page_reading_order",
+                return_value=(False, None, False, len(body)),
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._extract_scan_page_text_with_evidence",
+                return_value=(body, [], False, False, None),
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._page_may_contain_table",
+                return_value=True,
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._table_title_above_bbox",
+                return_value="",
+            ),
+        ):
+            extracted, warnings, visuals, *_rest = _extract_pdfplumber_page_text(
+                page,
+                "full-page-text.pdf",
+                755,
+                coordinate_evidence=([], [], None),
+            )
+
+        self.assertEqual(" ".join(body.split()), extracted)
+        self.assertEqual([], visuals)
+        self.assertIn("发现整页单列候选", "\n".join(warnings))
+
     def test_revision_table_with_nine_rectangles_passes_narrow_table_gate(self) -> None:
         """A lightly ruled revision record is found without lowering the global gate."""
 
