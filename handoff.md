@@ -2,14 +2,14 @@
 
 ## 当前任务：不同 PDF 风格下的短页窗稳定性（2026-09-26）
 
-- 目标：用本机 OIF/PCIe 真实短页窗查找跨版式、跨生成器误报，并保护识别出的真实内容变化。task_id `pdf-random-window-fidelity-20260925`，owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；当前已提交行为基线 `0936c6b8ba5144e8e8f6d2c628cc695869be6612`，其后新增的符号/单位修复与两项测试尚待提交。main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久项目分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动；候选未集成。
-- 已修 OIF CEI 4.0→5.1 两页灰色行号栏混入正文、CEM Implementation Note 误作表格、嵌套标题框重复计数，以及三项独立代码审查发现：独立表短值被页内相似单元格吞掉、嵌套表字段/值顺序不一致仍被去重、弱运行页眉被误称“同章节”。修复使用表自身源文字和页内坐标证明、保留行/字段/值顺序、并只让强上下文标“同章节”。审查者随后又证明数值 token 丢失 `+/-` 与单位符号，故新增 `+10 µV`/`−10 V` 和嵌套 `+1.25 µV`/`−1.25 V` 两条回归，并改用保留符号、小数和单位 glyph 的 token 化；最终 RED/GREEN 需在最新源码上重跑。
+- 目标：用本机 OIF/PCIe 真实短页窗查找跨版式、跨生成器误报，并保护识别出的真实内容变化。task_id `pdf-random-window-fidelity-20260925`，owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；最新行为提交 `6dce141e218fc078e27b11ee49852d1be4f017f4`，工作树目前无行为代码未提交项。main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久项目分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动；候选未集成。
+- 已修 OIF CEI 4.0→5.1 两页灰色行号栏混入正文、CEM Implementation Note 误作表格、R5.1 嵌套标题框重复计数，以及四项审查发现：独立表短值被页内相似单元格吞掉、嵌套表字段/值次序不一致仍被去重、弱运行页眉被误称“同章节”、符号/单位/小数分隔符被归一为相同值。过滤要求同表源文字与框内坐标块双证据；嵌套表保留字段和值的次序、正负号、精度及单位 glyph；弱上下文只产出待复核标签。
 - 最新源代码完整套件 `1395` 项通过、1 项条件跳过，日志 `work/page-window-gate/results/full-final-signed-semantic-20260926.log`；用户 CEI 5.1/05.3 随机切片语料 `24/24`、0 跳过，结果 `work/page-window-gate/results/cei-slices-final-signed-semantic-20260926.json`。八项定向正负测试也通过，覆盖独立同页短值、框内短片段、符号/单位、字段和值重排、弱上下文、自动列标题碎片及小数分隔符。
-- 严格 v2 回执 `work/page-window-gate/receipt-final19.json` 为 `BLOCKED`：U+F020 私用填充变异未被原 OIF 整体报告测试杀死，说明探针绑定不足。回执不覆盖；门禁计划已将该变异改绑到专门的两页行号网格单元测试，并新增符号/单位、小数分隔符负变异和 RED/GREEN 对。由于代码和测试仍有未提交修订，尚未对最新 OID 重建 manifest；最终回执使用新文件名 `receipt-final20.json`。
-- 对提交 `6069351` 生成的三份 CEM/OIF CLI 报告，视觉复核通过；审阅者确认复核标签和未核对页边界清楚，但未逐格读数。它们不包含 `0936c6b` 后的弱上下文/来源证明和后续符号修复，不能当最终产物；最终提交后须重新生成报告并重新审阅。
+- 严格 v2 回执 `work/page-window-gate/receipt-final20.json` 为 `EXECUTED_EVIDENCE_PASS / verified_scope_only`：65 个源绑定运行完成、八行全 PASS，包括完整回归、24 窗 CEI corpus、三份真实 CLI、独立来源 oracle，以及跨表/弱上下文/正负号/单位/小数分隔符/U+F020 的 RED/GREEN 变异。较早 `receipt-final19.json` 因 PUA 变异绑定过宽而 `BLOCKED`，保留不覆盖。
+- 最新 `6dce141e` 的三份 CLI 报告均通过合同并由隔离 Chromium 以 1280×720 实际复核：CEM 1.1→R4 SHA `cde0794f6090a08866cde02b72a61cdecbbe3e920b54e14244851ea96e73b619`；CEM R4→R5.1 SHA `d5059b7658545015c8a11f6c70e54fba390ec7e4dc99a5c34c914801c53f3008`；OIF CEI 4.0→5.1 SHA `bfe43c5fae92f9e42f3b4392cd54d4ac4b89e3882f0f7f2f0cdd94294fcc8cac`。三份都保持“需人工复核”；CEM 1.1→R4 的 25→75 正文变化仍无可靠定位，OIF 两组页对未完成像素比较，报告没有把“未检出差异”写成确认相同。截图位于 `work/page-window-gate/results/report-visual-review-final20-20260926/`。
+- 独立代码审查通过并对行为提交 `6dce141e218fc078e27b11ee49852d1be4f017f4` attestation；记录位于 `.git/codex-coordination-v1/reviews/pdf-random-window-fidelity-20260925/01a0da45-6983-70a1-9e02-4f477d205bf8--6dce141e218fc078e27b11ee49852d1be4f017f4.json`。
 - OIF 既有跨 OIF/PCIe `10/10`、跨样式 `7/7`、MR/LR/Linear 新页窗 `3/3` 都是以前的切片记录，不代表整本或任意 PDF 准确率。对 canonical `6abf4f7` 的离线统计覆盖 29 个切片、185 个章节配对：没有观测到页序逆转，但 19 个配对的同层最佳与次佳原始分差小于 0.10（13 个小于 0.05）；来源为 `work/page-window-gate/results/canonical-6ab-pairing-stats-20260926.json`。它没有逐节人工真值，不能据此定阈值。主章节求解仍是全局贪心、置信度未进入结论。
-- 对提交 `0936c6b` 生成的三份 CEM/OIF CLI 报告已通过场景合同，但未视觉审阅；之后的符号/单位改动会改变表格候选投影，必须在最新提交上重生成并复核 HTML。独立代码 reviewer 尚未对最新修订 OID 通过 attestation。
-- 下一步：提交符号/单位修复和小数反例；在该 OID 上重跑三个公开 CLI 报告、重新审阅视觉结果并执行严格 v2 门禁，再由独立 reviewer 对精确代码 OID 复核。门禁通过前保持候选未集成，不宣称全工具稳定。单调章节求解、配对置信清单/报告投影、整本文档错配自检仍未解决。用户 PDF 和切片保留在 ignored 语料，不提交。
+- 下一步：按 RinysProject 集成流程核对分支关系和集成占用，再决定是否安全更新 canonical `main` 与持久项目分支。即使此候选完成集成，单调章节求解、配对置信清单/报告投影、整体错配自检及整本跨 PDF 家族准确率仍未解决。用户 PDF 和切片保留在 ignored 语料，不提交。
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
 
