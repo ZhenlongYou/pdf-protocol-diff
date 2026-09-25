@@ -450,6 +450,74 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                     any(change["change_type"] == "modified" for change in payload["content_changes"])
                 )
 
+    def test_forum_clause_url_footer_cluster_preserves_technical_values(self) -> None:
+        """A nearby publication URL must not authorize removing a technical value."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cases = (
+                (
+                    "value_on_marker_line",
+                    lambda page, value: (
+                        page.insert_text(
+                            (72, 725),
+                            f"Optical Internetworking Forum - Clause 11: Maximum receiver input is {value}",
+                            fontsize=8,
+                        ),
+                        page.insert_text((72, 742), "www.oiforum.com", fontsize=8),
+                    ),
+                ),
+                (
+                    "value_inside_footer_cluster",
+                    lambda page, value: (
+                        page.insert_text(
+                            (72, 705),
+                            "Optical Internetworking Forum - Clause 11: CEI-25G-LR Interface",
+                            fontsize=8,
+                        ),
+                        page.insert_text(
+                            (72, 720),
+                            f"Maximum receiver input is {value}",
+                            fontsize=8,
+                        ),
+                        page.insert_text((72, 735), "www.oiforum.com", fontsize=8),
+                    ),
+                ),
+            )
+            for case_name, draw_footer in cases:
+                case_root = root / case_name
+                case_root.mkdir()
+                paths = (case_root / "old.pdf", case_root / "new.pdf")
+                values = ("4.2 V", "4.8 V")
+                for path, value in zip(paths, values, strict=True):
+                    document = fitz.open()
+                    page = document.new_page(width=612, height=792)
+                    page.insert_text((54, 120), "11 Technical Values", fontsize=12)
+                    page.insert_text((54, 150), "The stated value is checked at the receiver.", fontsize=10)
+                    draw_footer(page, value)
+                    document.save(path)
+                    document.close()
+
+                extracted = [extract_pdf_text(path, 1, 1) for path in paths]
+                options = DiffOptions(
+                    old_start_page=1,
+                    old_end_page=1,
+                    new_start_page=1,
+                    new_end_page=1,
+                )
+                result = run_diff(paths[0], paths[1], options)
+                reports = write_reports(result, case_root / "reports", options)
+                payload = json.loads(reports["json"].read_text(encoding="utf-8"))
+                reader_changes = json.dumps(payload["content_changes"], ensure_ascii=False)
+
+                self.assertIn(values[0], extracted[0].pages[0].text)
+                self.assertIn(values[1], extracted[1].pages[0].text)
+                self.assertIn(values[0], reader_changes)
+                self.assertIn(values[1], reader_changes)
+                self.assertTrue(
+                    any(change["change_type"] == "modified" for change in payload["content_changes"])
+                )
+
     def test_repeated_forum_clause_footer_requires_stable_folio_backing(self) -> None:
         """Two consecutive folio-backed Forum/Clause captions prove a footer."""
 

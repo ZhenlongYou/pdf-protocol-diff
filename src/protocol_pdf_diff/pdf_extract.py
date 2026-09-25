@@ -2181,9 +2181,13 @@ def _proven_running_footer_boxes(
         )
         for word in line_words
     }
+    generic_boxes = tuple(
+        _tight_word_bbox(word, width=width, height=height)
+        for word in bottom_words
+        if id(word) in generic_words
+    )
     if not marker_lines or not clustered_url_lines:
-        return tuple(_tight_word_bbox(word, width=width, height=height)
-                     for word in bottom_words if id(word) in generic_words)
+        return generic_boxes
 
     proof_lines = [*marker_lines, *clustered_url_lines]
     footer_start = min(line[0] for line in proof_lines)
@@ -2199,6 +2203,17 @@ def _proven_running_footer_boxes(
             break
         footer_cluster.append(line)
         previous_bottom = bottom
+
+    # A nearby URL and publication marker prove footer placement, but they do
+    # not grant removal authority over a technical value elsewhere in the same
+    # tightly packed cluster. Leave the whole cluster intact when it contains
+    # a value-bearing or normative line.
+    cluster_has_technical_fact = any(
+        contains_technical_footer_fact(text)
+        for _top, _bottom, text, _line_words in footer_cluster
+    )
+    if cluster_has_technical_fact:
+        return generic_boxes
 
     selected_word_ids = {
         id(word)
@@ -2786,6 +2801,8 @@ def _looks_like_running_footer_marker(line_text: str) -> bool:
     """Recognize a short legal/status/title line that can anchor a footer cluster."""
 
     candidate = normalize_line(line_text).casefold()
+    if contains_technical_footer_fact(candidate):
+        return False
     if re.match(r"^(?:copyright\b|©)", candidate):
         return True
     if "draft" in candidate and any(

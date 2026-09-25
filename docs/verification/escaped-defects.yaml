@@ -19,6 +19,15 @@ escaped_defects:
     regression_test_id: BOTTOM_FORUM_CLAUSE_TECHNICAL_LINE_RETAINED_TEST
     public_path_rerun_id: RUN-FOOTER-REAL
     state: verified
+  - id: DEF-PAGE-WINDOW-URL-FOOTER-CLUSTER-OVERFILTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A bottom technical value close to a Forum/Clause footer marker and URL could still disappear from a short-window comparison."
+    discovered_via: independent_review
+    failure_mechanism: "Page-local footer clustering selected tightly spaced marker-to-URL lines without checking for technical values elsewhere in the cluster."
+    red_green_pair_id: PAIR-URL-FOOTER-CLUSTER-TECHNICAL-VALUE
+    regression_test_id: FORUM_CLAUSE_URL_CLUSTER_VALUE_PRESERVED_TEST
+    public_path_rerun_id: RUN-FOOTER-REAL
+    state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
     user_symptom: "曲线图 Frequency (GHz) 横轴碎片被当作跨页续表，报告错误删除行。"
