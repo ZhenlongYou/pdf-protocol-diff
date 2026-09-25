@@ -1,14 +1,15 @@
 # PDF Protocol Diff Handoff
 
-## 当前任务：跨版式短页窗内容忠实度（2026-09-25）
+## 当前任务：随机短页窗内容保真与 OIF CEI 语料（2026-09-25）
 
-- task_id `pdf-random-window-fidelity-20260925`；owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925` 当前 HEAD `7b531c1a94ebf5cb66abaa0ea14b3bf3b250eb81`；解析修复提交 `f6959949193ff6975a912b4cde8a2b7d480123b5`，新增本机语料入口测试为 `7b531c1`。起点 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`；canonical `project/pdf-protocol-diff` 未更新。
-- 本轮将 OIF CEI 5.1/05.3 的同一对用户 PDF（SHA-256 分别为 `3bc6c387…e2bd5` 和 `1fa2417c…3e2f72`）加入忽略追踪的本机 manifest：`corpus/local/manifest-random-oif-cei-slices-20260925.json`。固定种子下 9 个三页窗，加上 105↔109 单页 Figure 压力窗，共 `10/10 PASS, 0 skip`；所有结果都保持 `degraded`，这只覆盖清单里的页窗。
-- 修复单页灰色行号栏漏滤：单页需要近完整的连续数字网格、空白编号基线，以及至少 8 个基线上的灰色行号/深色正文反差；普通黑色编号列表保留。修复法律版权/草案页脚的 `is/are` 误触发：只豁免明确的法律草案句式，技术单位、阈值或规范性词语仍阻止删栏。修复无题图内一行网格伪表：只有候选位于闭合的大型矢量图框、前有 Figure 图题、且没有近邻 Table 图题或技术表格字段时才归入图形。
-- 真实 `main.py` 页窗报告：CEI p105↔p109 为 `degraded`、读者正文/表格确认变化均为 0，Figure 2-21 两侧原图仍保留；HTML 在 `/Users/mac/Documents/ProtocolPdfDiffReports/random_slices_20260925/oif_cei_single_figure_window_f695994/protocol_diff_20260925_203904/protocol_diff_report.html`。OIF 235.12↔.13 p13 仍报告 `+/-50 ppm` 波特率公差变化，版权/网址未混入读者差异；HTML 在 `/Users/mac/Documents/ProtocolPdfDiffReports/random_slices_20260925/oif235_page13_footer_f695994/protocol_diff_20260925_203902/protocol_diff_report.html`。两份 provenance 均绑定代码提交 `f695994…`，状态保持 `degraded`。
-- 本机独立 PyMuPDF 源页字词清单核对 CEI p105↔p109：Figure 图题相同，图框内 15 词与图外正文 103 词的多重集在两侧相同；这只核验选中的两个页面。受影响模块上一轮 `78/78 PASS`；把该 OIF 测试改为从项目本地语料目录读取后，单项真实页窗测试 `1/1 PASS`。
-- 新增缺陷记录见 `docs/verification/escaped-defects.yaml`。严格 v2 计划已生成并通过 schema-only 检查；完整测试与执行型收据尚待运行。旧 OID 的 `receipt-final12.json` 不适用于本轮源码。计划按真实 Base 35 页、OIF 10 窗口、OIF 235 p13、独立源页 oracle、RED/GREEN 变异与完整项目套件执行。
-- 集成仍受仓库预检阻塞：canonical `project/pdf-protocol-diff` 超前候选基线 45 个提交，存在 `pdf_extract.py` / `reporting.py` 冲突；两个未登记分支和三个 `prunable` worktree 记录仍需其 owner 或仓库库存流程处理。未移动 canonical refs；不得清理他人状态。完成候选门禁后再由原 owner 重试集成与 `source_regions.py` scope 扩展。
+- task_id `pdf-random-window-fidelity-20260925`；owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；本轮代码与测试提交 `0c146260f3a9b5ece01ec9d59d28944d08ef3f1e`，基线 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`。canonical `main` 未动，`project/pdf-protocol-diff` 当前为 `6abf4f7fd80af1415404579517b264bd448e3a05`，本轮未合入。
+- 用户给的 OIF CEI 5.1/05.3 PDF 与本机门禁副本 SHA-256 一致：`3bc6c38731ac20f9bf8c6a2c7e9c4baccbab34dc3d43ad645ee18bb2cf2e1bd5`、`1fa2417c96f06bc8115bcc79b7d2f7a160e35b8cc5bbebe7051fd446833e2f72`。忽略追踪本机测试清单 `corpus/local/manifest-random-oif-cei-slices-20260925.json` 共 24 窗：23 个三页窗和 p105↔p109 单页 Figure 窗。固定 seed `20260925` 新增 14 个窗口，覆盖旧版 p54–56 到 p604–606；新旧页窗以 PyMuPDF 源页词袋相似度确认，所选新页为 p58–60 到 p608–610。最终结果 `24/24 PASS, 0 skip`；所有状态均为 `degraded`，结论仅覆盖这些切片，不代表整本准确度。
+- 两项独立审查发现已修复并登记：签名法律页脚簇现在把 `shall/must/should/may/required/prohibited` 和中文规范词作为保留正文的证据；图形归属只用明确描边未填充矩形或由直线边缘重建的闭框，开放曲线的大 bbox 不再能单独隐藏网格。RED/GREEN 负控、合成 PDF `main.py` CLI 和受影响测试均覆盖这两项。无题单行技术表现在可进入报告；但合成差异中仍被列为旧表删除/新表新增，表格身份没有足够证据配对，需人工判断。
+- 受影响模块命令 `python -m unittest tests.test_coordinate_page_furniture tests.test_page_window_content_correspondence`：`80/80 PASS`。真实 CEI p105↔p109 Figure、OIF 235.12/13 p13 `+/-50 ppm`、合成签名页脚 `shall→may` 和开放曲线下 `35→40 ps` 网格均经项目入口检查；独立 Figure 源页 oracle 也通过。
+- STRICT v2 schema 检查通过；`work/page-window-gate/receipt-final15.json` 因旧 full-page 变异文件导致首个 RED 用例退出 2，保留为 BLOCKED。刷新变异后，`receipt-final16.json` 的 RED/GREEN、Base 35 页真实入口、24 窗 OIF 语料、Figure 源页 oracle、OIF 235 p13 和两项新真实 CLI probe 均退出 0；门禁最终因完整套件 `RUN-FULL-SUITE` 退出 1 而 BLOCKED。全套 `1375` 项、`4` 个断言失败、`1` 条件跳过、`0` 错误。四项来自 OIF 058 页 18 的一个旧原始片段断言，以及 OIF 532 页 11/9 的 HTML/Markdown/TXT 三个 `JH4u/EOJ03` 可见文本断言。基线 `f3d349fcb28d1a4258a071c40c5e017e03ecf415` 上单独复跑这两个真实 PDF 测试也得到相同四个断言失败。PDF SHA-256：058.11 `23dc1d5209f4e5494f72e8d1eca4bf13eb31b8ec1c05bd23809df9fc62b613a7`、058.13 `2660420d77fea471a86a2de624e43785d43cebfdaba795d7041e84163b490263`、532.04 `03ad58e1b338fb7df59158f2a09676837f4202547680b17429ecc6de9b449a78`、532.05 `e0932c29d9a15052018e4e08fad7cc86b6fa08cb8dffd1c578abfaa41e04a7fb`。不要把 receipt-final16 描述为 PASS，也不要为追求绿灯跳过这些测试。
+- 最新严格收据和 24 窗摘要：`work/page-window-gate/receipt-final16.json`、`work/page-window-gate/results/oif-cei-24-final-summary.json`。24 窗 manifest 与用户 PDF 保存在本机 ignored 语料；不要将用户 PDF 提交。
+- 集成状态仍是候选未合入：canonical `main` 为基线 `5f89bfb…`，持久项目分支为 `6abf4f7…`。当前有其他任务分支/worktree；未 acquire 集成占用，未移动他人 refs。因完整套件失败，当前应由原 owner 通过 `parallel release --result blocked` 保存候选，待 OIF 058/532 测试契约有明确解决依据后再重试门禁与集成。
+- 下一步：先按源 PDF 与报告契约复核 OIF 058/532 的基线断言，确定是过时测试期望还是缺失的读者证据；之后重跑完整套件和新 STRICT v2 receipt，再按 orchestrator 检查集成库存。不要覆盖 final15/final16 收据，不要把 `corpus/local` 用户输入提交。
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
 
