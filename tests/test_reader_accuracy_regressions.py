@@ -2499,6 +2499,35 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             ),
         )
 
+    def test_cell_soft_line_breaks_are_not_table_row_changes(self) -> None:
+        """单元格内软换行只改变排版，不构成已确认的表格行修改。"""
+
+        old_row = (
+            "表格行: T1 | Characteristic=Reference Clock Single Side Band Phase Noise | "
+            "Symbol=Ref_PN | Condition=\uf0b310MHz offset | MIN= | NOM= | MAX=-143 | UNIT=dBc/Hz"
+        )
+        # 表行序列化用字面量 ``\n`` 表示单元格内换行。
+        new_row = old_row.replace("Condition=\uf0b310MHz", "Condition=\uf0b3\\n10MHz")
+
+        self.assertEqual("需人工复核", _table_structured_diff_kind(old_row, new_row))
+        self.assertEqual(
+            "需人工复核",
+            _table_structured_diff_kind(
+                "表格行: T1 | Column 1=TXDATA[n..0]P/N | Column 2=Output of SERDES Component | "
+                "Column 3=The Transmit Data (TXDATA[n]) signals are the outputs of the SERDES component.",
+                "表格行: T1 | Column 1=TXDATA[n..0]P/N | Column 2=Output of SERDES Component | "
+                "Column 3=The Transmit Data (TXDATA[n]) signals are the\\noutputs of the SERDES component.",
+            ),
+        )
+        # 数字串被空白拼合/拆分时仍不得当作软换行归并。
+        self.assertEqual(
+            "需人工复核",
+            _table_structured_diff_kind(
+                "表格行: T1 | Parameter=Length | Value=4 0 | Units=UI",
+                "表格行: T1 | Parameter=Length | Value=40 | Units=UI",
+            ),
+        )
+
     def test_geometry_proven_repeated_x_lanes_restore_one_merged_column(self) -> None:
         """Repeated categorical/numeric lanes recover a detector-missed boundary."""
 

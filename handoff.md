@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 单元格软换行假修改修复（2026-09-27）
+
+- 做了什么：整本 OIF CEI 5.1→05.3 仍有 5 张表（Table 1-2、1-9、18-6、19-6、23-11）因“单元格内软换行/空白丢失”被误报为已确认修改（如 `⨯10MHz` vs `⨯\n10MHz`、`the outputs of` vs `the\noutputs of`）。根因是表行序列化用字面量 `\n` 表示换行，既不在空白归一范围、也不在连字符族折叠范围。新增 `_table_rows_differ_only_by_whitespace_layout`：去掉空白与字面量换行后逐字符相同且数字串一致时降级为“需人工复核”，保持既有“纯空白重排→复核”契约（不直接判无变化）；数字被空白拼合/拆分仍按数字间距复核。新增回归；OIF 语料 24/24、全套 1847 项通过。
+- 当前状态：任务分支 `opencode/pdf-table-wrap-fix-20260927` 已提交（含本交接），待合并推送；合并后用最终代码重跑 OIF 整本复验（目标 0 占位、0 张 modified 表）；PCIe Base 6.4/6.5 整本（旧代码）仍在后台运行。
+- 下一步：合并 `main` 与 `project/pdf-protocol-diff` 并推送；OIF 最终整本三件套复验；Base 完成后分析并按需用最终代码重跑。
+
 ## OpenCode 连字符族空占位假修改修复（2026-09-27）
 
 - 做了什么：整本 OIF CEI 5.1→05.3 报告把 12 张 QPRBS/参考时钟表（Table 17-5、18-6、19-6、21-5、23-11、24-8/9、25-21、26-7/8、27-7/8）误报为“已确认修改”，历史整本为 0 张 modified 表。根因是表内空占位横线的 `‐`(U+2010) 与 ASCII `-` 字形差异：`_normalize_table_row_math_text` 未归一 U+2010/U+2011/U+2012，且折叠连字符串的字符类漏掉该族。现已归一，并把该族纳入“不和字母数字相连的连字符串折叠”。REF 行 `‐‐` vs `--` 判“无变化”，真实 Index 7→8 仍判修改；新增 `test_unicode_hyphen_placeholders_are_not_table_row_changes`；全套 1846 项通过。

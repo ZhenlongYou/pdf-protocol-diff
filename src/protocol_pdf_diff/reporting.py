@@ -9648,6 +9648,25 @@ def _labeled_table_row_value_display(
     return " | ".join(parts)
 
 
+def _table_rows_differ_only_by_whitespace_layout(old_row: str, new_row: str) -> bool:
+    """Return True when only whitespace/line-break layout differs.
+
+    去掉全部空白后逐字符相同、且两侧数字串完全一致时，视为单元格内软换行
+    差异（例如 ``⨯10MHz`` 与 ``⨯\\n10MHz``）。按既有契约这只降级为
+    “需人工复核”，不能直接当作无变化。数字串必须完全一致，避免把
+    ``4 0`` 与 ``40`` 的抽取空格当成换行归并。
+    """
+
+    if not old_row or not new_row:
+        return False
+    # 表格行序列化用字面量 ``\n``/``\r`` 表示单元格内换行；它们和真实空白一样
+    # 只是排版，不得作为内容差异参与比较。
+    layout_pattern = r"\\n|\\r|\s+"
+    if re.sub(layout_pattern, "", old_row) != re.sub(layout_pattern, "", new_row):
+        return False
+    return re.findall(r"\d+", old_row) == re.findall(r"\d+", new_row)
+
+
 def _table_structured_diff_kind(old_row: str, new_row: str) -> str:
     """Classify one table summary row with a short review label."""
 
@@ -9655,6 +9674,12 @@ def _table_structured_diff_kind(old_row: str, new_row: str) -> str:
         return "无变化"
     if old_row and new_row and _table_rows_equal_across_observed_schema(old_row, new_row):
         return "无变化"
+    if (
+        old_row
+        and new_row
+        and _table_rows_differ_only_by_whitespace_layout(old_row, new_row)
+    ):
+        return "需人工复核"  # 单元格内软换行/空格丢失只降级复核，不确认内容修改。
     if _table_rows_differ_only_by_unproven_reader_glyph_mapping(old_row, new_row):
         return "需人工复核"
     if _table_rows_differ_only_by_one_sided_blank_unit(old_row, new_row):
