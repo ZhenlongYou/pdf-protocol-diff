@@ -25,6 +25,12 @@
 - 修正代码提交为 `1e5fa6f57a9107459d5f1bc75a57414190c2de01`，父提交 `28ebdb7a9b69597c739f98e0e330f75610619da4`。目前修正只在候选分支，未合入 `main`/`project`，未推送。严格 v2 门禁没有在修正后重跑；上面的旧回执仍为阻塞，不能用定向测试代替完整 receipt。
 - 最新用户要求先停止内容验证；后续不再运行完整产品测试、变异测试或门禁，也不把修正标为已验证。保存并释放 task 时保留候选 worktree 与修正源码，状态为 blocked/resumable。
 
+## OpenCode 接手验证（2026-09-26 晚，轻量流程）
+
+- **做了什么**：接手候选 `03b988b`（含修复 `1e5fa6f`）。验证结果：① 定向测试 `tests.test_page_window_content_correspondence` 44 项全过；② RED 检查手工复现——`MUT-SINGLE-PAGE-GRAY-GRID-DISABLED` 替换源码后探针 exit=1（符合预期），修正已解决旧回执的"预期 1 实际 0"；③ 全套 1831 项中 1 项失败（`test_real_532_jitter_table_uses_structured_rows_without_raw_fragment_leak`，`0.118 UI` 审计行），**基线 `28ebdb7` 同样失败，属预存在问题，与本修复无关**。
+- **当前状态**：候选已快进合入本地 `main` 与 `project/pdf-protocol-diff`；未推送；完整 v2 receipt 未重跑（轻量模式默认不需要；旧 BLOCKED 回执是修正前的历史记录）。
+- **下一步**：用户确认后推送 `main` + `project/pdf-protocol-diff`；或由 Codex 接手做正式交付判断（若未来走重型，再补完整 receipt）。
+
 
 ## 当前任务：报告 HTML 最大化自适应（2026-09-18）
 
