@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 整本页组空截图占位修复（2026-09-27）
+
+- 做了什么：整本 OIF CEI 5.1→05.3 报告出现 70 处“截图暂不可用”空框（历史整本与页窗验收均为 0）。根因：页组按卡片页范围渲染全部物理页，但只有拿到坐标视觉证据的页才有原页截图；无证据页被渲染成空框。`_render_page_source_pair` 现在只渲染确实有截图候选的页，整侧无候选时整侧不渲染；文字明细与 JSON 审计不变。新增 `test_page_evidence_group_omits_pages_without_source_screenshots`；小窗口实测 1.2 Overview / 2.C.4.6 占位从 2/2 归零；全套 1845 项通过。
+- 当前状态：任务分支 `opencode/pdf-screenshot-placeholder-fix-20260927` 已提交（含本交接），待合并推送；整本 OIF 用旧显示跑出的报告仍在分析（内容层 181 正文/37 表格，修复后需重跑确认 0 占位）；PCIe Base 6.4/6.5 整本正在后台跑。
+- 下一步：合并 `main` 与 `project/pdf-protocol-diff` 并推送；重跑 OIF 整本复验 0 占位并做源页真值抽样；Base 整本完成（或按需重跑）后同样复验。
+
 ## OpenCode 页窗门禁回归修复（2026-09-27）
 
 - 做了什么：在 `opencode/pdf-figure-reflow-fix-20260927`（基于 `32133bc`）修复页窗门禁复核发现的真实回归与门禁材料问题——图内相邻标签被抽成 `Zero line`/`Signal line` 合并片段时不再成为已确认正文修改（新增 `figure_crop_owns_whole_tokens` 整词级保守回归，双侧 Figure 配对才生效，句子/跨图拼词拒绝）；表格分数横线 2/3 连字符归一（CEI 5.1/05.3 Table 7-4、9-7 的假差异，标识符/区间 `A--B`、`1--2` 不受影响）；PUA 公式墙不再因含字母被当作标量保留（261-receiver 公式假修改）；重造失效的两页灰色行号栏变异并新增图内重排变异，修复门禁探针报告名 glob 与全套探针导入路径；327 语料期望按源行证据更新（Table 16-1/16-2/16-4 仅空白/横线/乘号渲染差异，24/24 通过）。

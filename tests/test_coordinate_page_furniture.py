@@ -2470,6 +2470,38 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
         self.assertEqual(2, rendered.count("<img"))
         self.assertNotIn("跳转到已展示截图", rendered)
 
+    def test_page_evidence_group_omits_pages_without_source_screenshots(self) -> None:
+        """页范围内没有截图的页不再生成空框，只有有证据的页进入视觉区。"""
+
+        entries = [
+            (
+                (51, 0, "text"),
+                1,
+                1,
+                '<article id="text">text</article>',
+                (51, 55),
+                {
+                    "all": {"old": {51, 52}, "new": {55, 56}},
+                    "visible": {"old": {52}, "new": {56}},
+                },
+            )
+        ]
+        sources = {
+            ("old", 52): ("data:image/png;base64,old52", None, 2),
+            ("new", 56): ("data:image/png;base64,new56", None, 2),
+        }
+        rendered = reporting_module._render_page_evidence_groups(
+            entries,
+            page_source_candidates=sources,
+            force_shared_source=True,
+        )
+        self.assertNotIn("截图暂不可用", rendered)
+        self.assertEqual(2, rendered.count("<img"))
+        self.assertIn('src="data:image/png;base64,old52"', rendered)
+        self.assertIn('src="data:image/png;base64,new56"', rendered)
+        self.assertNotIn("page-source-51", rendered)
+        self.assertNotIn("page-source-55", rendered)
+
     def test_cross_page_cards_share_sources_without_reintroducing_a_page(self) -> None:
         """Cards spanning later pages merge before fallback screenshots are added."""
 

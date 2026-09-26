@@ -15943,15 +15943,17 @@ def _render_page_source_pair(
     def side_html(side: str, pages: list[int], label: str) -> str:
         if not pages:
             return ""
+        # 只有确实拿到原页截图的物理页进入视觉对比区。页范围里没有截图证据的
+        # 页仍保留在上方文字明细与 JSON 审计中；不再生成“截图暂不可用”空框，
+        # 与历史整本报告（0 占位）的读者层契约保持一致。
+        rendered_pages = [
+            page for page in pages if (side, page) in page_source_candidates
+        ]
+        if not rendered_pages:
+            return ""
         figures: list[str] = []
-        for page in pages:
-            candidate = page_source_candidates.get((side, page))
-            if candidate is None:
-                figures.append(
-                    f'<div class="page-source-empty">PDF 第 {_escape(str(page))} 页截图暂不可用</div>'
-                )
-                continue
-            uri, view_box, _priority = candidate
+        for page in rendered_pages:
+            uri, view_box, _priority = page_source_candidates[(side, page)]
             view_attr = (
                 f' data-source-view="{_escape(json.dumps(view_box))}"'
                 if view_box is not None
@@ -15971,6 +15973,8 @@ def _render_page_source_pair(
 
     old_side = side_html("old", old_pages, "旧版原页截图")
     new_side = side_html("new", new_pages, "新版原页截图")
+    if not old_side and not new_side:
+        return ""
     return f'<div class="page-evidence-source-grid">{old_side}{new_side}</div>'
 
 
