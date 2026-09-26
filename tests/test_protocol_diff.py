@@ -12625,6 +12625,90 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertEqual([], selected)
 
+    def test_late_rescue_crossing_is_explicitly_marked_for_review(self) -> None:
+        """A crossing first found by a later rescue cannot become confirmed add/delete."""
+
+        def section(section_id: str, number: str, title: str, table_token: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=(
+                    f"The {title} procedure shall remain stable across each supported revision.\n"
+                    + (f"{table_token} " * 100)
+                ),
+            )
+
+        old_sections = [
+            section("old-a", "1", "Alpha", "OLDALPHA"),
+            section("old-b", "2", "Beta", "OLDBETA"),
+        ]
+        new_sections = [
+            section("new-b", "3", "Beta", "NEWBETA"),
+            section("new-a", "4", "Alpha", "NEWALPHA"),
+        ]
+
+        def table_unit_keys(sections: list[Section]) -> set[str]:
+            return {
+                compare_module._review_unit_key(unit)
+                for section_item in sections
+                for unit in compare_module._paragraph_review_units(
+                    section_item.body,
+                    suppressed_table_unit_keys=set(),
+                )[1:]
+            }
+
+        old_table_keys = table_unit_keys(old_sections)
+        new_table_keys = table_unit_keys(new_sections)
+        consume_candidates = compare_module._consume_section_match_candidates
+        with mock.patch.object(
+            compare_module,
+            "_structural_identity_rescue_pairs",
+            return_value=[],
+        ), mock.patch.object(
+            compare_module,
+            "_document_relation_anchor_pairs",
+            return_value=[],
+        ), mock.patch.object(
+            compare_module,
+            "_consume_section_match_candidates",
+            wraps=consume_candidates,
+        ) as consume_spy:
+            changes = compare_module.compare_sections(
+                old_sections,
+                new_sections,
+                DiffOptions(),
+                suppressed_old_table_unit_keys=old_table_keys,
+                suppressed_new_table_unit_keys=new_table_keys,
+            )
+
+        self.assertTrue(
+            any(
+                {(candidate[1], candidate[2]) for candidate in call.args[0]}
+                == {(0, 1), (1, 0)}
+                and all(
+                    candidate[3] == "evidence_suppressed_similarity_fallback"
+                    for candidate in call.args[0]
+                )
+                for call in consume_spy.call_args_list
+            ),
+            "the fixture must reach the crossed late-fallback candidates",
+        )
+        self.assertEqual(4, len(changes))
+        self.assertTrue(all(change.change_type == "review" for change in changes))
+        self.assertTrue(
+            all(change.match_basis == "ambiguous_order_conflict" for change in changes)
+        )
+        self.assertTrue(
+            all("没有确认新增或删除" in change.review_reason for change in changes)
+        )
+
     def test_global_residual_pairing_respects_assignment_field_identity(self) -> None:
         """Shared values cannot cross-pair two moved explicit assignment fields."""
 

@@ -2551,6 +2551,32 @@ def _match_sections(
     order_conflict_old: set[int] = set()
     order_conflict_new: set[int] = set()
 
+    def consume_rescue_candidates(
+        candidates: list[tuple[float, int, int, str]],
+    ) -> None:
+        """Apply a rescue pass and retain any rejected crossing as review."""
+
+        _consume_section_match_candidates(
+            candidates,
+            old_sections,
+            new_sections,
+            matched_old,
+            matched_new,
+            matches,
+            minimum_similarity=options.min_section_match_similarity,
+            order_conflict_old=order_conflict_old,
+            order_conflict_new=order_conflict_new,
+        )
+        _append_order_conflict_reviews(
+            order_conflict_old,
+            order_conflict_new,
+            matched_old,
+            matched_new,
+            matches,
+        )
+        order_conflict_old.clear()
+        order_conflict_new.clear()
+
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
     for old_index, new_index, match_basis in _unique_section_content_move_pairs(
@@ -2721,29 +2747,10 @@ def _match_sections(
 
     report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
     report_progress("match_rescue", detail="核对章节对应关系")
-    _consume_section_match_candidates(
-        fallback_candidates,
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
-        order_conflict_old=order_conflict_old,
-        order_conflict_new=order_conflict_new,
-    )
-    _append_order_conflict_reviews(
-        order_conflict_old,
-        order_conflict_new,
-        matched_old,
-        matched_new,
-        matches,
-    )
-    order_conflict_old.clear()
-    order_conflict_new.clear()
+    consume_rescue_candidates(fallback_candidates)
 
     ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         [
             (
                 1.0 + _section_similarity(
@@ -2769,15 +2776,9 @@ def _match_sections(
                 options.min_section_match_similarity,
             )
         ],
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )  # 结构证据授权的配对也必须遵守已确定的文档顺序。
 
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         [
             (
                 1.0 + _section_similarity(
@@ -2797,27 +2798,15 @@ def _match_sections(
                 options.min_section_match_similarity,
             )
         ],
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )  # 编号后移只改变配对授权；报告继续显示实际全文分数。
 
     # 表格/Figure 剔除候选及错误父层级下的唯一同题强正文候选只能兜底：
     # 先让编号结构、兄弟偏移和父子边界使用更强证据，避免抢走可结构化解释的配对。
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         late_fallback_candidates,
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )
 
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         [
             (
                 1.0 + _section_similarity(
@@ -2836,12 +2825,6 @@ def _match_sections(
                 matched_new,
             )
         ],
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )
 
     explicit_two_sided_window = all(
@@ -2865,7 +2848,7 @@ def _match_sections(
             options.min_section_match_similarity,
         )
     )
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         [
             (
                 1.0 + _section_similarity(
@@ -2878,15 +2861,9 @@ def _match_sections(
             )
             for old_index, new_index in document_relation_pairs
         ],
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )  # 双侧唯一标题和高段落骨架覆盖可越过错误父层级；仍保留真实全文分数。
 
-    _consume_section_match_candidates(
+    consume_rescue_candidates(
         [
             (
                 1.0 + _section_similarity(
@@ -2906,12 +2883,6 @@ def _match_sections(
                 options,
             )
         ],
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
-        matches,
-        minimum_similarity=options.min_section_match_similarity,
     )  # 用户页窗锚点也不能与已有对应关系交叉。
 
     for new_index, _new_section in enumerate(new_sections):

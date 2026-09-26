@@ -235,3 +235,21 @@ escaped_defects:
     regression_test_id: READER_TEST::display
     public_path_rerun_id: RUN-READER-NATIVE-REPORT
     state: verified
+  - id: DEF-SECTION-ORDER-CONFLICT-20260926
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "在大量重复模板句的重排章节中，报告可能把同位置但主题不符的章节配对，并显示错误修改。"
+    discovered_via: synthetic_public_cli_reproduction
+    failure_mechanism: "按原始相似度总和做单调配对，会让多个较弱的同位置候选压过单个更强的双侧唯一候选；工具此前没有把互相交叉的双侧唯一最佳候选明确降为待核实。"
+    red_green_pair_id: PAIR-SECTION-ORDER-CONFLICT
+    regression_test_id: PRIMARY_SECTION_PAIRING_ORDER_TEST
+    public_path_rerun_id: RUN-MONOTONIC-CLI-REORDER
+    state: verified
+  - id: DEF-LATE-RESCUE-ORDER-CONFLICT-20260926
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "后置章节救援阶段遇到相互交叉的强候选时，可能把对应关系不确定的章节降成普通新增和删除。"
+    discovered_via: independent_code_review
+    failure_mechanism: "结构、偏移、表格剔除回退及文档锚点救援共用单调选择器，但原调用没有收集被过滤的交叉候选，末尾因此将端点标成普通未匹配。"
+    red_green_pair_id: PAIR-LATE-RESCUE-ORDER-CONFLICT
+    regression_test_id: LATE_RESCUE_ORDER_CONFLICT_TEST
+    public_path_rerun_id: RUN-MONOTONIC-CLI-REORDER
+    state: verified
