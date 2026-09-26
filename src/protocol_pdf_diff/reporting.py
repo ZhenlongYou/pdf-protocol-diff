@@ -89,6 +89,7 @@ _MATCH_BASIS_LABELS = {
     "unique_title_body_fallback": "双侧唯一同题且正文强相似配对",
     "structural_prose_identity": "剔除结构化表格行后正文一致",
     "structural_unique_anchor": "同父同层唯一的标题技术锚点+第二正文证据",
+    "unique_body_move_anchor": "双侧唯一正文身份锚点，识别已移动章节",
     "structural_adjacent_brackets": "前后相邻章节共同确认",
     "structural_shift_run_body": "普通兄弟章节证明一致编号偏移+多条独立正文证据",
     "structural_shift_bracketed_sentence": "前后普通兄弟夹定一致编号偏移+标题相关正文句",
@@ -103,6 +104,7 @@ _STRUCTURAL_MATCH_BASES = frozenset(
     {
         "structural_prose_identity",
         "structural_unique_anchor",
+        "unique_body_move_anchor",
         "structural_adjacent_brackets",
         "structural_shift_run_body",
         "structural_shift_bracketed_sentence",

@@ -2357,6 +2357,107 @@ def _moved_child_body_is_contained(
     return True
 
 
+def _unique_section_content_move_pairs(
+    old_sections: list[Section],
+    new_sections: list[Section],
+    matched_old: set[int],
+    matched_new: set[int],
+    minimum_similarity: float,
+) -> list[tuple[int, int, str]]:
+    """Recognize moved sections only from unique, exact substantive prose.
+
+    The primary matcher follows document order. This separate pass handles the
+    narrower case where a whole clause or repeated-number subdocument moved:
+    its normalized body must identify exactly one section on each side. For
+    repeated identity paths, title plus body must also be unique and the
+    occurrence ordinal must show that the section moved.
+    """
+
+    if minimum_similarity >= 1.0:
+        return []  # Keep the explicit 1.0 setting as whole-section equality.
+
+    def content_key(section: Section) -> tuple[str, str] | None:
+        if (
+            section.role != "technical"
+            or section.section_id in {"running-header-evidence", "running-footer-evidence"}
+            or not section.body.strip()
+        ):
+            return None
+        body_key = _review_unit_key(section.body)
+        if len(body_key) < _SECTION_SHIFT_PROSE_MIN_CHARS:
+            return None
+        return body_key, _review_unit_key(section.title)
+
+    old_keys = {index: content_key(section) for index, section in enumerate(old_sections)}
+    new_keys = {index: content_key(section) for index, section in enumerate(new_sections)}
+    old_by_body: dict[str, list[int]] = defaultdict(list)
+    new_by_body: dict[str, list[int]] = defaultdict(list)
+    old_by_title_body: dict[tuple[str, str], list[int]] = defaultdict(list)
+    new_by_title_body: dict[tuple[str, str], list[int]] = defaultdict(list)
+    old_by_identity: dict[str, list[int]] = defaultdict(list)
+    new_by_identity: dict[str, list[int]] = defaultdict(list)
+    for index, section in enumerate(old_sections):
+        old_by_identity[section.identity_key].append(index)
+        key = old_keys[index]
+        if key is not None:
+            body_key, title_key = key
+            old_by_body[body_key].append(index)
+            if title_key:
+                old_by_title_body[(title_key, body_key)].append(index)
+    for index, section in enumerate(new_sections):
+        new_by_identity[section.identity_key].append(index)
+        key = new_keys[index]
+        if key is not None:
+            body_key, title_key = key
+            new_by_body[body_key].append(index)
+            if title_key:
+                new_by_title_body[(title_key, body_key)].append(index)
+
+    candidates: list[tuple[int, int, str]] = []
+    for old_index, key in old_keys.items():
+        if key is None or old_index in matched_old:
+            continue
+        body_key, title_key = key
+        if len(old_by_body[body_key]) == 1 and len(new_by_body.get(body_key, ())) == 1:
+            new_index = new_by_body[body_key][0]
+        elif (
+            title_key
+            and len(old_by_title_body[(title_key, body_key)]) == 1
+            and len(new_by_title_body.get((title_key, body_key), ())) == 1
+        ):
+            new_index = new_by_title_body[(title_key, body_key)][0]
+        else:
+            continue  # Repeated boilerplate without a unique section title stays ambiguous.
+        if new_index in matched_new:
+            continue
+
+        old_section = old_sections[old_index]
+        new_section = new_sections[new_index]
+        identity_changed = old_section.identity_key != new_section.identity_key
+        old_identity_indexes = old_by_identity[old_section.identity_key]
+        new_identity_indexes = new_by_identity[new_section.identity_key]
+        old_ordinal = old_identity_indexes.index(old_index)
+        new_ordinal = new_identity_indexes.index(new_index)
+        if not identity_changed and old_ordinal == new_ordinal:
+            continue  # Leave ordinary same-slot identity matches to the primary solver.
+        candidates.append((old_index, new_index, "unique_body_move_anchor"))
+
+    old_degree = Counter(old_index for old_index, _new_index, _basis in candidates)
+    new_degree = Counter(new_index for _old_index, new_index, _basis in candidates)
+    unique_pairs = [
+        candidate
+        for candidate in candidates
+        if old_degree[candidate[0]] == 1 and new_degree[candidate[1]] == 1
+    ]
+    ordered_pairs = sorted(unique_pairs, key=lambda item: item[0])
+    if all(
+        left[1] < right[1]
+        for left, right in pairwise(ordered_pairs)
+    ):
+        return []  # Aligned exact bodies belong to the monotonic primary solver.
+    return unique_pairs
+
+
 def _section_with_descendant_body(parent: Section, child: Section) -> Section:
     """Append a structurally moved child's source body to its matched parent."""
 
@@ -2404,6 +2505,29 @@ def _match_sections(
     matched_new: set[int] = set()
     rejected_exact_pairs: set[tuple[int, int]] = set()
     matches: list[tuple[int | None, int | None, float, str]] = []
+
+    old_table_unit_keys = suppressed_old_table_unit_keys or set()
+    new_table_unit_keys = suppressed_new_table_unit_keys or set()
+    for old_index, new_index, match_basis in _unique_section_content_move_pairs(
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        options.min_section_match_similarity,
+    ):
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append(
+            (
+                old_index,
+                new_index,
+                _section_similarity(
+                    old_sections[old_index].comparable_text,
+                    new_sections[new_index].comparable_text,
+                ),
+                match_basis,
+            )
+        )
 
     exact_candidates: list[tuple[float, int, int, str]] = []
     exact_total = sum(len(old_indexes) * len(exact_new_by_key.get(key, []))
@@ -2454,8 +2578,6 @@ def _match_sections(
         matched_new.add(new_index)
         matches.append((old_index, new_index, similarity, match_basis))
 
-    old_table_unit_keys = suppressed_old_table_unit_keys or set()
-    new_table_unit_keys = suppressed_new_table_unit_keys or set()
     old_title_counts = Counter(
         _review_unit_key(section.title) for section in old_sections
     )
@@ -2735,10 +2857,17 @@ def _select_monotonic_section_candidates(
     earlier new-side endpoint, so the result is deterministic.
     """
 
-    anchors = sorted(
+    paired_sections = [
         (old_index, new_index)
         for old_index, new_index, _score, _basis in matches
         if old_index is not None and new_index is not None
+    ]
+    anchors = sorted(
+        (old_index, new_index)
+        for old_index, new_index, _score, basis in matches
+        if old_index is not None
+        and new_index is not None
+        and basis != "unique_body_move_anchor"
     )
     anchor_old = [old_index for old_index, _new_index in anchors]
     anchor_new = [new_index for _old_index, new_index in anchors]
@@ -2749,8 +2878,8 @@ def _select_monotonic_section_candidates(
     ):
         return []  # Existing anchors are inconsistent; do not add guesses on top.
 
-    matched_old = set(anchor_old)
-    matched_new = set(anchor_new)
+    matched_old = {old_index for old_index, _new_index in paired_sections}
+    matched_new = {new_index for _old_index, new_index in paired_sections}
     best_by_pair: dict[tuple[int, int], tuple[float, int, int, str]] = {}
     for score, old_index, new_index, match_basis in candidates:
         if (

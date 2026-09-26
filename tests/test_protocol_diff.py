@@ -12459,22 +12459,26 @@ class ProtocolDiffTests(unittest.TestCase):
             "The receiver calibration uses the alpha sampling reference and preserves "
             "the measured transfer response. "
         ) * 18
+        alpha_old_body = alpha_body + "The legacy calibration result remains available."
+        alpha_new_body = alpha_body + "The updated calibration result remains available."
         beta_body = (
             "The transmitter timing check uses the beta recovery marker and preserves "
             "the measured launch interval. "
         ) * 18
+        beta_old_body = beta_body + "The legacy timing result remains available."
+        beta_new_body = beta_body + "The updated timing result remains available."
         anchor_a = "A stable introductory clause anchors the comparison."
         anchor_b = "A stable closing clause anchors the comparison."
         old_sections = [
             section("old-a", "0", "Anchor A", anchor_a),
-            section("old-alpha", "1.1", "Alpha Calibration", alpha_body),
-            section("old-beta", "1.2", "Beta Timing", beta_body),
+            section("old-alpha", "1.1", "Alpha Calibration", alpha_old_body),
+            section("old-beta", "1.2", "Beta Timing", beta_old_body),
             section("old-b", "9", "Anchor B", anchor_b),
         ]
         new_sections = [
             section("new-a", "0", "Anchor A", anchor_a),
-            section("new-beta", "2.1", "Beta Timing", beta_body),
-            section("new-alpha", "2.2", "Alpha Calibration", alpha_body),
+            section("new-beta", "2.1", "Beta Timing", beta_new_body),
+            section("new-alpha", "2.2", "Alpha Calibration", alpha_new_body),
             section("new-b", "9", "Anchor B", anchor_b),
         ]
 
@@ -12502,6 +12506,50 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertEqual(1, sum(old is None for old, _new, _score, _basis in matches))
         self.assertEqual(1, sum(new is None for _old, new, _score, _basis in matches))
+
+    def test_unique_exact_body_anchor_preserves_an_actual_section_move(self) -> None:
+        """Exact unique prose can identify a moved section outside the monotonic lane."""
+
+        def section(section_id: str, number: str, title: str, body: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        body_a = (
+            "The receiver calibration shall preserve the declared sampling "
+            "reference and measured transfer response. "
+        ) * 8
+        body_b = (
+            "The transmitter timing shall preserve the declared recovery "
+            "marker and measured launch interval. "
+        ) * 8
+        old_sections = [
+            section("old-a", "1.1", "Receiver Calibration", body_a),
+            section("old-b", "1.2", "Transmitter Timing", body_b),
+        ]
+        new_sections = [
+            section("new-b", "3.1", "Transmitter Timing", body_b),
+            section("new-a", "3.2", "Receiver Calibration", body_a),
+        ]
+
+        matches = compare_module._match_sections(old_sections, new_sections, DiffOptions())
+        pairs = [
+            (old_index, new_index, basis)
+            for old_index, new_index, _score, basis in matches
+            if old_index is not None and new_index is not None
+        ]
+
+        self.assertEqual([(0, 1), (1, 0)], [(old, new) for old, new, _basis in pairs])
+        self.assertTrue(all(basis == "unique_body_move_anchor" for _old, _new, basis in pairs))
 
     def test_sparse_monotonic_solver_matches_independent_small_oracle(self) -> None:
         """A brute-force subset oracle checks the sparse maximum-weight path."""
