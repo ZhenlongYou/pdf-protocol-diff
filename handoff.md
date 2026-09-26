@@ -17,6 +17,14 @@
 2. 按 project → report-responsive（其历史含 long-doc）→ 当前修复的顺序更新 canonical `main` 和持久分支。
 3. 按用户要求不跑测试；最终状态不得标记为已验证，交付门禁状态如实记录。
 
+## 最新状态（2026-09-26，覆盖上方旧计划）
+
+- 本地 `main` 与 `project/pdf-protocol-diff` 都在 `28ebdb7a9b69597c739f98e0e330f75610619da4`；该候选已合入本地分支。失败集成回执仍是 `BLOCKED`：`/Users/mac/Documents/ProtocolPdfDiffReports/latest_branch_integration_20260926/test_effectiveness_v2_receipt.json`，`gate_id=pdf-section-order-conflict-20260926`，失败项为 `RUN-SINGLE-PAGE-GUTTER-RED` 预期退出 `1`、实际 `0`。回执 SHA-256 为 `35df1065c23cb0c9d863452946613bba49795124b90f5c5e342fc2bf86a2303e`。
+- 原 owner 已通过 `preserve_failed_integration.py` 保留失败任务并释放两份 integration lease。审计 ID `39db2d2698cf8456a1e07df44b94d624`；恢复时 `main`、候选分支与 worktree 均为 `28ebdb7`，没有移动 refs 或删除 worktree。之后按用户指令恢复原 task 继续处理。
+- 复现的代码原因在 `src/protocol_pdf_diff/pdf_extract.py` 的 `extract_pdf_text`：短页窗灰度/坐标证明拒绝行号 gutter 后，后续几何候选 fallback 又把它加回过滤框，绕过了 `_single_page_line_number_grid_has_gray_contrast`。在 `tests/test_page_window_content_correspondence.py` 的 `test_single_page_line_number_style_change_keeps_the_actual_value_delta` 中增加了黑色行号与正文同色的反例；旧代码因 `ambiguous_line_number_sides` 为空而失败。移除该二次授权路径后，同一条定向测试通过。
+- 修正代码提交为 `1e5fa6f57a9107459d5f1bc75a57414190c2de01`，父提交 `28ebdb7a9b69597c739f98e0e330f75610619da4`。目前修正只在候选分支，未合入 `main`/`project`，未推送。严格 v2 门禁没有在修正后重跑；上面的旧回执仍为阻塞，不能用定向测试代替完整 receipt。
+- 最新用户要求先停止内容验证；后续不再运行完整产品测试、变异测试或门禁，也不把修正标为已验证。保存并释放 task 时保留候选 worktree 与修正源码，状态为 blocked/resumable。
+
 
 ## 当前任务：报告 HTML 最大化自适应（2026-09-18）
 
