@@ -2472,6 +2472,33 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             ),
         )
 
+    def test_unicode_hyphen_placeholders_are_not_table_row_changes(self) -> None:
+        """U+2010 族空占位与 ASCII 横线等价，QPRBS/参考时钟表不因此报已确认修改。"""
+
+        old_row = (
+            "表格行: T1 | Label=REF | Description=Reference ↵ for symbol ↵ index | "
+            "Gray Coded PAM4 Symbols=3333333 | Index of First Symbol=1 | "
+            "Index Transition Begins=\u2010\u2010 | Index Transition Ends=\u2010\u2010 | "
+            "Index of Last Symbol=7 | Threshold Level=\u2010\u2010"
+        )
+        new_row = old_row.replace("\u2010", "-")
+
+        self.assertEqual("无变化", _table_structured_diff_kind(old_row, new_row))
+        self.assertNotEqual(
+            "无变化",
+            _table_structured_diff_kind(
+                old_row,
+                new_row.replace("Index of Last Symbol=7", "Index of Last Symbol=8"),
+            ),
+        )
+        self.assertEqual(
+            "无变化",
+            _table_structured_diff_kind(
+                "表格行: T1 | Threshold Level=\u20101/",
+                "表格行: T1 | Threshold Level=-1/",
+            ),
+        )
+
     def test_geometry_proven_repeated_x_lanes_restore_one_merged_column(self) -> None:
         """Repeated categorical/numeric lanes recover a detector-missed boundary."""
 

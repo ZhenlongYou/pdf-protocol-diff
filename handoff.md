@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 连字符族空占位假修改修复（2026-09-27）
+
+- 做了什么：整本 OIF CEI 5.1→05.3 报告把 12 张 QPRBS/参考时钟表（Table 17-5、18-6、19-6、21-5、23-11、24-8/9、25-21、26-7/8、27-7/8）误报为“已确认修改”，历史整本为 0 张 modified 表。根因是表内空占位横线的 `‐`(U+2010) 与 ASCII `-` 字形差异：`_normalize_table_row_math_text` 未归一 U+2010/U+2011/U+2012，且折叠连字符串的字符类漏掉该族。现已归一，并把该族纳入“不和字母数字相连的连字符串折叠”。REF 行 `‐‐` vs `--` 判“无变化”，真实 Index 7→8 仍判修改；新增 `test_unicode_hyphen_placeholders_are_not_table_row_changes`；全套 1846 项通过。
+- 当前状态：任务分支 `opencode/pdf-hyphen-family-fix-20260927` 已提交（含本交接），待合并推送；整本 OIF 最终复跑将在合并后启动（同时验证 0 占位与 12 表不再误报）；PCIe Base 6.4/6.5 整本仍在后台跑。
+- 下一步：合并 `main` 与 `project/pdf-protocol-diff` 并推送；最终 OIF 整本复验（0 占位、表格假阳性消失、源页真值抽样）；Base 完成后同样复验，必要时用最终代码重跑。
+
 ## OpenCode 整本页组空截图占位修复（2026-09-27）
 
 - 做了什么：整本 OIF CEI 5.1→05.3 报告出现 70 处“截图暂不可用”空框（历史整本与页窗验收均为 0）。根因：页组按卡片页范围渲染全部物理页，但只有拿到坐标视觉证据的页才有原页截图；无证据页被渲染成空框。`_render_page_source_pair` 现在只渲染确实有截图候选的页，整侧无候选时整侧不渲染；文字明细与 JSON 审计不变。新增 `test_page_evidence_group_omits_pages_without_source_screenshots`；小窗口实测 1.2 Overview / 2.C.4.6 占位从 2/2 归零；全套 1845 项通过。

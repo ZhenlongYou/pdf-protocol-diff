@@ -10405,11 +10405,11 @@ def _table_row_single_line_text_key(value: str, *, field_label: str = "") -> str
         compact_source,
         field_label=field_label,
     )
-    # 分数横线或空占位在抽取时可能是 2~3 个连字符（前面还常紧贴 ×/· 等符号）；
-    # 不和字母数字相连的连字符串在比较键里只保留一个，避免横线长度被当成
-    # 参数变化（显示值仍保留原文；A--B、1--2 这类标识符/区间不受影响）。
+    # 分数横线或空占位在抽取时可能是 2~3 个连字符（还可能是 U+2010 族变体、
+    # 前面紧贴 ×/· 等符号）；不和字母数字相连的连字符串在比较键里只保留一个，
+    # 避免横线长度/字形被当成参数变化（显示值仍保留原文；A--B、1--2 不受影响）。
     compact_source = re.sub(
-        r"(?<![0-9A-Za-z])[-–—−]{2,}(?![0-9A-Za-z])",
+        r"(?<![0-9A-Za-z])[-\u2010\u2011\u2012\u2013\u2014\u2212]{2,}(?![0-9A-Za-z])",
         "-",
         compact_source,
     )
@@ -10724,7 +10724,13 @@ def _normalize_table_row_math_text(value: str) -> str:
         return f"\ue000{len(hexadecimal_literals) - 1}\ue001"
 
     normalized = _HEX_LITERAL_RE.sub(protect_hexadecimal, value)
-    normalized = normalized.replace("−", "-").replace("–", "-").replace("—", " - ")  # 数学负号和破折号统一。
+    normalized = (
+        normalized.replace("−", "-").replace("–", "-").replace("—", " - ")
+        # U+2010/U+2011/U+2012 是连字符族变体；不同 PDF（或同一表两版）会把
+        # 空占位横线渲染成 ‐/‑/‒ 或 ASCII '-'，必须归一后比较，
+        # 否则 QPRBS/参考时钟表的空占位会被误报成已确认修改。
+        .replace("\u2010", "-").replace("\u2011", "-").replace("\u2012", "-")
+    )  # 数学负号和破折号统一。
     normalized = re.sub(r"(?i)\b(note|test|section|table|figure)\s*(\d)", r"\1 \2", normalized)  # Note2/Note 2 等价。
     normalized = re.sub(
         r"(?i)(?<![\w.])([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*"
