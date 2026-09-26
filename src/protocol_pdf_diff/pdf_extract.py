@@ -301,17 +301,7 @@ def _extract_pdf_text_with_pdfplumber(
                 for index, evidence in coordinate_evidence.items()
             },
         )  # 只有跨页完整重置网格与空白编号基线共同成立时，才从比较面剔除窄边列。
-        if selected_page_count < _DOCUMENT_LINE_NUMBER_MIN_PAGES:
-            for index, page in selected_pages:
-                if gutter_boxes_by_page.get(index):
-                    continue
-                local_evidence = _page_printed_line_number_grid_evidence(
-                    page,
-                    words=coordinate_evidence[index][0],
-                    minimum_orphan_baselines=1,
-                )
-                if len(local_evidence) == 1:
-                    gutter_boxes_by_page[index] = local_evidence[0][0]
+        # 短页窗的灰度对比和坐标检查由上面的证明函数统一完成；几何候选不能在拒绝后重新授权删除。
         # A short page-window cannot establish a repeated header, but an explicit
         # publication masthead with a revision/version token is still page furniture.
         header_evidence_by_page = _document_running_header_evidence(

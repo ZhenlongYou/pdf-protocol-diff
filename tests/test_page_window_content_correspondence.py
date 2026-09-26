@@ -1270,7 +1270,13 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
             paths = (root / "left-gutter.pdf", root / "right-gutter.pdf")
             blank_rows = {2, 7, 12, 17, 22, 27, 32, 37, 42, 47}
 
-            def write_numbered_page(path: Path, side: str, value: str) -> None:
+            def write_numbered_page(
+                path: Path,
+                side: str,
+                value: str,
+                *,
+                line_number_color: tuple[float, float, float] = (0.6, 0.6, 0.6),
+            ) -> None:
                 document = fitz.open()
                 page = document.new_page(width=612, height=792)
                 for line_number in range(1, 50):
@@ -1284,7 +1290,7 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                         (x, baseline),
                         number_text,
                         fontsize=8,
-                        color=(0.6, 0.6, 0.6),
+                        color=line_number_color,
                     )
                     if line_number in blank_rows:
                         continue
@@ -1327,6 +1333,21 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         self.assertIn("4.2 V", reader_changes)
         self.assertIn("4.8 V", reader_changes)
         self.assertEqual(["modified"], [change["change_type"] for change in payload["changes"]])
+
+        with tempfile.TemporaryDirectory() as dark_temp_dir:
+            dark_path = Path(dark_temp_dir) / "dark-left-gutter.pdf"
+            write_numbered_page(
+                dark_path,
+                "left",
+                "4.2 V",
+                line_number_color=(0.0, 0.0, 0.0),
+            )
+            dark_extract = extract_pdf_text(dark_path, 1, 1)
+            self.assertIn(
+                "left",
+                dark_extract.pages[0].ambiguous_line_number_sides,
+                "a dark numeric column without gray-vs-body contrast must remain unproven",
+            )
 
     def test_single_page_copyright_footer_style_change_is_not_technical_content(self) -> None:
         """A publisher URL/legal notice swap at page bottom stays metadata."""
