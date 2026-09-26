@@ -10,13 +10,15 @@ section context, but final sign-off should still inspect the source PDFs.
 from __future__ import annotations
 
 import difflib
-from math import isfinite
-from types import MappingProxyType
 import re
+from bisect import bisect_left
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
+from math import isfinite
 from pathlib import Path
+from types import MappingProxyType
 
 from .catalog_evidence import catalog_identity_similarity
 from .comparison_session import comparison_session, memoize_comparison
@@ -42,7 +44,13 @@ from .pdf_extract import (
     _looks_like_pure_numeric_table_entry,
     extract_pdf_text,
 )
-from .progress import ProgressEvent, ProgressObserver, notify_progress, progress_session, report_progress
+from .progress import (
+    ProgressEvent,
+    ProgressObserver,
+    notify_progress,
+    progress_session,
+    report_progress,
+)
 from .prose_source_visuals import build_prose_source_visuals
 from .quality import (
     PairAssessment,
@@ -2378,12 +2386,11 @@ def _match_sections(
     suppressed_old_table_unit_keys: set[str] | None = None,
     suppressed_new_table_unit_keys: set[str] | None = None,
 ) -> list[tuple[int | None, int | None, float, str]]:
-    """Pair old/new sections using exact keys first, then global best scores.
+    """Pair sections in document order, then use evidence-backed rescue paths.
 
-    The second pass builds all viable fallback candidates and assigns the
-    strongest pairs first. That is more conservative than matching each new
-    section greedily in document order, especially when protocols contain many
-    repeated boilerplate clauses.
+    Exact identity and fallback candidates are solved as one-to-one monotonic
+    assignments. Every later rescue is constrained by pairs already fixed, so
+    a moved or repeated clause cannot create a crossing match.
     """
 
     exact_old_by_key: dict[str, list[int]] = {}
@@ -2398,7 +2405,7 @@ def _match_sections(
     rejected_exact_pairs: set[tuple[int, int]] = set()
     matches: list[tuple[int | None, int | None, float, str]] = []
 
-    exact_candidates: list[tuple[float, int, int]] = []
+    exact_candidates: list[tuple[float, int, int, str]] = []
     exact_total = sum(len(old_indexes) * len(exact_new_by_key.get(key, []))
                       for key, old_indexes in exact_old_by_key.items())
     exact_completed = 0
@@ -2433,20 +2440,19 @@ def _match_sections(
                     body_similarity,
                 )
                 if similarity >= options.min_section_match_similarity:
-                    exact_candidates.append((similarity, old_index, new_index))
+                    exact_candidates.append(
+                        (similarity, old_index, new_index, "similarity_exact")
+                    )
                 # 相同编号并不保证是同一条款：插入新条款会占用旧编号并整体后移。
                 # 即使标题未变，也必须由实际可比文本达到用户阈值；证据不足时保守显示新增/删除。
 
     report_progress("match_exact", exact_completed, exact_total, unit="候选对")
-    for similarity, old_index, new_index in sorted(
-        exact_candidates,
-        key=lambda item: (-item[0], abs(item[1] - item[2]), item[2], item[1]),
+    for similarity, old_index, new_index, match_basis in (
+        _select_monotonic_section_candidates(exact_candidates, matches)
     ):
-        if old_index in matched_old or new_index in matched_new:
-            continue
         matched_old.add(old_index)
         matched_new.add(new_index)
-        matches.append((old_index, new_index, similarity, "similarity_exact"))
+        matches.append((old_index, new_index, similarity, match_basis))
 
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
@@ -2542,55 +2548,65 @@ def _match_sections(
     )
 
     ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
-    for old_index, new_index, match_basis in _structural_identity_rescue_pairs(
-        old_sections,
-        new_sections,
-        exact_old_by_key,
-        exact_new_by_key,
-        matched_old,
-        matched_new,
-        {
-            (old_index, new_index)
-            for old_index, new_index, _similarity_value, _match_basis in matches
-            if old_index is not None and new_index is not None
-        },
-        options.min_section_match_similarity,
-    ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
+    _consume_section_match_candidates(
+        [
             (
-                old_index,
-                new_index,
-                _section_similarity(
+                1.0 + _section_similarity(
                     old_sections[old_index].comparable_text,
                     new_sections[new_index].comparable_text,
                 ),
+                old_index,
+                new_index,
                 match_basis,
             )
-        )  # 保留实际全文分数；结构证据只授权配对，不伪造高相似度。
+            for old_index, new_index, match_basis in _structural_identity_rescue_pairs(
+                old_sections,
+                new_sections,
+                exact_old_by_key,
+                exact_new_by_key,
+                matched_old,
+                matched_new,
+                {
+                    (old_index, new_index)
+                    for old_index, new_index, _similarity_value, _match_basis in matches
+                    if old_index is not None and new_index is not None
+                },
+                options.min_section_match_similarity,
+            )
+        ],
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )  # 结构证据授权的配对也必须遵守已确定的文档顺序。
 
-    for old_index, new_index, match_basis in _shifted_section_rescue_pairs(
-        old_sections,
-        new_sections,
-        ordinary_matches,
-        matched_old,
-        matched_new,
-        options.min_section_match_similarity,
-    ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
+    _consume_section_match_candidates(
+        [
             (
-                old_index,
-                new_index,
-                _section_similarity(
+                1.0 + _section_similarity(
                     old_sections[old_index].comparable_text,
                     new_sections[new_index].comparable_text,
                 ),
+                old_index,
+                new_index,
                 match_basis,
             )
-        )  # 编号后移只改变配对授权；报告继续显示实际全文相似度。
+            for old_index, new_index, match_basis in _shifted_section_rescue_pairs(
+                old_sections,
+                new_sections,
+                ordinary_matches,
+                matched_old,
+                matched_new,
+                options.min_section_match_similarity,
+            )
+        ],
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )  # 编号后移只改变配对授权；报告继续显示实际全文分数。
 
     # 表格/Figure 剔除候选及错误父层级下的唯一同题强正文候选只能兜底：
     # 先让编号结构、兄弟偏移和父子边界使用更强证据，避免抢走可结构化解释的配对。
@@ -2603,26 +2619,31 @@ def _match_sections(
         matches,
     )
 
-    for old_index, new_index in _mapped_parent_unique_child_rescue_pairs(
-        old_sections,
-        new_sections,
-        matches,
-        matched_old,
-        matched_new,
-    ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
+    _consume_section_match_candidates(
+        [
             (
-                old_index,
-                new_index,
-                _section_similarity(
+                1.0 + _section_similarity(
                     old_sections[old_index].comparable_text,
                     new_sections[new_index].comparable_text,
                 ),
+                old_index,
+                new_index,
                 "structural_mapped_parent_unique_child",
             )
-        )
+            for old_index, new_index in _mapped_parent_unique_child_rescue_pairs(
+                old_sections,
+                new_sections,
+                matches,
+                matched_old,
+                matched_new,
+            )
+        ],
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )
 
     explicit_two_sided_window = all(
         value is not None
@@ -2645,42 +2666,52 @@ def _match_sections(
             options.min_section_match_similarity,
         )
     )
-    for old_index, new_index in document_relation_pairs:
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
+    _consume_section_match_candidates(
+        [
             (
-                old_index,
-                new_index,
-                _section_similarity(
+                1.0 + _section_similarity(
                     old_sections[old_index].comparable_text,
                     new_sections[new_index].comparable_text,
                 ),
+                old_index,
+                new_index,
                 "document_relation_anchor",
             )
-        )  # 双侧唯一标题和高段落骨架覆盖可越过错误父层级；仍保留真实全文分数。
-
-    for old_index, new_index in _user_page_window_anchor_pairs(
+            for old_index, new_index in document_relation_pairs
+        ],
         old_sections,
         new_sections,
-        matches,
         matched_old,
         matched_new,
-        options,
-    ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
+        matches,
+    )  # 双侧唯一标题和高段落骨架覆盖可越过错误父层级；仍保留真实全文分数。
+
+    _consume_section_match_candidates(
+        [
             (
-                old_index,
-                new_index,
-                _section_similarity(
+                1.0 + _section_similarity(
                     old_sections[old_index].comparable_text,
                     new_sections[new_index].comparable_text,
                 ),
+                old_index,
+                new_index,
                 "user_page_window_anchor",
             )
-        )  # 用户同时限定两侧页窗时，授权最相关的剩余正文进入比较，但不伪造相似度。
+            for old_index, new_index in _user_page_window_anchor_pairs(
+                old_sections,
+                new_sections,
+                matches,
+                matched_old,
+                matched_new,
+                options,
+            )
+        ],
+        old_sections,
+        new_sections,
+        matched_old,
+        matched_new,
+        matches,
+    )  # 用户页窗锚点也不能与已有对应关系交叉。
 
     for new_index, _new_section in enumerate(new_sections):
         if new_index not in matched_new:
@@ -2692,6 +2723,131 @@ def _match_sections(
     return matches
 
 
+def _select_monotonic_section_candidates(
+    candidates: list[tuple[float, int, int, str]],
+    matches: list[tuple[int | None, int | None, float, str]],
+) -> list[tuple[float, int, int, str]]:
+    """Select the highest-scoring noncrossing subset without a dense N×M table.
+
+    Existing matches divide the page order into fixed intervals. Candidates
+    that cross those anchors are rejected, then a sparse weighted increasing
+    subsequence selects one-to-one pairs. Ties prefer more pairs and then the
+    earlier new-side endpoint, so the result is deterministic.
+    """
+
+    anchors = sorted(
+        (old_index, new_index)
+        for old_index, new_index, _score, _basis in matches
+        if old_index is not None and new_index is not None
+    )
+    anchor_old = [old_index for old_index, _new_index in anchors]
+    anchor_new = [new_index for _old_index, new_index in anchors]
+    if (
+        len(set(anchor_old)) != len(anchor_old)
+        or len(set(anchor_new)) != len(anchor_new)
+        or any(left >= right for left, right in pairwise(anchor_new))
+    ):
+        return []  # Existing anchors are inconsistent; do not add guesses on top.
+
+    matched_old = set(anchor_old)
+    matched_new = set(anchor_new)
+    best_by_pair: dict[tuple[int, int], tuple[float, int, int, str]] = {}
+    for score, old_index, new_index, match_basis in candidates:
+        if (
+            not isfinite(score)
+            or score <= 0.0
+            or old_index in matched_old
+            or new_index in matched_new
+        ):
+            continue
+        if bisect_left(anchor_old, old_index) != bisect_left(anchor_new, new_index):
+            continue  # Candidate lies on opposite sides of an already fixed pair.
+        pair = (old_index, new_index)
+        candidate = (score, old_index, new_index, match_basis)
+        current = best_by_pair.get(pair)
+        if current is None or (score, match_basis) > (current[0], current[3]):
+            best_by_pair[pair] = candidate
+
+    ordered = sorted(
+        best_by_pair.values(),
+        key=lambda item: (item[1], item[2], -item[0], item[3]),
+    )
+    if not ordered:
+        return []
+
+    new_coordinates = sorted({candidate[2] for candidate in ordered})
+    new_rank = {coordinate: index for index, coordinate in enumerate(new_coordinates)}
+    # Each state stores (total score, pair count, previous state, candidate).
+    states: list[
+        tuple[float, int, int | None, tuple[float, int, int, str]]
+    ] = []
+    fenwick: list[int | None] = [None] * (len(new_coordinates) + 1)
+
+    def state_key(state_index: int) -> tuple[float, int, int, int]:
+        score, count, _previous, candidate = states[state_index]
+        return (score, count, -candidate[2], -candidate[1])
+
+    def better_state(left: int | None, right: int | None) -> int | None:
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return left if state_key(left) >= state_key(right) else right
+
+    def query(prefix_length: int) -> int | None:
+        best: int | None = None
+        cursor = prefix_length
+        while cursor:
+            best = better_state(best, fenwick[cursor])
+            cursor -= cursor & -cursor
+        return best
+
+    def update(position: int, state_index: int) -> None:
+        cursor = position
+        while cursor < len(fenwick):
+            fenwick[cursor] = better_state(fenwick[cursor], state_index)
+            cursor += cursor & -cursor
+
+    cursor = 0
+    while cursor < len(ordered):
+        group_end = cursor + 1
+        old_index = ordered[cursor][1]
+        while group_end < len(ordered) and ordered[group_end][1] == old_index:
+            group_end += 1
+
+        pending_updates: list[tuple[int, int]] = []
+        for candidate in ordered[cursor:group_end]:
+            rank = new_rank[candidate[2]]
+            previous = query(rank)  # Strictly lower new index; equal indices cannot pair.
+            if previous is None:
+                previous_score, previous_count = 0.0, 0
+            else:
+                previous_score, previous_count = states[previous][0:2]
+            states.append(
+                (
+                    previous_score + candidate[0],
+                    previous_count + 1,
+                    previous,
+                    candidate,
+                )
+            )
+            pending_updates.append((rank + 1, len(states) - 1))
+
+        # Delaying updates until the old-index group is complete prevents two
+        # candidates for one old section from entering the same path.
+        for position, state_index in pending_updates:
+            update(position, state_index)
+        cursor = group_end
+
+    best = query(len(new_coordinates))
+    selected: list[tuple[float, int, int, str]] = []
+    while best is not None:
+        _score, _count, previous, candidate = states[best]
+        selected.append(candidate)
+        best = previous
+    return sorted(selected, key=lambda item: (item[1], item[2]))
+
+
 def _consume_section_match_candidates(
     candidates: list[tuple[float, int, int, str]],
     old_sections: list[Section],
@@ -2700,14 +2856,12 @@ def _consume_section_match_candidates(
     matched_new: set[int],
     matches: list[tuple[int | None, int | None, float, str]],
 ) -> None:
-    """Apply ranked one-to-one section candidates without inflating similarity."""
+    """Apply monotonic one-to-one candidates without inflating similarity."""
 
-    for score, old_index, new_index, match_basis in sorted(
+    for score, old_index, new_index, match_basis in _select_monotonic_section_candidates(
         candidates,
-        key=lambda item: (-item[0], abs(item[1] - item[2]), item[2], item[1]),
+        matches,
     ):
-        if old_index in matched_old or new_index in matched_new:
-            continue
         matched_old.add(old_index)
         matched_new.add(new_index)
         similarity = _section_similarity(

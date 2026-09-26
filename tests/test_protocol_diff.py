@@ -12437,6 +12437,133 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(["The limit is 20 mV."], change.added_snippets)
         self.assertFalse(change.removed_snippets)
 
+    def test_primary_section_pairing_preserves_document_order(self) -> None:
+        """Two swapped boilerplate-like clauses cannot both be cross-paired."""
+        from itertools import pairwise
+
+        def section(section_id: str, number: str, title: str, body: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        alpha_body = (
+            "The receiver calibration uses the alpha sampling reference and preserves "
+            "the measured transfer response. "
+        ) * 18
+        beta_body = (
+            "The transmitter timing check uses the beta recovery marker and preserves "
+            "the measured launch interval. "
+        ) * 18
+        anchor_a = "A stable introductory clause anchors the comparison."
+        anchor_b = "A stable closing clause anchors the comparison."
+        old_sections = [
+            section("old-a", "0", "Anchor A", anchor_a),
+            section("old-alpha", "1.1", "Alpha Calibration", alpha_body),
+            section("old-beta", "1.2", "Beta Timing", beta_body),
+            section("old-b", "9", "Anchor B", anchor_b),
+        ]
+        new_sections = [
+            section("new-a", "0", "Anchor A", anchor_a),
+            section("new-beta", "2.1", "Beta Timing", beta_body),
+            section("new-alpha", "2.2", "Alpha Calibration", alpha_body),
+            section("new-b", "9", "Anchor B", anchor_b),
+        ]
+
+        matches = compare_module._match_sections(old_sections, new_sections, DiffOptions())
+        pairs = sorted(
+            (old_index, new_index)
+            for old_index, new_index, _score, _basis in matches
+            if old_index is not None and new_index is not None
+        )
+
+        self.assertIn((0, 0), pairs)
+        self.assertIn((3, 3), pairs)
+        self.assertLessEqual(
+            len(pairs),
+            3,
+            "the two swapped clauses cannot both be paired across each other",
+        )
+        self.assertEqual(
+            pairs,
+            sorted(pairs, key=lambda pair: (pair[0], pair[1])),
+        )
+        self.assertTrue(
+            all(left[1] < right[1] for left, right in pairwise(pairs)),
+            f"matched sections crossed in document order: {pairs}",
+        )
+        self.assertEqual(1, sum(old is None for old, _new, _score, _basis in matches))
+        self.assertEqual(1, sum(new is None for _old, new, _score, _basis in matches))
+
+    def test_sparse_monotonic_solver_matches_independent_small_oracle(self) -> None:
+        """A brute-force subset oracle checks the sparse maximum-weight path."""
+
+        from itertools import combinations, pairwise
+
+        candidates = [
+            (0.91, 0, 0, "candidate"),
+            (0.75, 0, 2, "candidate"),
+            (0.85, 1, 1, "candidate"),
+            (0.74, 1, 3, "candidate"),
+            (0.90, 2, 2, "candidate"),
+            (0.78, 2, 4, "candidate"),
+            (0.88, 3, 3, "candidate"),
+            (0.93, 4, 4, "candidate"),
+        ]
+        selected = compare_module._select_monotonic_section_candidates(candidates, [])
+
+        valid_scores: list[float] = []
+        for size in range(len(candidates) + 1):
+            for subset in combinations(candidates, size):
+                ordered = sorted(subset, key=lambda candidate: candidate[1])
+                old_indexes = [candidate[1] for candidate in ordered]
+                new_indexes = [candidate[2] for candidate in ordered]
+                if len(set(old_indexes)) != len(old_indexes):
+                    continue
+                if len(set(new_indexes)) != len(new_indexes):
+                    continue
+                if any(
+                    left >= right
+                    for left, right in pairwise(new_indexes)
+                ):
+                    continue
+                valid_scores.append(sum(candidate[0] for candidate in subset))
+
+        self.assertAlmostEqual(
+            max(valid_scores),
+            sum(candidate[0] for candidate in selected),
+        )
+        self.assertEqual(
+            [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)],
+            [(candidate[1], candidate[2]) for candidate in selected],
+        )
+
+    def test_sparse_monotonic_solver_respects_fixed_matches(self) -> None:
+        """A new candidate cannot jump across an already trusted anchor."""
+
+        fixed = [(1, 1, 0.99, "similarity_exact")]
+        candidates = [
+            (0.8, 0, 0, "before"),
+            (1.0, 0, 2, "crosses-fixed-anchor"),
+            (0.7, 2, 2, "after"),
+            (0.9, 2, 0, "crosses-fixed-anchor"),
+        ]
+
+        selected = compare_module._select_monotonic_section_candidates(
+            candidates,
+            fixed,
+        )
+
+        self.assertEqual([(0, 0), (2, 2)], [(candidate[1], candidate[2]) for candidate in selected])
+
     def test_global_residual_pairing_respects_assignment_field_identity(self) -> None:
         """Shared values cannot cross-pair two moved explicit assignment fields."""
 
