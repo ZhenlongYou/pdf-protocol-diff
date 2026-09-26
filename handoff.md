@@ -7,16 +7,15 @@
 - 原随机页窗候选 `codex/pdf-random-window-fidelity-20260925` 以 `4402a958df76c387f5bf5a6c667e2544e0f03c2f` 保存在 blocked task 中；其行为提交为 `db286806f9a0c723dab6e2b392e3e5610ab1164c`。它从旧 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb` 分出，不能作为新任务基线。旧候选的页窗/72-run证据仍在其原工作树 `work/page-window-gate/`，不证明本合并结果。
 - 新 claim 的精确 scope 包含 report-responsive 相对 project 的 18 个历史路径，以及原候选的 13 个历史路径，共 27 个文件。主线只读合并预览发现 6 个冲突文件；本次在新候选中解决并保留两侧变更。
 - 合并候选提交为 `5edbff37061949ee5337f11db6378af3813bc482`；随后仅更新 handoff 的提交 `b8bdbdfaee3f8cf0eb9ad1fdf4ff001c5d911a31` 已推送。`985e77f`、`1cfb7b6` 和原随机窗候选 `4402a95` 均是当前候选祖先。用户授权后，已按预览清除 long-doc / report-responsive 两条本地与 GitHub refs，并 prune 了三个失效 worktree 的 Git 登记；三处原目录均仍在，分别保留 9、9、10 个文件。
-- 完整远端库存还存在 `codex/pdf-user-facing-settings-20260917`，OID `f886c3a381fa5d96ae26dadc6f95a75238ef3140`；它也是新候选的祖先，但不在已授权清理的两条 refs 中。已向用户请求是否按该完整 OID 删除此额外远端 ref；收到答复前保留它。当前候选尚未 acquire，canonical main 与持久 project refs 未改。
-- 新候选源码已提交并推送；尚未取得 integration lease。收到额外 ref 的处理授权后继续 acquire；等待期间按原 owner 流程将当前 claim 释放为 blocked，保留工作树、分支与证据。
+- `codex/pdf-user-facing-settings-20260917` 的远端 OID `f886c3a381fa5d96ae26dadc6f95a75238ef3140` 已经用户明确授权，并在核对它是候选祖先、候选远端 OID 为 `d0c4f194e22cffc78d78b31092d48b49ce504c2d` 后，用精确 `--force-with-lease` 删除。该提交仍是新候选祖先；其他两个授权源分支 refs 和三个 prunable worktree 登记也已清理，临时目录与其文件保留。
+- 目前完整远端分支清单只剩 mapped `main`、`project/pdf-protocol-diff` 和本 task branch。当前候选在本 handoff-only 更新前为 `d0c4f194e22cffc78d78b31092d48b49ce504c2d`；canonical main `5f89bfb`、project `6abf4f7` 均未改，尚无 integration lease。本候选的合并行为仍未运行测试或验证。
 - 本次合并后的行为与报告尚未运行测试或验证；不要把旧候选回执或各源分支历史结果说成本合并结果的验证。
 
 ## 下一步
 
-1. 等待用户决定是否清理 `codex/pdf-user-facing-settings-20260917`。若授权，按 OID `f886c3a381fa5d96ae26dadc6f95a75238ef3140` 和远端精确 lease 删除；否则保留并等待其原 owner 正式登记。
-2. 解决剩余远端库存阻塞后取得 integration lease；新候选已包含 project、两个已授权候选和随机页窗修复。
-3. 按 project → report-responsive（其历史含 long-doc）→ 当前修复的顺序更新 canonical `main` 和持久分支。
-4. 按用户要求不跑测试；最终状态不得标记为已验证，交付门禁状态如实记录。
+1. 从当前 task candidate acquire 集成锁，检查 scope 与远端库存。
+2. 按 project → report-responsive（其历史含 long-doc）→ 当前修复的顺序更新 canonical `main` 和持久分支。
+3. 按用户要求不跑测试；最终状态不得标记为已验证，交付门禁状态如实记录。
 
 
 ## 当前任务：报告 HTML 最大化自适应（2026-09-18）
