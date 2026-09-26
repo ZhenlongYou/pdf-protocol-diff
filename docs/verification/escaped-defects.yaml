@@ -1,5 +1,5 @@
 schema_version: 1
-scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; truthful visual coverage; readable report evidence with no source-image upscaling."
+scope_statement: "Long PDF execution and cancellation; source identity, region ownership and occurrence matching; page-window content fidelity; truthful visual coverage; readable report evidence with no source-image upscaling."
 escaped_defects:
   - id: DEF-READER-PAGE-GROUP-SOURCE-SYMMETRY-20260917
     acceptance_id: REQ-CONTENT-CORRESPONDENCE
@@ -135,6 +135,78 @@ escaped_defects:
     red_green_pair_id: PAIR-PAGE-FURNITURE
     regression_test_id: FIGURE_TEXT_LAYER_TEST::page_furniture
     public_path_rerun_id: RUN-FIGURE-TEXT-REAL-PAGE-209
+    state: verified
+  - id: DEF-PAGE-WINDOW-TABLE-WRAPPER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "PCIe Base 6.4/6.5 short-window reports showed ordinary page prose as deleted and added tables, so the compared content was misleading."
+    discovered_via: user_counterexample
+    failure_mechanism: "A page-filling one-column pdfplumber candidate captured most native page text and was published as a table despite having no caption or structured columns."
+    red_green_pair_id: PAIR-PAGE-WINDOW-TABLE-WRAPPER
+    regression_test_id: FULL_PAGE_SINGLE_COLUMN_CAPTURE_TEST
+    public_path_rerun_id: RUN-BASE-WINDOW-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-FORUM-FOOTER-OVERFILTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A changed bottom-of-page technical line containing Forum and Clause text could be treated as publication footer and disappear from the comparison."
+    discovered_via: independent_review
+    failure_mechanism: "A broad bottom-position Forum/Clause marker granted footer deletion authority without a page folio or repeated footer geometry; page-local folio removal also accepted measurement-bearing voltage and baud-rate text."
+    red_green_pair_id: PAIR-BOTTOM-FORUM-CLAUSE-TECHNICAL-LINE
+    regression_test_id: BOTTOM_FORUM_CLAUSE_TECHNICAL_LINE_RETAINED_TEST
+    public_path_rerun_id: RUN-FOOTER-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-URL-FOOTER-CLUSTER-OVERFILTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A bottom technical value close to a Forum/Clause footer marker and URL could still disappear from a short-window comparison."
+    discovered_via: independent_review
+    failure_mechanism: "Page-local footer clustering selected tightly spaced marker-to-URL lines without checking for technical values elsewhere in the cluster."
+    red_green_pair_id: PAIR-URL-FOOTER-CLUSTER-TECHNICAL-VALUE
+    regression_test_id: FORUM_CLAUSE_URL_CLUSTER_VALUE_PRESERVED_TEST
+    public_path_rerun_id: RUN-FOOTER-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-SINGLE-PAGE-GRAY-GUTTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A one-page comparison could treat light-gray printed line numbers as protocol text when an edition moved the gutter to the opposite page edge."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "The existing document-level line-grid gate required three selected pages. Single-page windows now need a near-complete geometric reset grid plus repeated gray-number/dark-body contrast; black numbered lists remain fail-open."
+    red_green_pair_id: PAIR-SINGLE-PAGE-GRAY-GUTTER
+    regression_test_id: SINGLE_PAGE_GRAY_GRID_STYLE_CONTRAST_TEST
+    public_path_rerun_id: RUN-OIF-FIGURE-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-COPYRIGHT-DRAFT-FOOTER-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A copyright and draft-footer layout change could appear as a confirmed body edit because the legal notice's word 'is' triggered the technical-fact guard."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "The footer guard treated the copula in a narrowly recognized legal draft notice as a technical statement. Only those legal copulas are now exempt; units, thresholds, and normative facts stay fail-open."
+    red_green_pair_id: PAIR-SINGLE-PAGE-COPYRIGHT-DRAFT-FOOTER
+    regression_test_id: SINGLE_PAGE_COPYRIGHT_FOOTER_METADATA_TEST
+    public_path_rerun_id: RUN-OIF-235-PAGE13-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-CAPTIONED-VECTOR-FIGURE-PSEUDOTABLE-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "OIF CEI page 105 versus 109 reported the same Figure 2-21 label fragments as body edits and an uncaptioned table add/delete."
+    discovered_via: cross_style_corpus_expansion
+    failure_mechanism: "A one-row grid detector mistook a label inside a large, closed vector Figure frame for a table; the resulting table bbox also blocked Figure text review."
+    red_green_pair_id: PAIR-OIF-CEI-CAPTIONED-VECTOR-FIGURE
+    regression_test_id: OIF_CEI_SINGLE_FIGURE_WINDOW_TEST
+    public_path_rerun_id: RUN-OIF-FIGURE-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-SIGNED-FOOTER-NORMATIVE-LINE-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A normative sentence between a Forum/Clause marker, copyright line, and legal draft notice could be removed from the comparison."
+    discovered_via: independent_review
+    failure_mechanism: "The signed footer-cluster guard rejected numeric/value-bearing text but did not protect shall/must/should/may statements."
+    red_green_pair_id: PAIR-SIGNED-FOOTER-NORMATIVE-LINE
+    regression_test_id: SIGNED_FOOTER_NORMATIVE_BODY_PRESERVED_TEST
+    public_path_rerun_id: RUN-NORMATIVE-FOOTER-REAL
+    state: verified
+  - id: DEF-PAGE-WINDOW-OPEN-CURVE-TECHNICAL-GRID-20260925
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "A large open vector curve and Figure caption could cause a genuine technical grid inside the Figure to be dropped."
+    discovered_via: independent_review
+    failure_mechanism: "A raw open-curve bounding box was accepted as a closed Figure frame and granted ownership over a separate one-row grid."
+    red_green_pair_id: PAIR-OPEN-CURVE-TECHNICAL-GRID
+    regression_test_id: OPEN_CURVE_TECHNICAL_GRID_PRESERVED_TEST
+    public_path_rerun_id: RUN-OPEN-CURVE-REAL
     state: verified
   - id: DEF-PLOT-AXIS-20260910
     acceptance_id: REQ-PLOT-AXIS
@@ -306,4 +378,22 @@ escaped_defects:
     red_green_pair_id: PAIR-PROSE-NUMERIC-NEAR-ONE-FOLD
     regression_test_id: PROSE_NUMERIC_NEAR_ONE_FOLD_TEST
     public_path_rerun_id: RUN-PROSE-NUMERIC-NEAR-ONE-FOLD-20260917
+    state: verified
+  - id: DEF-SECTION-ORDER-CONFLICT-20260926
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "在大量重复模板句的重排章节中，报告可能把同位置但主题不符的章节配对，并显示错误修改。"
+    discovered_via: synthetic_public_cli_reproduction
+    failure_mechanism: "按原始相似度总和做单调配对，会让多个较弱的同位置候选压过单个更强的双侧唯一候选；工具此前没有把互相交叉的双侧唯一最佳候选明确降为待核实。"
+    red_green_pair_id: PAIR-SECTION-ORDER-CONFLICT
+    regression_test_id: PRIMARY_SECTION_PAIRING_ORDER_TEST
+    public_path_rerun_id: RUN-MONOTONIC-CLI-REORDER
+    state: verified
+  - id: DEF-LATE-RESCUE-ORDER-CONFLICT-20260926
+    acceptance_id: REQ-PAGE-WINDOW-CONTENT-FIDELITY
+    user_symptom: "后置章节救援阶段遇到相互交叉的强候选时，可能把对应关系不确定的章节降成普通新增和删除。"
+    discovered_via: independent_code_review
+    failure_mechanism: "结构、偏移、表格剔除回退及文档锚点救援共用单调选择器，但原调用没有收集被过滤的交叉候选，末尾因此将端点标成普通未匹配。"
+    red_green_pair_id: PAIR-LATE-RESCUE-ORDER-CONFLICT
+    regression_test_id: LATE_RESCUE_ORDER_CONFLICT_TEST
+    public_path_rerun_id: RUN-MONOTONIC-CLI-REORDER
     state: verified

@@ -65,6 +65,7 @@ from .text_utils import (
     is_english_count_context_verb,
     is_known_engineering_symbol_letter_suffix,
     micro_identifier_signatures,
+    normalize_line,
     normalize_table_number_dashes,
     normalize_for_similarity,
     parse_number_word_phrase,
@@ -91,6 +92,7 @@ _MATCH_BASIS_LABELS = {
     "unique_title_body_fallback": "双侧唯一同题且正文强相似配对",
     "structural_prose_identity": "剔除结构化表格行后正文一致",
     "structural_unique_anchor": "同父同层唯一的标题技术锚点+第二正文证据",
+    "unique_body_move_anchor": "双侧唯一正文身份锚点，识别已移动章节",
     "structural_adjacent_brackets": "前后相邻章节共同确认",
     "structural_shift_run_body": "普通兄弟章节证明一致编号偏移+多条独立正文证据",
     "structural_shift_bracketed_sentence": "前后普通兄弟夹定一致编号偏移+标题相关正文句",
@@ -99,12 +101,14 @@ _MATCH_BASIS_LABELS = {
     "structural_mapped_parent_unique_child": "强证据父章节配对+双侧唯一同题直属子章节",
     "document_relation_anchor": "双侧唯一相关标题+结构/引用锚点+文档顺序",
     "user_page_window_anchor": "用户指定双侧页窗强关联",
+    "ambiguous_order_conflict": "章节候选顺序冲突，新增/删除结论待核实",
     "unmatched": "未配对",
 }
 _STRUCTURAL_MATCH_BASES = frozenset(
     {
         "structural_prose_identity",
         "structural_unique_anchor",
+        "unique_body_move_anchor",
         "structural_adjacent_brackets",
         "structural_shift_run_body",
         "structural_shift_bracketed_sentence",
@@ -115,19 +119,23 @@ _STRUCTURAL_MATCH_BASES = frozenset(
     }
 )
 _USER_ANCHORED_MATCH_BASES = frozenset({"user_page_window_anchor"})
+_AMBIGUOUS_MATCH_BASES = frozenset({"ambiguous_order_conflict"})
 _EVIDENCE_SUPPRESSED_MATCH_BASES = frozenset({"evidence_suppressed_similarity_fallback"})
 _UNIQUE_TITLE_BODY_MATCH_BASES = frozenset({"unique_title_body_fallback"})
 _EXPLAINED_MATCH_BASES = (
     _STRUCTURAL_MATCH_BASES
     | _USER_ANCHORED_MATCH_BASES
+    | _AMBIGUOUS_MATCH_BASES
     | _EVIDENCE_SUPPRESSED_MATCH_BASES
     | _UNIQUE_TITLE_BODY_MATCH_BASES
 )
 
 
 def _match_basis_explanation(match_basis: str) -> str:
-    """Explain why a below-threshold section pair was still authorized."""
+    """Explain the section identity evidence or ambiguity reason in a report."""
 
+    if match_basis in _AMBIGUOUS_MATCH_BASES:
+        return "双侧最强章节候选互相交叉；保留原文供核对，不自动确认新增或删除"
     if match_basis in _USER_ANCHORED_MATCH_BASES:
         return "用户页窗授权；相似度仍为全文实际值"
     if match_basis in _EVIDENCE_SUPPRESSED_MATCH_BASES:
@@ -299,6 +307,8 @@ class _TableVisualGroup:
 
     old_tables: tuple[TableVisual, ...]  # 旧版同一逻辑表格的一个或多个截图区域。
     new_tables: tuple[TableVisual, ...]  # 新版同一逻辑表格的一个或多个截图区域。
+    review_only: bool = False  # 证据只足以定位候选时保留两侧截图，不声称内容已配对或新增/删除。
+    review_reason: str = ""  # 标明页窗位置复核与图表定位符顺延复核的不同证据来源。
 
 
 @dataclass(frozen=True)
@@ -343,6 +353,416 @@ def _report_pair_label(old_pdf: str | Path, new_pdf: str | Path) -> str:
     new_name = _safe_report_component(Path(new_pdf).stem)
     return f"{old_name}_vs_{new_name}"
 
+def _verified_body_page_pair_map(result: DiffResult) -> dict[int, int]:
+    """Return only exact rendered-body page pairs bound to the parsed PDF bytes."""
+
+    provenance = result.provenance
+    audit = provenance.visual_watchdog_audit if provenance is not None else None
+    if audit is None or audit.source_hashes_match is not True:
+        return {}
+    pairs = tuple(getattr(audit, "identical_body_page_pairs", ()))
+    old_pages = [old for old, _new in pairs]
+    new_pages = [new for _old, new in pairs]
+    if len(set(old_pages)) != len(old_pages) or len(set(new_pages)) != len(new_pages):
+        return {}  # Duplicate source-page ownership cannot certify a one-to-one mapping.
+    return dict(pairs)
+
+
+def _selected_window_single_page_visual_bridges(
+    result: DiffResult,
+    exact_page_pairs: dict[int, int],
+) -> dict[int, int]:
+    """Infer one changed page's position only between exact visual neighbors.
+
+    The selected windows must have equal length and complete, exact physical
+    folio audits. A bridge is returned only for a single non-identical page
+    directly between two exact page pairs with the same relative window index.
+    This establishes a review locator, never body equality.
+    """
+
+    old_start = result.old_selected_start_page
+    old_end = result.old_selected_end_page
+    new_start = result.new_selected_start_page
+    new_end = result.new_selected_end_page
+    if not all((old_start, old_end, new_start, new_end)):
+        return {}
+    old_count = old_end - old_start + 1
+    new_count = new_end - new_start + 1
+    if old_count != new_count or old_count < 3:
+        return {}
+    audit = (
+        result.provenance.visual_watchdog_audit
+        if result.provenance is not None
+        else None
+    )
+    if audit is None or audit.source_hashes_match is not True or not audit.complete:
+        return {}
+
+    def has_exact_folio(page_audit, page_number: int) -> bool:
+        return tuple(
+            normalize_line(text).casefold()
+            for text in page_audit.running_footer_texts
+        ) == (f"page {page_number}".casefold(),)
+
+    old_audit = {page.page_number: page for page in result.old_extraction_audit}
+    new_audit = {page.page_number: page for page in result.new_extraction_audit}
+    if any(
+        page_number not in old_audit
+        or not has_exact_folio(old_audit[page_number], page_number)
+        for page_number in range(old_start, old_end + 1)
+    ) or any(
+        page_number not in new_audit
+        or not has_exact_folio(new_audit[page_number], page_number)
+        for page_number in range(new_start, new_end + 1)
+    ):
+        return {}
+
+    bridges: dict[int, int] = {}
+    for old_page in range(old_start + 1, old_end):
+        new_page = new_start + (old_page - old_start)
+        if old_page in exact_page_pairs:
+            continue
+        if (
+            exact_page_pairs.get(old_page - 1) == new_page - 1
+            and exact_page_pairs.get(old_page + 1) == new_page + 1
+        ):
+            bridges[old_page] = new_page
+    return bridges
+
+
+def _selected_window_folio_page_pairs(result: DiffResult) -> dict[int, int]:
+    """Map equal-length selected windows only when every physical folio is proven."""
+
+    old_start = result.old_selected_start_page
+    old_end = result.old_selected_end_page
+    new_start = result.new_selected_start_page
+    new_end = result.new_selected_end_page
+    if not all((old_start, old_end, new_start, new_end)):
+        return {}
+    old_count = old_end - old_start + 1
+    new_count = new_end - new_start + 1
+    if old_count != new_count or old_count < 3:
+        return {}
+
+    provenance = result.provenance
+    if provenance is None:
+        return {}
+    old_input = provenance.old_input
+    new_input = provenance.new_input
+    if (
+        not old_input.sha256
+        or not new_input.sha256
+        or old_input.sha256 == new_input.sha256
+    ):
+        return {}
+    if (
+        old_input.selected_start_page != old_start
+        or old_input.selected_end_page != old_end
+        or new_input.selected_start_page != new_start
+        or new_input.selected_end_page != new_end
+    ):
+        return {}
+
+    def page_folio_identity(page_audit, page_number: int) -> tuple[str, str] | None:
+        values = tuple(
+            normalize_line(text).casefold()
+            for text in page_audit.running_footer_texts
+            if normalize_line(text)
+        )
+        if values == (f"page {page_number}".casefold(),):
+            return ("page-label", "page")
+
+        identities: set[str] = set()
+        footer_marker = re.compile(
+            r"(?i)\b(?:clause|chapter|section|part|forum|consortium|copyright|"
+            r"specification|standard|agreement|manual|working\s+group)\b"
+        )
+        for value in values:
+            for pattern in (
+                r"^(?P<title>.+?)\s+(?P<folio>\d{1,4})$",
+                r"^(?P<folio>\d{1,4})\s+(?P<title>.+)$",
+            ):
+                match = re.fullmatch(pattern, normalize_line(value), flags=re.I)
+                if match is None or int(match.group("folio")) != page_number:
+                    continue
+                title = normalize_line(match.group("title"))
+                if len(title) >= 20 and footer_marker.search(title):
+                    identities.add(title.casefold())
+        if len(identities) != 1:
+            return None
+        return ("document-footer", next(iter(identities)))
+
+    def exact_page_audits(audits, start: int, end: int):
+        selected = {}
+        for page_audit in audits:
+            if page_audit.page_number in selected:
+                return None
+            selected[page_audit.page_number] = page_audit
+        if len(selected) != len(audits) or set(selected) != set(range(start, end + 1)):
+            return None
+        identities = {
+            page_number: page_folio_identity(page_audit, page_number)
+            for page_number, page_audit in selected.items()
+        }
+        if any(identity is None for identity in identities.values()):
+            return None
+        if len({identity[0] for identity in identities.values() if identity}) != 1:
+            return None
+        return selected, identities
+
+    old_exact = exact_page_audits(
+        result.old_extraction_audit,
+        old_start,
+        old_end,
+    )
+    new_exact = exact_page_audits(
+        result.new_extraction_audit,
+        new_start,
+        new_end,
+    )
+    if old_exact is None or new_exact is None:
+        return {}
+    _old_audit, old_identities = old_exact
+    _new_audit, new_identities = new_exact
+    pairs = {
+        old_page: new_start + old_page - old_start
+        for old_page in range(old_start, old_end + 1)
+    }
+    for old_page, new_page in pairs.items():
+        if old_identities[old_page] != new_identities[new_page]:
+            return {}
+    return pairs
+
+
+def _selected_window_locator_table_page_pairs(
+    result: DiffResult,
+    exact_page_pairs: dict[int, int],
+    bridge_page_pairs: dict[int, int],
+) -> dict[int, int]:
+    """Return folio-proven window pairs not already handled by pixel evidence."""
+
+    already_mapped = set(exact_page_pairs) | set(bridge_page_pairs)
+    return {
+        old_page: new_page
+        for old_page, new_page in _selected_window_folio_page_pairs(result).items()
+        if old_page not in already_mapped
+    }
+
+
+def _selected_single_page_window_review_pairs(result: DiffResult) -> dict[int, int]:
+    """Map an explicitly compared one-page window for review-only table candidates."""
+
+    old_start = result.old_selected_start_page
+    old_end = result.old_selected_end_page
+    new_start = result.new_selected_start_page
+    new_end = result.new_selected_end_page
+    provenance = result.provenance
+    if not all((old_start, old_end, new_start, new_end)) or provenance is None:
+        return {}
+    if old_start != old_end or new_start != new_end:
+        return {}  # 单页的相对位置只用于复核，不推广到多页页窗的逐页硬配。
+    old_input = provenance.old_input
+    new_input = provenance.new_input
+    if (
+        not old_input.sha256
+        or not new_input.sha256
+        or old_input.sha256 == new_input.sha256
+    ):
+        return {}
+    if (
+        old_input.selected_start_page != old_start
+        or old_input.selected_end_page != old_end
+        or new_input.selected_start_page != new_start
+        or new_input.selected_end_page != new_end
+    ):
+        return {}
+    if (
+        len(result.old_extraction_audit) != 1
+        or result.old_extraction_audit[0].page_number != old_start
+    ):
+        return {}
+    if (
+        len(result.new_extraction_audit) != 1
+        or result.new_extraction_audit[0].page_number != new_start
+    ):
+        return {}
+    return {old_start: new_start}
+
+
+def _proven_publication_header_section_change(
+    change: SectionChange,
+    result: DiffResult,
+) -> bool:
+    """Suppress only margin title lines individually tied to this PDF's first page."""
+
+    old_section = change.old_section
+    new_section = change.new_section
+    if not (
+        any(
+            section is not None and section.section_id == "running-header-evidence"
+            for section in (old_section, new_section)
+        )
+        and all(
+            section is None or section.section_id == "running-header-evidence"
+            for section in (old_section, new_section)
+        )
+    ):
+        return False
+    if not all((
+        result.old_selected_start_page,
+        result.old_selected_end_page,
+        result.new_selected_start_page,
+        result.new_selected_end_page,
+    )):
+        return False
+    old_page_count = result.old_selected_end_page - result.old_selected_start_page + 1
+    new_page_count = result.new_selected_end_page - result.new_selected_start_page + 1
+    if old_page_count != new_page_count:
+        return False
+
+    def identity_headers(audits, start: int, end: int) -> set[str] | None:
+        pages = {page.page_number: page for page in audits}
+        if any(page_number not in pages for page_number in range(start, end + 1)):
+            return None
+        if any(
+            not pages[page_number].page_identity_header_texts
+            for page_number in range(start, end + 1)
+        ):
+            return None
+        return {
+            normalize_line(text)
+            for page_number in range(start, end + 1)
+            for text in pages[page_number].page_identity_header_texts
+            if normalize_line(text)
+        }
+
+    old_identity_headers = identity_headers(
+        result.old_extraction_audit,
+        result.old_selected_start_page,
+        result.old_selected_end_page,
+    )
+    new_identity_headers = identity_headers(
+        result.new_extraction_audit,
+        result.new_selected_start_page,
+        result.new_selected_end_page,
+    )
+
+    def non_identity_header_values(
+        section: Section | None,
+        identity_values: set[str] | None,
+    ) -> Counter[str] | None:
+        if section is None:
+            return Counter() if identity_values else None
+        if not identity_values:
+            return None
+        body_values = Counter(
+            normalize_line(line)
+            for line in section.body.splitlines()
+            if normalize_line(line)
+        )
+        page_values = Counter(
+            normalize_line(value)
+            for _page_number, value in section.page_bodies
+            if normalize_line(value)
+        )
+        if not page_values or body_values != page_values:
+            return None  # 缺失/重复行不能借同值 None 或首页身份匹配作证。
+        if any(body_values[value] < 1 for value in identity_values):
+            return None
+        remainder = body_values.copy()
+        for value in identity_values:
+            del remainder[value]
+        return remainder
+
+    old_remainder = non_identity_header_values(old_section, old_identity_headers)
+    new_remainder = non_identity_header_values(new_section, new_identity_headers)
+    if old_remainder is None or new_remainder is None:
+        return False
+    if old_section is None or new_section is None:
+        return not (old_remainder or new_remainder)
+    return old_remainder == new_remainder  # 首页身份行不计正文；其它页眉仍须双侧逐字相同。
+
+
+def _section_physical_pages(
+    section: Section | None,
+    *,
+    side: str,
+    result: DiffResult,
+) -> set[int]:
+    if section is None:
+        return set()
+    if section.section_id == "running-header-evidence":
+        start = result.old_selected_start_page if side == "old" else result.new_selected_start_page
+        end = result.old_selected_end_page if side == "old" else result.new_selected_end_page
+        return set(range(start, end + 1)) if start and end and end >= start else set()
+    if section.page_bodies:
+        return {page for page, _body in section.page_bodies}
+    if section.start_page and section.end_page and section.end_page >= section.start_page:
+        return set(range(section.start_page, section.end_page + 1))
+    return set()
+
+
+def _page_facts_are_rendered_equal(
+    old_pages: set[int],
+    new_pages: set[int],
+    page_pairs: dict[int, int],
+) -> bool:
+    if not old_pages and not new_pages:
+        return False
+    if not old_pages.issubset(page_pairs):
+        return False
+    verified_new_pages = set(page_pairs.values())
+    if not new_pages.issubset(verified_new_pages):
+        return False
+    if old_pages and new_pages:
+        return {page_pairs[page] for page in old_pages} == new_pages
+    return True
+
+
+def _section_change_has_rendered_equal_sources(
+    change: SectionChange,
+    result: DiffResult,
+    page_pairs: dict[int, int],
+) -> bool:
+    return _page_facts_are_rendered_equal(
+        _section_physical_pages(change.old_section, side="old", result=result),
+        _section_physical_pages(change.new_section, side="new", result=result),
+        page_pairs,
+    )
+
+
+def _section_change_render_suppression_reason(
+    change: SectionChange,
+    result: DiffResult,
+    page_pairs: dict[int, int],
+) -> str | None:
+    if _proven_publication_header_section_change(change, result):
+        return "重复页眉与各自 PDF Title 及受限版本前缀精确相符；页眉差异保留在原始审计，不计入正文变化。"
+    return _render_suppression_reason(
+        _section_physical_pages(change.old_section, side="old", result=result),
+        _section_physical_pages(change.new_section, side="new", result=result),
+        page_pairs,
+    )
+
+
+def _table_change_has_rendered_equal_sources(
+    change: TableChange | _TableVisualGroup,
+    page_pairs: dict[int, int],
+) -> bool:
+    old_pages = {table.page_number for table in change.old_tables}
+    new_pages = {table.page_number for table in change.new_tables}
+    return _page_facts_are_rendered_equal(old_pages, new_pages, page_pairs)
+
+
+def _render_suppression_reason(
+    old_pages: set[int],
+    new_pages: set[int],
+    page_pairs: dict[int, int],
+) -> str | None:
+    if _page_facts_are_rendered_equal(old_pages, new_pages, page_pairs):
+        return "坐标已证明的页边区域之外，旧/新对应源页在高分辨率渲染下逐像素相同；抽取结构差异仅保留在原始审计字段。"
+    return None
+
 
 @comparison_session
 def write_reports(
@@ -365,19 +785,54 @@ def write_reports(
     report_dir = base_dir / f"{pair_label}_{timestamp}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
+    identical_body_page_pairs = _verified_body_page_pair_map(result)
+    window_table_review_pairs = _selected_window_single_page_visual_bridges(
+        result,
+        identical_body_page_pairs,
+    )
+    locator_table_page_pairs = _selected_window_locator_table_page_pairs(
+        result,
+        identical_body_page_pairs,
+        window_table_review_pairs,
+    )
+    single_page_window_pairs = _selected_single_page_window_review_pairs(result)
     table_groups = _paired_table_visuals(
         result.old_table_visuals,
         result.new_table_visuals,
         old_sections=result.old_sections,
         new_sections=result.new_sections,
+        page_pairs=window_table_review_pairs,
+        locator_page_pairs=locator_table_page_pairs,
+        single_page_window_pairs=single_page_window_pairs,
     )  # 读者正文去重需要全部已配对表，包括因内容完全相同而不生成变化卡的表。
     table_changes = _ordered_table_changes(_build_table_changes(result, table_groups=table_groups))  # 表格事实只计算一次，并在所有格式中保持技术表优先。
     # 读者表格只中和完整值中的定位编号，任何其它字符变化仍保留该行。
-    reader_table_changes = _reader_table_changes(table_changes)
+    reader_table_changes = [
+        change
+        for change in _reader_table_changes(table_changes)
+        if not _table_change_has_rendered_equal_sources(
+            change,
+            identical_body_page_pairs,
+        )
+    ]
     reader_table_evidence: list[TableChange | _TableVisualGroup] = [
-        *table_changes,
-        *table_groups,
-    ]  # 变化表携带显式复核卡；未变化且可靠的表仍由完整配对组提供去重证据。
+        *(
+            change
+            for change in table_changes
+            if not _table_change_has_rendered_equal_sources(
+                change,
+                identical_body_page_pairs,
+            )
+        ),
+        *(
+            group
+            for group in table_groups
+            if not _table_change_has_rendered_equal_sources(
+                group,
+                identical_body_page_pairs,
+            )
+        ),
+    ]  # 相同源页像素证据优先；其余变化表携带显式复核卡，完整配对组保留去重证据。
     from .physical_table_rows import render_physical_appendix, authorized_spans, write_physical_csv, physical_text_export
     # Physical-row records use the same table-level source images as the main
     # table/uncertainty evidence.  Suppress another embedded copy there; the
@@ -447,6 +902,14 @@ def write_reports(
         # 作者、邮箱、版权和修订记录只保留在原始 JSON 审计面。
         if change.role == "document_metadata":
             continue
+        if _proven_publication_header_section_change(change, result):
+            continue  # Title 匹配且版本前缀受限的正式出版页眉属于元数据，不随正文改字重新进入读者差异。
+        if _section_change_has_rendered_equal_sources(
+            change,
+            result,
+            identical_body_page_pairs,
+        ):
+            continue  # 两侧原页正文完全相同；页眉/页脚之外没有可见内容变化。
         old_figure_sources = figure_sources_for_section(
             change.old_section,
             old_figure_texts_by_owner,
@@ -644,22 +1107,39 @@ def write_reports(
                         review_replaced_snippets=[],
                         omitted_snippet_count=0,
                     ),
+                    role_override=(
+                        "document_metadata"
+                        if _proven_publication_header_section_change(change, result)
+                        else None
+                    ),
                 ),
                 "reader_card_id": reader_change_card_ids.get(
                     _section_change_reader_identity(change)
                 ),
                 "appendix_card_id": appendix_change_ids.get(_section_change_reader_identity(change)),
+                "reader_suppression_reason": _section_change_render_suppression_reason(
+                    change,
+                    result,
+                    identical_body_page_pairs,
+                ),
             }
             for change in result.changes
         ],
         "table_changes": [
-            {
-                **_table_change_to_dict(change),
-                "reader_card_id": reader_table_card_ids.get(
+            _table_change_audit_to_dict(
+                change,
+                reader_card_id=reader_table_card_ids.get(
                     _table_change_reader_identity(change)
                 ),
-                "appendix_card_id": appendix_table_ids.get(_table_change_reader_identity(change)),
-            }
+                appendix_card_id=appendix_table_ids.get(
+                    _table_change_reader_identity(change)
+                ),
+                suppression_reason=_render_suppression_reason(
+                    {table.page_number for table in change.old_tables},
+                    {table.page_number for table in change.new_tables},
+                    identical_body_page_pairs,
+                ),
+            )
             for change in table_changes
         ],
         # 公式自动对比已经关闭；即使旧调用方注入遗留 FormulaChange，
@@ -2573,18 +3053,104 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
         return []  # 同一不可变字节快照和页窗不生成结构不确定性复核卡；风险仍由 assessment 说明。
 
     changes: list[TableChange] = []
-    groups = table_groups if table_groups is not None else _paired_table_visuals(
-        result.old_table_visuals,
-        result.new_table_visuals,
-        old_sections=result.old_sections,
-        new_sections=result.new_sections,
-    )
+    if table_groups is None:
+        exact_page_pairs = _verified_body_page_pair_map(result)
+        bridge_page_pairs = _selected_window_single_page_visual_bridges(
+            result,
+            exact_page_pairs,
+        )
+        table_groups = _paired_table_visuals(
+            result.old_table_visuals,
+            result.new_table_visuals,
+            old_sections=result.old_sections,
+            new_sections=result.new_sections,
+            page_pairs=bridge_page_pairs,
+            locator_page_pairs=_selected_window_locator_table_page_pairs(
+                result,
+                exact_page_pairs,
+                bridge_page_pairs,
+            ),
+            single_page_window_pairs=_selected_single_page_window_review_pairs(result),
+        )
+    groups = table_groups
     for group in groups:
         if _table_group_is_isolated_one_cell_image_fragment(group):
             continue  # 图中孤立短标签即使被网格检测框住，也没有足够证据宣称新增/删除表格。
-        row_change_list = _table_row_changes(group.old_tables, group.new_tables)
-        from .table_annotations import classify_annotations
-        row_change_list = classify_annotations(row_change_list, group.old_tables, group.new_tables, _make_table_row_change)
+        if group.review_only:
+            if group.review_reason in {
+                "same-position-content-change",
+                "same-position-unreadable-rows",
+            }:
+                row_change_list = _same_position_candidate_row_changes(
+                    group.old_tables,
+                    group.new_tables,
+                )
+            else:
+                if group.review_reason == "locator-renumbering":
+                    review_item = "图表编号顺延候选"
+                    old_review = "旧版唯一同框候选已由页窗页码对应；候选行文字只在图表编号上变化。"
+                    new_review = "新版唯一同框候选与旧版行文字只差图表编号；页面像素不同，请复核原页。"
+                elif group.review_reason == "same-position-exact-rows":
+                    review_item = "同位置无题表格候选"
+                    old_review = "旧版候选行文字在空白规整后与新版对应位置相同；表格身份仍需核对。"
+                    new_review = "新版候选行文字在空白规整后与旧版对应位置相同；页面像素不同，请复核原页。"
+                elif group.review_reason == "descriptive-caption-same-section":
+                    review_item = "同章节同题表格候选"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版在同一章节有唯一同描述表题，但页内位置差异较大；"
+                        "编号、列结构和行对应关系请结合截图核实。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版在同一章节有唯一同描述表题，但页内位置差异较大；"
+                        "编号、列结构和行对应关系请结合截图核实。"
+                    )
+                elif group.review_reason == "descriptive-caption-weak-context":
+                    review_item = "同描述表题候选复核"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版存在唯一同描述表题，但章节或页窗线索不足以确认身份；"
+                        "请对照两侧源页截图核实编号、列结构和行对应关系。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版存在唯一同描述表题，但章节或页窗线索不足以确认身份；"
+                        "请对照两侧源页截图核实编号、列结构和行对应关系。"
+                    )
+                elif group.review_reason == "descriptive-caption-multipart":
+                    review_item = "同题多表拆分候选"
+                    old_titles = " / ".join(_unique_table_titles(group.old_tables)) or "无题"
+                    new_titles = " / ".join(_unique_table_titles(group.new_tables)) or "无题"
+                    old_review = (
+                        f"旧表题：{old_titles}。新版在同一章节把相同表题核心拆成多张表；"
+                        "这里只保留整组复核线索，不建立逐行对应。请逐表查看原页。"
+                    )
+                    new_review = (
+                        f"新表题：{new_titles}。旧版有同一表题核心的多张表；"
+                        "编号和结构变化较大，逐表身份及数据差异需要对照原页确认。"
+                    )
+                else:
+                    review_item = "页窗表格候选对应"
+                    old_review = "旧版候选框与对应原页位置一致；表格身份与行归属仍需核实。"
+                    new_review = "新版候选框与对应原页位置一致；表格身份与行归属仍需核实。"
+                row_change_list = [
+                    TableRowChange(
+                        item=review_item,
+                        old_value=old_review,
+                        new_value=new_review,
+                        change_type="需人工复核",
+                    )
+                ]
+        else:
+            row_change_list = _table_row_changes(group.old_tables, group.new_tables)
+            from .table_annotations import classify_annotations
+            row_change_list = classify_annotations(
+                row_change_list,
+                group.old_tables,
+                group.new_tables,
+                _make_table_row_change,
+            )
         unreliable_multirow_alignment = _table_group_has_unreliable_multirow_alignment(group)
         alignment_review_is_reader_evidence = bool(
             unreliable_multirow_alignment
@@ -2621,12 +3187,12 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
         )
         if group.old_tables and group.new_tables and not row_changes and not caption_changed:
             continue  # 未变化表格不占导航和报告篇幅。
-        change_type = "modified"
-        if not group.old_tables:
+        change_type = "review" if group.review_only else "modified"
+        if not group.review_only and not group.old_tables:
             change_type = "added"
-        elif not group.new_tables:
+        elif not group.review_only and not group.new_tables:
             change_type = "deleted"
-        elif (
+        elif not group.review_only and (
             row_changes
             and not caption_changed
             and not any(
@@ -2856,6 +3422,9 @@ def _paired_table_visuals(
     *,
     old_sections: list[Section] | None = None,
     new_sections: list[Section] | None = None,
+    page_pairs: dict[int, int] | None = None,
+    locator_page_pairs: dict[int, int] | None = None,
+    single_page_window_pairs: dict[int, int] | None = None,
 ) -> list[_TableVisualGroup]:
     """Pair table visuals by logical table group without forcing weak matches."""
 
@@ -2863,6 +3432,24 @@ def _paired_table_visuals(
     new_unused = set(range(len(new_tables)))  # 未匹配新表索引。
     groups: list[_TableVisualGroup] = []  # 输出旧/新逻辑表格组。
     _pair_same_caption_table_groups(
+        old_tables,
+        new_tables,
+        old_unused,
+        new_unused,
+        groups,
+        old_sections=old_sections,
+        new_sections=new_sections,
+    )
+    _pair_unique_caption_core_multipart_groups(
+        old_tables,
+        new_tables,
+        old_unused,
+        new_unused,
+        groups,
+        old_sections=old_sections,
+        new_sections=new_sections,
+    )
+    _pair_unique_descriptive_caption_renumberings(
         old_tables,
         new_tables,
         old_unused,
@@ -3037,11 +3624,387 @@ def _paired_table_visuals(
         old_unused.remove(old_index)
         new_unused.remove(new_index)
         groups.append(_TableVisualGroup((old_tables[old_index],), (new_tables[new_index],)))
+    if page_pairs:
+        _pair_anchored_unmatched_table_geometry(
+            old_tables,
+            new_tables,
+            old_unused,
+            new_unused,
+            groups,
+            page_pairs,
+        )  # 单个正文差异夹在两侧像素同页之间时，几何重合候选只列为复核，不伪称整表删增。
+    if locator_page_pairs:
+        _pair_locator_renumbered_table_geometry(
+            old_tables,
+            new_tables,
+            old_unused,
+            new_unused,
+            groups,
+            locator_page_pairs,
+        )  # 页窗、精确页脚、同框唯一候选和受限行文本归一共同成立时只列复核。
+    if single_page_window_pairs:
+        _pair_single_page_window_table_geometry(
+            old_tables,
+            new_tables,
+            old_unused,
+            new_unused,
+            groups,
+            single_page_window_pairs,
+        )  # 单页显式对比只允许同框、同标签唯一单行候选进入人工复核。
     for old_index in sorted(old_unused):
         groups.append(_TableVisualGroup((old_tables[old_index],), ()))
     for new_index in sorted(new_unused):
         groups.append(_TableVisualGroup((), (new_tables[new_index],)))
     return groups
+
+
+def _pair_anchored_unmatched_table_geometry(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    page_pairs: dict[int, int],
+) -> None:
+    """Pair same-position uncaptioned candidates as review-only evidence.
+
+    A bridge page is not body-equal. Neighboring exact pages only establish its
+    locator. Matching unique table boxes on that page prevents detector fragments
+    from becoming definite added/deleted tables, while all paired content remains
+    visible for manual review.
+    """
+
+    def candidates_by_box(tables, unused, page_number):
+        candidates: dict[tuple[float, float, float, float], int] = {}
+        indexes = [
+            index
+            for index in sorted(unused)
+            if tables[index].page_number == page_number
+        ]
+        if not indexes or any(
+            tables[index].title.strip()
+            or not _table_visual_has_valid_bbox(tables[index])
+            for index in indexes
+        ):
+            return None
+        for index in indexes:
+            key = tuple(round(float(value), 1) for value in tables[index].bbox)
+            if key in candidates:
+                return None  # 重复框无法提供唯一候选对应关系。
+            candidates[key] = index
+        return candidates
+
+    for old_page, new_page in sorted(page_pairs.items()):
+        old_by_box = candidates_by_box(old_tables, old_unused, old_page)
+        new_by_box = candidates_by_box(new_tables, new_unused, new_page)
+        if not old_by_box or not new_by_box or set(old_by_box) != set(new_by_box):
+            continue
+        for box in sorted(old_by_box):
+            old_index = old_by_box[box]
+            new_index = new_by_box[box]
+            old_unused.remove(old_index)
+            new_unused.remove(new_index)
+            groups.append(_TableVisualGroup(
+                (old_tables[old_index],),
+                (new_tables[new_index],),
+                review_only=True,
+            ))
+
+
+_TABLE_FIGURE_LOCATOR_REFERENCE_RE = re.compile(
+    r"(?i)(?<!\w)(?P<kind>Figure|Table)\s*(?P<number>\d+(?:\s*-\s*\d+)+)"
+)
+
+
+def _table_candidate_row_correspondence_reason(
+    old_table: TableVisual,
+    new_table: TableVisual,
+) -> str | None:
+    """Classify uncaptioned, same-position candidates without claiming table identity."""
+
+    if old_table.title.strip() or new_table.title.strip():
+        return None
+
+    def compact_row(row: str) -> str:
+        # Some flattened table rows retain literal ``\\n`` separators after
+        # serialization; make them boundaries so a following Figure/Table label
+        # is still recognized as a locator rather than part of the word ``nFigure``.
+        return compact_inline(row.replace(r"\n", " ").replace(r"\t", " "))
+
+    old_rows = tuple(
+        value for row in old_table.row_texts if (value := compact_row(row))
+    )
+    new_rows = tuple(
+        value for row in new_table.row_texts if (value := compact_row(row))
+    )
+    if not old_rows or not new_rows:
+        return "same-position-unreadable-rows"
+    if old_rows == new_rows:
+        return "same-position-exact-rows"
+
+    old_references: list[tuple[str, tuple[int, ...]]] = []
+    new_references: list[tuple[str, tuple[int, ...]]] = []
+
+    def normalize_rows(
+        rows: tuple[str, ...],
+        references: list[tuple[str, tuple[int, ...]]],
+    ):
+        normalized_rows = []
+        for row in rows:
+            def replace_reference(match: re.Match[str]) -> str:
+                number_parts = tuple(
+                    int(part.strip())
+                    for part in re.split(r"\s*-\s*", match.group("number"))
+                )
+                references.append((match.group("kind").casefold(), number_parts))
+                return f"{match.group('kind')} <locator>"
+
+            normalized_rows.append(
+                _TABLE_FIGURE_LOCATOR_REFERENCE_RE.sub(replace_reference, row)
+            )
+        return tuple(normalized_rows)
+
+    normalized_old_rows = normalize_rows(old_rows, old_references)
+    normalized_new_rows = normalize_rows(new_rows, new_references)
+    if normalized_old_rows != normalized_new_rows:
+        return "same-position-content-change"
+    if not old_references or len(old_references) != len(new_references):
+        return "same-position-content-change"
+
+    shifts: set[int] = set()
+    for (old_kind, old_parts), (new_kind, new_parts) in zip(
+        old_references,
+        new_references,
+        strict=True,
+    ):
+        if (
+            old_kind != new_kind
+            or len(old_parts) != len(new_parts)
+            or old_parts[:-1] != new_parts[:-1]
+        ):
+            return "same-position-content-change"
+        shifts.add(new_parts[-1] - old_parts[-1])
+    if len(shifts) == 1 and 0 not in shifts:
+        return "locator-renumbering"
+    if shifts and shifts == {0}:
+        return "same-position-exact-rows"
+    return "same-position-content-change"
+
+
+def _same_position_candidate_row_changes(
+    old_tables: tuple[TableVisual, ...],
+    new_tables: tuple[TableVisual, ...],
+) -> list[TableRowChange]:
+    """Show literal row-text differences while keeping their pairing review-only."""
+
+    def rows(tables: tuple[TableVisual, ...]) -> list[str]:
+        return [
+            compact_inline(row.replace(r"\n", " ").replace(r"\t", " "))
+            for table in tables
+            for row in table.row_texts
+            if compact_inline(row.replace(r"\n", " ").replace(r"\t", " "))
+        ]
+
+    old_rows = rows(old_tables)
+    new_rows = rows(new_tables)
+    if not old_rows or not new_rows:
+        return [
+            TableRowChange(
+                item="同位置候选提取文本",
+                old_value="；".join(old_rows) if old_rows else "未提取到可比行文本",
+                new_value="；".join(new_rows) if new_rows else "未提取到可比行文本",
+                change_type="需人工复核",
+            )
+        ]
+
+    def row_differences(old_row: str, new_row: str) -> list[tuple[str, str]]:
+        old_tokens = old_row.split()
+        new_tokens = new_row.split()
+        matcher = difflib.SequenceMatcher(
+            None,
+            old_tokens,
+            new_tokens,
+            autojunk=False,
+        )
+        differences: list[tuple[str, str]] = []
+        for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            old_context = old_tokens[max(0, old_start - 2):min(len(old_tokens), old_end + 2)]
+            new_context = new_tokens[max(0, new_start - 2):min(len(new_tokens), new_end + 2)]
+            old_excerpt = truncate(" ".join(old_context), 180) if old_context else "（无对应文本）"
+            new_excerpt = truncate(" ".join(new_context), 180) if new_context else "（无对应文本）"
+            differences.append((old_excerpt, new_excerpt))
+        return differences or [(truncate(old_row, 180), truncate(new_row, 180))]
+
+    row_matcher = difflib.SequenceMatcher(
+        None,
+        old_rows,
+        new_rows,
+        autojunk=False,
+    )
+    findings: list[TableRowChange] = []
+    for tag, old_start, old_end, new_start, new_end in row_matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        old_changed = old_rows[old_start:old_end]
+        new_changed = new_rows[new_start:new_end]
+        paired_count = min(len(old_changed), len(new_changed))
+        excerpt_pairs = [
+            excerpt_pair
+            for old_row, new_row in zip(
+                old_changed[:paired_count],
+                new_changed[:paired_count],
+                strict=True,
+            )
+            for excerpt_pair in row_differences(old_row, new_row)
+        ]
+        excerpt_pairs.extend(
+            (truncate(row, 180), "（无对应文本）") for row in old_changed[paired_count:]
+        )
+        excerpt_pairs.extend(
+            ("（无对应文本）", truncate(row, 180)) for row in new_changed[paired_count:]
+        )
+        for old_excerpt, new_excerpt in excerpt_pairs:
+            findings.append(
+                TableRowChange(
+                    item=f"同位置候选文本差异 {len(findings) + 1}",
+                    old_value=old_excerpt,
+                    new_value=new_excerpt,
+                    change_type="需人工复核",
+                )
+            )
+    return findings or [
+        TableRowChange(
+            item="同位置候选内容",
+            old_value="同框候选原文请结合截图核对",
+            new_value="同框候选原文请结合截图核对",
+            change_type="需人工复核",
+        )
+    ]
+
+
+def _pair_locator_renumbered_table_geometry(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    page_pairs: dict[int, int],
+) -> None:
+    """Keep same-box uncaptioned candidates with exact or locator-only rows review-only."""
+
+    def candidates_by_box(tables, unused, page_number):
+        candidates: dict[tuple[float, float, float, float], int] = {}
+        indexes = [
+            index
+            for index in sorted(unused)
+            if tables[index].page_number == page_number
+        ]
+        if not indexes or any(
+            tables[index].title.strip()
+            or not _table_visual_has_valid_bbox(tables[index])
+            for index in indexes
+        ):
+            return None
+        for index in indexes:
+            key = tuple(round(float(value), 1) for value in tables[index].bbox)
+            if key in candidates:
+                return None  # 重复框不能提供唯一的一对一位置证据。
+            candidates[key] = index
+        return candidates
+
+    for old_page, new_page in sorted(page_pairs.items()):
+        old_by_box = candidates_by_box(old_tables, old_unused, old_page)
+        new_by_box = candidates_by_box(new_tables, new_unused, new_page)
+        if not old_by_box or not new_by_box:
+            continue
+        for box in sorted(old_by_box.keys() & new_by_box.keys()):
+            old_index = old_by_box[box]
+            new_index = new_by_box[box]
+            reason = _table_candidate_row_correspondence_reason(
+                old_tables[old_index],
+                new_tables[new_index],
+            )
+            if reason is None:
+                continue
+            old_unused.remove(old_index)
+            new_unused.remove(new_index)
+            groups.append(
+                _TableVisualGroup(
+                    (old_tables[old_index],),
+                    (new_tables[new_index],),
+                    review_only=True,
+                    review_reason=reason,
+                )
+            )
+
+
+def _pair_single_page_window_table_geometry(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    page_pairs: dict[int, int],
+) -> None:
+    """Keep a changed uncaptioned singleton visible as review, never as table add/delete."""
+
+    for old_page, new_page in sorted(page_pairs.items()):
+        old_indexes = [
+            index
+            for index in sorted(old_unused)
+            if old_tables[index].page_number == old_page
+        ]
+        new_indexes = [
+            index
+            for index in sorted(new_unused)
+            if new_tables[index].page_number == new_page
+        ]
+        if len(old_indexes) != 1 or len(new_indexes) != 1:
+            continue  # 多表页没有足够的单页定位信息来决定候选对应关系。
+        old_index, new_index = old_indexes[0], new_indexes[0]
+        old_table, new_table = old_tables[old_index], new_tables[new_index]
+        if (
+            old_table.title.strip()
+            or new_table.title.strip()
+            or len(old_table.row_texts) != 1
+            or len(new_table.row_texts) != 1
+            or not _table_visual_has_valid_bbox(old_table)
+            or not _table_visual_has_valid_bbox(new_table)
+        ):
+            continue
+        if tuple(round(float(value), 1) for value in old_table.bbox) != tuple(
+            round(float(value), 1) for value in new_table.bbox
+        ):
+            continue  # 只接受唯一且精确同框候选；近邻位置不足以指认单行表格。
+        old_fields = _table_row_fields(old_table.row_texts[0])
+        new_fields = _table_row_fields(new_table.row_texts[0])
+        old_identity = _table_row_relaxed_primary_identity(old_table.row_texts[0])
+        new_identity = _table_row_relaxed_primary_identity(new_table.row_texts[0])
+        if (
+            not old_identity
+            or old_identity != new_identity
+            or set(old_fields) != set(new_fields)
+        ):
+            continue  # 同一单行参数身份和字段结构缺一不可，且结果仍只进入复核。
+        old_unit = _first_table_field(old_fields, ("unit", "units"))
+        new_unit = _first_table_field(new_fields, ("unit", "units"))
+        if compact_inline(old_unit).casefold() != compact_inline(new_unit).casefold():
+            continue  # 单位变化会改变行语义，不能仅凭页窗位置将候选配在一起。
+        reason = _table_candidate_row_correspondence_reason(old_table, new_table)
+        if reason != "same-position-content-change":
+            continue
+        old_unused.remove(old_index)
+        new_unused.remove(new_index)
+        groups.append(
+            _TableVisualGroup(
+                (old_table,),
+                (new_table,),
+                review_only=True,
+                review_reason=reason,
+            )
+        )
 
 
 def _mutual_unique_non_crossing_table_pairs(
@@ -4829,6 +5792,394 @@ def _table_visual_caption_descriptor_key(table: TableVisual) -> str:
     if len(descriptor) < 12 or len(words) < 3:
         return ""  # “Parameters”一类短标题不足以越过章节上下文。
     return descriptor
+
+
+def _pair_unique_caption_core_multipart_groups(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    *,
+    old_sections: list[Section] | None,
+    new_sections: list[Section] | None,
+) -> None:
+    """Keep a localized table split/merge as one review candidate when captions share a unique core."""
+
+    def caption_tokens(table: TableVisual) -> tuple[str, ...]:
+        descriptor = _table_visual_caption_descriptor_key(table)
+        return tuple(re.findall(r"[a-z0-9]+|[\u3400-\u9fff]+", descriptor.casefold()))
+
+    def contains_core(words: tuple[str, ...], core: tuple[str, ...]) -> bool:
+        width = len(core)
+        return any(words[start : start + width] == core for start in range(len(words) - width + 1))
+
+    old_words = {index: caption_tokens(old_tables[index]) for index in sorted(old_unused)}
+    new_words = {index: caption_tokens(new_tables[index]) for index in sorted(new_unused)}
+    descriptors = tuple(old_words.values()) + tuple(new_words.values())
+    possible_cores: set[tuple[str, ...]] = set()
+    for words in descriptors:
+        for width in range(len(words), 3, -1):  # at least four ordered words are needed for a caption core.
+            possible_cores.update(
+                words[start : start + width]
+                for start in range(len(words) - width + 1)
+            )
+
+    mappings: dict[tuple[tuple[int, ...], tuple[int, ...]], tuple[str, ...]] = {}
+    for core in possible_cores:
+        old_indexes = tuple(
+            index for index, words in old_words.items() if contains_core(words, core)
+        )
+        new_indexes = tuple(
+            index for index, words in new_words.items() if contains_core(words, core)
+        )
+        if not (2 <= len(old_indexes) <= 3 and 2 <= len(new_indexes) <= 3):
+            continue  # 只处理小型局部拆分/合并；更宽的组保留单侧候选。
+        key = (old_indexes, new_indexes)
+        previous = mappings.get(key)
+        if previous is None or len(core) > len(previous):
+            mappings[key] = core
+    if len(mappings) != 1:
+        return  # 多种候选映射无法唯一确定时，不用共享词串强制分组。
+
+    (old_indexes, new_indexes), _core = next(iter(mappings.items()))
+    old_group = [old_tables[index] for index in old_indexes]
+    new_group = [new_tables[index] for index in new_indexes]
+    all_tables = [*old_group, *new_group]
+    if len({compact_inline(table.title).casefold() for table in all_tables}) != len(all_tables):
+        return  # 重复表题仍有歧义，即使抽取候选已局部去重也不猜身份。
+
+    old_contexts = {
+        _table_visual_section_context(table, old_sections or [])
+        for table in old_group
+    }
+    new_contexts = {
+        _table_visual_section_context(table, new_sections or [])
+        for table in new_group
+    }
+    old_strong_contexts = {
+        context
+        for context in old_contexts
+        if context
+        and not _table_context_is_page_fallback(context)
+        and not _table_context_is_weak_numeric_heading(context)
+    }
+    new_strong_contexts = {
+        context
+        for context in new_contexts
+        if context
+        and not _table_context_is_page_fallback(context)
+        and not _table_context_is_weak_numeric_heading(context)
+    }
+    if len(old_strong_contexts) != 1 or old_strong_contexts != new_strong_contexts:
+        return  # 至少需要一个唯一且两侧相同的强章节锚点。
+
+    old_pages = sorted({table.page_number for table in old_group})
+    new_pages = sorted({table.page_number for table in new_group})
+    if old_pages[-1] - old_pages[0] > 1 or new_pages[-1] - new_pages[0] > 1:
+        return  # 不跨越较长范围拼接同题表。
+
+    for index in old_indexes:
+        old_unused.remove(index)
+    for index in new_indexes:
+        new_unused.remove(index)
+    groups.append(
+        _TableVisualGroup(
+            tuple(old_group),
+            tuple(new_group),
+            review_only=True,
+            review_reason="descriptive-caption-multipart",
+        )
+    )  # 标题核心只授权收拢复核截图，不授权表格等价或逐行数据对应。
+
+
+def _table_context_is_weak_numeric_heading(context: str) -> bool:
+    """Recognize only a page-window context whose sole heading number looks like a line index."""
+
+    path = _table_context_number_path(context)
+    return bool(re.fullmatch(r"\d{3,}", path))
+
+
+def _captioned_table_adjacent_continuation_indexes(
+    tables: list[TableVisual],
+    unused: set[int],
+    caption_index: int,
+) -> tuple[int, ...]:
+    """Attach one same-schema, repeated-header page-edge continuation to its captioned table."""
+
+    captioned = tables[caption_index]
+    if (
+        not captioned.row_texts
+        or captioned.page_bbox is None
+        or not _table_visual_has_valid_bbox(captioned)
+    ):
+        return ()
+    page_x0, _page_top, page_x1, _page_bottom = captioned.page_bbox
+    page_width = page_x1 - page_x0
+    if page_width <= 0:
+        return ()
+    caption_x0 = (captioned.bbox[0] - page_x0) / page_width
+    caption_x1 = (captioned.bbox[2] - page_x0) / page_width
+    caption_width = caption_x1 - caption_x0
+    if caption_width <= 0:
+        return ()
+    boundary_rows = {
+        key
+        for row in captioned.row_texts
+        if (key := _table_row_pairing_key(row))
+    }
+    candidates: list[int] = []
+    for index in sorted(unused):
+        if index == caption_index:
+            continue
+        continuation = tables[index]
+        if not (
+            continuation.is_continuation
+            and not continuation.title.strip()
+            and continuation.table_number == captioned.table_number
+            and continuation.page_number == captioned.page_number + 1
+            and continuation.row_texts
+            and continuation.page_bbox is not None
+            and _table_visual_has_valid_bbox(continuation)
+        ):
+            continue
+        page_x0, page_top, page_x1, page_bottom = continuation.page_bbox
+        page_width = page_x1 - page_x0
+        page_height = page_bottom - page_top
+        if page_width <= 0 or page_height <= 0:
+            continue
+        top_gap = (continuation.bbox[1] - page_top) / page_height
+        if not 0.0 <= top_gap <= _TABLE_PAGE_EDGE_MAX_FRACTION:
+            continue
+        continuation_x0 = (continuation.bbox[0] - page_x0) / page_width
+        continuation_x1 = (continuation.bbox[2] - page_x0) / page_width
+        continuation_width = continuation_x1 - continuation_x0
+        overlap = max(
+            0.0,
+            min(caption_x1, continuation_x1) - max(caption_x0, continuation_x0),
+        )
+        if (
+            continuation_width <= 0
+            or overlap / min(caption_width, continuation_width) < 0.9
+            or min(caption_width, continuation_width) / max(caption_width, continuation_width) < 0.85
+        ):
+            continue
+        if _table_row_pairing_key(continuation.row_texts[0]) not in boundary_rows:
+            continue  # 页序号和同列位置仍不足；首行必须逐字重现已检测表格中的一行。
+        candidates.append(index)
+    return tuple(candidates) if len(candidates) == 1 else ()
+
+
+def _pair_unique_descriptive_caption_renumberings(
+    old_tables: list[TableVisual],
+    new_tables: list[TableVisual],
+    old_unused: set[int],
+    new_unused: set[int],
+    groups: list[_TableVisualGroup],
+    *,
+    old_sections: list[Section] | None,
+    new_sections: list[Section] | None,
+) -> None:
+    """Pair a unique, same-position table when revisions change numbering format.
+
+    Some documents change from flat table numbers (``Table 46``) to
+    chapter-prefixed numbers (``Table 6-10``). A long exact caption tail that
+    occurs once on each side, at the same page-relative table position, is a
+    strong table-identity anchor even when a two-anchor numbering-family shift
+    cannot be inferred. Incomplete row evidence remains review-only.
+    """
+
+    def number_token(table: TableVisual) -> str:
+        title = compact_inline(table.title)
+        match = _NUMBERED_TABLE_CAPTION_RE.match(title)
+        return normalize_table_number_dashes(match.group("number")) if match else ""
+
+    def normalized_bbox(table: TableVisual) -> tuple[float, float, float, float] | None:
+        if not _table_visual_has_valid_bbox(table) or table.page_bbox is None:
+            return None
+        try:
+            page_x0, page_top, page_x1, page_bottom = (
+                float(value) for value in table.page_bbox
+            )
+            x0, top, x1, bottom = (float(value) for value in table.bbox)
+        except (TypeError, ValueError):
+            return None
+        width = page_x1 - page_x0
+        height = page_bottom - page_top
+        if width <= 0 or height <= 0:
+            return None
+        return (
+            (x0 - page_x0) / width,
+            (top - page_top) / height,
+            (x1 - page_x0) / width,
+            (bottom - page_top) / height,
+        )
+
+    def overlap_ratio(
+        old_box: tuple[float, float, float, float],
+        new_box: tuple[float, float, float, float],
+    ) -> float:
+        left = max(old_box[0], new_box[0])
+        top = max(old_box[1], new_box[1])
+        right = min(old_box[2], new_box[2])
+        bottom = min(old_box[3], new_box[3])
+        intersection = max(0.0, right - left) * max(0.0, bottom - top)
+        old_area = max(0.0, old_box[2] - old_box[0]) * max(
+            0.0, old_box[3] - old_box[1]
+        )
+        new_area = max(0.0, new_box[2] - new_box[0]) * max(
+            0.0, new_box[3] - new_box[1]
+        )
+        union = old_area + new_area - intersection
+        return intersection / union if union > 0 else 0.0
+
+    old_by_descriptor: dict[str, list[int]] = {}
+    new_by_descriptor: dict[str, list[int]] = {}
+    for index in sorted(old_unused):
+        descriptor = _table_visual_caption_descriptor_key(old_tables[index])
+        if descriptor and number_token(old_tables[index]):
+            old_by_descriptor.setdefault(descriptor, []).append(index)
+    for index in sorted(new_unused):
+        descriptor = _table_visual_caption_descriptor_key(new_tables[index])
+        if descriptor and number_token(new_tables[index]):
+            new_by_descriptor.setdefault(descriptor, []).append(index)
+
+    for descriptor in sorted(old_by_descriptor.keys() & new_by_descriptor.keys()):
+        old_indexes = old_by_descriptor[descriptor]
+        new_indexes = new_by_descriptor[descriptor]
+        if len(old_indexes) != 1 or len(new_indexes) != 1:
+            continue  # 重复描述不足以区分同题表，不能按最近位置或序号猜配。
+        old_index, new_index = old_indexes[0], new_indexes[0]
+        old_table, new_table = old_tables[old_index], new_tables[new_index]
+        if (
+            old_index not in old_unused
+            or new_index not in new_unused
+            or number_token(old_table) == number_token(new_table)
+            or old_table.table_number != new_table.table_number
+        ):
+            continue
+        old_box = normalized_bbox(old_table)
+        new_box = normalized_bbox(new_table)
+        old_context = _table_visual_section_context(old_table, old_sections or [])
+        new_context = _table_visual_section_context(new_table, new_sections or [])
+        if old_box is None or new_box is None:
+            continue  # 缺少有限的页内几何时，唯一 caption 仍不足以确定它是同一表。
+        if overlap_ratio(old_box, new_box) < 0.72:
+            context_is_weak = bool(
+                not old_context
+                or not new_context
+                or _table_context_is_page_fallback(old_context)
+                or _table_context_is_page_fallback(new_context)
+                or _table_context_is_weak_numeric_heading(old_context)
+                or _table_context_is_weak_numeric_heading(new_context)
+            )
+            context_is_exact = bool(
+                old_context
+                and old_context == new_context
+                and not context_is_weak
+            )  # 相同的页眉/页脚或页窗回退线索不是章节锚点。
+            if not context_is_exact and not context_is_weak:
+                continue  # 两侧章节线索都明确且冲突时，唯一同题也不足以配对。
+            old_indexes = (
+                old_index,
+                *_captioned_table_adjacent_continuation_indexes(
+                    old_tables,
+                    old_unused,
+                    old_index,
+                ),
+            )
+            new_indexes = (
+                new_index,
+                *_captioned_table_adjacent_continuation_indexes(
+                    new_tables,
+                    new_unused,
+                    new_index,
+                ),
+            )
+            old_unused.remove(old_index)
+            new_unused.remove(new_index)
+            for index in old_indexes[1:]:
+                old_unused.remove(index)
+            for index in new_indexes[1:]:
+                new_unused.remove(index)
+            groups.append(
+                _TableVisualGroup(
+                    tuple(old_tables[index] for index in old_indexes),
+                    tuple(new_tables[index] for index in new_indexes),
+                    review_only=True,
+                    review_reason=(
+                        "descriptive-caption-same-section"
+                        if context_is_exact
+                        else "descriptive-caption-weak-context"
+                    ),
+                )
+            )  # 低重合只保留唯一同题候选；弱上下文不授权确定差异或行映射。
+            continue
+        if old_context and new_context and old_context != new_context:
+            old_path = _table_context_number_path(old_context)
+            new_path = _table_context_number_path(new_context)
+            if (
+                _table_context_is_page_fallback(old_context)
+                or _table_context_is_page_fallback(new_context)
+            ):
+                pass  # 物理页占位不是与另一侧技术章节相冲突的身份事实。
+            elif old_path and new_path:
+                old_parts = old_path.split(".")
+                new_parts = new_path.split(".")
+                shared_parts = 0
+                for old_part, new_part in zip(old_parts, new_parts):
+                    if old_part != new_part:
+                        break
+                    shared_parts += 1
+                if shared_parts < 2:
+                    continue  # 两侧章节证据若冲突且无共同父级，保留为单侧候选。
+            else:
+                continue  # 一侧只有物理页占位时不制造章节冲突；其它无号标题仍须相同。
+
+        old_unused.remove(old_index)
+        new_unused.remove(new_index)
+        rows_are_reviewable = bool(
+            old_table.row_texts
+            and new_table.row_texts
+            and old_table.row_alignment_reliable
+            and new_table.row_alignment_reliable
+            and old_table.content_fully_represented
+            and new_table.content_fully_represented
+            and old_table.data_rows_fully_represented
+            and new_table.data_rows_fully_represented
+        )
+        groups.append(
+            _TableVisualGroup(
+                (old_table,),
+                (new_table,),
+                review_only=not rows_are_reviewable,
+                review_reason=(
+                    "same-position-content-change" if not rows_are_reviewable else ""
+                ),
+            )
+        )
+
+
+def _table_context_is_page_fallback(context: str) -> bool:
+    """Recognize only an extractor placeholder that names a physical page."""
+
+    if context.startswith("number:fallback-content:"):
+        _path, separator, raw_title = context.partition("\x1ftitle:")
+        return bool(separator and _is_physical_page_fallback_title(raw_title))
+    if context.startswith("heading:"):
+        heading = context.removeprefix("heading:")
+        return _is_physical_page_fallback_title(heading) or heading in {
+            "运行页眉（坐标证据）",
+            "运行页脚（坐标证据）",
+        }
+    return False
+
+
+def _is_physical_page_fallback_title(value: str) -> bool:
+    candidate = compact_inline(value).casefold()
+    return bool(
+        re.fullmatch(r"(?:page\s*\d+|第\s*\d+\s*页)", candidate)
+    )
 
 
 def _table_visual_exact_caption_tail_key(table: TableVisual) -> str:
@@ -8309,6 +9660,8 @@ def _table_structured_diff_kind(old_row: str, new_row: str) -> str:
         return "需人工复核"
     if _table_rows_differ_only_by_numeric_internal_spacing(old_row, new_row):
         return "需人工复核"
+    if _table_rows_differ_only_by_whitespace(old_row, new_row):
+        return "需人工复核"
     if old_row and not new_row:
         return "旧表删除行"
     if new_row and not old_row:
@@ -8353,6 +9706,43 @@ def _table_rows_differ_only_by_numeric_internal_spacing(
                 or re.search(r"(?<=\d)\s+(?=\d)", new_value)
             )
         ):
+            return False
+        saw_spacing_difference = True
+    return saw_spacing_difference
+
+
+def _table_rows_differ_only_by_whitespace(old_row: str, new_row: str) -> bool:
+    """Keep token-boundary loss in a review row instead of calling it a change.
+
+    Some PDFs drop spaces at cell boundaries (for example ``Below 10 GHz`` /
+    ``Below10GHz``) or encode a space as a private-use glyph.  Removing all
+    whitespace is too permissive for equality, but it can safely establish
+    that the only visible discrepancy needs source review rather than a
+    confirmed table-value change.
+    """
+
+    if not old_row or not new_row:
+        return False
+    old_entries = _table_row_field_entries(old_row)
+    new_entries = _table_row_field_entries(new_row)
+    if len(old_entries) != len(new_entries) or not old_entries:
+        return False
+    saw_spacing_difference = False
+    for old_entry, new_entry in zip(old_entries, new_entries, strict=True):
+        if old_entry[:3] != new_entry[:3]:
+            return False
+        old_raw_value = old_entry[3]
+        new_raw_value = new_entry[3]
+        if old_raw_value == new_raw_value:
+            continue
+        old_value = old_raw_value.replace("\uf020", " ")
+        new_value = new_raw_value.replace("\uf020", " ")
+        if old_value == new_value:
+            saw_spacing_difference = True
+            continue
+        old_without_whitespace = re.sub(r"\s+", "", old_value)
+        new_without_whitespace = re.sub(r"\s+", "", new_value)
+        if old_without_whitespace != new_without_whitespace:
             return False
         saw_spacing_difference = True
     return saw_spacing_difference
@@ -10693,17 +12083,32 @@ def _reader_table_changes(
                 and row.change_type == "需人工复核"
             )
         )
-        # 行项目已由表格配对确定；只有完整旧/新值在引用中和后相等时才删除该行。
+        # 位置候选的逐字差异受上游整行关系判定保护；不能把每个单独的 locator
+        # 片段各自归一后删除，否则不一致的 Figure/Table 位移会让整张复核卡消失。
         reference_filtered_rows = tuple(
             row
             for row in row_changes
-            if not _reader_values_match_after_locator_renumbering(
-                row.old_value,
-                row.new_value,
-            )
-            and not (
-                change.old_tables and change.new_tables
-                and cosmetic_content_equal(row.old_value, row.new_value, cell_wrap=True, context=' '.join([row.item, *(table.title for table in (*change.old_tables, *change.new_tables))]))
+            if (
+                row.item.startswith("同位置候选文本差异 ")
+                or row.item == "同位置候选提取文本"
+                or (
+                    not _reader_values_match_after_locator_renumbering(
+                        row.old_value,
+                        row.new_value,
+                    )
+                    and not (
+                        change.old_tables and change.new_tables
+                        and cosmetic_content_equal(
+                            row.old_value,
+                            row.new_value,
+                            cell_wrap=True,
+                            context=" ".join([
+                                row.item,
+                                *(table.title for table in (*change.old_tables, *change.new_tables)),
+                            ]),
+                        )
+                    )
+                )
             )
         )
         reference_only_suppressed = bool(row_changes) and not reference_filtered_rows
@@ -10836,6 +12241,17 @@ def _reader_section_change(
                          audit_removed_snippets=audit_removed if change.audit_removed_snippets is not None else None,
                          audit_added_snippets=audit_added if change.audit_added_snippets is not None else None,
                          audit_replaced_snippets=audit_pairs if change.audit_replaced_snippets is not None else None)
+    if (
+        change.change_type != "review"
+        and _section_change_is_window_boundary_prelude(change)
+    ):
+        change = replace(
+            change,
+            change_type="review",
+            review_reason=(
+                "页窗起点的前序文本缺少双侧章节/段落身份对应；保留原文供核对，不确认新增或删除。"
+            ),
+        )
     # 用户排除了全文邮箱；仅变地址的片段消失，混合句仍保留其要求、数值和条件。
     def email_free_values(values):
         return [cleaned for value in values if (cleaned := neutral_email_text(value))]
@@ -10935,6 +12351,15 @@ def _reader_section_change(
     change = _reader_change_without_range_placeholder_heading(change)
     if change is None:
         return None
+    if any(figure_visual_sides) and _reader_section_has_unverified_private_glyph(change):
+        return replace(
+            change,
+            change_type="review",
+            review_reason=(
+                "同页含已配对图形且正文差异包含未映射的私用字形；"
+                "保留原文供核对，不确认公式或图中文字变化。"
+            ),
+        )
     if change.review_replaced_snippets:
         return _reader_repair_duplicate_scientific_operators(change)
     if _reader_change_is_layout_reorder_only(change):
@@ -11129,6 +12554,42 @@ def _reader_repair_duplicate_scientific_operators(
             for pair in change.review_replaced_snippets
         ],
     )
+
+
+def _section_change_is_window_boundary_prelude(change: SectionChange) -> bool:
+    """Return whether a one-sided fact is merely text before the selected-window section."""
+
+    return bool(
+        change.report_location == "范围起始页前序内容"
+        or any(
+            section is not None and section.location == "范围起始页前序内容"
+            for section in (change.old_section, change.new_section)
+        )
+    )
+
+
+def _reader_section_has_unverified_private_glyph(change: SectionChange) -> bool:
+    """Keep PUA changes on figure-bearing pages review-only without glyph proof."""
+
+    values = [
+        *(
+            change.audit_added_snippets
+            if change.audit_added_snippets is not None
+            else change.added_snippets
+        ),
+        *(
+            change.audit_removed_snippets
+            if change.audit_removed_snippets is not None
+            else change.removed_snippets
+        ),
+    ]
+    pairs = (
+        change.audit_replaced_snippets
+        if change.audit_replaced_snippets is not None
+        else change.replaced_snippets
+    )
+    values.extend(value for pair in pairs for value in (pair.old, pair.new))
+    return any(re.search(r"[\ue000-\uf8ff]", value) for value in values)
 
 
 def _reader_change_without_unreadable_singletons(
@@ -14944,6 +16405,8 @@ def _extraction_audit_to_dict(
             "visual_noise_bbox_count": page_audit.visual_noise_bbox_count,
             **({"running_footer_texts": page_audit.running_footer_texts}
                if getattr(page_audit, "running_footer_texts", ()) else {}),
+            **({"page_identity_header_texts": page_audit.page_identity_header_texts}
+               if getattr(page_audit, "page_identity_header_texts", ()) else {}),
             **({"blank_glyph_evidence": page_audit.blank_glyph_evidence}
                if getattr(page_audit, "blank_glyph_evidence", ()) else {}),
         }
@@ -14978,6 +16441,11 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
                 "excluded_region_count": visual_audit.excluded_region_count,
                 "complete": visual_audit.complete,
                 "source_hashes_match": visual_audit.source_hashes_match,
+                "identical_body_page_pairs": [
+                    [old_page, new_page]
+                    for old_page, new_page in visual_audit.identical_body_page_pairs
+                ],
+                "identity_render_dpi": visual_audit.identity_render_dpi,
                 "old_visual_source_sha256": visual_audit.old_visual_source_sha256,
                 "new_visual_source_sha256": visual_audit.new_visual_source_sha256,
                 "coverage_issues": [
@@ -15140,6 +16608,7 @@ def _change_to_dict(
     change: SectionChange,
     *,
     display_change: SectionChange | None = None,
+    role_override: str | None = None,
 ) -> dict[str, object]:
     """Serialize raw audit facts plus one reader-safe display projection."""
 
@@ -15150,7 +16619,7 @@ def _change_to_dict(
     return {
         "change_type": change.change_type,
         "change_label": _CHANGE_LABELS.get(change.change_type, change.change_type),
-        "role": change.role,
+        "role": role_override or change.role,
         "report_location": change.report_location,
         "display_report_location": _display_change_location(change),
         "old_location": change.old_section.location if change.old_section else None,
@@ -15276,6 +16745,57 @@ def _table_change_to_dict(change: TableChange) -> dict[str, object]:
             for row in change.row_changes
         ],
     }
+
+
+def _table_change_audit_to_dict(
+    change: TableChange,
+    *,
+    reader_card_id: str | None,
+    appendix_card_id: str | None,
+    suppression_reason: str | None,
+) -> dict[str, object]:
+    """Serialize raw table findings without presenting suppressed candidates as facts."""
+
+    payload = _table_change_to_dict(change)
+    payload.update(
+        {
+            "reader_card_id": reader_card_id,
+            "appendix_card_id": appendix_card_id,
+            "reader_suppression_reason": suppression_reason,
+        }
+    )
+    if not suppression_reason or reader_card_id or appendix_card_id:
+        return payload
+
+    row_changes = payload["row_changes"]
+    if not isinstance(row_changes, list) or any(
+        not isinstance(row, dict) for row in row_changes
+    ):
+        return payload  # 未知行结构保持原样；安全分类不能以丢弃审计内容为代价。
+
+    payload["raw_candidate_change_type"] = payload["change_type"]
+    payload["raw_candidate_change_label"] = payload["change_label"]
+    payload["raw_candidate_row_change_count"] = payload["row_change_count"]
+    payload["raw_candidate_review_count"] = payload["review_count"]
+
+    safe_rows: list[dict[str, object]] = []
+    for row in row_changes:
+        safe_row = dict(row)
+        safe_row["raw_candidate_change_type"] = safe_row["change_type"]
+        safe_row["change_type"] = "需人工复核"
+        safe_rows.append(safe_row)
+
+    payload.update(
+        {
+            "change_type": "review",
+            "change_label": _CHANGE_LABELS["review"],
+            "row_change_count": 0,
+            "review_count": len(safe_rows),
+            "row_changes": safe_rows,
+            "reader_disposition": "suppressed",
+        }
+    )
+    return payload
 
 
 def _section_to_dict(section: Section) -> dict[str, object]:

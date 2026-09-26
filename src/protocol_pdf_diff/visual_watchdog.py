@@ -34,6 +34,7 @@ from .text_utils import compact_inline
 from .visual_preview import full_width_preview_bbox, render_material_diff_preview
 
 VISUAL_RENDER_DPI = 96
+VISUAL_IDENTITY_RENDER_DPI = 144
 VISUAL_PIXEL_DELTA_THRESHOLD = 28
 # A material connected component is sufficient evidence. The whole-page ratio
 # remains an audit metric, not a second gate that can erase one small symbol.
@@ -62,6 +63,13 @@ def detect_visual_review_items(
     ) = _provable_exact_text_pairs(
         old_extraction,
         new_extraction,
+    )
+    eligible_page_pairs, unmatched_old_pages, unmatched_new_pages = _bridge_one_window_gap(
+        old_extraction,
+        new_extraction,
+        eligible_page_pairs,
+        unmatched_old_pages,
+        unmatched_new_pages,
     )
     covered_old_pages, covered_new_pages = (
         _reader_visible_semantic_change_pages(semantic_result)
@@ -138,6 +146,7 @@ def detect_visual_review_items(
     checked_page_pair_count = 0
     failed_page_pair_count = 0
     excluded_region_count = 0
+    identical_body_page_pairs: list[tuple[int, int]] = []
     try:
         old_snapshot, old_visual_sha = _snapshot_pdf(Path(old_extraction.pdf_path))
         new_snapshot, new_visual_sha = _snapshot_pdf(Path(new_extraction.pdf_path))
@@ -191,18 +200,6 @@ def detect_visual_review_items(
                     f"旧第 {old_page_number} / 新第 {new_page_number} 页：{layout_reason}"
                 )
                 continue
-            if alignment_method == "reader-equivalent-text":
-                failed_page_pair_count += 1
-                coverage_issues.append(VisualCoverageIssue(old_page_number, new_page_number,
-                    "引用编号发生变化，但缺少逐字符坐标，不能安全排除编号区域。", "locator"))
-                processed_pairs.add((old_page_number, new_page_number))
-                warnings.append(
-                    "视觉漏检哨兵未生成像素差异卡："
-                    f"旧第 {old_page_number} / 新第 {new_page_number} 页仅含纯引用编号变化，"
-                    "但当前抽取证据只有整行边界框、没有逐字符编号坐标；为避免吞掉"
-                    "同一行内的真实小图形，本页视觉覆盖按未完成处理。"
-                )
-                continue
             old_excluded = (
                 *old_page.visual_noise_bboxes,
                 *old_evidence.get(old_page_number, ()),
@@ -213,6 +210,45 @@ def detect_visual_review_items(
             )
             excluded_region_count += len(old_excluded) + len(new_excluded)
             try:
+                old_identity_image = _render_page(
+                    old_document,
+                    old_page_number,
+                    dpi=VISUAL_IDENTITY_RENDER_DPI,
+                )
+                new_identity_image = _render_page(
+                    new_document,
+                    new_page_number,
+                    dpi=VISUAL_IDENTITY_RENDER_DPI,
+                )
+                if _body_page_rasters_are_identical(
+                    old_identity_image,
+                    new_identity_image,
+                    old_page_bbox=old_page.page_bbox,
+                    new_page_bbox=new_page.page_bbox,
+                    old_noise_bboxes=old_page.page_identity_noise_bboxes,
+                    new_noise_bboxes=new_page.page_identity_noise_bboxes,
+                ) and _native_page_body_text_is_exact(old_page, new_page):
+                    identical_body_page_pairs.append(
+                        (old_page_number, new_page_number)
+                    )
+                    checked_page_pair_count += 1
+                    processed_pairs.add((old_page_number, new_page_number))
+                    continue
+                if alignment_method == "reader-equivalent-text":
+                    failed_page_pair_count += 1
+                    coverage_issues.append(VisualCoverageIssue(
+                        old_page_number,
+                        new_page_number,
+                        "引用编号发生变化，且高分辨率原页正文并非逐像素一致；缺少逐字符编号坐标，不能安全解释这处视觉差异。",
+                        "locator",
+                    ))
+                    processed_pairs.add((old_page_number, new_page_number))
+                    warnings.append(
+                        "视觉漏检哨兵未生成像素差异卡："
+                        f"旧第 {old_page_number} / 新第 {new_page_number} 页包含读者等价的编号变化，"
+                        "但没有高分辨率原页正文完全相同的证据，也没有逐字符编号坐标；保留人工复核状态。"
+                    )
+                    continue
                 old_image = _render_page(old_document, old_page_number)
                 new_image = _render_page(new_document, new_page_number)
                 item = _compare_page_images(
@@ -286,7 +322,135 @@ def detect_visual_review_items(
         old_visual_source_sha256=old_visual_sha,
         new_visual_source_sha256=new_visual_sha,
         coverage_issues=tuple(coverage_issues),
+        identical_body_page_pairs=tuple(identical_body_page_pairs),
+        identity_render_dpi=VISUAL_IDENTITY_RENDER_DPI,
     )
+
+
+def _bridge_one_window_gap(
+    old_extraction: ExtractionResult,
+    new_extraction: ExtractionResult,
+    pairs: list[tuple[int, int, str]],
+    unmatched_old_pages: tuple[int, ...],
+    unmatched_new_pages: tuple[int, ...],
+) -> tuple[list[tuple[int, int, str]], tuple[int, ...], tuple[int, ...]]:
+    """Propose a page pair for one OCR gap bracketed by exact neighboring pages.
+
+    The source images are still checked before the pair can count as equal.  This
+    bridge only supplies a candidate address: both windows must have explicit,
+    equal lengths; all unique text pairs must preserve the same relative index;
+    and the one unmatched page on each side must occupy the same interior index
+    with an exact mapped neighbor on both sides.
+    """
+
+    old_pages = list(old_extraction.pages)
+    new_pages = list(new_extraction.pages)
+    if (
+        not old_pages
+        or len(old_pages) != len(new_pages)
+        or old_extraction.selected_start_page is None
+        or old_extraction.selected_end_page is None
+        or new_extraction.selected_start_page is None
+        or new_extraction.selected_end_page is None
+        or old_extraction.selected_end_page - old_extraction.selected_start_page + 1 != len(old_pages)
+        or new_extraction.selected_end_page - new_extraction.selected_start_page + 1 != len(new_pages)
+        or len(unmatched_old_pages) != 1
+        or len(unmatched_new_pages) != 1
+    ):
+        return pairs, unmatched_old_pages, unmatched_new_pages
+
+    old_index_by_page = {page.page_number: index for index, page in enumerate(old_pages)}
+    new_index_by_page = {page.page_number: index for index, page in enumerate(new_pages)}
+    try:
+        old_gap = old_index_by_page[unmatched_old_pages[0]]
+        new_gap = new_index_by_page[unmatched_new_pages[0]]
+    except KeyError:
+        return pairs, unmatched_old_pages, unmatched_new_pages
+    if old_gap != new_gap or old_gap == 0 or old_gap == len(old_pages) - 1:
+        return pairs, unmatched_old_pages, unmatched_new_pages
+    if not any(
+        page.ocr_used or page.image_dominant
+        for page in (old_pages[old_gap], new_pages[new_gap])
+    ):
+        return pairs, unmatched_old_pages, unmatched_new_pages
+
+    paired_indexes = set()
+    for old_number, new_number, _method in pairs:
+        old_index = old_index_by_page.get(old_number)
+        new_index = new_index_by_page.get(new_number)
+        if old_index is None or new_index is None or old_index != new_index:
+            return pairs, unmatched_old_pages, unmatched_new_pages
+        paired_indexes.add(old_index)
+    if old_gap - 1 not in paired_indexes or old_gap + 1 not in paired_indexes:
+        return pairs, unmatched_old_pages, unmatched_new_pages
+
+    bridged = [
+        *pairs,
+        (
+            old_pages[old_gap].page_number,
+            new_pages[new_gap].page_number,
+            "same-window-gap-bridge",
+        ),
+    ]
+    bridged.sort(key=lambda pair: (pair[0], pair[1]))
+    return bridged, (), ()
+
+
+def _body_page_rasters_are_identical(
+    old_image: Image.Image,
+    new_image: Image.Image,
+    *,
+    old_page_bbox: tuple[float, float, float, float] | None,
+    new_page_bbox: tuple[float, float, float, float] | None,
+    old_noise_bboxes: tuple[tuple[float, float, float, float], ...],
+    new_noise_bboxes: tuple[tuple[float, float, float, float], ...],
+) -> bool:
+    """Require exact high-resolution pixels outside source-proven page furniture."""
+
+    if (
+        old_page_bbox is None
+        or new_page_bbox is None
+        or old_page_bbox != new_page_bbox
+        or old_image.size != new_image.size
+    ):
+        return False
+    old_array = np.asarray(old_image.convert("RGB"))
+    new_array = np.asarray(new_image.convert("RGB"))
+    if old_array.shape != new_array.shape:
+        return False
+    visible = np.ones(old_array.shape[:2], dtype=np.uint8)
+    _clear_excluded_regions(
+        visible,
+        old_noise_bboxes,
+        page_bbox=old_page_bbox,
+        source_size=old_image.size,
+    )
+    _clear_excluded_regions(
+        visible,
+        new_noise_bboxes,
+        page_bbox=new_page_bbox,
+        source_size=new_image.size,
+    )
+    keep = visible.astype(bool)
+    return bool(keep.any() and np.array_equal(old_array[keep], new_array[keep]))
+
+
+def _native_page_body_text_is_exact(old_page: PageText, new_page: PageText) -> bool:
+    """Keep invisible text-layer changes from being erased by a pixel match."""
+
+    def body_blocks(page: PageText) -> tuple[str, ...]:
+        return tuple(
+            " ".join(block.text.split())
+            for block in page.blocks
+            if block.kind is DocumentBlockKind.TEXT
+            and block.text.strip()
+            and not any(
+                _bboxes_intersect(block.bbox, noise_bbox)
+                for noise_bbox in page.page_identity_noise_bboxes
+            )
+        )
+
+    return body_blocks(old_page) == body_blocks(new_page)
 
 
 def _snapshot_pdf(path: Path) -> tuple[BinaryIO, str]:

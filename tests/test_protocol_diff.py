@@ -2298,8 +2298,28 @@ class ProtocolDiffTests(unittest.TestCase):
             "表格行: T1 | Column 1=Note: required for mode A | Column 2=",
             "表格行: T1 | Column 1= | Column 2=20 mV",
         ]
+        implementation_note_box_rows = [
+            "表格行: T1 | Column 1=IMPLEMENTATION NOTE",
+            "表格行: T1 | Column 1=PCI Express Slot Requirements",
+            "表格行: T1 | Column 1=The 75 W slot requirements are defined in this specification.",
+            "表格行: T1 | Column 1=150 W / 225 W / 300 W add-in cards must accommodate the voltage variation.",
+        ]
+        split_heading_note_box_rows = [
+            "表格行: T1 | Column 1= | Column 2=IMPLEMENTATION NOTE",
+            "表格行: T1 | Column 1=Power, Thermal Mechanical, and Labeling Considerations | Column 2=",
+            "表格行: T1 | Column 1=Implementers should pay special attention to the following: | Column 2=",
+            "表格行: T1 | Column 1=After a card is reset, the initial slot power limit may change. | Column 2=",
+        ]
 
         self.assertTrue(_should_skip_detected_table("", split_note_rows))
+        self.assertTrue(
+            _should_skip_detected_table("", implementation_note_box_rows),
+            "single-column Implementation Note callouts must remain prose, not added tables",
+        )
+        self.assertTrue(
+            _should_skip_detected_table("", split_heading_note_box_rows),
+            "a one-cell note heading may occupy a separate icon column while body rows remain prose",
+        )
         self.assertTrue(_should_skip_detected_table("Notes", title_led_note_rows))
         self.assertFalse(_should_skip_detected_table("", real_single_column_rows))
         self.assertFalse(_should_skip_detected_table("", sparse_real_table_rows))
@@ -6735,6 +6755,36 @@ class ProtocolDiffTests(unittest.TestCase):
             html = outputs["html"].read_text(encoding="utf-8")
             markdown = outputs["markdown"].read_text(encoding="utf-8")
             text_report = outputs["text"].read_text(encoding="utf-8")
+            payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
+
+        table_audit = next(
+            change
+            for change in payload["table_changes"]
+            if any("Table 31-4" in title for title in change["old_titles"])
+        )
+        audit_rows = {row["item"]: row for row in table_audit["row_changes"]}
+        for item, value, condition in (
+            ("JH4u", "0.118 UI", "31.3.13"),
+            ("EOJ03", "0.025 UI", "31.3.13"),
+        ):
+            self.assertEqual("需人工复核", audit_rows[item]["change_type"])
+            self.assertIn(value, audit_rows[item]["old_value"])
+            self.assertIn(value, audit_rows[item]["new_value"])
+            self.assertIn(condition, audit_rows[item]["old_value"])
+            self.assertIn("31.3.14", audit_rows[item]["new_value"])
+
+        reader_table_audit = json.dumps(
+            payload["content_table_changes"],
+            ensure_ascii=False,
+        )
+        self.assertNotIn("JH4u", reader_table_audit)
+        self.assertNotIn("EOJ03", reader_table_audit)
+        table_html = html.split(
+            '<section class="table-visuals" id="table-changes">',
+            1,
+        )[1].split("</section>", 1)[0]
+        self.assertIn("Table 31-4.", table_html)
+        self.assertGreaterEqual(table_html.count("<img"), 2)
 
         for kind, rendered in {
             "html": html,
@@ -6742,6 +6792,7 @@ class ProtocolDiffTests(unittest.TestCase):
             "text": text_report,
         }.items():
             with self.subTest(kind=kind):
+                self.assertIn("Table 31-4.", rendered)
                 self.assertNotIn("JH - 0.118 UI 4u", rendered)
                 self.assertNotIn("EOJ - 0.025 UI 03", rendered)
                 # Rows whose only change is a section-reference renumber are
@@ -6749,6 +6800,8 @@ class ProtocolDiffTests(unittest.TestCase):
                 # raw extraction above still proves that the symbols were
                 # reconstructed without split fragments.
                 self.assertIn("Output Enabled", rendered)
+                self.assertNotIn("JH4u", rendered)
+                self.assertNotIn("EOJ03", rendered)
 
     @unittest.skipUnless(
         Path("/Users/mac/Documents/文件对比工具/oif2024.532.04.pdf").is_file()
@@ -7290,15 +7343,38 @@ class ProtocolDiffTests(unittest.TestCase):
         "本地 OIF 058 双版本样本不存在",
     )
     def test_real_058_table_renumbering_has_one_contextual_sentence(self) -> None:
-        """Table 32-9/10 renumbering stays inside its complete explanatory sentence."""
+        """Table 32-9/10 renumbering stays in its source sentence without gutter fragments."""
+
+        import pymupdf
+
+        old_path = Path("/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf")
+        new_path = Path("/Users/mac/Documents/文件对比工具/oif2024.058.13.pdf")
+        with pymupdf.open(old_path) as document:
+            old_source = re.sub(r"\s+", " ", document[17].get_text("text"))
+        with pymupdf.open(new_path) as document:
+            new_source = re.sub(r"\s+", " ", document[17].get_text("text"))
+
+        self.assertIn(
+            "Further receiver electrical requirements at test point R",
+            old_source,
+        )
+        self.assertIn(
+            "specified in Table 32-9, with the receiver interference tolerance parameters specified in Table 32-10",
+            old_source,
+        )
+        self.assertIn(
+            "specified in Table 32-7, with the receiver interference tolerance parameters specified in Table 32-8",
+            new_source,
+        )
+        self.assertNotIn("9 10 Table 32-7.", new_source)
 
         old_extraction = extract_pdf_text(
-            "/Users/mac/Documents/文件对比工具/oif2024.058.11.pdf",
+            old_path,
             start_page=18,
             end_page=18,
         )
         new_extraction = extract_pdf_text(
-            "/Users/mac/Documents/文件对比工具/oif2024.058.13.pdf",
+            new_path,
             start_page=18,
             end_page=18,
         )
@@ -7324,9 +7400,11 @@ class ProtocolDiffTests(unittest.TestCase):
             for change in result.changes
             for snippet in (*change.added_snippets, *change.removed_snippets)
         ]
-        self.assertFalse(
-            any(snippet == "9 10 Table 32-7." for snippet in raw_single_side)
-        )  # 该拆分表题由表格证据承载，不再作为正文片段重复发布。
+        self.assertFalse(any("9 10 Table 32-7." in snippet for snippet in raw_single_side))
+        self.assertTrue(
+            any("Table 32-7" in table.title for table in new_extraction.table_visuals),
+            [table.title for table in new_extraction.table_visuals],
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, DiffOptions())
@@ -7336,11 +7414,27 @@ class ProtocolDiffTests(unittest.TestCase):
             }
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
         self.assertFalse(
-            any("9 10 Table 32-7." in change["added_snippets"] for change in payload["changes"])
+            any(
+                "9 10 Table 32-7." in snippet
+                for change in payload["changes"]
+                for snippet in (*change["added_snippets"], *change["removed_snippets"])
+            )
         )
+        contextual_audit = [
+            pair
+            for change in payload["changes"]
+            for pair in change["replaced_snippets"]
+            if "Further receiver electrical requirements" in pair["old"]
+        ]
+        self.assertEqual(1, len(contextual_audit))
+        self.assertIn("Table 32-9", contextual_audit[0]["old"])
+        self.assertIn("Table 32-10", contextual_audit[0]["old"])
+        self.assertIn("Table 32-7", contextual_audit[0]["new"])
+        self.assertIn("Table 32-8", contextual_audit[0]["new"])
         for kind, rendered in rendered_reports.items():
             with self.subTest(kind=kind):
                 self.assertNotIn("9 10 Table 32-7.", rendered)
+                self.assertNotIn("Further receiver electrical requirements", rendered)
         self.assertEqual(
             0,
             rendered_reports["html"].count("Further receiver electrical requirements"),
@@ -12358,6 +12452,278 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertIn("NRZ", change.replaced_snippets[0].new)
         self.assertEqual(["The limit is 20 mV."], change.added_snippets)
         self.assertFalse(change.removed_snippets)
+
+    def test_primary_section_pairing_preserves_document_order(self) -> None:
+        """Two swapped boilerplate-like clauses cannot both be cross-paired."""
+        from itertools import pairwise
+
+        def section(section_id: str, number: str, title: str, body: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        shared_boilerplate = (
+            "The receiver and transmitter interface preserves the declared sampling "
+            "reference and measured electrical transfer response. "
+        ) * 18
+        alpha_old_body = shared_boilerplate + "Legacy alpha calibration result remains available."
+        alpha_new_body = shared_boilerplate + "Updated alpha calibration result remains available."
+        beta_old_body = shared_boilerplate + "Legacy beta timing result remains available."
+        beta_new_body = shared_boilerplate + "Updated beta timing result remains available."
+        anchor_a = "A stable introductory clause anchors the comparison."
+        anchor_b = "A stable closing clause anchors the comparison."
+        old_sections = [
+            section("old-a", "0", "Anchor A", anchor_a),
+            section("old-alpha", "1.1", "Alpha Calibration", alpha_old_body),
+            section("old-beta", "1.2", "Beta Timing", beta_old_body),
+            section("old-b", "9", "Anchor B", anchor_b),
+        ]
+        new_sections = [
+            section("new-a", "0", "Anchor A", anchor_a),
+            section("new-beta", "2.1", "Beta Timing", beta_new_body),
+            section("new-alpha", "2.2", "Alpha Calibration", alpha_new_body),
+            section("new-b", "9", "Anchor B", anchor_b),
+        ]
+
+        matches = compare_module._match_sections(old_sections, new_sections, DiffOptions())
+        pairs = sorted(
+            (old_index, new_index)
+            for old_index, new_index, _score, _basis in matches
+            if old_index is not None and new_index is not None
+        )
+
+        self.assertIn((0, 0), pairs)
+        self.assertIn((3, 3), pairs)
+        self.assertEqual([(0, 0), (3, 3)], pairs)
+        self.assertEqual(
+            pairs,
+            sorted(pairs, key=lambda pair: (pair[0], pair[1])),
+        )
+        self.assertTrue(
+            all(left[1] < right[1] for left, right in pairwise(pairs)),
+            f"matched sections crossed in document order: {pairs}",
+        )
+        self.assertEqual(2, sum(old is None for old, _new, _score, _basis in matches))
+        self.assertEqual(2, sum(new is None for _old, new, _score, _basis in matches))
+
+    def test_unique_exact_body_anchor_preserves_an_actual_section_move(self) -> None:
+        """Exact unique prose can identify a moved section outside the monotonic lane."""
+
+        def section(section_id: str, number: str, title: str, body: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=body,
+            )
+
+        body_a = (
+            "The receiver calibration shall preserve the declared sampling "
+            "reference and measured transfer response. "
+        ) * 8
+        body_b = (
+            "The transmitter timing shall preserve the declared recovery "
+            "marker and measured launch interval. "
+        ) * 8
+        old_sections = [
+            section("old-a", "1.1", "Receiver Calibration", body_a),
+            section("old-b", "1.2", "Transmitter Timing", body_b),
+        ]
+        new_sections = [
+            section("new-b", "3.1", "Transmitter Timing", body_b),
+            section("new-a", "3.2", "Receiver Calibration", body_a),
+        ]
+
+        matches = compare_module._match_sections(old_sections, new_sections, DiffOptions())
+        pairs = [
+            (old_index, new_index, basis)
+            for old_index, new_index, _score, basis in matches
+            if old_index is not None and new_index is not None
+        ]
+
+        self.assertEqual([(0, 1), (1, 0)], [(old, new) for old, new, _basis in pairs])
+        self.assertTrue(all(basis == "unique_body_move_anchor" for _old, _new, basis in pairs))
+
+    def test_sparse_monotonic_solver_matches_independent_small_oracle(self) -> None:
+        """A brute-force subset oracle checks the sparse maximum-weight path."""
+
+        from itertools import combinations, pairwise
+
+        candidates = [
+            (0.91, 0, 0, "candidate"),
+            (0.75, 0, 2, "candidate"),
+            (0.85, 1, 1, "candidate"),
+            (0.74, 1, 3, "candidate"),
+            (0.90, 2, 2, "candidate"),
+            (0.78, 2, 4, "candidate"),
+            (0.88, 3, 3, "candidate"),
+            (0.93, 4, 4, "candidate"),
+        ]
+        selected = compare_module._select_monotonic_section_candidates(candidates, [])
+
+        valid_objectives: list[tuple[float, int]] = []
+        for size in range(len(candidates) + 1):
+            for subset in combinations(candidates, size):
+                ordered = sorted(subset, key=lambda candidate: candidate[1])
+                old_indexes = [candidate[1] for candidate in ordered]
+                new_indexes = [candidate[2] for candidate in ordered]
+                if len(set(old_indexes)) != len(old_indexes):
+                    continue
+                if len(set(new_indexes)) != len(new_indexes):
+                    continue
+                if any(
+                    left >= right
+                    for left, right in pairwise(new_indexes)
+                ):
+                    continue
+                gain = sum(max(candidate[0] - 0.72, 0.0) for candidate in subset)
+                valid_objectives.append((gain, len(subset)))
+
+        best_gain, best_count = max(valid_objectives)
+        self.assertAlmostEqual(
+            best_gain,
+            sum(max(candidate[0] - 0.72, 0.0) for candidate in selected),
+        )
+        self.assertEqual(best_count, len(selected))
+        self.assertEqual(
+            [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)],
+            [(candidate[1], candidate[2]) for candidate in selected],
+        )
+
+    def test_sparse_monotonic_solver_respects_fixed_matches(self) -> None:
+        """A new candidate cannot jump across an already trusted anchor."""
+
+        fixed = [(1, 1, 0.99, "similarity_exact")]
+        candidates = [
+            (0.8, 0, 0, "before"),
+            (1.0, 0, 2, "crosses-fixed-anchor"),
+            (0.7, 2, 2, "after"),
+            (0.9, 2, 0, "crosses-fixed-anchor"),
+        ]
+
+        selected = compare_module._select_monotonic_section_candidates(
+            candidates,
+            fixed,
+        )
+
+        self.assertEqual([(0, 0), (2, 2)], [(candidate[1], candidate[2]) for candidate in selected])
+
+    def test_monotonic_solver_leaves_mutually_best_crossings_unmatched(self) -> None:
+        """Strong opposite content choices cannot be replaced by weaker templates."""
+
+        candidates = [
+            (0.999, 0, 1, "strong-content-match"),
+            (0.999, 1, 0, "strong-content-match"),
+            (0.813, 0, 0, "marginal-template-match"),
+            (0.813, 1, 1, "marginal-template-match"),
+        ]
+
+        selected = compare_module._select_monotonic_section_candidates(
+            candidates,
+            [],
+            minimum_similarity=0.72,
+        )
+
+        self.assertEqual([], selected)
+
+    def test_late_rescue_crossing_is_explicitly_marked_for_review(self) -> None:
+        """A crossing first found by a later rescue cannot become confirmed add/delete."""
+
+        def section(section_id: str, number: str, title: str, table_token: str) -> Section:
+            heading = f"{number} {title}"
+            return Section(
+                section_id=section_id,
+                heading=heading,
+                title=title,
+                level=2,
+                heading_path=(heading,),
+                number_path=(number,),
+                start_page=1,
+                end_page=1,
+                body=(
+                    f"The {title} procedure shall remain stable across each supported revision.\n"
+                    + (f"{table_token} " * 100)
+                ),
+            )
+
+        old_sections = [
+            section("old-a", "1", "Alpha", "OLDALPHA"),
+            section("old-b", "2", "Beta", "OLDBETA"),
+        ]
+        new_sections = [
+            section("new-b", "3", "Beta", "NEWBETA"),
+            section("new-a", "4", "Alpha", "NEWALPHA"),
+        ]
+
+        def table_unit_keys(sections: list[Section]) -> set[str]:
+            return {
+                compare_module._review_unit_key(unit)
+                for section_item in sections
+                for unit in compare_module._paragraph_review_units(
+                    section_item.body,
+                    suppressed_table_unit_keys=set(),
+                )[1:]
+            }
+
+        old_table_keys = table_unit_keys(old_sections)
+        new_table_keys = table_unit_keys(new_sections)
+        consume_candidates = compare_module._consume_section_match_candidates
+        with mock.patch.object(
+            compare_module,
+            "_structural_identity_rescue_pairs",
+            return_value=[],
+        ), mock.patch.object(
+            compare_module,
+            "_document_relation_anchor_pairs",
+            return_value=[],
+        ), mock.patch.object(
+            compare_module,
+            "_consume_section_match_candidates",
+            wraps=consume_candidates,
+        ) as consume_spy:
+            changes = compare_module.compare_sections(
+                old_sections,
+                new_sections,
+                DiffOptions(),
+                suppressed_old_table_unit_keys=old_table_keys,
+                suppressed_new_table_unit_keys=new_table_keys,
+            )
+
+        self.assertTrue(
+            any(
+                {(candidate[1], candidate[2]) for candidate in call.args[0]}
+                == {(0, 1), (1, 0)}
+                and all(
+                    candidate[3] == "evidence_suppressed_similarity_fallback"
+                    for candidate in call.args[0]
+                )
+                for call in consume_spy.call_args_list
+            ),
+            "the fixture must reach the crossed late-fallback candidates",
+        )
+        self.assertEqual(4, len(changes))
+        self.assertTrue(all(change.change_type == "review" for change in changes))
+        self.assertTrue(
+            all(change.match_basis == "ambiguous_order_conflict" for change in changes)
+        )
+        self.assertTrue(
+            all("没有确认新增或删除" in change.review_reason for change in changes)
+        )
 
     def test_global_residual_pairing_respects_assignment_field_identity(self) -> None:
         """Shared values cannot cross-pair two moved explicit assignment fields."""
@@ -22772,8 +23138,9 @@ class ProtocolDiffTests(unittest.TestCase):
             report_md = outputs["markdown"].read_text(encoding="utf-8")
             report_html = outputs["html"].read_text(encoding="utf-8")
 
-        self.assertIn("新增: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertIn("需复核: 新选择范围第 20 页的章节前内容", report_md)
         self.assertIn("新位置: 新选择范围第 20 页的章节前内容", report_md)
+        self.assertNotIn("新增: 新选择范围第 20 页的章节前内容", report_md)
         self.assertNotIn("范围起始页前序内容", report_md)
         self.assertNotIn("范围起始页前序内容", report_html)
 

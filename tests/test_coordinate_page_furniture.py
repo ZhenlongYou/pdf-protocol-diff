@@ -38,7 +38,10 @@ from protocol_pdf_diff.pdf_extract import (
     _document_proven_line_number_gutter_boxes,
     _extract_pdfplumber_page_text,
     _filtered_layout_page,
+    _layout_object_inside_any_box,
+    _page_closed_vector_graphic_frame_bboxes,
     _page_may_contain_table,
+    _table_bbox_belongs_to_captioned_figure,
 )
 from protocol_pdf_diff.reporting import write_reports
 
@@ -99,6 +102,213 @@ def _version_with_running_footer(name: str, revision: str) -> ExtractionResult:
 
 
 class CoordinatePageFurnitureTests(unittest.TestCase):
+    def test_unstructured_table_inside_captioned_vector_figure_is_not_a_table(self) -> None:
+        """A closed vector Figure frame owns a captionless pseudo-table within it."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        page_bbox = (0.0, 0.0, 612.0, 792.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        unstructured_row = [
+            "表格行: T1 | Column 1=p | Column 2=df(Am | Column 3=plitude)"
+        ]
+
+        self.assertTrue(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                unstructured_row,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=page_bbox,
+            )
+        )
+
+    def test_open_vector_curve_does_not_hide_technical_table_inside_figure(self) -> None:
+        """An open curve's broad bbox is not proof that a technical grid is Figure text."""
+
+        table_bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        # One open curve can span the whole plot, but its bounding box does not
+        # establish a closed frame that owns a separately detected technical grid.
+        open_curve_bbox = ((79.74, 174.24, 540.24, 567.90),)
+        page = mock.Mock()
+        page.rects = []
+        page.lines = []
+        page.curves = [
+            {
+                "x0": open_curve_bbox[0][0],
+                "top": open_curve_bbox[0][1],
+                "x1": open_curve_bbox[0][2],
+                "bottom": open_curve_bbox[0][3],
+            }
+        ]
+        closed_frames = _page_closed_vector_graphic_frame_bboxes(
+            page,
+            (0.0, 0.0, 612.0, 792.0),
+        )
+        technical_grid_row = [
+            "表格行: T1 | Column 1=Rise Time | Column 2=35 ps"
+        ]
+
+        self.assertEqual((), closed_frames)
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                table_bbox,
+                technical_grid_row,
+                words,
+                vector_graphic_bboxes=open_curve_bbox,
+                vector_graphic_frame_bboxes=closed_frames,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
+            )
+        )
+
+    def test_technical_table_schema_is_retained_inside_captioned_vector_figure(self) -> None:
+        """An explicit parameter/value schema keeps table authority over a figure frame."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            }
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        technical_rows = [
+            "表格行: T1 | Parameter=Receiver Input | Value=4.2 V"
+        ]
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                technical_rows,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
+            )
+        )
+
+    def test_nearer_table_caption_overrides_the_captioned_figure_frame(self) -> None:
+        """A Table caption between a Figure and its inner grid preserves that candidate."""
+
+        bbox = (168.66, 305.67, 289.26, 432.0)
+        words = [
+            {
+                "text": "Figure 2-21. Varying the Receiver Sampling Point",
+                "x0": 193.0,
+                "x1": 426.0,
+                "top": 158.8,
+                "bottom": 168.8,
+            },
+            {
+                "text": "Table 7-2. Receiver Limits",
+                "x0": 170.0,
+                "x1": 305.0,
+                "top": 188.0,
+                "bottom": 198.0,
+            },
+        ]
+        vector_edges = (
+            (79.74, 174.24, 80.22, 567.90),
+            (539.76, 174.24, 540.24, 567.90),
+            (79.74, 173.76, 540.24, 174.24),
+            (79.74, 567.90, 540.24, 568.38),
+        )
+        unstructured_row = [
+            "表格行: T1 | Column 1=p | Column 2=df(Am | Column 3=plitude)"
+        ]
+
+        self.assertFalse(
+            _table_bbox_belongs_to_captioned_figure(
+                bbox,
+                unstructured_row,
+                words,
+                vector_graphic_bboxes=vector_edges,
+                page_bbox=(0.0, 0.0, 612.0, 792.0),
+            )
+        )
+
+    def test_full_page_single_column_capture_stays_in_prose_not_table_cards(self) -> None:
+        """A page-sized one-cell detector result must not replace the source prose."""
+
+        body = (
+            "The receiver shall preserve ordering for every posted request. "
+            "The device must complete interrupt messages without waiting for the CPU. "
+        ) * 18
+        page = mock.Mock()
+        page.width = 612.0
+        page.height = 792.0
+        page.bbox = (0.0, 0.0, 612.0, 792.0)
+        page.chars = []
+        page.lines = []
+        page.rects = []
+        page.images = []
+        page.extract_text.return_value = body
+        page.crop.return_value.extract_text.return_value = body
+        table = mock.Mock()
+        table.bbox = (6.0, 7.0, 608.0, 792.0)
+        table.rows = []
+        table.extract.return_value = [[body]]
+        page.find_tables.return_value = [table]
+
+        with (
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._assess_page_reading_order",
+                return_value=(False, None, False, len(body)),
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._extract_scan_page_text_with_evidence",
+                return_value=(body, [], False, False, None),
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._page_may_contain_table",
+                return_value=True,
+            ),
+            mock.patch(
+                "protocol_pdf_diff.pdf_extract._table_title_above_bbox",
+                return_value="",
+            ),
+        ):
+            extracted, warnings, visuals, *_rest = _extract_pdfplumber_page_text(
+                page,
+                "full-page-text.pdf",
+                755,
+                coordinate_evidence=([], [], None),
+            )
+
+        self.assertEqual(" ".join(body.split()), extracted)
+        self.assertEqual([], visuals)
+        self.assertIn("发现整页单列候选", "\n".join(warnings))
+
     def test_revision_table_with_nine_rectangles_passes_narrow_table_gate(self) -> None:
         """A lightly ruled revision record is found without lowering the global gate."""
 
@@ -676,7 +886,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
                     words_by_page,
                 )
 
-                self.assertEqual({}, gutter_boxes)  # 两页重复只证明排版相似，不能证明数字属于可删除页边栏。
+                self.assertEqual({}, gutter_boxes)  # 两页没有独立灰度对比证据时，重复数字仍须保留。
                 for page_number, page in pages:
                     self.assertIs(
                         page,
@@ -870,6 +1080,146 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             _document_proven_line_number_gutter_boxes(pages, words_by_page),
         )  # 无空白编号基线时必须 fail-open，不能被“三页 + 1..49”门槛误删。
 
+    def test_single_page_black_numbered_rows_do_not_pass_as_printed_gutter(self) -> None:
+        """A one-page window needs gray-vs-body style evidence beyond a numeric grid."""
+
+        page = mock.Mock()
+        page.width = 612.0
+        page.height = 792.0
+        words: list[dict[str, object]] = []
+        page.chars = []
+        for value in range(1, 50):
+            top = 78.0 + (value - 1) * 13.0
+            label = str(value)
+            x1 = 60.0
+            number_word = {
+                "text": label,
+                "x0": x1 - len(label) * 6.0,
+                "x1": x1,
+                "top": top,
+                "bottom": top + 11.0,
+            }
+            words.append(number_word)
+            page.chars.append({**number_word, "non_stroking_color": (0.0,)})
+            if value % 5 == 0:
+                continue
+            body_word = {
+                "text": f"Requirement{value}",
+                "x0": 72.0,
+                "x1": 160.0,
+                "top": top,
+                "bottom": top + 11.0,
+            }
+            words.append(body_word)
+            page.chars.append({**body_word, "non_stroking_color": (0.0,)})
+
+        gutter_boxes = _document_proven_line_number_gutter_boxes(
+            [(1, page)],
+            {1: words},
+        )
+
+        self.assertEqual({}, gutter_boxes)
+
+    def test_split_digit_layout_span_uses_only_adjacent_proven_numeric_boxes(self) -> None:
+        fragments = (
+            (548.0, 100.0, 552.9, 110.0),
+            (553.0, 100.4, 558.0, 110.4),
+        )
+        split_number = {
+            "text": "1 5\uf020",
+            "x0": 548.0,
+            "x1": 558.0,
+            "top": 100.0,
+            "bottom": 110.4,
+        }
+
+        self.assertTrue(
+            _layout_object_inside_any_box(split_number, fragments, digits_only=True)
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {**split_number, "text": "15V"}, fragments, digits_only=True
+            )
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {**split_number, "x1": 558.75}, fragments, digits_only=True
+            )
+        )
+        self.assertFalse(
+            _layout_object_inside_any_box(
+                {
+                    "text": "1 5 6",
+                    "x0": 548.0,
+                    "x1": 565.0,
+                    "top": 100.0,
+                    "bottom": 110.4,
+                },
+                (*fragments, (558.1, 100.0, 565.0, 110.0)),
+                digits_only=True,
+            )
+        )
+
+    def test_two_page_gray_line_number_grid_requires_each_page_and_stable_pitch(self) -> None:
+        """Two short-window pages can prove a facing-page gutter only with gray contrast on both sides."""
+
+        def make_page(side: str, *, gray: bool = True, private_padding: bool = False):
+            page = mock.Mock()
+            page.width = 612.0
+            page.height = 792.0
+            page.chars = []
+            words: list[dict[str, object]] = []
+            blank_rows = {2, 7, 12, 17, 22, 27, 32, 37, 42, 47}
+            for value in range(1, 50):
+                top = 80.0 + (value - 1) * 13.0
+                token = f"{value}\uf020" if private_padding else str(value)
+                width = 6.7 * len(str(value))
+                x0 = 60.0 - width if side == "left" else 554.0
+                x1 = x0 + width
+                number_word = {
+                    "text": token,
+                    "x0": x0,
+                    "x1": x1,
+                    "top": top,
+                    "bottom": top + 10.0,
+                }
+                words.append(number_word)
+                page.chars.append(
+                    {
+                        **number_word,
+                        "text": str(value),
+                        "non_stroking_color": (0.6, 0.6, 0.6) if gray else (0.0, 0.0, 0.0),
+                    }
+                )
+                if value in blank_rows:
+                    continue
+                body_word = {
+                    "text": f"Requirement{value}",
+                    "x0": 90.0,
+                    "x1": 180.0,
+                    "top": top,
+                    "bottom": top + 10.0,
+                }
+                words.append(body_word)
+                page.chars.append({**body_word, "non_stroking_color": (0.0, 0.0, 0.0)})
+            page.extract_words.return_value = words
+            return page, words
+
+        left_page, left_words = make_page("left")
+        right_page, right_words = make_page("right", private_padding=True)
+        proven = _document_proven_line_number_gutter_boxes(
+            [(224, left_page), (225, right_page)],
+            {224: left_words, 225: right_words},
+        )
+        self.assertEqual({224, 225}, set(proven))
+
+        black_right_page, black_right_words = make_page("right", gray=False)
+        rejected = _document_proven_line_number_gutter_boxes(
+            [(224, left_page), (225, black_right_page)],
+            {224: left_words, 225: black_right_words},
+        )
+        self.assertEqual({}, rejected)
+
     def test_preserved_gutter_like_numbers_mark_the_page_as_layout_risk(self) -> None:
         """保留疑似行号后必须降级，不能把歧义页面伪装成可靠正文。"""
 
@@ -954,7 +1304,7 @@ class CoordinatePageFurnitureTests(unittest.TestCase):
             {1: [*gutter_words, *body_words], 2: repeated_gutter_words},
         )
 
-        self.assertEqual({}, gutter_boxes)  # 跨页重复不能证明数字是装饰性行号。
+        self.assertEqual({}, gutter_boxes)  # 跨页重复但缺少每页的灰色字体证据时，不能删除疑似行号。
         self.assertIs(
             page,
             _filtered_layout_page(

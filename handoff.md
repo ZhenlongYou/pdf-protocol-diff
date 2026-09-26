@@ -1,5 +1,23 @@
 # PDF Protocol Diff Handoff
 
+## 当前任务：合入最新公开分支与随机页窗修复（2026-09-26）
+
+- task_id：`pdf-latest-integration-20260926`；owner：`01a0d0b9-200c-7390-bc01-a397a648683b`；分支：`codex/pdf-latest-integration-20260926`；worktree：`/Users/mac/.codex/worktrees/pdf-latest-integration/pdf_protocol_diff`；基线：持久分支 `project/pdf-protocol-diff`，OID `6abf4f7fd80af1415404579517b264bd448e3a05`。
+- 用户确认本轮包含 `project/pdf-protocol-diff`、长文档候选 `codex/pdf-long-doc-optimization-20260918`（`985e77fb205be9ee46449757a1864cc6d10e622d`）、报告宽屏候选 `codex/report-responsive-20260918`（`1cfb7b699ca9c4f37586caf4e4c54994a24a7303`）和随机页窗修复。`report-responsive` 以长文档分支为父提交。用户明确要求本轮不跑测试。
+- 原随机页窗候选 `codex/pdf-random-window-fidelity-20260925` 以 `4402a958df76c387f5bf5a6c667e2544e0f03c2f` 保存在 blocked task 中；其行为提交为 `db286806f9a0c723dab6e2b392e3e5610ab1164c`。它从旧 main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb` 分出，不能作为新任务基线。旧候选的页窗/72-run证据仍在其原工作树 `work/page-window-gate/`，不证明本合并结果。
+- 新 claim 的精确 scope 包含 report-responsive 相对 project 的 18 个历史路径，以及原候选的 13 个历史路径，共 27 个文件。主线只读合并预览发现 6 个冲突文件；本次在新候选中解决并保留两侧变更。
+- 两条旧 public topic refs 和三个 prunable `/private/tmp` 工作树缺少可恢复的原始 claim / Git 关联。用户已明确授权：先把两个源 tip 完整保全到新的登记候选并推送，核对祖先关系后删除这两条旧候选的本地及 GitHub refs，并仅清理三个工作树的 Git 登记；原目录与目录内文件必须保留。该清理尚待执行。
+- 本次合并后的行为与报告尚未运行测试或验证；不要把旧候选回执或各源分支历史结果说成本合并结果的验证。
+
+## 下一步
+
+1. 完成六处冲突合并并提交当前候选；保留两条源候选及随机页窗候选的完整历史。
+2. 推送登记候选，核对远端完整 OID，并确认两个旧源 tip 均为候选祖先。
+3. 按用户授权移除两条旧候选 refs，清理三个 prunable 工作树的 Git 登记；保留三处目录和所有文件。
+4. 通过集成预检后 acquire；按 project、公开候选、当前修复的顺序更新 canonical `main` 和持久分支。
+5. 按用户要求不跑测试；最终状态不得标记为已验证。
+
+
 ## 当前任务：报告 HTML 最大化自适应（2026-09-18）
 
 - 用户反馈生成的报告 HTML 在浏览器最大化后仍保持窄内容区。根因是报告模板 `main` 固定 `max-width: 1180px`，宽窗口右侧留下空白；这只影响报告展示布局，不改变 PDF 比较、报告数据或证据内容。

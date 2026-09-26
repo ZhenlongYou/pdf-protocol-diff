@@ -115,7 +115,9 @@ class PageText:
     page_bbox: tuple[float, float, float, float] | None = None  # 原始页边界用于证明页边内容；缺失时禁止从文字包络猜测页面尺寸。
     ambiguous_line_number_sides: tuple[str, ...] = ()  # 疑似打印行号位于 left/right；数字保留，只供章节器抑制伪标题。
     visual_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 仅保存坐标已证明并从比较文字过滤的页脚/页边噪声区域，视觉哨兵可据此精确屏蔽。
+    page_identity_noise_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 只含已证明的物理页码、首页身份页眉及修订/日期/正式草稿页脚，可用于“正文同图”核验。
     running_header_texts: tuple[str, ...] = ()  # 跨页坐标证明的运行页眉从正文分离，但原文仍进入版本间结构化比较。
+    page_identity_header_texts: tuple[str, ...] = ()  # 仅保存与 PDF Title 及严格版本前缀匹配的出版物标题页眉。
     vector_graphic_bboxes: tuple[tuple[float, float, float, float], ...] = ()  # 原生 PDF 矩形/曲线/线段的几何包络；只作图形区域正向证据，不改写正文。
     source_blank_glyphs: tuple[tuple[tuple[float, float, float, float], str, str, int, int], ...] = ()
     formula_bboxes: tuple[tuple[float, float, float, float], ...] = ()
@@ -160,6 +162,7 @@ class PageExtractionAudit:
     layout_backend_version: str | None = None
     visual_noise_bbox_count: int = 0  # 只记录屏蔽区域数量，不泄漏坐标或页边文字。
     running_footer_texts: tuple[str, ...] = ()
+    page_identity_header_texts: tuple[str, ...] = ()  # 精确匹配 PDF 标题的出版物页眉，用于独立于正文变化的元数据过滤。
     blank_glyph_evidence: tuple[tuple[str, str, int, int, int], ...] = ()  # 原始字符、字体摘要、CID、GID、数量。
 
 
@@ -206,6 +209,7 @@ def snapshot_page_extraction_audit(
             layout_backend_version=page.layout_backend_version,
             visual_noise_bbox_count=len(page.visual_noise_bboxes),
             running_footer_texts=getattr(page, "running_footer_texts", ()),
+            page_identity_header_texts=getattr(page, "page_identity_header_texts", ()),
             blank_glyph_evidence=tuple((*key, count) for key, count in sorted(Counter(
                 item[1:] for item in getattr(page, "source_blank_glyphs", ())
             ).items())),
@@ -325,6 +329,8 @@ class VisualWatchdogAudit:
     old_visual_source_sha256: str | None = None
     new_visual_source_sha256: str | None = None
     coverage_issues: tuple[VisualCoverageIssue, ...] = ()
+    identical_body_page_pairs: tuple[tuple[int, int], ...] = ()  # 独立原页渲染在已证明页眉/页脚屏蔽后逐像素相同的页对。
+    identity_render_dpi: int | None = None  # 只有记录此分辨率下的精确渲染核验，才允许报告正文页对相同。
 
 
 @dataclass(frozen=True)

@@ -768,9 +768,9 @@ def _remove_proven_margin_noise(pages: list[PageText]) -> list[PageText]:
         normalized_pages.append(paragraph_lines)
 
     repeated_footer_lines: Counter[str] = Counter()
-    for lines in normalized_pages:
+    for page, lines in zip(pages, normalized_pages):
         for line in set(lines[-6:]):
-            if _looks_like_repeated_margin_furniture(line):
+            if _looks_like_repeated_margin_furniture(line, page=page):
                 repeated_footer_lines[line.casefold()] += 1
 
     if not repeated_footer_lines:
@@ -788,7 +788,7 @@ def _remove_proven_margin_noise(pages: list[PageText]) -> list[PageText]:
                 if not (
                     index >= len(lines) - 6
                     and repeated_footer_lines[line.casefold()] >= 2
-                    and _looks_like_repeated_margin_furniture(line)
+                    and _looks_like_repeated_margin_furniture(line, page=page)
                 )
             ),
         )
@@ -811,7 +811,12 @@ def _coordinate_margin_furniture_lines(pages: list[PageText]) -> dict[int, set[s
     candidates_by_page: dict[int, list[tuple[str, str, str]]] = {}
     repeat_counts: Counter[tuple[str, str]] = Counter()
     for page in pages:
-        page_candidates = _page_coordinate_margin_candidates(page)
+        page_candidates = [
+            candidate
+            for candidate in _page_coordinate_margin_candidates(page)
+            if not _is_physical_page_label(candidate[2])
+            or _is_proven_physical_page_label(page, candidate[2])
+        ]
         candidates_by_page[page.page_number] = page_candidates
         page_keys = {
             (zone, fingerprint)
@@ -891,7 +896,7 @@ def _page_coordinate_margin_candidates(page: PageText) -> list[tuple[str, str, s
     for block in text_blocks:
         line = normalize_line(block.text)
         if not (
-            _looks_like_repeated_margin_furniture(line)
+            _looks_like_repeated_margin_furniture(line, page=page)
             or _looks_like_coordinate_publication_footer(line)
         ):
             continue
@@ -951,12 +956,18 @@ def _has_dense_line_number_gutter(lines: list[str]) -> bool:
     return len(set(values)) >= 8 and max(values) - min(values) >= 7  # 这里只停止标题猜测，不删除内容，因此宁可更早进入保守路径。
 
 
-def _looks_like_repeated_margin_furniture(line: str) -> bool:
+def _looks_like_repeated_margin_furniture(
+    line: str,
+    *,
+    page: PageText | None = None,
+) -> bool:
     """Recognize generic title, legal, page-counter, and status furniture."""
 
     candidate = normalize_line(line).casefold()
     if not 2 <= len(candidate) <= 220:
         return False
+    if _is_physical_page_label(candidate):
+        return page is not None and _is_proven_physical_page_label(page, candidate)
     if re.match(r"^(?:copyright\b|©|\(c\)\s*\d{4})", candidate):
         return True
     if "draft" in candidate and any(
@@ -1017,7 +1028,14 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
     for page in pages:
         unique_candidates = set(_page_margin_candidates(page.text))
         for zones, line in unique_candidates:
-            if 2 <= len(line) <= 100 and _looks_like_dynamic_page_furniture(line):
+            if (
+                2 <= len(line) <= 100
+                and _looks_like_dynamic_page_furniture(line)
+                and (
+                    not _is_physical_page_label(line)
+                    or _is_proven_physical_page_label(page, line)
+                )
+            ):
                 for margin_position in _margin_positions(zones):
                     dynamic_counts[(margin_position, _furniture_fingerprint(line))] += 1
 
@@ -1038,6 +1056,7 @@ def _remove_repeating_page_furniture(pages: list[PageText]) -> list[PageText]:
                 line,
                 line_zones.get(index, frozenset()),
                 repeated_dynamic,
+                page=page,
             )
         ]
         # 只改正文视图；坐标块、字体和页边证据必须继续绑定同一物理页。
@@ -1095,6 +1114,8 @@ def _is_removed_page_furniture(
     raw_line: str,
     zones: frozenset[str],
     repeated_dynamic: set[tuple[str, str]],
+    *,
+    page: PageText | None = None,
 ) -> bool:
     """Decide whether one extracted line is learned header/footer furniture."""
 
@@ -1103,6 +1124,10 @@ def _is_removed_page_furniture(
     line = normalize_line(raw_line)
     if not _looks_like_dynamic_page_furniture(line):
         return False
+    if _is_physical_page_label(line) and (
+        page is None or not _is_proven_physical_page_label(page, line)
+    ):
+        return False  # Page N 单侧标签只有被 PDF 抽取器的页窗证明授权后才能删除。
     fingerprint = _furniture_fingerprint(line)
     return (
         ("top-margin" in zones and ("top", fingerprint) in repeated_dynamic)
@@ -1133,6 +1158,22 @@ def _looks_like_dynamic_page_furniture(line: str) -> bool:
         r"^\s*第\s*\d+\s*页(?:\s*(?:/|共)\s*\d+\s*页?)?\s*$",
     )
     return any(re.fullmatch(pattern, candidate) for pattern in page_patterns)
+
+
+def _is_physical_page_label(line: str) -> bool:
+    """Return whether a line is exactly a physical-page label, without a total."""
+
+    return bool(re.fullmatch(r"(?i)page\s+\d+", normalize_line(line)))
+
+
+def _is_proven_physical_page_label(page: PageText, line: str) -> bool:
+    """Match a physical-page label only to the source-backed folio audit value."""
+
+    candidate = normalize_line(line).casefold()
+    return any(
+        candidate == normalize_line(value).casefold()
+        for value in page.running_footer_texts
+    )
 
 
 def _furniture_fingerprint(line: str) -> str:
