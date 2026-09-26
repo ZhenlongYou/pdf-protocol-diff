@@ -2,15 +2,17 @@
 
 ## 当前任务：章节配对顺序冲突与本地短页窗验收（2026-09-26）
 
-- task_id: `pdf-random-window-fidelity-20260925`；owner: `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支：`codex/pdf-random-window-fidelity-20260925`；worktree：`/Users/mac/.codex/worktrees/pdf-random-window-fidelity-20260925/pdf_protocol_diff`。
-- 本轮代码提交：`db286806f9a0c723dab6e2b392e3e5610ab1164c`。canonical main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动，候选尚未集成。
-- 已修：主章节候选使用稀疏加权单调求解；互为唯一最强但顺序相反的候选保留为复核项；唯一正文锚点可单独证明实际移动。独立审查随后发现结构、偏移、表格剔除回退及后续锚点阶段没有收集单调求解器过滤出的冲突端点。提交 `db28680` 把所有后置救援统一送入记录冲突的入口，并在后续救援前把端点标为已处理。
-- 新回归 `test_late_rescue_crossing_is_explicitly_marked_for_review` 实际经过表格证据剔除回退，确认两个强候选交叉；`compare_sections` 必须输出四条 `review / ambiguous_order_conflict`，不能输出新增或删除。包含新回归、主路径交叉、唯一移动、独立暴力枚举 oracle、重复编号以及长匹配边界在内的 9 项定向测试通过（8.893 秒）。
-- 当前提交的真实 public CLI 检查通过：旧/新合成 PDF SHA 分别为 `9d2684ba30fb367fa178a1a3cbae6926ecd556c37a210c1a0231fd328cf5da29` 和 `9539321af1b12a4f725a8ba3f00e54e21a097737723f75e220e0911b368a446b`。HTML 路径 `work/page-window-gate/results/monotonic-public-cli-rescue-closeout/reports/protocol_diff_20260926_100220/protocol_diff_report.html`，SHA-256 `4906cef3cfb270e3655251c2027897d53d3e7694b9c443eebe55fdf67df2d651`；JSON SHA-256 `0ade2b07b24a09bc4702822575da629c9ad858fc8b605102ddf754ad85d269d8`。报告为 degraded，四项全是“需复核”，0 项确认新增、删除或修改。1280×720 浏览器目视和控制台检查通过；截图：`.playwright-cli/page-2026-09-26T02-03-57-237Z.png`、`.playwright-cli/page-2026-09-26T02-04-32-384Z.png`。
-- 严格 v2 门禁与最终 OID 独立审查尚待执行。门禁构建器 `work/page-window-gate/build_rescue_closeout_evidence.py` 生成 `work/page-window-gate/rescue-closeout-evidence.json`；计划新回执为 `work/page-window-gate/receipt-rescue-closeout.json`。旧 `receipt-monotonic-555006.json` 来自本次救援修复前，保留作历史，不得当作最终通过证据。最终回执须包括完整套件、本机 Base 6.4/6.5 页窗、OIF/PCIe 样本、CLI 和 RED/GREEN 执行。
-- 当前任务整体仍未集成。此前 integration acquire 因未登记的旧分支及标为 prunable 的其他 worktree 未通过预检；未清理这些其他工作区。集成前须重新查看当前协调状态，不要假设旧阻塞已自动消失。
-- 本次只验证了指定短页窗与回归集合，不能宣称任意 PDF 或全套 OIF/PCIe 都稳定。较大的配对置信度余量、统一稀有词评分、章节对应清单、异常新增/删除率提示、文档家族预检和编号空间分组仍未完成。
-- 下一步：生成 final OID 绑定的 v2 清单并执行完整门禁；处理任何失败；取得只读审查对最终 OID 的 attestation；将实际收据及审查状态更新到本节。只有预检通过后才考虑集成，若仍失败则保存候选并按协调器流程标为 blocked。
+- task_id: pdf-random-window-fidelity-20260925；owner: 01a0d0b9-200c-7390-bc01-a397a648683b；分支 codex/pdf-random-window-fidelity-20260925；worktree /Users/mac/.codex/worktrees/pdf-random-window-fidelity-20260925/pdf_protocol_diff。
+- 行为代码提交：db286806f9a0c723dab6e2b392e3e5610ab1164c。canonical main 5f89bfb03373f20af57f8dc256961ddcb70b0cfb、持久分支 6abf4f7fd80af1415404579517b264bd448e3a05 未改；候选没有集成或推送。
+- 已修：主配对使用稀疏加权单调求解；双侧唯一强候选相互交叉时只出待复核；唯一正文锚点仍可保留真实移动。独立审查指出后置救援遗漏冲突收集，db28680 将结构、偏移、表格证据剔除回退和后续锚点统一送入冲突记录入口。
+- 新回归 test_late_rescue_crossing_is_explicitly_marked_for_review 确实生成两个交叉 evidence_suppressed_similarity_fallback 候选；compare_sections 输出四条 review / ambiguous_order_conflict，不报新增或删除。定向配对、移动、重复编号、oracle 和长输入共 9 项测试通过。严格门禁中的修复前 RED 和修复后 GREEN 也都按预期执行。
+- 严格 v2 回执 work/page-window-gate/receipt-rescue-closeout.json，SHA-256 729c2d9ffe7d52a944f972709ff7dcb2eb625da2a543538b91a4b68b86bdd771，结果 EXECUTED_EVIDENCE_PASS / verified_scope_only：72 次执行，8 行全 PASS，215 个源文件哈希绑定，无 open defect。完整 unittest discovery、真实 CLI 和独立 oracle 均通过。不要把这个范围扩展成任意 PDF 正确率保证。修复前旧回执 receipt-monotonic-555006.json 仅作历史保留。
+- Base 6.4 第 1517–1551 页对 Base 6.5 第 1567–1601 页的 public CLI 比较已重跑。摘要 work/page-window-gate/results/base-rescue-summary.json：正文差异 0、正文表格差异 0、整体 degraded。独立 oracle 在回执中报告 35/35 页对 token 相同，正文像素差异超过阈值的页对为 0。报告 HTML 为 work/page-window-gate/results/base-rescue-closeout/protocol_diff_20260926_102752/protocol_diff_report.html，SHA-256 bbef44511f496e8260c1b6ddffab413e2283c6e1e04f5ebcd409ce181888c785；JSON SHA-256 f97815ed5e6055e035e4a174dfb86357219344bf8caada86fe29ceb5cc9e6aab。
+- Base JSON 保留 2 条原始正文候选和 13 条原始表格候选，均未进入读者变化清单：正文候选分别因源页像素相同、运行页眉与版本信息匹配而抑制；表格候选因坐标证明区域外源页像素相同而抑制。报告明确“未检出差异，但不能据此确认一致”，同时列出旧侧 1518/1540、新侧 1568/1590 的阅读顺序风险，以及旧 1530、新 1580 的整页 OCR 和栅格图像风险。1280×720 截图 .playwright-cli/page-2026-09-26T02-29-06-309Z.png，SHA-256 b6ef24ed3319b4d34243ef810b3890f34af3fcf063cdaec01d7bc9965003bf7d。
+- OIF corpus 为 24/24、0 skip；独立 24-window OIF CLI contract 通过；CEM 和 CEI 页窗/来源 oracle 均在回执中通过。合成重排 public CLI 报告有 4 条待复核，0 条确认新增、删除或修改；HTML：work/page-window-gate/results/monotonic-public-cli-rescue-closeout/reports/protocol_diff_20260926_100220/protocol_diff_report.html，SHA-256 4906cef3cfb270e3655251c2027897d53d3e7694b9c443eebe55fdf67df2d651。1280×720 截图见 .playwright-cli/page-2026-09-26T02-03-57-237Z.png 和 .playwright-cli/page-2026-09-26T02-04-32-384Z.png。
+- 独立代码审查对精确 OID 5c84d8e68aa4d1cf840552d2a623696affad08c9 attestation pass；记录位于 .git/codex-coordination-v1/reviews/pdf-random-window-fidelity-20260925/01a0db52-61ab-7cc3-a2f8-e9b55cf87752--5c84d8e68aa4d1cf840552d2a623696affad08c9.json。独立视觉审查认为 Base 报告没有错报内容或宣称一致；它指出 HTML 没展示 35/35 oracle 覆盖和被抑制候选的理由，“0 视觉漏检核对”也可能被误读。报告结果本身保守，候选和理由可在 JSON/回执查到；本轮未改报告展示代码。
+- 更大的跨 PDF 家族稳定性目标仍未完成：配对 margin、稀有 token/IDF 评分、章节对应清单、异常新增/删除率提示、文档家族预检和编号 scope 分组仍是后续工作。
+- 候选未集成或推送。此前 integration acquire 因未登记分支及标为 prunable 的其他 worktree 未通过预检；本轮未重试，也未清理他人工作区。后续要集成，先由原 owner 检查 live coordination state 和当前 workspace owner，不能用本地 commit 或回执代替 main/远端交付。当前 owner 收尾后按协调器流程释放为 blocked，保留候选供原 owner 恢复。
 
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
