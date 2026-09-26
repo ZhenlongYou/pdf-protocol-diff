@@ -1,16 +1,17 @@
 # PDF Protocol Diff Handoff
 
-## 当前任务：不同 PDF 风格下的短页窗稳定性（2026-09-26）
+## 当前任务：章节配对顺序冲突与本地短页窗验收（2026-09-26）
 
-- 目标：用本机 OIF/PCIe 真实短页窗查找跨版式、跨生成器误报，并保护识别出的真实内容变化。task_id `pdf-random-window-fidelity-20260925`，owner `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支 `codex/pdf-random-window-fidelity-20260925`；最新行为提交 `6dce141e218fc078e27b11ee49852d1be4f017f4`，工作树目前无行为代码未提交项。main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久项目分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动；候选未集成。
-- 已修 OIF CEI 4.0→5.1 两页灰色行号栏混入正文、CEM Implementation Note 误作表格、R5.1 嵌套标题框重复计数，以及四项审查发现：独立表短值被页内相似单元格吞掉、嵌套表字段/值次序不一致仍被去重、弱运行页眉被误称“同章节”、符号/单位/小数分隔符被归一为相同值。过滤要求同表源文字与框内坐标块双证据；嵌套表保留字段和值的次序、正负号、精度及单位 glyph；弱上下文只产出待复核标签。
-- 最新源代码完整套件记录 `1395` 项运行，其中 `1394` 项通过、1 项条件跳过；日志 `work/page-window-gate/results/full-final-signed-semantic-20260926.log`。用户 CEI 5.1/05.3 随机切片语料 `24/24`、0 跳过，结果 `work/page-window-gate/results/cei-slices-final-signed-semantic-20260926.json`。八项定向正负测试也通过，覆盖独立同页短值、框内短片段、符号/单位、字段和值重排、弱上下文、自动列标题碎片及小数分隔符。
-- 严格 v2 回执 `work/page-window-gate/receipt-final20.json` 为 `EXECUTED_EVIDENCE_PASS / verified_scope_only`：65 个源绑定运行完成、八行全 PASS，包括完整回归、24 窗 CEI corpus、三份真实 CLI、独立来源 oracle，以及跨表/弱上下文/正负号/单位/小数分隔符/U+F020 的 RED/GREEN 变异。较早 `receipt-final19.json` 因 PUA 变异绑定过宽而 `BLOCKED`，保留不覆盖。
-- 最新 `6dce141e` 的三份 CLI 报告均通过合同并由隔离 Chromium 以 1280×720 实际复核：CEM 1.1→R4 SHA `cde0794f6090a08866cde02b72a61cdecbbe3e920b54e14244851ea96e73b619`；CEM R4→R5.1 SHA `d5059b7658545015c8a11f6c70e54fba390ec7e4dc99a5c34c914801c53f3008`；OIF CEI 4.0→5.1 SHA `bfe43c5fae92f9e42f3b4392cd54d4ac4b89e3882f0f7f2f0cdd94294fcc8cac`。三份都保持“需人工复核”；CEM 1.1→R4 的 25→75 正文变化仍无可靠定位，OIF 两组页对未完成像素比较，报告没有把“未检出差异”写成确认相同。截图位于 `work/page-window-gate/results/report-visual-review-final20-20260926/`。
-- 独立代码审查通过并对行为提交 `6dce141e218fc078e27b11ee49852d1be4f017f4` attestation；记录位于 `.git/codex-coordination-v1/reviews/pdf-random-window-fidelity-20260925/01a0da45-6983-70a1-9e02-4f477d205bf8--6dce141e218fc078e27b11ee49852d1be4f017f4.json`。
-- 2026-09-26 尝试获取集成 lease 时，preflight 在改任何引用/索引前失败：存在未登记分支 `codex/pdf-long-doc-optimization-20260918`、`codex/report-responsive-20260918` 及对应 `/private/tmp/pdf-longdoc-windows-20260918`、`/private/tmp/pdf-longopt-baseline-20260918-a`、`/private/tmp/pdf-report-responsive-20260918` worktree（`git worktree list` 标记为 prunable）；协调器未授 lease，任务仍是 `working`。未清理这些其他任务工作区。canonical `main`/`origin/main` 仍为 `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`，持久项目分支/远端仍为 `6abf4f7fd80af1415404579517b264bd448e3a05`，本候选未集成。
-- OIF 既有跨 OIF/PCIe `10/10`、跨样式 `7/7`、MR/LR/Linear 新页窗 `3/3` 都是以前的切片记录，不代表整本或任意 PDF 准确率。对 canonical `6abf4f7` 的离线统计覆盖 29 个切片、185 个章节配对：没有观测到页序逆转，但 19 个配对的同层最佳与次佳原始分差小于 0.10（13 个小于 0.05）；来源为 `work/page-window-gate/results/canonical-6ab-pairing-stats-20260926.json`。它没有逐节人工真值，不能据此定阈值。主章节求解仍是全局贪心、置信度未进入结论。
-- 下一步：先由各自任务 owner 或仓库维护流程登记/清理上述被判为未登记的分支/worktree，再重试集成 preflight；不可由本任务删除或覆盖这些工作区。即使此候选完成集成，单调章节求解、配对置信清单/报告投影、整体错配自检及整本跨 PDF 家族准确率仍未解决。用户 PDF 和切片保留在 ignored 语料，不提交。
+- task_id: `pdf-random-window-fidelity-20260925`；owner: `01a0d0b9-200c-7390-bc01-a397a648683b`；候选分支：`codex/pdf-random-window-fidelity-20260925`；worktree：`/Users/mac/.codex/worktrees/pdf-random-window-fidelity-20260925/pdf_protocol_diff`。
+- 本轮代码提交：`db286806f9a0c723dab6e2b392e3e5610ab1164c`。canonical main `5f89bfb03373f20af57f8dc256961ddcb70b0cfb`、持久分支 `6abf4f7fd80af1415404579517b264bd448e3a05` 未动，候选尚未集成。
+- 已修：主章节候选使用稀疏加权单调求解；互为唯一最强但顺序相反的候选保留为复核项；唯一正文锚点可单独证明实际移动。独立审查随后发现结构、偏移、表格剔除回退及后续锚点阶段没有收集单调求解器过滤出的冲突端点。提交 `db28680` 把所有后置救援统一送入记录冲突的入口，并在后续救援前把端点标为已处理。
+- 新回归 `test_late_rescue_crossing_is_explicitly_marked_for_review` 实际经过表格证据剔除回退，确认两个强候选交叉；`compare_sections` 必须输出四条 `review / ambiguous_order_conflict`，不能输出新增或删除。包含新回归、主路径交叉、唯一移动、独立暴力枚举 oracle、重复编号以及长匹配边界在内的 9 项定向测试通过（8.893 秒）。
+- 当前提交的真实 public CLI 检查通过：旧/新合成 PDF SHA 分别为 `9d2684ba30fb367fa178a1a3cbae6926ecd556c37a210c1a0231fd328cf5da29` 和 `9539321af1b12a4f725a8ba3f00e54e21a097737723f75e220e0911b368a446b`。HTML 路径 `work/page-window-gate/results/monotonic-public-cli-rescue-closeout/reports/protocol_diff_20260926_100220/protocol_diff_report.html`，SHA-256 `4906cef3cfb270e3655251c2027897d53d3e7694b9c443eebe55fdf67df2d651`；JSON SHA-256 `0ade2b07b24a09bc4702822575da629c9ad858fc8b605102ddf754ad85d269d8`。报告为 degraded，四项全是“需复核”，0 项确认新增、删除或修改。1280×720 浏览器目视和控制台检查通过；截图：`.playwright-cli/page-2026-09-26T02-03-57-237Z.png`、`.playwright-cli/page-2026-09-26T02-04-32-384Z.png`。
+- 严格 v2 门禁与最终 OID 独立审查尚待执行。门禁构建器 `work/page-window-gate/build_rescue_closeout_evidence.py` 生成 `work/page-window-gate/rescue-closeout-evidence.json`；计划新回执为 `work/page-window-gate/receipt-rescue-closeout.json`。旧 `receipt-monotonic-555006.json` 来自本次救援修复前，保留作历史，不得当作最终通过证据。最终回执须包括完整套件、本机 Base 6.4/6.5 页窗、OIF/PCIe 样本、CLI 和 RED/GREEN 执行。
+- 当前任务整体仍未集成。此前 integration acquire 因未登记的旧分支及标为 prunable 的其他 worktree 未通过预检；未清理这些其他工作区。集成前须重新查看当前协调状态，不要假设旧阻塞已自动消失。
+- 本次只验证了指定短页窗与回归集合，不能宣称任意 PDF 或全套 OIF/PCIe 都稳定。较大的配对置信度余量、统一稀有词评分、章节对应清单、异常新增/删除率提示、文档家族预检和编号空间分组仍未完成。
+- 下一步：生成 final OID 绑定的 v2 清单并执行完整门禁；处理任何失败；取得只读审查对最终 OID 的 attestation；将实际收据及审查状态更新到本节。只有预检通过后才考虑集成，若仍失败则保存候选并按协调器流程标为 blocked。
+
 
 ## 当前任务：坐标轴伪表格（2026-09-10）
 
