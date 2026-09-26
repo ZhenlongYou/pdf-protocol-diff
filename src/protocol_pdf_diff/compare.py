@@ -54,6 +54,7 @@ from .progress import (
 from .prose_source_visuals import build_prose_source_visuals
 from .quality import (
     PairAssessment,
+    PairingReview,
     ReliabilityState,
     assess_pair,
     build_provenance,
@@ -285,6 +286,40 @@ def _assessment_with_visual_review(
     )
 
 
+_FALLBACK_PAIR_MATCH_BASES = frozenset(
+    {
+        "similarity_fallback",
+        "evidence_suppressed_similarity_fallback",
+        "unique_title_body_fallback",
+    }
+)
+
+
+def _pairing_review(changes: list[SectionChange]) -> PairingReview:
+    """Summarize final reader-visible pairing evidence for the assessment.
+
+    Only the change list after global noise suppression is counted, so the
+    degraded reasons describe what the reader can actually inspect.
+    """
+
+    one_sided = 0
+    ambiguous = 0
+    fallback = 0
+    for change in changes:
+        if change.old_section is None or change.new_section is None:
+            one_sided += 1
+        if change.match_basis == "ambiguous_order_conflict":
+            ambiguous += 1
+        elif change.match_basis in _FALLBACK_PAIR_MATCH_BASES:
+            fallback += 1
+    return PairingReview(
+        change_count=len(changes),
+        one_sided_count=one_sided,
+        ambiguous_conflict_count=ambiguous,
+        fallback_pair_count=fallback,
+    )
+
+
 @comparison_session
 def compare_extractions(
     old_extraction: ExtractionResult,
@@ -359,7 +394,6 @@ def compare_extractions(
         footer = _running_footer_section(extraction)
         if footer is not None:
             sections.insert(0, footer)
-    assessment = assess_pair(old_extraction, new_extraction, old_sections, new_sections)
     provenance = build_provenance(old_extraction, new_extraction, options)
     identical_inputs = provenance_inputs_are_identical(provenance)
     old_table_visuals = _table_visuals_with_text_fallbacks(old_table_visuals, old_extraction.pages)
@@ -409,6 +443,13 @@ def compare_extractions(
         warnings.append(
             f"已隐藏 {suppressed_noise_count} 条全局重复页眉页脚、DRAFT、版权或行号噪声差异。"
         )
+    assessment = assess_pair(
+        old_extraction,
+        new_extraction,
+        old_sections,
+        new_sections,
+        pairing_review=_pairing_review(changes),
+    )  # 读者可见变化确定后再判定可靠性；配对证据不足会直接进入降级原因。
     if not old_sections:
         warnings.append(f"{old_extraction.pdf_path.name}: 未识别到可比较文本段落。")
     if not new_sections:
@@ -3513,6 +3554,53 @@ def _document_relation_internal_locator_keys(body: str) -> frozenset[str]:
     )
 
 
+def _anchor_order_limits(
+    anchors: list[tuple[int, int]],
+) -> tuple[list[int], list[int | None], list[int | None]]:
+    """Return sorted anchor positions with per-slot document-order limits.
+
+    已配对章节把文档顺序切成固定区间：更早的旧章节只能配更早的新章节，
+    反之亦然。前缀最大/后缀最小让每次顺序检查保持 O(log 已配对数)。
+    """
+
+    anchor_old = [old_index for old_index, _new_index in anchors]
+    prefix_max_new: list[int | None] = []
+    highest_new: int | None = None
+    for _old_index, new_index in anchors:
+        highest_new = new_index if highest_new is None else max(highest_new, new_index)
+        prefix_max_new.append(highest_new)
+    suffix_min_new: list[int | None] = [None] * len(anchors)
+    lowest_new: int | None = None
+    for position in range(len(anchors) - 1, -1, -1):
+        new_index = anchors[position][1]
+        lowest_new = new_index if lowest_new is None else min(lowest_new, new_index)
+        suffix_min_new[position] = lowest_new
+    return anchor_old, prefix_max_new, suffix_min_new
+
+
+def _anchor_order_allows(
+    anchor_old: list[int],
+    prefix_max_new: list[int | None],
+    suffix_min_new: list[int | None],
+    old_index: int,
+    new_index: int,
+) -> bool:
+    """Return whether a candidate keeps every existing pair in document order.
+
+    等价于逐个锚点检查 ``(old_index - anchor_old) * (new_index - anchor_new) >= 0``；
+    更早的锚点要求新位置不早于其最大值，更晚的锚点要求新位置不晚于其最小值。
+    """
+
+    position = bisect_left(anchor_old, old_index)
+    earlier_upper = prefix_max_new[position - 1] if position else None
+    if earlier_upper is not None and new_index < earlier_upper:
+        return False
+    later_lower = suffix_min_new[position] if position < len(anchor_old) else None
+    if later_lower is not None and new_index > later_lower:
+        return False
+    return True
+
+
 def _monotonic_related_section_pairs(
     old_sections: list[Section],
     new_sections: list[Section],
@@ -3557,22 +3645,34 @@ def _monotonic_related_section_pairs(
     new_candidates = eligible_sections(new_sections, matched_new)
     if not old_candidates or not new_candidates:
         return []  # 抽取为空时仍保持不可比较，文档关系不能制造缺失的正文证据。
-    existing_pairs = tuple(
+    existing_pairs = sorted(
         (old_index, new_index)
         for old_index, new_index, _score, _basis in matches
         if old_index is not None and new_index is not None
     )
+    anchor_old, prefix_max_new, suffix_min_new = _anchor_order_limits(existing_pairs)
 
     def preserves_existing_order(old_index: int, new_index: int) -> bool:
-        return all(
-            (old_index - paired_old) * (new_index - paired_new) >= 0
-            for paired_old, paired_new in existing_pairs
+        return _anchor_order_allows(
+            anchor_old,
+            prefix_max_new,
+            suffix_min_new,
+            old_index,
+            new_index,
         )
 
     ranked_candidates: list[
         tuple[tuple[int, float, float, float, int, int, int], int, int]
     ] = []
     evidence_scores: dict[tuple[int, int], float] = {}
+    old_title_keys = {
+        index: _review_unit_key(section.title)
+        for index, section, _units in old_candidates
+    }
+    new_title_keys = {
+        index: _review_unit_key(section.title)
+        for index, section, _units in new_candidates
+    }
     old_exact_title_counts = Counter(
         _review_unit_key(section.title)
         for section in old_sections
@@ -3587,6 +3687,12 @@ def _monotonic_related_section_pairs(
     )
     old_related_title_counts = Counter({index: 0 for index, _section, _units in old_candidates})
     new_related_title_counts = Counter({index: 0 for index, _section, _units in new_candidates})
+    old_external_locator_keys: dict[int, frozenset[str]] = {}
+    new_external_locator_keys: dict[int, frozenset[str]] = {}
+    old_internal_locator_keys: dict[int, frozenset[str]] = {}
+    new_internal_locator_keys: dict[int, frozenset[str]] = {}
+    old_locator_unique: dict[int, bool] = {}
+    new_locator_unique: dict[int, bool] = {}
     if require_unique_related_title:
         for completed, (old_index, old_section, _old_units) in enumerate(old_candidates):
             report_progress("match_rescue", completed, len(old_candidates), unit="旧版章节",
@@ -3595,6 +3701,36 @@ def _monotonic_related_section_pairs(
                 if _review_similarity_at_least(old_section.title, new_section.title, 0.92):
                     old_related_title_counts[old_index] += 1
                     new_related_title_counts[new_index] += 1
+        # locator 正则与双侧唯一性只依赖单侧章节；在成对枚举前各算一次，
+        # 避免每个候选对重复扫描全部候选（原实现的 O(N·M·(N+M)) 热点）。
+        for index, section, _units in old_candidates:
+            old_external_locator_keys[index] = _document_relation_external_locator_keys(section.body)
+            old_internal_locator_keys[index] = _document_relation_internal_locator_keys(section.body)
+        for index, section, _units in new_candidates:
+            new_external_locator_keys[index] = _document_relation_external_locator_keys(section.body)
+            new_internal_locator_keys[index] = _document_relation_internal_locator_keys(section.body)
+        for old_index, old_section, _old_units in old_candidates:
+            shared_count = 0
+            for new_index, new_section, _new_units in new_candidates:
+                if (
+                    old_external_locator_keys[old_index] & new_external_locator_keys[new_index]
+                    and _review_similarity_at_least(old_section.title, new_section.title, 0.70)
+                ):
+                    shared_count += 1
+                    if shared_count > 1:
+                        break
+            old_locator_unique[old_index] = shared_count == 1
+        for new_index, new_section, _new_units in new_candidates:
+            shared_count = 0
+            for old_index, old_section, _old_units in old_candidates:
+                if (
+                    old_external_locator_keys[old_index] & new_external_locator_keys[new_index]
+                    and _review_similarity_at_least(old_section.title, new_section.title, 0.70)
+                ):
+                    shared_count += 1
+                    if shared_count > 1:
+                        break
+            new_locator_unique[new_index] = shared_count == 1
     # Each old/new orientation is tested once; both original uniqueness counts
     # receive that same boolean result. False mode never consumes these counts.
     for completed, (old_index, old_section, old_units) in enumerate(old_candidates):
@@ -3605,10 +3741,10 @@ def _monotonic_related_section_pairs(
             matched_count = _review_unit_skeleton_match_count(old_units, new_units)
             shorter_count = min(len(old_units), len(new_units))
             overlap_ratio = matched_count / shorter_count if shorter_count else 0.0
-            old_title_key = _review_unit_key(old_section.title)
+            old_title_key = old_title_keys[old_index]
             titles_match = bool(
                 old_title_key
-                and old_title_key == _review_unit_key(new_section.title)
+                and old_title_key == new_title_keys[new_index]
             )
             title_similarity = _review_similarity(
                 old_section.title,
@@ -3630,38 +3766,17 @@ def _monotonic_related_section_pairs(
                     and old_exact_title_counts[old_title_key] == 1
                     and new_exact_title_counts[old_title_key] == 1
                 )
-                old_external_locators = _document_relation_external_locator_keys(
-                    old_section.body
-                )
-                new_external_locators = _document_relation_external_locator_keys(
-                    new_section.body
-                )
                 shared_external_locator = bool(
-                    old_external_locators & new_external_locators
+                    old_external_locator_keys[old_index] & new_external_locator_keys[new_index]
                 )
                 shared_internal_locator = bool(
-                    _document_relation_internal_locator_keys(old_section.body)
-                    & _document_relation_internal_locator_keys(new_section.body)
+                    old_internal_locator_keys[old_index] & new_internal_locator_keys[new_index]
                 )
                 locator_pair_is_unique = bool(
                     shared_external_locator
                     and title_similarity >= 0.70
-                    and sum(
-                        bool(
-                            old_external_locators
-                            & _document_relation_external_locator_keys(candidate.body)
-                        )
-                        and _review_similarity_at_least(old_section.title, candidate.title, 0.70)
-                        for _candidate_index, candidate, _candidate_units in new_candidates
-                    ) == 1
-                    and sum(
-                        bool(
-                            _document_relation_external_locator_keys(candidate.body)
-                            & new_external_locators
-                        )
-                        and _review_similarity_at_least(candidate.title, new_section.title, 0.70)
-                        for _candidate_index, candidate, _candidate_units in old_candidates
-                    ) == 1
+                    and old_locator_unique[old_index]
+                    and new_locator_unique[new_index]
                 )
                 evidence_proven = bool(
                     (
@@ -4534,17 +4649,43 @@ def _normalized_section_sample(text: str) -> str:
 
 
 @memoize_comparison()
+def _sample_character_counts(text: str) -> dict[str, int]:
+    """Count characters once per section sample.
+
+    difflib 的 quick_ratio 本质是字符袋交集上界；按章节缓存计数向量后，
+    成对枚举只需对较小的一侧做一次字典扫描，无需每对重建 fullbcount。
+    """
+
+    counts: dict[str, int] = {}
+    for char in text:
+        counts[char] = counts.get(char, 0) + 1
+    return counts
+
+
+@memoize_comparison()
 def _section_similarity_for_threshold(left: str, right: str, threshold: float) -> float | None:
     """Return the original score, or None only when an upper bound rejects it."""
     left_norm, right_norm = _normalized_section_sample(left), _normalized_section_sample(right)
     if left_norm == right_norm:
         # The normalized score is exactly one; no alignment can reject it.
         return 1.0
-    matcher = difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False)
-    if matcher.real_quick_ratio() < threshold or matcher.quick_ratio() < threshold:
-        return None
-    if left_norm or right_norm:
-        upper = 2.0 * _lcs_match_count(left_norm, right_norm) / (len(left_norm) + len(right_norm))
+    total_length = len(left_norm) + len(right_norm)
+    if total_length:
+        # 与 difflib.real_quick_ratio 等价的长度上界，先淘汰长度悬殊的对。
+        if 2.0 * min(len(left_norm), len(right_norm)) / total_length < threshold:
+            return None
+        # 与 difflib.quick_ratio 等价的字符袋上界；计数向量按样本缓存。
+        left_counts = _sample_character_counts(left_norm)
+        right_counts = _sample_character_counts(right_norm)
+        if len(left_counts) > len(right_counts):
+            left_counts, right_counts = right_counts, left_counts
+        shared = 0
+        for char, count in left_counts.items():
+            other = right_counts.get(char, 0)
+            shared += count if count < other else other
+        if 2.0 * shared / total_length < threshold:
+            return None
+        upper = 2.0 * _lcs_match_count(left_norm, right_norm) / total_length
         if upper < threshold:
             return None
     return _section_similarity(left, right)

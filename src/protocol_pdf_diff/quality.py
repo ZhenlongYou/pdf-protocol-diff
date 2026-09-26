@@ -54,6 +54,11 @@ MIN_AVERAGE_TECHNICAL_CHARACTERS_PER_PAGE = 200
 MIN_LINES_FOR_FRAGMENTATION_CHECK = 40
 MAX_AVERAGE_CHARACTERS_PER_FRAGMENTED_LINE = 4.0
 MIN_SINGLE_CHARACTER_LINE_RATIO = 0.50
+# 章节配对证据只会在明显异常时才降级：短页窗本来就可能只有少量单侧变化，
+# 不能因为数量少就加风险；阈值按"读者可见变化"的绝对量和相对量双重判定。
+MIN_ONE_SIDED_CHANGES_FOR_PAIRING_DEGRADE = 10
+MAX_ONE_SIDED_TO_PAIRED_RATIO = 3.0
+MIN_FALLBACK_PAIRS_FOR_PAIRING_DEGRADE = 5
 
 
 class ReliabilityState(str, Enum):
@@ -105,6 +110,20 @@ class PairAssessment:
     allows_no_difference_conclusion: bool
     old_document: DocumentQualityMetrics
     new_document: DocumentQualityMetrics
+
+
+@dataclass(frozen=True)
+class PairingReview:
+    """Aggregated reader-visible section-pairing evidence.
+
+    Counts come from the final change list after global noise suppression, so a
+    degraded reason always describes what the reader can actually see.
+    """
+
+    change_count: int = 0
+    one_sided_count: int = 0
+    ambiguous_conflict_count: int = 0
+    fallback_pair_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -195,6 +214,8 @@ def assess_pair(
     new_extraction: ExtractionResult,
     old_sections: list[Section],
     new_sections: list[Section],
+    *,
+    pairing_review: PairingReview | None = None,
 ) -> PairAssessment:
     """Assess a pair without changing any extracted or compared facts."""
 
@@ -307,6 +328,30 @@ def assess_pair(
             degraded_reasons.append(
                 f"{label}有 {metrics.duplicate_number_path_count} 个重复章节编号路径；"
                 "可能包含多个子文档或编号重启，章节配对需要人工复核。"
+            )
+    if pairing_review is not None:
+        paired_count = max(pairing_review.change_count - pairing_review.one_sided_count, 0)
+        if pairing_review.ambiguous_conflict_count:
+            degraded_reasons.append(
+                f"有 {pairing_review.ambiguous_conflict_count} 条章节候选顺序冲突；"
+                "新增/删除结论仍待核实，不能据此自动认定一致。"
+            )
+        if (
+            pairing_review.one_sided_count >= MIN_ONE_SIDED_CHANGES_FOR_PAIRING_DEGRADE
+            and pairing_review.one_sided_count
+            > MAX_ONE_SIDED_TO_PAIRED_RATIO * max(paired_count, 1)
+        ):
+            degraded_reasons.append(
+                f"{pairing_review.one_sided_count} 条单侧新增/删除或待核实明显多于 "
+                f"{paired_count} 条成对变化；章节对应关系可能整体失准。"
+            )
+        if (
+            pairing_review.fallback_pair_count >= MIN_FALLBACK_PAIRS_FOR_PAIRING_DEGRADE
+            and pairing_review.fallback_pair_count > paired_count
+        ):
+            degraded_reasons.append(
+                f"{pairing_review.fallback_pair_count} 条变化依赖兜底相似度配对，"
+                "超过成对变化数量；建议调高章节匹配阈值后复核。"
             )
     if degraded_reasons:
         return PairAssessment(

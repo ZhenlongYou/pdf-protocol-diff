@@ -329,6 +329,161 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual("reliable", result.assessment.state)
         self.assertTrue(result.assessment.allows_no_difference_conclusion)
 
+    def test_pairing_review_degrades_ambiguous_conflicts(self) -> None:
+        """顺序冲突的配对证据必须让文本层可靠的报告降级复核。"""
+
+        body = (
+            "The receiver shall satisfy every normative electrical timing calibration and "
+            "interoperability requirement for all declared operating modes and data rates. "
+        ) * 12
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_pairing_review.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{body}\n2 Requirements\n{body}")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_pairing_review.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{body}\n2 Requirements\n{body}")],
+        )
+        old_sections = compare_module.section_document(old_extraction)
+        new_sections = compare_module.section_document(new_extraction)
+
+        baseline = compare_module.assess_pair(
+            old_extraction, new_extraction, old_sections, new_sections,
+        )
+        self.assertEqual("reliable", baseline.state)
+
+        assessment = compare_module.assess_pair(
+            old_extraction,
+            new_extraction,
+            old_sections,
+            new_sections,
+            pairing_review=compare_module.PairingReview(
+                change_count=2,
+                one_sided_count=2,
+                ambiguous_conflict_count=2,
+            ),
+        )
+
+        self.assertEqual("degraded", assessment.state)
+        self.assertFalse(assessment.allows_no_difference_conclusion)
+        self.assertTrue(any("顺序冲突" in reason for reason in assessment.reasons))
+
+    def test_pairing_review_counts_reader_visible_change_bases(self) -> None:
+        """配对审阅统计只使用最终读者可见变化的依据字段。"""
+
+        section = Section(
+            section_id="s1",
+            heading="1 Scope",
+            title="Scope",
+            level=1,
+            heading_path=("1 Scope",),
+            number_path=("1",),
+            start_page=1,
+            end_page=1,
+            body="Scope body",
+        )
+
+        def change(old_section, new_section, basis):
+            return SectionChange(
+                change_type="review",
+                old_section=old_section,
+                new_section=new_section,
+                similarity=0.0,
+                match_basis=basis,
+            )
+
+        review = compare_module._pairing_review(
+            [
+                change(section, None, "ambiguous_order_conflict"),
+                change(None, section, "similarity_fallback"),
+                change(section, section, "similarity_exact"),
+            ]
+        )
+
+        self.assertEqual(3, review.change_count)
+        self.assertEqual(2, review.one_sided_count)
+        self.assertEqual(1, review.ambiguous_conflict_count)
+        self.assertEqual(1, review.fallback_pair_count)
+
+    def test_anchor_order_allows_matches_naive_crossing_check(self) -> None:
+        """锚点顺序快速检查必须与逐锚点相乘判定完全等价。"""
+
+        anchors_by_case = (
+            [],
+            [(0, 0)],
+            [(0, 0), (2, 1), (4, 4)],
+            [(1, 5), (4, 2), (7, 9)],
+            [(0, 9), (3, 0), (6, 6), (9, 3)],
+        )
+        for anchors in anchors_by_case:
+            sorted_anchors = sorted(anchors)
+            limits = compare_module._anchor_order_limits(sorted_anchors)
+            for old_index in range(11):
+                for new_index in range(11):
+                    if any(
+                        anchor_old == old_index
+                        for anchor_old, _anchor_new in sorted_anchors
+                    ):
+                        continue  # 已配对旧章节不会再次作为候选。
+                    expected = all(
+                        (old_index - anchor_old) * (new_index - anchor_new) >= 0
+                        for anchor_old, anchor_new in sorted_anchors
+                    )
+                    with self.subTest(
+                        anchors=anchors, old=old_index, new=new_index,
+                    ):
+                        self.assertEqual(
+                            expected,
+                            compare_module._anchor_order_allows(
+                                *limits, old_index, new_index,
+                            ),
+                        )
+
+    def test_section_threshold_bound_rejects_only_when_upper_bounds_fail(self) -> None:
+        """阈值预筛必须与 difflib 上界判定一致，不能拒绝仍可能达标的配对。"""
+
+        import difflib as difflib_module
+
+        pairs = (
+            ("receiver jitter budget 0.118 UI", "receiver jitter budget 0.135 UI"),
+            ("a b c d e f", "a b c d x y"),
+            ("completely different text", "unrelated wording"),
+            ("short", "a much longer unrelated sentence body"),
+            ("", "non empty"),
+            ("", ""),
+            ("same sample text", "same sample text"),
+        )
+        for left, right in pairs:
+            for threshold in (0.4, 0.72, 0.95):
+                with self.subTest(left=left, right=right, threshold=threshold):
+                    left_norm = compare_module._normalized_section_sample(left)
+                    right_norm = compare_module._normalized_section_sample(right)
+                    matcher = difflib_module.SequenceMatcher(
+                        None, left_norm, right_norm, autojunk=False,
+                    )
+                    rejected = left_norm != right_norm and (
+                        matcher.real_quick_ratio() < threshold
+                        or matcher.quick_ratio() < threshold
+                        or (
+                            bool(left_norm or right_norm)
+                            and 2.0
+                            * compare_module._lcs_match_count(left_norm, right_norm)
+                            / (len(left_norm) + len(right_norm))
+                            < threshold
+                        )
+                    )
+                    expected = (
+                        None
+                        if rejected
+                        else compare_module._section_similarity(left, right)
+                    )
+                    self.assertEqual(
+                        expected,
+                        compare_module._section_similarity_for_threshold(
+                            left, right, threshold,
+                        ),
+                    )
+
     def test_indeterminate_report_never_claims_no_difference(self) -> None:
         """An empty/scanned self-comparison must state that equality is unknowable."""
 
@@ -6763,13 +6918,13 @@ class ProtocolDiffTests(unittest.TestCase):
             if any("Table 31-4" in title for title in change["old_titles"])
         )
         audit_rows = {row["item"]: row for row in table_audit["row_changes"]}
-        for item, value, condition in (
-            ("JH4u", "0.118 UI", "31.3.13"),
-            ("EOJ03", "0.025 UI", "31.3.13"),
+        for item, field, condition in (
+            ("JH4u", "Max=0.118 | Unit=UI", "31.3.13"),
+            ("EOJ03", "Max=0.025 | Unit=UI", "31.3.13"),
         ):
             self.assertEqual("需人工复核", audit_rows[item]["change_type"])
-            self.assertIn(value, audit_rows[item]["old_value"])
-            self.assertIn(value, audit_rows[item]["new_value"])
+            self.assertIn(field, audit_rows[item]["old_value"])
+            self.assertIn(field, audit_rows[item]["new_value"])
             self.assertIn(condition, audit_rows[item]["old_value"])
             self.assertIn("31.3.14", audit_rows[item]["new_value"])
 
@@ -6779,10 +6934,11 @@ class ProtocolDiffTests(unittest.TestCase):
         )
         self.assertNotIn("JH4u", reader_table_audit)
         self.assertNotIn("EOJ03", reader_table_audit)
-        table_html = html.split(
-            '<section class="table-visuals" id="table-changes">',
+        self.assertIn('id="page-ordered-evidence"', html)
+        table_html = html.split('id="page-ordered-evidence"', 1)[1].split(
+            '<section class="change-card"',
             1,
-        )[1].split("</section>", 1)[0]
+        )[0]  # 表格证据现在归入按页序的原页证据区；取到首个变化卡之前即可。
         self.assertIn("Table 31-4.", table_html)
         self.assertGreaterEqual(table_html.count("<img"), 2)
 

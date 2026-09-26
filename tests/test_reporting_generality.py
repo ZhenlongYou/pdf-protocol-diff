@@ -2898,7 +2898,12 @@ class ReportingGeneralityTests(unittest.TestCase):
             extraction("new.pdf", (("2", "Part II"), ("1", "Part I"))),
             options,
         )
-        self.assertEqual("reliable", result.assessment.state)
+        # 章节交叉互换只保留顺序冲突复核项：既不能自动确认移动，也不能据此宣称可靠。
+        self.assertEqual("degraded", result.assessment.state)
+        self.assertFalse(result.assessment.allows_no_difference_conclusion)
+        self.assertTrue(
+            any("顺序冲突" in reason for reason in result.assessment.reasons)
+        )
         with tempfile.TemporaryDirectory() as temp_dir:
             outputs = write_reports(result, temp_dir, options)
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))

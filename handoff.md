@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 配对与评估优化（2026-09-26）
+
+- 做了什么：在 `opencode/pdf-match-opt-20260926` 上优化配对与评估——`_monotonic_related_section_pairs` 的 locator 正则与双侧唯一性改为预计算、顺序检查改为锚点前缀最大/后缀最小（72 万次随机查询与朴素逐锚点判定等价）；`_section_similarity_for_threshold` 用按样本缓存的字符袋上界替代每对重建的 difflib quick_ratio（3000 组随机判定等价，合成网格约 1.54×）；`quality.assess_pair` 新增 `PairingReview`，顺序冲突、单侧占比失衡、兜底配对过多会降级为需人工复核；修复 532 jitter 红测试的两处陈旧断言（结构化 Max/Unit 字段、`page-ordered-evidence` 报告区），并把章节互换场景更新为新降级契约。
+- 当前状态：任务分支待提交/合并，全套 1835 项通过（0 失败、7 条件跳过）；尚未推送。
+- 下一步：提交后合并到 `main` 与 `project/pdf-protocol-diff` 并推送；可选继续做兜底候选分桶（倒排索引）与报告"章节对应清单"总览；若走重型交付需另补 STRICT v2 回执，轻量验证不代替。
+
 ## 当前任务：合入最新公开分支与随机页窗修复（2026-09-26）
 
 - task_id：`pdf-latest-integration-20260926`；owner：`01a0d0b9-200c-7390-bc01-a397a648683b`；分支：`codex/pdf-latest-integration-20260926`；worktree：`/Users/mac/.codex/worktrees/pdf-latest-integration/pdf_protocol_diff`；基线：持久分支 `project/pdf-protocol-diff`，OID `6abf4f7fd80af1415404579517b264bd448e3a05`。
