@@ -2059,9 +2059,16 @@ def compare_sections(
                 options.max_snippets_per_section,
                 suppressed_table_unit_keys=new_table_unit_keys,
             )
-            decision, decision_reason = _one_sided_change_type(
-                "added", new_index, matches, old_sections, new_sections, source_extractions, residual_units,
-            )
+            if match_basis == "ambiguous_order_conflict":
+                decision = "review"
+                decision_reason = (
+                    "旧版与新版各有更强但相互交叉的章节候选；工具没有确认新增或删除，"
+                    "请对照原页核实对应关系。"
+                )
+            else:
+                decision, decision_reason = _one_sided_change_type(
+                    "added", new_index, matches, old_sections, new_sections, source_extractions, residual_units,
+                )
             changes.append(
                 SectionChange(
                     change_type=decision,
@@ -2072,7 +2079,11 @@ def compare_sections(
                     added_snippets=added_snippets,
                     omitted_snippet_count=omitted_count,
                     audit_added_snippets=audit_added,
-                    match_basis="unmatched_source_coverage_checked" if source_extractions else match_basis,
+                    match_basis=(
+                        match_basis
+                        if match_basis == "ambiguous_order_conflict"
+                        else "unmatched_source_coverage_checked" if source_extractions else match_basis
+                    ),
                 )
             )
         elif old_section:
@@ -2081,9 +2092,16 @@ def compare_sections(
                 options.max_snippets_per_section,
                 suppressed_table_unit_keys=old_table_unit_keys,
             )
-            decision, decision_reason = _one_sided_change_type(
-                "deleted", old_index, matches, old_sections, new_sections, source_extractions, residual_units,
-            )
+            if match_basis == "ambiguous_order_conflict":
+                decision = "review"
+                decision_reason = (
+                    "旧版与新版各有更强但相互交叉的章节候选；工具没有确认新增或删除，"
+                    "请对照原页核实对应关系。"
+                )
+            else:
+                decision, decision_reason = _one_sided_change_type(
+                    "deleted", old_index, matches, old_sections, new_sections, source_extractions, residual_units,
+                )
             changes.append(
                 SectionChange(
                     change_type=decision,
@@ -2094,7 +2112,11 @@ def compare_sections(
                     removed_snippets=removed_snippets,
                     omitted_snippet_count=omitted_count,
                     audit_removed_snippets=audit_removed,
-                    match_basis="unmatched_source_coverage_checked" if source_extractions else match_basis,
+                    match_basis=(
+                        match_basis
+                        if match_basis == "ambiguous_order_conflict"
+                        else "unmatched_source_coverage_checked" if source_extractions else match_basis
+                    ),
                 )
             )
 
@@ -2458,6 +2480,27 @@ def _unique_section_content_move_pairs(
     return unique_pairs
 
 
+def _append_order_conflict_reviews(
+    old_indexes: set[int],
+    new_indexes: set[int],
+    matched_old: set[int],
+    matched_new: set[int],
+    matches: list[tuple[int | None, int | None, float, str]],
+) -> None:
+    """Reserve mutually best crossing candidates as explicit review items."""
+
+    for old_index in sorted(old_indexes):
+        if old_index in matched_old:
+            continue
+        matched_old.add(old_index)
+        matches.append((old_index, None, 0.0, "ambiguous_order_conflict"))
+    for new_index in sorted(new_indexes):
+        if new_index in matched_new:
+            continue
+        matched_new.add(new_index)
+        matches.append((None, new_index, 0.0, "ambiguous_order_conflict"))
+
+
 def _section_with_descendant_body(parent: Section, child: Section) -> Section:
     """Append a structurally moved child's source body to its matched parent."""
 
@@ -2505,6 +2548,8 @@ def _match_sections(
     matched_new: set[int] = set()
     rejected_exact_pairs: set[tuple[int, int]] = set()
     matches: list[tuple[int | None, int | None, float, str]] = []
+    order_conflict_old: set[int] = set()
+    order_conflict_new: set[int] = set()
 
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
@@ -2572,11 +2617,27 @@ def _match_sections(
 
     report_progress("match_exact", exact_completed, exact_total, unit="候选对")
     for similarity, old_index, new_index, match_basis in (
-        _select_monotonic_section_candidates(exact_candidates, matches)
+        _select_monotonic_section_candidates(
+            exact_candidates,
+            matches,
+            minimum_similarity=options.min_section_match_similarity,
+            order_conflict_old=order_conflict_old,
+            order_conflict_new=order_conflict_new,
+        )
     ):
         matched_old.add(old_index)
         matched_new.add(new_index)
         matches.append((old_index, new_index, similarity, match_basis))
+
+    _append_order_conflict_reviews(
+        order_conflict_old,
+        order_conflict_new,
+        matched_old,
+        matched_new,
+        matches,
+    )
+    order_conflict_old.clear()
+    order_conflict_new.clear()
 
     old_title_counts = Counter(
         _review_unit_key(section.title) for section in old_sections
@@ -2667,7 +2728,19 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
+        order_conflict_old=order_conflict_old,
+        order_conflict_new=order_conflict_new,
     )
+    _append_order_conflict_reviews(
+        order_conflict_old,
+        order_conflict_new,
+        matched_old,
+        matched_new,
+        matches,
+    )
+    order_conflict_old.clear()
+    order_conflict_new.clear()
 
     ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
     _consume_section_match_candidates(
@@ -2701,6 +2774,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )  # 结构证据授权的配对也必须遵守已确定的文档顺序。
 
     _consume_section_match_candidates(
@@ -2728,6 +2802,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )  # 编号后移只改变配对授权；报告继续显示实际全文分数。
 
     # 表格/Figure 剔除候选及错误父层级下的唯一同题强正文候选只能兜底：
@@ -2739,6 +2814,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )
 
     _consume_section_match_candidates(
@@ -2765,6 +2841,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )
 
     explicit_two_sided_window = all(
@@ -2806,6 +2883,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )  # 双侧唯一标题和高段落骨架覆盖可越过错误父层级；仍保留真实全文分数。
 
     _consume_section_match_candidates(
@@ -2833,6 +2911,7 @@ def _match_sections(
         matched_old,
         matched_new,
         matches,
+        minimum_similarity=options.min_section_match_similarity,
     )  # 用户页窗锚点也不能与已有对应关系交叉。
 
     for new_index, _new_section in enumerate(new_sections):
@@ -2848,20 +2927,21 @@ def _match_sections(
 def _select_monotonic_section_candidates(
     candidates: list[tuple[float, int, int, str]],
     matches: list[tuple[int | None, int | None, float, str]],
+    *,
+    minimum_similarity: float = 0.72,
+    order_conflict_old: set[int] | None = None,
+    order_conflict_new: set[int] | None = None,
 ) -> list[tuple[float, int, int, str]]:
-    """Select the highest-scoring noncrossing subset without a dense N×M table.
+    """Select candidates by gain above the unmatched threshold, sparsely.
 
     Existing matches divide the page order into fixed intervals. Candidates
     that cross those anchors are rejected, then a sparse weighted increasing
-    subsequence selects one-to-one pairs. Ties prefer more pairs and then the
-    earlier new-side endpoint, so the result is deterministic.
+    subsequence selects one-to-one pairs. The unmatched outcome is the zero-gain
+    baseline; a marginal candidate cannot win merely because several weak
+    candidates add up to a larger raw similarity total. Ties prefer more pairs
+    and then the earlier new-side endpoint, so the result is deterministic.
     """
 
-    paired_sections = [
-        (old_index, new_index)
-        for old_index, new_index, _score, _basis in matches
-        if old_index is not None and new_index is not None
-    ]
     anchors = sorted(
         (old_index, new_index)
         for old_index, new_index, _score, basis in matches
@@ -2878,8 +2958,16 @@ def _select_monotonic_section_candidates(
     ):
         return []  # Existing anchors are inconsistent; do not add guesses on top.
 
-    matched_old = {old_index for old_index, _new_index in paired_sections}
-    matched_new = {new_index for _old_index, new_index in paired_sections}
+    matched_old = {
+        old_index
+        for old_index, _new_index, _score, _basis in matches
+        if old_index is not None
+    }
+    matched_new = {
+        new_index
+        for _old_index, new_index, _score, _basis in matches
+        if new_index is not None
+    }
     best_by_pair: dict[tuple[int, int], tuple[float, int, int, str]] = {}
     for score, old_index, new_index, match_basis in candidates:
         if (
@@ -2897,8 +2985,69 @@ def _select_monotonic_section_candidates(
         if current is None or (score, match_basis) > (current[0], current[3]):
             best_by_pair[pair] = candidate
 
+    candidate_values = list(best_by_pair.values())
+    by_old: dict[int, list[tuple[float, int, int, str]]] = defaultdict(list)
+    by_new: dict[int, list[tuple[float, int, int, str]]] = defaultdict(list)
+    for candidate in candidate_values:
+        by_old[candidate[1]].append(candidate)
+        by_new[candidate[2]].append(candidate)
+
+    def unique_best(edges: list[tuple[float, int, int, str]]) -> tuple[float, int, int, str] | None:
+        best_score = max(edge[0] for edge in edges)
+        best_edges = [edge for edge in edges if edge[0] == best_score]
+        return best_edges[0] if len(best_edges) == 1 else None
+
+    mutual_best: list[tuple[float, int, int, str]] = []
+    old_best = {index: unique_best(edges) for index, edges in by_old.items()}
+    new_best = {index: unique_best(edges) for index, edges in by_new.items()}
+    for candidate in candidate_values:
+        old_candidate = old_best[candidate[1]]
+        new_candidate = new_best[candidate[2]]
+        if (
+            old_candidate is not None
+            and new_candidate is not None
+            and old_candidate[1:3] == candidate[1:3]
+            and new_candidate[1:3] == candidate[1:3]
+        ):
+            mutual_best.append(candidate)
+
+    # If the unique best choices on both sides cross, weaker monotonic options
+    # must not silently replace them with same-position template matches.
+    ordered_mutual_best = sorted(mutual_best, key=lambda item: item[1])
+    prefix_max_new: list[int | None] = []
+    highest_new: int | None = None
+    for _score, _old_index, new_index, _basis in ordered_mutual_best:
+        prefix_max_new.append(highest_new)
+        highest_new = new_index if highest_new is None else max(highest_new, new_index)
+    suffix_min_new: list[int | None] = [None] * len(ordered_mutual_best)
+    lowest_new: int | None = None
+    for index in range(len(ordered_mutual_best) - 1, -1, -1):
+        suffix_min_new[index] = lowest_new
+        new_index = ordered_mutual_best[index][2]
+        lowest_new = new_index if lowest_new is None else min(lowest_new, new_index)
+    blocked_old: set[int] = set()
+    blocked_new: set[int] = set()
+    for index, candidate in enumerate(ordered_mutual_best):
+        new_index = candidate[2]
+        if (
+            (prefix_max_new[index] is not None and new_index < prefix_max_new[index])
+            or (suffix_min_new[index] is not None and new_index > suffix_min_new[index])
+        ):
+            blocked_old.add(candidate[1])
+            blocked_new.add(new_index)
+    if blocked_old or blocked_new:
+        if order_conflict_old is not None:
+            order_conflict_old.update(blocked_old)
+        if order_conflict_new is not None:
+            order_conflict_new.update(blocked_new)
+        candidate_values = [
+            candidate
+            for candidate in candidate_values
+            if candidate[1] not in blocked_old and candidate[2] not in blocked_new
+        ]
+
     ordered = sorted(
-        best_by_pair.values(),
+        candidate_values,
         key=lambda item: (item[1], item[2], -item[0], item[3]),
     )
     if not ordered:
@@ -2952,9 +3101,10 @@ def _select_monotonic_section_candidates(
                 previous_score, previous_count = 0.0, 0
             else:
                 previous_score, previous_count = states[previous][0:2]
+            gain = max(candidate[0] - minimum_similarity, 0.0)
             states.append(
                 (
-                    previous_score + candidate[0],
+                    previous_score + gain,
                     previous_count + 1,
                     previous,
                     candidate,
@@ -2984,12 +3134,19 @@ def _consume_section_match_candidates(
     matched_old: set[int],
     matched_new: set[int],
     matches: list[tuple[int | None, int | None, float, str]],
+    *,
+    minimum_similarity: float = 0.72,
+    order_conflict_old: set[int] | None = None,
+    order_conflict_new: set[int] | None = None,
 ) -> None:
     """Apply monotonic one-to-one candidates without inflating similarity."""
 
     for score, old_index, new_index, match_basis in _select_monotonic_section_candidates(
         candidates,
         matches,
+        minimum_similarity=minimum_similarity,
+        order_conflict_old=order_conflict_old,
+        order_conflict_new=order_conflict_new,
     ):
         matched_old.add(old_index)
         matched_new.add(new_index)

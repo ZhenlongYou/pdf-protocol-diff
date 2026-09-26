@@ -12455,18 +12455,14 @@ class ProtocolDiffTests(unittest.TestCase):
                 body=body,
             )
 
-        alpha_body = (
-            "The receiver calibration uses the alpha sampling reference and preserves "
-            "the measured transfer response. "
+        shared_boilerplate = (
+            "The receiver and transmitter interface preserves the declared sampling "
+            "reference and measured electrical transfer response. "
         ) * 18
-        alpha_old_body = alpha_body + "The legacy calibration result remains available."
-        alpha_new_body = alpha_body + "The updated calibration result remains available."
-        beta_body = (
-            "The transmitter timing check uses the beta recovery marker and preserves "
-            "the measured launch interval. "
-        ) * 18
-        beta_old_body = beta_body + "The legacy timing result remains available."
-        beta_new_body = beta_body + "The updated timing result remains available."
+        alpha_old_body = shared_boilerplate + "Legacy alpha calibration result remains available."
+        alpha_new_body = shared_boilerplate + "Updated alpha calibration result remains available."
+        beta_old_body = shared_boilerplate + "Legacy beta timing result remains available."
+        beta_new_body = shared_boilerplate + "Updated beta timing result remains available."
         anchor_a = "A stable introductory clause anchors the comparison."
         anchor_b = "A stable closing clause anchors the comparison."
         old_sections = [
@@ -12491,11 +12487,7 @@ class ProtocolDiffTests(unittest.TestCase):
 
         self.assertIn((0, 0), pairs)
         self.assertIn((3, 3), pairs)
-        self.assertLessEqual(
-            len(pairs),
-            3,
-            "the two swapped clauses cannot both be paired across each other",
-        )
+        self.assertEqual([(0, 0), (3, 3)], pairs)
         self.assertEqual(
             pairs,
             sorted(pairs, key=lambda pair: (pair[0], pair[1])),
@@ -12504,8 +12496,8 @@ class ProtocolDiffTests(unittest.TestCase):
             all(left[1] < right[1] for left, right in pairwise(pairs)),
             f"matched sections crossed in document order: {pairs}",
         )
-        self.assertEqual(1, sum(old is None for old, _new, _score, _basis in matches))
-        self.assertEqual(1, sum(new is None for _old, new, _score, _basis in matches))
+        self.assertEqual(2, sum(old is None for old, _new, _score, _basis in matches))
+        self.assertEqual(2, sum(new is None for _old, new, _score, _basis in matches))
 
     def test_unique_exact_body_anchor_preserves_an_actual_section_move(self) -> None:
         """Exact unique prose can identify a moved section outside the monotonic lane."""
@@ -12568,7 +12560,7 @@ class ProtocolDiffTests(unittest.TestCase):
         ]
         selected = compare_module._select_monotonic_section_candidates(candidates, [])
 
-        valid_scores: list[float] = []
+        valid_objectives: list[tuple[float, int]] = []
         for size in range(len(candidates) + 1):
             for subset in combinations(candidates, size):
                 ordered = sorted(subset, key=lambda candidate: candidate[1])
@@ -12583,12 +12575,15 @@ class ProtocolDiffTests(unittest.TestCase):
                     for left, right in pairwise(new_indexes)
                 ):
                     continue
-                valid_scores.append(sum(candidate[0] for candidate in subset))
+                gain = sum(max(candidate[0] - 0.72, 0.0) for candidate in subset)
+                valid_objectives.append((gain, len(subset)))
 
+        best_gain, best_count = max(valid_objectives)
         self.assertAlmostEqual(
-            max(valid_scores),
-            sum(candidate[0] for candidate in selected),
+            best_gain,
+            sum(max(candidate[0] - 0.72, 0.0) for candidate in selected),
         )
+        self.assertEqual(best_count, len(selected))
         self.assertEqual(
             [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)],
             [(candidate[1], candidate[2]) for candidate in selected],
@@ -12611,6 +12606,24 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
         self.assertEqual([(0, 0), (2, 2)], [(candidate[1], candidate[2]) for candidate in selected])
+
+    def test_monotonic_solver_leaves_mutually_best_crossings_unmatched(self) -> None:
+        """Strong opposite content choices cannot be replaced by weaker templates."""
+
+        candidates = [
+            (0.999, 0, 1, "strong-content-match"),
+            (0.999, 1, 0, "strong-content-match"),
+            (0.813, 0, 0, "marginal-template-match"),
+            (0.813, 1, 1, "marginal-template-match"),
+        ]
+
+        selected = compare_module._select_monotonic_section_candidates(
+            candidates,
+            [],
+            minimum_similarity=0.72,
+        )
+
+        self.assertEqual([], selected)
 
     def test_global_residual_pairing_respects_assignment_field_identity(self) -> None:
         """Shared values cannot cross-pair two moved explicit assignment fields."""

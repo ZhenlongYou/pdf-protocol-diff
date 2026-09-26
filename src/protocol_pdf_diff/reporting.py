@@ -98,6 +98,7 @@ _MATCH_BASIS_LABELS = {
     "structural_mapped_parent_unique_child": "强证据父章节配对+双侧唯一同题直属子章节",
     "document_relation_anchor": "双侧唯一相关标题+结构/引用锚点+文档顺序",
     "user_page_window_anchor": "用户指定双侧页窗强关联",
+    "ambiguous_order_conflict": "章节候选顺序冲突，新增/删除结论待核实",
     "unmatched": "未配对",
 }
 _STRUCTURAL_MATCH_BASES = frozenset(
@@ -115,19 +116,23 @@ _STRUCTURAL_MATCH_BASES = frozenset(
     }
 )
 _USER_ANCHORED_MATCH_BASES = frozenset({"user_page_window_anchor"})
+_AMBIGUOUS_MATCH_BASES = frozenset({"ambiguous_order_conflict"})
 _EVIDENCE_SUPPRESSED_MATCH_BASES = frozenset({"evidence_suppressed_similarity_fallback"})
 _UNIQUE_TITLE_BODY_MATCH_BASES = frozenset({"unique_title_body_fallback"})
 _EXPLAINED_MATCH_BASES = (
     _STRUCTURAL_MATCH_BASES
     | _USER_ANCHORED_MATCH_BASES
+    | _AMBIGUOUS_MATCH_BASES
     | _EVIDENCE_SUPPRESSED_MATCH_BASES
     | _UNIQUE_TITLE_BODY_MATCH_BASES
 )
 
 
 def _match_basis_explanation(match_basis: str) -> str:
-    """Explain why a below-threshold section pair was still authorized."""
+    """Explain the section identity evidence or ambiguity reason in a report."""
 
+    if match_basis in _AMBIGUOUS_MATCH_BASES:
+        return "双侧最强章节候选互相交叉；保留原文供核对，不自动确认新增或删除"
     if match_basis in _USER_ANCHORED_MATCH_BASES:
         return "用户页窗授权；相似度仍为全文实际值"
     if match_basis in _EVIDENCE_SUPPRESSED_MATCH_BASES:
