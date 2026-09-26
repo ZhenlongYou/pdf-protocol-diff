@@ -5639,8 +5639,13 @@ def _prose_outside_displayed_formula(unit: str) -> list[str]:
 def _retain_formula_adjacent_span(span: str) -> bool:
     """A locator regrouping must never weaken a span's retention decision."""
     words = re.findall(r'[^\W\d_]{2,}', span, flags=re.UNICODE)
+    private_glyphs = bool(re.search(r'[\ue000-\uf8ff]', span))
+    readable_scalar = bool(re.search(r'\d+\.\d+|\d{2,}', span))
     scalar_expression = (bool(re.search(r'[^\W\d_]', span))
-                         and not re.search(r'(?i)\b(?:log|ln|sin|cos|tan|exp|sqrt)\s*\(|[∑∫∏]', span))
+                         and not re.search(r'(?i)\b(?:log|ln|sin|cos|tan|exp|sqrt)\s*\(|[∑∫∏]', span)
+                         # PUA 公式墙只有在带可读多数值时才算标量；否则它是
+                         # 版面公式，不能因为含字母就把乱序公式重报成正文修改。
+                         and (not private_glyphs or readable_scalar))
     return bool((not _DISPLAYED_FORMULA_RELATION_RE.search(span)
                  and not re.search(r'[\ue000-\uf8ff]', span))
                 or scalar_expression or len(words) >= 4

@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 页窗门禁回归修复（2026-09-27）
+
+- 做了什么：在 `opencode/pdf-figure-reflow-fix-20260927`（基于 `32133bc`）修复页窗门禁复核发现的真实回归与门禁材料问题——图内相邻标签被抽成 `Zero line`/`Signal line` 合并片段时不再成为已确认正文修改（新增 `figure_crop_owns_whole_tokens` 整词级保守回归，双侧 Figure 配对才生效，句子/跨图拼词拒绝）；表格分数横线 2/3 连字符归一（CEI 5.1/05.3 Table 7-4、9-7 的假差异，标识符/区间 `A--B`、`1--2` 不受影响）；PUA 公式墙不再因含字母被当作标量保留（261-receiver 公式假修改）；重造失效的两页灰色行号栏变异并新增图内重排变异，修复门禁探针报告名 glob 与全套探针导入路径；327 语料期望按源行证据更新（Table 16-1/16-2/16-4 仅空白/横线/乘号渲染差异，24/24 通过）。
+- 当前状态：任务分支已提交（含本交接），全套 1844 项通过（0 失败）、OIF 语料 24/24、目标 RED/GREEN 与图契约通过；canonical `work/page-window-gate` 门禁材料同步更新（探针、变异、语料期望），尚未合并/推送。
+- 下一步：合并到 `main` 与 `project/pdf-protocol-diff` 并推送；由 Codex 审核本轮修复与 327 语料期望变更；若走重型交付需另补 STRICT v2 回执。
+
 ## OpenCode 配对与评估优化（2026-09-26）
 
 - 做了什么：在 `opencode/pdf-match-opt-20260926` 上优化配对与评估——`_monotonic_related_section_pairs` 的 locator 正则与双侧唯一性改为预计算、顺序检查改为锚点前缀最大/后缀最小（72 万次随机查询与朴素逐锚点判定等价）；`_section_similarity_for_threshold` 用按样本缓存的字符袋上界替代每对重建的 difflib quick_ratio（3000 组随机判定等价，合成网格约 1.54×）；`quality.assess_pair` 新增 `PairingReview`，顺序冲突、单侧占比失衡、兜底配对过多会降级为需人工复核；修复 532 jitter 红测试的两处陈旧断言（结构化 Max/Unit 字段、`page-ordered-evidence` 报告区），并把章节互换场景更新为新降级契约。

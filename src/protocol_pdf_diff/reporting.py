@@ -23,6 +23,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from .figure_filters import (
+    figure_crop_owns_whole_tokens,
     filter_figure_visual_snippets,
     is_figure_visual_pair,
     strip_coordinate_owned_figure_fragment,
@@ -10404,6 +10405,14 @@ def _table_row_single_line_text_key(value: str, *, field_label: str = "") -> str
         compact_source,
         field_label=field_label,
     )
+    # 分数横线或空占位在抽取时可能是 2~3 个连字符（前面还常紧贴 ×/· 等符号）；
+    # 不和字母数字相连的连字符串在比较键里只保留一个，避免横线长度被当成
+    # 参数变化（显示值仍保留原文；A--B、1--2 这类标识符/区间不受影响）。
+    compact_source = re.sub(
+        r"(?<![0-9A-Za-z])[-–—−]{2,}(?![0-9A-Za-z])",
+        "-",
+        compact_source,
+    )
     case_source = compact_source
     case_source = case_source.replace("µ", "u").replace("μ", "u")
     case_source = _normalize_table_row_math_text(case_source)
@@ -12644,6 +12653,12 @@ def _reader_change_without_figure_visual_fragments(
     )
     if change is None:
         return None
+    # 坐标归属之后仍可能剩下“行合并碎片”（如把图内相邻标签合并成
+    # ``Zero line``）：它在源词流里没有连续有序出现，坐标证明不到。
+    # 保留双侧裁图清单，用整词级保守规则处理这一段；坐标面已消费的
+    # 文本不再重复作为 Figure 清单使用。
+    old_figure_inventory = tuple(old_visual_texts) if old_visual_available else ()
+    new_figure_inventory = tuple(new_visual_texts) if new_visual_available else ()
     # The generic coordinate pass has already consumed source-backed text.
     # The remaining Figure-specific pass handles legacy standalone captions.
     old_visual_texts = ()
@@ -12712,7 +12727,14 @@ def _reader_change_without_figure_visual_fragments(
                 and new_visual_available
                 and old_value
                 and new_value
-                and is_figure_visual_pair(old_value, new_value)
+                and (
+                    is_figure_visual_pair(old_value, new_value)
+                    or (
+                        # 行合并碎片：双侧同一张 Figure 的整词清单就能解释。
+                        figure_crop_owns_whole_tokens(old_value, old_figure_inventory)
+                        and figure_crop_owns_whole_tokens(new_value, new_figure_inventory)
+                    )
+                )
             ):
                 continue
             if old_visual_available and old_value:

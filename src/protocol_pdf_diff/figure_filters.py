@@ -72,6 +72,36 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
     )
 
 
+def figure_crop_owns_whole_tokens(
+    value: str,
+    source_texts: tuple[str, ...] | list[str],
+) -> bool:
+    """Return True when ONE Figure crop's text inventory holds every whole token.
+
+    只用于行合并碎片：抽取器会把图内相邻标签合并成 ``Zero line`` 这类片段，
+    它在源词流里没有连续有序出现，因此坐标归属证明不到；这里只检查同一张
+    Figure 裁图的文本清单是否包含片段的每个整词，不做子串覆盖、不合并多张
+    图的词表，也不接受句子形态。调用方必须已经证明双侧 Figure 配对，才能
+    把片段从读者差异降级为图示重排。
+    """
+
+    compact = compact_inline(value)
+    if not compact or not source_texts:
+        return False
+    if _PROSE_OR_REQUIREMENT_VERB_RE.search(compact):
+        return False  # 真实句子（含谓语/条件句）优先保留。
+    if _is_figure_visual_prose_boundary(compact):
+        return False  # 句末标点、编号步骤或长段正文都按正文处理。
+    tokens = re.findall(r"\S+", compact)
+    if not tokens or len(tokens) > 6:
+        return False  # 只处理短标签碎片，避免吞掉整句改写。
+    for source_text in source_texts:
+        source_tokens = set(re.findall(r"\S+", compact_inline(source_text)))
+        if all(token in source_tokens for token in tokens):
+            return True  # 单张裁图必须独立覆盖全部整词。
+    return False
+
+
 def strip_coordinate_owned_figure_fragment(
     value: str,
     source_texts: tuple[str, ...] | list[str],

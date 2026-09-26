@@ -44,7 +44,10 @@ from protocol_pdf_diff.models import (
     TableVisual,
 )
 from protocol_pdf_diff.pdf_extract import _table_lines_from_rows_with_coverage
-from protocol_pdf_diff.figure_filters import strip_coordinate_owned_visual_fragment
+from protocol_pdf_diff.figure_filters import (
+    figure_crop_owns_whole_tokens,
+    strip_coordinate_owned_visual_fragment,
+)
 from protocol_pdf_diff.reporting import (
     _build_table_changes,
     _generic_boundary_merge_patterns_for_entries,
@@ -190,6 +193,68 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertIsNone(
             _reader_section_change(change, figure_visual_sides=(True, True))
+        )
+
+    def test_merged_figure_label_fragments_are_not_confirmed_pairs(self) -> None:
+        """图内相邻标签被抽成合并片段时仍按图示重排处理，不确认成正文修改。"""
+
+        old_labels = "Zero line Signal 28 Amplitude 29"
+        new_labels = "Zero Signal line 28 Amplitude 29"
+        old_section = Section(
+            "old-reflow", "2.C.5.2 Annex", "Annex", 2,
+            ("2.C.5.2 Annex",), ("2.C.5.2",), 105, 105,
+            "Figure 2-21. Varying\nZero\nline\nSignal",
+        )
+        new_section = Section(
+            "new-reflow", "2.C.5.2 Annex", "Annex", 2,
+            ("2.C.5.2 Annex",), ("2.C.5.2",), 109, 109,
+            "Figure 2-21. Varying\nZero\nSignal\nline",
+        )
+        change = SectionChange(
+            "modified",
+            old_section,
+            new_section,
+            0.99,
+            replaced_snippets=[
+                SnippetPair("Zero line", "Zero"),
+                SnippetPair("Signal", "Signal line"),
+            ],
+        )
+
+        self.assertIsNone(
+            _reader_section_change(
+                change,
+                figure_visual_sides=(True, True),
+                figure_visual_texts=((old_labels,), (new_labels,)),
+            )
+        )
+
+    def test_figure_crop_whole_token_rule_rejects_prose_and_cross_crop_pooling(self) -> None:
+        """整词规则只接受单张裁图覆盖的短标签，不接受句子或多图拼词。"""
+
+        self.assertTrue(
+            figure_crop_owns_whole_tokens("Zero line", ("Zero line Signal 28",))
+        )
+        self.assertTrue(
+            figure_crop_owns_whole_tokens("Signal line", ("Zero Signal line 28",))
+        )
+        self.assertFalse(
+            figure_crop_owns_whole_tokens(
+                "Hosts and modules shall meet the applicable specifications.",
+                ("Hosts and modules shall meet the applicable specifications.",),
+            )
+        )
+        self.assertFalse(
+            figure_crop_owns_whole_tokens(
+                "2. Capture the output waveform",
+                ("2 Capture output waveform",),
+            )
+        )
+        self.assertFalse(
+            figure_crop_owns_whole_tokens("Zero line", ("Zero 28", "line 29"))
+        )
+        self.assertFalse(
+            figure_crop_owns_whole_tokens("a b c d e f g", ("a b c d e f g",))
         )
 
     def test_figure_text_remains_when_no_coordinate_visual_owns_it(self) -> None:
@@ -2374,6 +2439,36 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             _table_structured_diff_kind(
                 spaced_old.replace("Host=4 0", "Host=True 1"),
                 spaced_new,
+            ),
+        )
+
+    def test_stacked_fraction_bar_dash_length_is_not_a_row_change(self) -> None:
+        """同一分数横线的 2/3 个连字符是抽取伪差异，不产生已确认表格行变化。"""
+
+        old_row = "表格行: T1 | Parameter=f1 | Value=3\nT_Baud --\n4 | Units=Hz"
+        new_row = "表格行: T1 | Parameter=f1 | Value=3\nT_Baud ---\n4 | Units=Hz"
+
+        def table(rows: list[str]) -> TableVisual:
+            return TableVisual(
+                page_number=1,
+                table_number=1,
+                title="Table 1. Fractions",
+                bbox=(0.0, 0.0, 100.0, 100.0),
+                image_data_uri="",
+                row_texts=rows,
+                grid_summary="",
+            )
+
+        self.assertEqual("无变化", _table_structured_diff_kind(old_row, new_row))
+        self.assertEqual(
+            [],
+            _table_row_changes((table([old_row]),), (table([new_row]),)),
+        )
+        self.assertNotEqual(
+            "无变化",
+            _table_structured_diff_kind(
+                "表格行: T1 | Parameter=Mode | Value=A--B | Units=-",
+                "表格行: T1 | Parameter=Mode | Value=A---B | Units=-",
             ),
         )
 
