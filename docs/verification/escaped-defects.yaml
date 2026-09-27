@@ -397,3 +397,48 @@ escaped_defects:
     regression_test_id: LATE_RESCUE_ORDER_CONFLICT_TEST
     public_path_rerun_id: RUN-MONOTONIC-CLI-REORDER
     state: verified
+  - id: DEF-FULLRUN-EMPTY-SCREENSHOT-PLACEHOLDER-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "整本 OIF CEI 5.1→05.3 报告出现 70 处“PDF 第 N 页截图暂不可用”空框；历史整本与页窗验收均为 0。"
+    discovered_via: full_document_validation
+    failure_mechanism: "页面组按差异卡覆盖的全部物理页渲染截图，但只有取得坐标视觉证据的页才有截图候选，无证据页被渲染成空框。"
+    red_green_pair_id: PAIR-FULLRUN-EMPTY-SCREENSHOT
+    regression_test_id: PAGE_GROUP_WITHOUT_SOURCE_SCREENSHOT_TEST
+    public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
+    state: verified
+  - id: DEF-TABLE-HYPHEN-FAMILY-FALSE-MODIFY-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "12 张 QPRBS/参考时钟表因空占位横线字形差异被误报为已确认修改。"
+    discovered_via: full_document_validation
+    failure_mechanism: "表内空占位横线旧版为 U+2010、新版为 ASCII 连字符；行比较只归一并折叠了 U+2212/–/—，漏掉 U+2010/U+2011/U+2012。"
+    red_green_pair_id: PAIR-TABLE-HYPHEN-FAMILY
+    regression_test_id: UNICODE_HYPHEN_PLACEHOLDER_TEST
+    public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
+    state: verified
+  - id: DEF-TABLE-CELL-SOFT-BREAK-FALSE-MODIFY-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "5 张表因同一单元格内换行位置不同被误报为已确认修改。"
+    discovered_via: full_document_validation
+    failure_mechanism: '表行序列化用字面量 \n/\r 表示单元格内换行；既有空白降级检查按字段对齐，换行破坏字段对齐后直接落入确认修改，且字面量换行不在空白归一范围。'
+    red_green_pair_id: PAIR-TABLE-CELL-SOFT-BREAK
+    regression_test_id: CELL_SOFT_LINE_BREAK_TEST
+    public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
+    state: verified
+  - id: DEF-FULLRUN-PROSE-READING-ORDER-NOISE-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "整本正文卡仍含阅读顺序/跨块拼接片段（源页抽样 112/165 无法按原文定位），与第十五轮 52 条正文噪声同源。"
+    discovered_via: full_document_validation
+    failure_mechanism: "多栏、公式与图内文字层在抽取时按阅读顺序拼接，正文单元成为非连续片段；当前没有对应区域的归属证明，报告保持 degraded 需人工复核。"
+    red_green_pair_id: PAIR-CONTENT-CORRESPONDENCE
+    regression_test_id: CONTENT_CORRESPONDENCE_TEST
+    public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
+    state: open
+  - id: DEF-FULLRUN-VISUAL-WATCHDOG-COVERAGE-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "整本视觉哨兵只核对 105/371 对可配对页，297 页未安全配对；未核对页不能由文字/表格差异覆盖。"
+    discovered_via: full_document_validation
+    failure_mechanism: "页级像素哨兵要求唯一内容配对；页数差异、重复页与图像主导页使大量页对无法安全配对，当前只作为覆盖边界如实列出。"
+    red_green_pair_id: PAIR-CONTENT-CORRESPONDENCE
+    regression_test_id: CONTENT_CORRESPONDENCE_TEST
+    public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
+    state: open
