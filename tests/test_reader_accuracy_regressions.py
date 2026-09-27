@@ -2528,6 +2528,21 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             ),
         )
 
+    def test_case_signature_span_lookup_preserves_whole_text_scan_semantics(self) -> None:
+        """按 span 查询签名必须与整段非重叠扫描的接受集合完全一致。"""
+
+        signatures = reporting_module._technical_case_signatures
+
+        self.assertEqual(["ABC"], signatures("ABC DEF", target_span=(0, 3)))
+        self.assertEqual(["DEF"], signatures("ABC DEF", target_span=(4, 7)))
+        # 连字符连接的长标识符整体是一次匹配，内联分词拆出的子串不得出签名。
+        self.assertEqual([], signatures("ABC-DEF", target_span=(0, 3)))
+        self.assertEqual([], signatures("ABC-DEF", target_span=(4, 7)))
+        self.assertEqual(["ABC-DEF"], signatures("ABC-DEF", target_span=(0, 7)))
+        # 不限定 span 时保持按文档顺序返回全部签名。
+        self.assertEqual(["ABC", "DEF"], signatures("ABC DEF"))
+        self.assertEqual(["ABC-DEF"], signatures("ABC-DEF"))
+
     def test_geometry_proven_repeated_x_lanes_restore_one_merged_column(self) -> None:
         """Repeated categorical/numeric lanes recover a detector-missed boundary."""
 

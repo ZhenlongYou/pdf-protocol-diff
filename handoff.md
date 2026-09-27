@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 报告性能优化严格等价修正（2026-09-27）
+
+- 做了什么：复查上一轮 `f5bc848` 的提速时发现边界隐患：给定 `target_span` 时用 `search(value, start, end)` 会因 `endpos` 截断尾部前瞻，可能把内联分词已拆开的更长标识符（如 `ABC-DEF` 中的 `ABC`）当成独立 token 并多出大小写签名。改为按整段文本缓存一次非重叠匹配索引 `_case_bearing_token_index`（`finditer` 结果按精确 span 建字典），再 O(1) 查询；接受集合与旧实现完全一致。新增边界回归测试（`ABC-DEF` 子串不出签名、整体出签名、正常 token 与整段调用不变）。Base 61 页窗口报告阶段维持 **30.2s（4.6×）**；与改造前基线对比：JSON 过滤时间戳/提交号后 **0 差异**，HTML 除“生成时间”一处字符串外逐字节相同（9,812,501B）。全套 1848 项、OIF 语料 24/24 通过。
+- 当前状态：任务分支 `opencode/pdf-report-perf-exact-20260927` 已提交（含本交接），待合并推送；随后用该版本重跑 Base 整本与 72-run 门禁回放。
+- 下一步：Base 整本三件套复验；72-run 回放确认；有新类别继续修。
+
 ## OpenCode 报告阶段性能优化（2026-09-27）
 
 - 做了什么：Base 整本单轮超 2 小时，分段计时显示报告阶段约 2.25s/页（61 页窗口 137.5s），是最大头。cProfile 定位两处纯重复计算并消除（不改变结果）：① `parse_number_word_phrase` 每次调用重建整个规范化 token 流，调用方按每个 token 起点调用导致 O(n²)（388M 次 token 规范化、1.17B 次 str.replace），改为按 token 元组缓存规范化结果；② `_technical_case_signatures` 在给定 `target_span` 时仍对整段文本 `finditer`（227M 次 `match.span()`），改为在该区间内 `search`。Base 61 页窗口报告阶段 **137.5s→30.1s（4.6×）**；同窗口新旧代码 JSON 过滤时间戳/提交号后逐字段 **0 差异**、HTML 字节数完全相同（9,826,662B，35 图）；全套 1847 项、OIF 语料 24/24 通过。

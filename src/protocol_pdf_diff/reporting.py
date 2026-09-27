@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .comparison_session import comparison_session
+from .comparison_session import comparison_session, memoize_comparison
 from .screenshot_presentation import IMAGE_VIEWER, table_context_image
 from .exact_match import ratio as exact_sequence_ratio
 
@@ -10544,6 +10544,22 @@ def _structured_value_shape(value: str) -> str:
     return "".join(shape)
 
 
+@memoize_comparison()
+def _case_bearing_token_index(value: str) -> dict[tuple[int, int], str]:
+    """Cache one value's non-overlapping case-bearing tokens by exact span.
+
+    旧实现每次调用都对整段文本 ``finditer`` 后按 span 过滤，内联分词按 token
+    依次询问时退化成 O(n²)。整段扫描结果只取决于 ``value``，按整段缓存一次、
+    再按精确 span 查询即可保持与原实现完全相同的接受集合（包括 ``ABC-DEF``
+    整体作为一次匹配、其子串不另行出签名这类边界语义）。
+    """
+
+    return {
+        (match.start(), match.end()): match.group(0)
+        for match in _TABLE_CASE_BEARING_TOKEN_RE.finditer(value)
+    }
+
+
 def _technical_case_signatures(
     value: str,
     *,
@@ -10551,20 +10567,15 @@ def _technical_case_signatures(
 ) -> list[str]:
     """Preserve case only where token shape indicates technical semantics."""
 
-    signatures: list[str] = []
+    snapshots = _case_bearing_token_index(value)
+    matches: Iterable[tuple[int, int, str]]
     if target_span is not None:
-        # 调用方按单 token 区间询问时，只在该区间内查找。旧实现对整段文本
-        # finditer 后逐 match 比较 span，表格/CSV 上会退化成 O(n²)。
-        match = _TABLE_CASE_BEARING_TOKEN_RE.search(
-            value, target_span[0], target_span[1]
-        )
-        matches: Iterable[re.Match[str]] = (
-            (match,) if match is not None and match.span() == target_span else ()
-        )
+        token = snapshots.get(target_span)
+        matches = ((target_span[0], target_span[1], token),) if token is not None else ()
     else:
-        matches = _TABLE_CASE_BEARING_TOKEN_RE.finditer(value)
-    for match in matches:
-        token = match.group(0)
+        matches = tuple((start, end, token) for (start, end), token in snapshots.items())
+    signatures: list[str] = []
+    for start, end, token in matches:
         letters = [character for character in token if character.isalpha()]
         cased_letters = [
             character
@@ -10593,20 +10604,20 @@ def _technical_case_signatures(
             or has_letter_and_digit
             or has_internal_upper
             or is_all_upper
-            or (is_single_letter and _single_letter_case_is_technical(value, match.start(), match.end()))
+            or (is_single_letter and _single_letter_case_is_technical(value, start, end))
             or (
                 is_titlecase
                 and _titlecase_token_is_technical(
                     value,
-                    match.start(),
-                    match.end(),
+                    start,
+                    end,
                     token,
                     cased_letters,
                 )
             )
             or (has_non_ascii_case and any(character.isupper() for character in cased_letters))
             or (
-                _span_is_inside_paired_literal(value, match.start(), match.end())
+                _span_is_inside_paired_literal(value, start, end)
                 and any(character.isupper() for character in cased_letters)
             )
         ):
