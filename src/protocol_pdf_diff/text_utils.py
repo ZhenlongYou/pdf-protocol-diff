@@ -11,6 +11,8 @@ import re
 import unicodedata
 from decimal import Decimal, InvalidOperation, localcontext
 
+from .comparison_session import memoize_comparison
+
 TABLE_NUMBER_DASH_CLASS = r"[\-\u2010\u2011\u2012\u2013\u2014\u2212]"
 
 _WHITESPACE_RE = re.compile(r"[ \t\u00a0]+")
@@ -666,7 +668,7 @@ def parse_number_word_phrase(tokens: list[str], start_index: int) -> tuple[str, 
 
     if start_index >= len(tokens):
         return None
-    normalized = [_normalize_number_word_token(token) for token in tokens]
+    normalized = _normalized_number_word_tokens(tuple(tokens))
     return _parse_normalized_number_word_phrase(normalized, start_index)
 
 
@@ -1086,10 +1088,25 @@ def canonicalize_chinese_number_expressions(text: str) -> str:
     return _CHINESE_CONTEXT_NUMBER_RE.sub(replace_count, value)
 
 
+@memoize_comparison()
 def _normalize_number_word_token(token: str) -> str:
     """Normalize a candidate number-word token for parsing only."""
 
     return token.casefold().replace("-", "").replace("‐", "").replace("‑", "")
+
+
+@memoize_comparison()
+def _normalized_number_word_tokens(tokens: tuple[str, ...]) -> list[str]:
+    """Cache one token stream's normalized form for repeated phrase parsing.
+
+    ``parse_number_word_phrase`` is called once per token index by inline
+    tokenization; rebuilding the whole normalized list per index made report
+    generation quadratic on table-heavy pages. The parser treats the returned
+    list as read-only (verified by the read-only scan of its body), so one
+    normalized copy per token stream is safe.
+    """
+
+    return [_normalize_number_word_token(token) for token in tokens]
 
 
 def _compact_number_word_value(normalized: str) -> int | None:

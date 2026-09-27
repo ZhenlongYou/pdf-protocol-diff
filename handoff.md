@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode 报告阶段性能优化（2026-09-27）
+
+- 做了什么：Base 整本单轮超 2 小时，分段计时显示报告阶段约 2.25s/页（61 页窗口 137.5s），是最大头。cProfile 定位两处纯重复计算并消除（不改变结果）：① `parse_number_word_phrase` 每次调用重建整个规范化 token 流，调用方按每个 token 起点调用导致 O(n²)（388M 次 token 规范化、1.17B 次 str.replace），改为按 token 元组缓存规范化结果；② `_technical_case_signatures` 在给定 `target_span` 时仍对整段文本 `finditer`（227M 次 `match.span()`），改为在该区间内 `search`。Base 61 页窗口报告阶段 **137.5s→30.1s（4.6×）**；同窗口新旧代码 JSON 过滤时间戳/提交号后逐字段 **0 差异**、HTML 字节数完全相同（9,826,662B，35 图）；全套 1847 项、OIF 语料 24/24 通过。
+- 当前状态：任务分支 `opencode/pdf-report-perf-fix-20260927` 已提交（含本交接），待合并推送；合并后用优化代码重跑 Base 整本（`PYTHONUNBUFFERED=1` 记录阶段耗时）并跑 72-run 门禁回放。
+- 下一步：Base 整本复验（0 占位、表格假阳性、源页抽样）；72-run 回放确认；若 Base 再暴露新类别继续修复。
+
 ## OpenCode 整本验证闭环（2026-09-27）
 
 - 做了什么：OIF CEI 5.1→05.3 整本全量验证发现并修复三类假阳性——页组空截图占位（70→0，`c6398b6`）、U+2010 连字符族空占位误报（12 张表，`4648070`）、单元格软换行误报（5 张表，`33df048`）；三项均补回归测试，最终代码上 OIF 语料 24/24、全套 1847 项、72-run 门禁 72/72（26 个 RED 全复现）通过，最终整本报告 0 占位、0 张 modified 表。仍未解决的正文阅读顺序噪声与视觉哨兵覆盖边界已作为 open 条目写入 `docs/verification/escaped-defects.yaml`。

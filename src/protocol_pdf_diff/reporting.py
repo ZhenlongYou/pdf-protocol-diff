@@ -10552,9 +10552,18 @@ def _technical_case_signatures(
     """Preserve case only where token shape indicates technical semantics."""
 
     signatures: list[str] = []
-    for match in _TABLE_CASE_BEARING_TOKEN_RE.finditer(value):
-        if target_span is not None and match.span() != target_span:
-            continue
+    if target_span is not None:
+        # 调用方按单 token 区间询问时，只在该区间内查找。旧实现对整段文本
+        # finditer 后逐 match 比较 span，表格/CSV 上会退化成 O(n²)。
+        match = _TABLE_CASE_BEARING_TOKEN_RE.search(
+            value, target_span[0], target_span[1]
+        )
+        matches: Iterable[re.Match[str]] = (
+            (match,) if match is not None and match.span() == target_span else ()
+        )
+    else:
+        matches = _TABLE_CASE_BEARING_TOKEN_RE.finditer(value)
+    for match in matches:
         token = match.group(0)
         letters = [character for character in token if character.isalpha()]
         cased_letters = [
