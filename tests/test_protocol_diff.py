@@ -6244,7 +6244,11 @@ class ProtocolDiffTests(unittest.TestCase):
             self.assertEqual(5, len(PdfReader(str(new_pdf)).pages))
             self.assertIn("modified", change_types)
             self.assertIn("added", change_types)
-            self.assertEqual("reliable", result.assessment.state)
+            self.assertEqual("degraded", result.assessment.state.value)
+            self.assertGreater(
+                result.provenance.visual_watchdog_audit.semantic_change_page_count,
+                0,
+            )
             self.assertTrue(any("1.1 Delivery" in location for location in locations))
             self.assertTrue(any("2.1 Security" in location for location in locations))
             self.assertTrue(any("2.2 Documentation" in location for location in locations))
@@ -17546,7 +17550,7 @@ class ProtocolDiffTests(unittest.TestCase):
         )
 
     def test_visual_watchdog_excludes_reader_visible_change_from_unchanged_scope(self) -> None:
-        """A normal redline page is already covered and must not degrade every report."""
+        """A redline stays distinct from unchanged pages and discloses its pixel gap."""
 
         pages = [
             [
@@ -17578,8 +17582,9 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertEqual(6, audit.eligible_page_pair_count)
         self.assertEqual(6, audit.checked_page_pair_count)
         self.assertEqual(0, audit.ambiguous_page_count)
-        self.assertTrue(audit.complete)
-        self.assertEqual("reliable", result.assessment.state)
+        self.assertFalse(audit.complete)
+        self.assertGreater(audit.semantic_change_page_count, 0)
+        self.assertEqual("degraded", result.assessment.state.value)
 
     def test_visual_watchdog_counts_unpaired_reader_suppressed_page_as_incomplete(self) -> None:
         """Metadata hidden from reader cards cannot make eligible=0 look complete."""

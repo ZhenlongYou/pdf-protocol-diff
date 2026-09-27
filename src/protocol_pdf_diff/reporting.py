@@ -87,6 +87,9 @@ _CHANGE_LABELS = {
     "review": "需复核",
     "unchanged": "未变化",
 }
+_FIGURE_FRAGMENT_REVIEW_REASON = (
+    "图中文字清单包含这些词，但尚不能证明只是换行或重排；请对照原图复核。"
+)
 _MATCH_BASIS_LABELS = {
     "similarity_exact": "编号结构与正文相似度",
     "similarity_fallback": "正文相似度回退配对",
@@ -1677,7 +1680,12 @@ def _append_markdown_changes(
                 if glyph_note := _unverified_pua_mapping_note(pair.old, pair.new):
                     lines.append(f"    说明: {glyph_note}")
         if change.review_replaced_snippets:
-            lines.append("- 上下文归属待核实（不表示适用条件相同）:" if change.context_review_records else "- 结构顺延复核（不计入核心差异，保留原文供核对）:")
+            if change.context_review_records:
+                lines.append("- 上下文归属待核实（不表示适用条件相同）:")
+            elif _FIGURE_FRAGMENT_REVIEW_REASON in change.review_reason:
+                lines.append("- 图文差异待复核（保留原文供核对）:")
+            else:
+                lines.append("- 结构顺延复核（不计入核心差异，保留原文供核对）:")
             for pair in change.review_replaced_snippets:
                 lines.append(f"  - 旧: {_reader_snippet_text(pair.old)}")
                 lines.append(f"    新: {_reader_snippet_text(pair.new)}")
@@ -2554,7 +2562,11 @@ def _render_change_html(
             f'（{_escape(_match_basis_explanation(change.match_basis))}）</div>'
         )
     pairs = "\n".join(_render_pair_html(pair.old, pair.new) for pair in change.replaced_snippets)
-    review_pairs = _render_review_pairs_html(change.review_replaced_snippets, context_scope=bool(change.context_review_records))
+    review_pairs = _render_review_pairs_html(
+        change.review_replaced_snippets,
+        context_scope=bool(change.context_review_records),
+        figure_scope=_FIGURE_FRAGMENT_REVIEW_REASON in change.review_reason,
+    )
     if change.formula_review_records:
         review_pairs += '<p class="review-note">公式来源待核实（' + str(len(change.formula_review_records)) + ' 项）；完整原文、精确来源位置与双侧原图见公式来源待核实记录，不表示公式相同。</p>'
     neutral = change.change_type == "review"
@@ -10913,7 +10925,12 @@ def _change_summary(change: SectionChange) -> str:
     if change.formula_review_records:
         parts.append(f"{len(change.formula_review_records)} 处公式来源待核实")
     if change.review_replaced_snippets:
-        parts.append(f"{len(change.review_replaced_snippets)} 处" + ("上下文归属待核实" if change.context_review_records else "结构顺延复核"))
+        review_label = (
+            "上下文归属待核实" if change.context_review_records else
+            "图文差异待复核" if _FIGURE_FRAGMENT_REVIEW_REASON in change.review_reason else
+            "结构顺延复核"
+        )
+        parts.append(f"{len(change.review_replaced_snippets)} 处{review_label}")
     if change.added_snippets:
         label = "段新版待核实原文" if change.change_type == "review" else "段新增"
         parts.append(f"{len(_reader_single_list_groups(change.added_snippets))} {label}")
@@ -11022,14 +11039,21 @@ def _render_pair_html(old_text: str, new_text: str, *, neutral: bool = False) ->
     """
 
 
-def _render_review_pairs_html(pairs: list[SnippetPair], *, context_scope: bool = False) -> str:
-    """Render ambiguous structural renumbering without red/green change emphasis."""
+def _render_review_pairs_html(
+    pairs: list[SnippetPair], *, context_scope: bool = False, figure_scope: bool = False,
+) -> str:
+    """Render ambiguous changes without red/green change emphasis."""
 
     if not pairs:
         return ""
-    rendered: list[str] = [
-        ('<div class="match-basis">上下文归属待核实（不表示文字已一致；双侧原文及邻近项目保留）</div>' if context_scope else '<div class="match-basis">结构顺延复核（不计入核心技术差异；旧、新原文保留供核对）</div>')
-    ]
+    label = (
+        "上下文归属待核实（不表示文字已一致；双侧原文及邻近项目保留）"
+        if context_scope else
+        "图文差异待复核（旧、新原文保留供核对）"
+        if figure_scope else
+        "结构顺延复核（不计入核心技术差异；旧、新原文保留供核对）"
+    )
+    rendered: list[str] = [f'<div class="match-basis">{label}</div>']
     for pair in pairs:
         old_html = _render_collapsible_snippet_html(pair.old, _escape(pair.old))
         new_html = _render_collapsible_snippet_html(pair.new, _escape(pair.new))
@@ -12707,8 +12731,7 @@ def _reader_change_without_figure_visual_fragments(
         return None
     # 坐标归属之后仍可能剩下“行合并碎片”（如把图内相邻标签合并成
     # ``Zero line``）：它在源词流里没有连续有序出现，坐标证明不到。
-    # 保留双侧裁图清单，用整词级保守规则处理这一段；坐标面已消费的
-    # 文本不再重复作为 Figure 清单使用。
+    # 双侧裁图清单只能提示人工复核，不能证明这种变化可从报告删除。
     old_figure_inventory = tuple(old_visual_texts) if old_visual_available else ()
     new_figure_inventory = tuple(new_visual_texts) if new_visual_available else ()
     # The generic coordinate pass has already consumed source-backed text.
@@ -12779,16 +12802,14 @@ def _reader_change_without_figure_visual_fragments(
                 and new_visual_available
                 and old_value
                 and new_value
-                and (
-                    is_figure_visual_pair(old_value, new_value)
-                    or (
-                        # 行合并碎片：双侧同一张 Figure 的整词清单且两侧只是同词重排。
-                        figure_crop_owns_whole_tokens(old_value, old_figure_inventory)
-                        and figure_crop_owns_whole_tokens(new_value, new_figure_inventory)
-                        and figure_fragment_token_sets_regrouped(old_value, new_value)
-                    )
-                )
+                and is_figure_visual_pair(old_value, new_value)
             ):
+                # 裁图能证明两侧文字属于 Figure，却不能证明图中标签没有改动。
+                # 只忽略已证明仅有定位编号差异的成对片段。
+                if compact_inline(_reader_neutralize_locator_numbers(old_value)) != compact_inline(
+                    _reader_neutralize_locator_numbers(new_value)
+                ):
+                    cleaned_replaced.append(SnippetPair(old_value, new_value))
                 continue
             if old_visual_available and old_value:
                 old_value = next(
@@ -12854,14 +12875,52 @@ def _reader_change_without_figure_visual_fragments(
             audit_replaced if change.audit_replaced_snippets is not None else None
         ),
     )
+    def needs_figure_review(pair: SnippetPair) -> bool:
+        return (
+            old_visual_available
+            and new_visual_available
+            and (
+                is_figure_visual_pair(pair.old, pair.new)
+                or (
+                    figure_crop_owns_whole_tokens(pair.old, old_figure_inventory)
+                    and figure_crop_owns_whole_tokens(pair.new, new_figure_inventory)
+                    and figure_fragment_token_sets_regrouped(pair.old, pair.new)
+                )
+            )
+        )
+
+    reviewed = _reader_change_with_replaced_pair_review(cleaned, needs_figure_review)
+    if reviewed is None:
+        return None
+    new_review_pairs = reviewed.review_replaced_snippets[len(cleaned.review_replaced_snippets):]
+    if new_review_pairs:
+        # 只把实际展示的 occurrence 移到复核区；展示上限之外的同类
+        # occurrence 仍留在完整审计清单，不能因词形相同而悄悄消失。
+        remaining_audit = (
+            list(cleaned.audit_replaced_snippets)
+            if cleaned.audit_replaced_snippets is not None else None
+        )
+        if remaining_audit is not None:
+            for pair in new_review_pairs:
+                if pair in remaining_audit:
+                    remaining_audit.remove(pair)
+        reviewed = replace(
+            reviewed,
+            audit_replaced_snippets=remaining_audit,
+            omitted_snippet_count=cleaned.omitted_snippet_count,
+            review_reason="；".join(
+                part for part in (reviewed.review_reason, _FIGURE_FRAGMENT_REVIEW_REASON) if part
+            ),
+        )
     if (
-        not cleaned.removed_snippets
-        and not cleaned.added_snippets
-        and not cleaned.replaced_snippets
-        and cleaned.omitted_snippet_count == 0
+        not reviewed.removed_snippets
+        and not reviewed.added_snippets
+        and not reviewed.replaced_snippets
+        and not reviewed.review_replaced_snippets
+        and reviewed.omitted_snippet_count == 0
     ):
         return None
-    return cleaned
+    return reviewed
 
 
 def _reader_change_without_coordinate_table_fragments(
@@ -13224,7 +13283,7 @@ def _reader_change_with_replaced_pair_review(
     change: SectionChange,
     should_review: Callable[[SnippetPair], bool],
 ) -> SectionChange | None:
-    """Move ambiguous renumber-only pairs out of core changes into neutral review."""
+    """Move ambiguous replacement pairs out of core changes into neutral review."""
 
     review_pairs = [
         pair for pair in change.replaced_snippets if should_review(pair)

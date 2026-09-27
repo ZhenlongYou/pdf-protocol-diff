@@ -30,11 +30,12 @@ class ContentOnlyTests(unittest.TestCase):
             self.assertNotIn('bob@example.test', md)
             self.assertNotIn('Limits ........', md)
 
-    def test_ordinary_case_and_whitespace_do_not_create_reader_changes(self):
-        for old, new in [('The MAXIMUM VALUE is specified.', 'The Maximum Value is specified.'),
-                         ('The output  voltage is specified.', 'The output voltage is specified.')]:
-            md, html = self.report('1 Requirements\n' + old, '1 Requirements\n' + new)
-            self.assertNotIn('\n### ', md)
+    def test_whitespace_changes_do_not_create_reader_changes(self):
+        md, _ = self.report(
+            '1 Requirements\nThe output  voltage is specified.',
+            '1 Requirements\nThe output voltage is specified.',
+        )
+        self.assertNotIn('\n### ', md)
 
     def test_all_caps_to_lowercase_words_survive_for_review(self):
         """纯全大写↔全小写可能是有语义的大小写敏感标识符，必须保留为差异。"""
@@ -83,10 +84,10 @@ class ContentOnlyTests(unittest.TestCase):
                          ('Value=10 ↵ 20', 'Value=10 20')]:
             self.assertFalse(cosmetic_content_equal(old, new, cell_wrap=True))
 
-    def test_uppercase_emphasis_with_word_shape_stays_cosmetic(self):
+    def test_letter_case_changes_are_not_cosmetic(self):
         from protocol_pdf_diff.content_equivalence import cosmetic_content_equal
-        self.assertTrue(cosmetic_content_equal('Warning message', 'WARNING message'))
-        self.assertTrue(cosmetic_content_equal('Warning message', 'warning message'))
+        self.assertFalse(cosmetic_content_equal('Warning message', 'WARNING message'))
+        self.assertFalse(cosmetic_content_equal('Warning message', 'warning message'))
 
     def table_report(self, old, new, *, reliable=True):
         def table(value):
@@ -100,10 +101,9 @@ class ContentOnlyTests(unittest.TestCase):
             paths = write_reports(result, directory, DiffOptions())
             return paths['markdown'].read_text()
 
-    def test_cell_wrapping_and_case_are_not_content_changes(self):
-        for old, new in [('Output\nvoltage', 'Output voltage'), ('MAXIMUM VALUE', 'Maximum Value')]:
-            md = self.table_report(old, new)
-            self.assertNotIn('配对相似度', md)
+    def test_cell_wrapping_is_not_a_content_change(self):
+        md = self.table_report('Output\nvoltage', 'Output voltage')
+        self.assertNotIn('配对相似度', md)
 
     def test_table_all_caps_to_lowercase_word_survives_for_review(self):
         md = self.table_report('MAXIMUM VALUE', 'Maximum value')

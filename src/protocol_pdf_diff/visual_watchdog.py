@@ -125,7 +125,7 @@ def detect_visual_review_items(
             failed_page_pair_count=0,
             ambiguous_page_count=ambiguous_page_count,
             excluded_region_count=0,
-            complete=ambiguous_page_count == 0,
+            complete=ambiguous_page_count == 0 and not semantic_change_pages,
             source_hashes_match=None,
             coverage_issues=tuple(coverage_issues),
             semantic_change_page_count=len(semantic_change_pages),
@@ -315,6 +315,7 @@ def detect_visual_review_items(
 
     complete = (
         ambiguous_page_count == 0
+        and not semantic_change_pages
         and failed_page_pair_count == 0
         and checked_page_pair_count == len(eligible_page_pairs)
     )

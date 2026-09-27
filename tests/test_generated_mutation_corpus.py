@@ -15,7 +15,7 @@ class GeneratedMutationCorpusTests(unittest.TestCase):
     """Prove change recall without depending on private vendor PDFs."""
 
     def test_semantic_mutations_survive_multiple_heading_families(self) -> None:
-        """Formula, negation, identifier, and limit changes must all remain visible."""
+        """Semantic edits remain visible while changed pages disclose unchecked pixels."""
 
         shared_lines = [
             "The document shall preserve every declared condition limit and responsibility."
@@ -67,7 +67,12 @@ class GeneratedMutationCorpusTests(unittest.TestCase):
                     changed_text = _changed_text(result)
 
                     self.assertTrue(result.changes, case_id)
-                    self.assertEqual("reliable", result.assessment.state.value, case_id)
+                    self.assertEqual("degraded", result.assessment.state.value, case_id)
+                    self.assertGreater(
+                        result.provenance.visual_watchdog_audit.semantic_change_page_count,
+                        0,
+                        case_id,
+                    )
                     self.assertEqual(1, len(result.changes), case_id)
                     change = result.changes[0]
                     self.assertEqual("modified", change.change_type, case_id)

@@ -166,8 +166,8 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
 
         self.assertIsNone(cleaned)
 
-    def test_combined_figure_caption_and_label_wall_is_not_word_compared(self) -> None:
-        """A caption and diagram labels extracted as one block still stay out of prose diff."""
+    def test_combined_figure_caption_and_label_wall_is_retained_for_review(self) -> None:
+        """Ambiguous diagram text remains visible for review instead of disappearing."""
 
         old_text = (
             "Figure 29-1. End-to-end linear channel Host A Host B retimer function "
@@ -193,12 +193,15 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             replaced_snippets=[SnippetPair(old_text, new_text)],
         )
 
-        self.assertIsNone(
-            _reader_section_change(change, figure_visual_sides=(True, True))
+        reviewed = _reader_section_change(change, figure_visual_sides=(True, True))
+        self.assertIsNotNone(reviewed)
+        self.assertEqual("review", reviewed.change_type)
+        self.assertEqual(
+            [SnippetPair(old_text, new_text)], reviewed.review_replaced_snippets
         )
 
-    def test_merged_figure_label_fragments_are_not_confirmed_pairs(self) -> None:
-        """图内相邻标签被抽成合并片段时仍按图示重排处理，不确认成正文修改。"""
+    def test_merged_figure_label_fragments_remain_visible_for_review(self) -> None:
+        """图内相邻标签被抽成合并片段时保留原文，供用户对照复核。"""
 
         old_labels = "Zero line Signal 28 Amplitude 29"
         new_labels = "Zero Signal line 28 Amplitude 29"
@@ -223,12 +226,19 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
             ],
         )
 
-        self.assertIsNone(
-            _reader_section_change(
-                change,
-                figure_visual_sides=(True, True),
-                figure_visual_texts=((old_labels,), (new_labels,)),
-            )
+        reviewed = _reader_section_change(
+            change,
+            figure_visual_sides=(True, True),
+            figure_visual_texts=((old_labels,), (new_labels,)),
+        )
+        self.assertIsNotNone(reviewed)
+        self.assertEqual("review", reviewed.change_type)
+        self.assertEqual(
+            [
+                SnippetPair("Zero line", "Zero"),
+                SnippetPair("Signal", "Signal line"),
+            ],
+            reviewed.review_replaced_snippets,
         )
 
     def test_figure_crop_whole_token_rule_rejects_prose_and_cross_crop_pooling(self) -> None:

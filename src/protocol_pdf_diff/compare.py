@@ -256,10 +256,19 @@ def _assessment_with_visual_review(
             f"发现 {visual_review_count} 页未解释的视觉变化；"
             "文字、表格和公式差异不足以覆盖这些源像素变化。"
         )
+    if audit.semantic_change_page_count:
+        reasons.append(
+            f"有 {audit.semantic_change_page_count} 个含正文变化的页面未做像素核对；"
+            "同页图形变化仍需人工复核。"
+        )
     if not audit.complete:
         if not audit.enabled:
             reasons.append("视觉漏检哨兵已关闭，本次未完成像素层核对。")
-        else:
+        elif (
+            audit.failed_page_pair_count
+            or audit.ambiguous_page_count
+            or audit.checked_page_pair_count != audit.eligible_page_pair_count
+        ):
             reasons.append(
                 "视觉漏检哨兵未完整覆盖可核对页面："
                 f"已核对 {audit.checked_page_pair_count}/"
@@ -275,7 +284,11 @@ def _assessment_with_visual_review(
         headline = (
             "需人工复核：存在语义层未解释的视觉变化"
             if visual_review_count
-            else "需人工复核：视觉漏检核对未完整完成"
+            else (
+                "需人工复核：正文变化页面尚未核对图形像素"
+                if audit.semantic_change_page_count
+                else "需人工复核：视觉漏检核对未完整完成"
+            )
         )
     return replace(
         assessment,
@@ -2656,10 +2669,12 @@ def _section_with_descendant_body(parent: Section, child: Section) -> Section:
         (child, child_heading, child.body),
     ):
         page_bodies = section.page_bodies or ((section.start_page, content),)
-        for position, (page_number, body) in enumerate(page_bodies):
+        if heading:
+            # 子章标题可能在前一页末尾，而正文从下一页才开始。
+            # page_bodies 只记录有正文的页，不能把标题放到它的首项。
+            page_lines[section.start_page].append(heading)
+        for page_number, body in page_bodies:
             text = body.strip()
-            if position == 0 and heading:
-                text = "\n".join(part for part in (heading, text) if part)
             if text:
                 page_lines[page_number].append(text)
     return replace(

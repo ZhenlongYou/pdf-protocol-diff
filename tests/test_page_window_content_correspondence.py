@@ -1417,8 +1417,8 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
         _REAL_OIF_CEI_51.is_file() and _REAL_OIF_CEI_053.is_file(),
         "local OIF CEI 5.1/5.3 PDFs are unavailable",
     )
-    def test_real_oif_single_page_figure_text_reflow_is_not_a_confirmed_change(self) -> None:
-        """The one-page window keeps an identical Figure as visual review, not prose/table edits."""
+    def test_real_oif_single_page_figure_text_reflow_remains_reviewable(self) -> None:
+        """Ambiguous figure-label reflow stays visible as a neutral review item."""
 
         options = DiffOptions(
             old_start_page=105,
@@ -1445,7 +1445,17 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
             any("至少三页" in warning for warning in extraction_warnings),
             extraction_warnings,
         )
-        self.assertEqual([], payload["content_changes"])
+        self.assertEqual(1, len(payload["content_changes"]))
+        figure_text_review = payload["content_changes"][0]
+        self.assertEqual("review", figure_text_review["change_type"])
+        self.assertIn("图中文字清单包含这些词", figure_text_review["review_reason"])
+        self.assertEqual(
+            [
+                {"old": "Zero line", "new": "Zero"},
+                {"old": "Signal", "new": "Signal line"},
+            ],
+            figure_text_review["review_replaced_snippets"],
+        )
         self.assertEqual([], payload["content_table_changes"])
         self.assertTrue(
             any(
@@ -2120,6 +2130,8 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                 "The unchanged closing clause.",
             ]
 
+            case_index = 0
+
             def compare_additional_header(
                 new_line: str,
                 *,
@@ -2128,8 +2140,12 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                 new_banner_prefix: str | None = None,
                 pair_header_sections: bool = False,
             ):
-                old_path = root / f"old_header_{new_line.replace(' ', '_')}.pdf"
-                new_path = root / f"new_header_{new_line.replace(' ', '_')}.pdf"
+                nonlocal case_index
+                case_index += 1
+                # Header text may contain Windows-reserved filename characters
+                # such as ':'. Keep synthetic fixture names platform-neutral.
+                old_path = root / f"old_header_case_{case_index}.pdf"
+                new_path = root / f"new_header_case_{case_index}.pdf"
                 _write_publication_header_pages(
                     old_path,
                     "6.4",
@@ -2180,7 +2196,7 @@ class PageWindowContentCorrespondenceTests(unittest.TestCase):
                             ),
                         ],
                     )
-                outputs = write_reports(result, root / f"reports-{new_line.replace(' ', '_')}", DiffOptions())
+                outputs = write_reports(result, root / f"reports-case-{case_index}", DiffOptions())
                 return json.loads(outputs["json"].read_text(encoding="utf-8"))
 
             unchanged_extra_line = compare_additional_header("Name Affiliation")

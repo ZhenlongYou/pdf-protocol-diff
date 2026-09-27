@@ -73,12 +73,10 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
 
 
 def figure_fragment_token_sets_regrouped(old: str, new: str) -> bool:
-    """Return True only when two fragments regroup the same label words.
+    """Identify possible regrouping for review; token sets are not proof.
 
-    行合并碎片是同一批图内标签被重新切分或换行；真实改名会把某个词换成另一个
-    不同的词，其词集合既非子集也非超集。要求一侧词集合包含另一侧，避免正文里
-    ``Transmit Only`` → ``Receive Only`` 这类改名仅因图中恰好出现过这些词就被
-    当作图示重排从差异清单删除。
+    词集合包含关系也可能是技术标签缩短或同词换序。调用方只能把这种情况
+    标记为待复核，不能据此删除差异。
     """
 
     old_tokens = set(re.findall(r"\S+", compact_inline(old)))
@@ -94,11 +92,11 @@ def figure_crop_owns_whole_tokens(
 ) -> bool:
     """Return True when ONE Figure crop's text inventory holds every whole token.
 
-    只用于行合并碎片：抽取器会把图内相邻标签合并成 ``Zero line`` 这类片段，
+    只用于发现可能的行合并碎片：抽取器会把图内相邻标签合并成 ``Zero line`` 这类片段，
     它在源词流里没有连续有序出现，因此坐标归属证明不到；这里只检查同一张
     Figure 裁图的文本清单是否包含片段的每个整词，不做子串覆盖、不合并多张
-    图的词表，也不接受句子形态。调用方必须已经证明双侧 Figure 配对，才能
-    把片段从读者差异降级为图示重排。
+    图的词表，也不接受句子形态。命中只能提示图文归属待复核，不能证明变化
+    没有技术含义。
     """
 
     compact = compact_inline(value)
