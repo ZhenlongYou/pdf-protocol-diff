@@ -6,6 +6,7 @@ import re
 import shutil
 
 from .models import classify_page_parser_route  # 重新导出模型层纯路由器，避免 PageText 不变量产生循环依赖。
+from .ocr_cache import cached_image_to_string  # 整页 OCR 复用按渲染像素命中的历史结果。
 from .text_utils import normalize_line
 
 
@@ -97,7 +98,7 @@ def _extract_scan_page_text_with_evidence(
             "未执行整页 OCR。"
         ], False, True, None
     try:
-        import pytesseract
+        import pytesseract  # noqa: F401 - 可用性检查：缺失时维持原有“未安装”说明。
     except ModuleNotFoundError:
         return native_text, [
             f"{pdf_name}: 第 {page_number} 页疑似扫描页，但 pytesseract 未安装，"
@@ -111,7 +112,7 @@ def _extract_scan_page_text_with_evidence(
         }
         if ocr_language is not None:
             ocr_arguments["lang"] = ocr_language
-        raw_ocr_text = pytesseract.image_to_string(image, **ocr_arguments)
+        raw_ocr_text = cached_image_to_string(image, **ocr_arguments)  # 相同渲染像素、语言与 psm 的重复整页识别走缓存。
     except Exception as exc:
         return native_text, [
             f"{pdf_name}: 第 {page_number} 页整页 OCR 失败: {exc}"

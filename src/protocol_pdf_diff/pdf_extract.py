@@ -45,6 +45,7 @@ from .models import (
     PageText,
     TableVisual,
 )
+from .ocr_cache import cached_image_to_string  # 表格截图 OCR 复用按图像字节命中的历史结果。
 from .page_furniture import (
     looks_like_page_bearing_running_header,
     looks_like_revision_or_publication_date,
@@ -6401,11 +6402,11 @@ def _ocr_table_image(image: object) -> tuple[str, str]:
     if shutil.which("tesseract") is None:
         return "", "OCR 未启用：未发现 tesseract；使用截图和 pdfplumber 表格行。"
     try:
-        import pytesseract
+        import pytesseract  # noqa: F401 - 可用性检查：缺失时保持原有“OCR 未启用”状态说明。
     except ModuleNotFoundError:
         return "", "OCR 未启用：pytesseract 未安装。"
     try:
-        text = pytesseract.image_to_string(image, config="--psm 6", timeout=60)  # psm 6 适合统一块状表格区域。
+        text = cached_image_to_string(image, config="--psm 6", timeout=60)  # psm 6 适合统一块状表格区域；相同图像的重复识别走缓存。
     except Exception as exc:
         return "", f"OCR 失败: {exc}"
     normalized = "\n".join(line for line in (normalize_line(raw) for raw in text.splitlines()) if line)

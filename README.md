@@ -313,6 +313,11 @@ Gold Accuracy 可用 `minimum_distinct_families` 要求多个经人工审阅的�
 需要限制处理范围时仍可使用页窗。累计预算耗尽后列出未处理页并保持 `degraded` 或
 `indeterminate` 的处理，属于后续工作。
 
+表格截图与整页 OCR 的结果现在按“渲染像素 + 语言 + PSM + Tesseract 版本”的哈希缓存到本机
+`~/.cache/protocol_pdf_diff/ocr`：命中文本与实时识别一致，重复运行、重叠页窗或反复调整报告
+参数时不再重复识别。设置 `PROTOCOL_PDF_DIFF_OCR_CACHE=off` 可关闭缓存，或把该变量指向自定义
+目录；测试进程默认不读写真实缓存。
+
 ## 桌面版 GUI
 
 如果要给不熟悉命令行的同事使用，可以运行桌面界面：

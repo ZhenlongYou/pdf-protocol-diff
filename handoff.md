@@ -1,5 +1,11 @@
 # PDF Protocol Diff Handoff
 
+## OpenCode OCR 结果缓存（2026-09-27）
+
+- 做了什么：先量出整本 Base 的 OCR 成本（61 页窗抽取 48.2s、86 次 tesseract 调用：表格截图 42/文档 + 整页 1/文档），据此落地 **OCR 结果缓存**：新增 `src/protocol_pdf_diff/ocr_cache.py`，表格截图（`--psm 6`）与整页扫描（`--psm 3`）按“渲染像素 SHA-256 + 语言 + PSM + Tesseract 版本/TESSDATA_PREFIX”缓存到 `~/.cache/protocol_pdf_diff/ocr`（`PROTOCOL_PDF_DIFF_OCR_CACHE=off` 关闭、可指向自定义目录；测试进程默认不读写真实缓存），命中复用原文本，可用性检查与状态文案不变。窗口等价性 6 轮（缓存关/冷/热 × 手工管线/真实事务入口）：JSON 过滤时间戳后 **0 差异**、HTML 除生成时间外逐字节相同；预热后窗口抽取 48.2s→**28.7s（1.68×）**、事务入口 115.0s→96.3s；冷缓存首跑即命中 39/86（两本共享同图表格）。全套 1853 项、OIF 语料 24/24 通过；新增 5 项缓存单测。**并行抽取方案被实测否决**：真正并发时 pypdfium2/PDFium 进程级状态会被破坏（42+42 张表格截图全部 "Failed to load page / Data format error"，串行对照 0 失败）；给渲染加全局锁可恢复安全，但 CPython GIL 下 3 轮对照加锁并行 35.6s 反慢于串行 29.8s，因此未进入交付。
+- 当前状态：任务分支 `opencode/pdf-parallel-extract-ocr-cache-20260927` 已提交（含本交接），待合并推送；Base 整本仍在后台运行（`base_final_6b25743`，使用 6b25743 代码、不含本缓存；缓存无损性由上述窗口/事务/语料证据覆盖）。
+- 下一步：合并 `main` 与 `project/pdf-protocol-diff` 并推送；Base 整本完成后按三件套（结构/占位/图片、分类统计、源页真值抽样）复验并出最终结论；若后续仍要并行抽取，需走进程级方案并单独验证内存峰值与事务上下文。
+
 ## OpenCode 报告性能优化严格等价修正（2026-09-27）
 
 - 做了什么：复查上一轮 `f5bc848` 的提速时发现边界隐患：给定 `target_span` 时用 `search(value, start, end)` 会因 `endpos` 截断尾部前瞻，可能把内联分词已拆开的更长标识符（如 `ABC-DEF` 中的 `ABC`）当成独立 token 并多出大小写签名。改为按整段文本缓存一次非重叠匹配索引 `_case_bearing_token_index`（`finditer` 结果按精确 span 建字典），再 O(1) 查询；接受集合与旧实现完全一致。新增边界回归测试（`ABC-DEF` 子串不出签名、整体出签名、正常 token 与整段调用不变）。Base 61 页窗口报告阶段维持 **30.2s（4.6×）**；与改造前基线对比：JSON 过滤时间戳/提交号后 **0 差异**，HTML 除“生成时间”一处字符串外逐字节相同（9,812,501B）。全套 1848 项、OIF 语料 24/24 通过。
