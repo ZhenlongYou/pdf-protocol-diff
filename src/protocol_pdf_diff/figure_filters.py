@@ -72,6 +72,22 @@ def is_figure_visual_pair(old: str, new: str) -> bool:
     )
 
 
+def figure_fragment_token_sets_regrouped(old: str, new: str) -> bool:
+    """Return True only when two fragments regroup the same label words.
+
+    行合并碎片是同一批图内标签被重新切分或换行；真实改名会把某个词换成另一个
+    不同的词，其词集合既非子集也非超集。要求一侧词集合包含另一侧，避免正文里
+    ``Transmit Only`` → ``Receive Only`` 这类改名仅因图中恰好出现过这些词就被
+    当作图示重排从差异清单删除。
+    """
+
+    old_tokens = set(re.findall(r"\S+", compact_inline(old)))
+    new_tokens = set(re.findall(r"\S+", compact_inline(new)))
+    if not old_tokens or not new_tokens:
+        return False
+    return old_tokens <= new_tokens or new_tokens <= old_tokens
+
+
 def figure_crop_owns_whole_tokens(
     value: str,
     source_texts: tuple[str, ...] | list[str],

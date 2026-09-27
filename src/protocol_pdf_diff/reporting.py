@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .figure_filters import (
     figure_crop_owns_whole_tokens,
+    figure_fragment_token_sets_regrouped,
     filter_figure_visual_snippets,
     is_figure_visual_pair,
     strip_coordinate_owned_figure_fragment,
@@ -12781,9 +12782,10 @@ def _reader_change_without_figure_visual_fragments(
                 and (
                     is_figure_visual_pair(old_value, new_value)
                     or (
-                        # 行合并碎片：双侧同一张 Figure 的整词清单就能解释。
+                        # 行合并碎片：双侧同一张 Figure 的整词清单且两侧只是同词重排。
                         figure_crop_owns_whole_tokens(old_value, old_figure_inventory)
                         and figure_crop_owns_whole_tokens(new_value, new_figure_inventory)
+                        and figure_fragment_token_sets_regrouped(old_value, new_value)
                     )
                 )
             ):
@@ -16358,21 +16360,30 @@ def _render_visual_coverage_html(result: DiffResult) -> str:
     """Make incomplete pixel coverage locatable without claiming a difference."""
 
     audit = result.provenance.visual_watchdog_audit if result.provenance else None
-    if audit is None or not audit.coverage_issues:
+    if audit is None:
         return ""
     def source_link(path: Path, page: int | None) -> str:
         if page is None:
             return "未确定"
         return f'<a href="{_escape(Path(path).resolve().as_uri())}#page={page}">{page}</a>'
+    semantic_rows = "".join(
+        f"<tr><td>{source_link(result.old_pdf, old_page)}</td>"
+        f"<td>{source_link(result.new_pdf, new_page)}</td>"
+        "<td>该页含读者可见的正文变化，未做像素层核对；图片内变化可能不在差异清单中。</td></tr>"
+        for old_page, new_page in audit.semantic_change_pages
+    )
     rows = "".join(
         f"<tr><td>{source_link(result.old_pdf, issue.old_page_number)}</td>"
         f"<td>{source_link(result.new_pdf, issue.new_page_number)}</td>"
         f"<td>{_escape(issue.reason)}</td></tr>"
         for issue in audit.coverage_issues
-    )
+    ) + semantic_rows
+    total = len(audit.coverage_issues) + len(audit.semantic_change_pages)
+    if not total:
+        return ""
     return (
         '<details class="visual-coverage-details"><summary>查看未核对页面及原因'
-        f'（{len(audit.coverage_issues)} 项）</summary>'
+        f'（{total} 项）</summary>'
         '<p>下表使用 PDF 物理页码。这些页面尚未完成像素比较，不能据此判断图形相同或不同。'
         '“未确定”表示没有安全的对应页，请回到源文件人工核对。</p>'
         '<table><thead><tr><th>旧版 PDF 页</th><th>新版 PDF 页</th><th>原因</th></tr></thead>'
@@ -16530,6 +16541,11 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
                      "new_page_number": issue.new_page_number, "reason": issue.reason,
                      "category": issue.category}
                     for issue in visual_audit.coverage_issues
+                ],
+                "semantic_change_page_count": visual_audit.semantic_change_page_count,
+                "semantic_change_pages": [
+                    [old_page, new_page]
+                    for old_page, new_page in visual_audit.semantic_change_pages
                 ],
             }
             if visual_audit is not None

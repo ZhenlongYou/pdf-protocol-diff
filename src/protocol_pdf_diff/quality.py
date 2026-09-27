@@ -347,11 +347,11 @@ def assess_pair(
             )
         if (
             pairing_review.fallback_pair_count >= MIN_FALLBACK_PAIRS_FOR_PAIRING_DEGRADE
-            and pairing_review.fallback_pair_count > paired_count
+            and pairing_review.fallback_pair_count * 2 > paired_count
         ):
             degraded_reasons.append(
                 f"{pairing_review.fallback_pair_count} 条变化依赖兜底相似度配对，"
-                "超过成对变化数量；建议调高章节匹配阈值后复核。"
+                f"占 {paired_count} 条成对变化的一半以上；建议调高章节匹配阈值后复核。"
             )
     if degraded_reasons:
         return PairAssessment(

@@ -39,9 +39,12 @@ def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False, conte
 
     Whitespace width is irrelevant. A cell soft wrap is ignored only between
     alphabetic words, not between numbers/list entries. Uppercase emphasis is
-    ignored for ordinary-shaped long words;
-    short acronyms, camel-case units, literals and named technical fields retain
-    case. This is spelling normalization, not semantic paraphrase matching.
+    ignored only when at least one side keeps an ordinary word shape (title
+    case, for example ``Warning`` vs ``WARNING``); a pure all-upper vs
+    all-lower spelling change is retained because case-sensitive identifiers,
+    enum values and command words may carry meaning. Short acronyms, camel-case
+    units, literals and named technical fields retain case. This is spelling
+    normalization, not semantic paraphrase matching.
     """
     def compact(value: str) -> str:
         value = without_email_addresses(value)
@@ -76,5 +79,9 @@ def cosmetic_content_equal(old: str, new: str, *, cell_wrap: bool = False, conte
         if not (a.isalpha() and len(a) >= 4 and len(b) >= 4):
             return False
         if not (a.isupper() or a.islower() or a.istitle()) or not (b.isupper() or b.islower() or b.istitle()):
+            return False
+        if (a.isupper() and b.islower()) or (a.islower() and b.isupper()):
+            # 纯全大写↔全小写不再当作排版强调：大小写敏感接口、枚举或命令词的变化
+            # 可能是实质语义，保留为待复核差异而不是在报告阶段删除。
             return False
     return True

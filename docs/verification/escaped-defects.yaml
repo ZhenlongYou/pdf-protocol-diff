@@ -442,3 +442,57 @@ escaped_defects:
     regression_test_id: CONTENT_CORRESPONDENCE_TEST
     public_path_rerun_id: RUN-FULL-OIF-CEI51-53-20260927
     state: open
+  - id: DEF-SUBHEADING-FOLD-DROPS-TITLE-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "旧版子标题（如 Optional behavior）在新版被删除、正文并入父章时，标题消失不产生任何差异卡。"
+    discovered_via: independent_code_review
+    failure_mechanism: "_section_with_descendant_body 只把被折叠子章的正文并入父章，不保留子章标题；新旧两侧正文因此对齐，读者看不到被删除的小标题。"
+    red_green_pair_id: PAIR-MISS-SUBHEADING-FOLD
+    regression_test_id: REMOVED_SUBSECTION_HEADING_FOLD_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: verified
+  - id: DEF-FIGURE-INVENTORY-HIDES-LABEL-RENAME-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "图外的模式项从 Transmit Only 改为 Receive Only，仅因同页图内出现过这些词就被从差异清单删除。"
+    discovered_via: independent_code_review
+    failure_mechanism: "行合并碎片兜底只做单张裁图的整词集合覆盖（figure_crop_owns_whole_tokens），没有证明两侧只是同词重排；真实改名因此被当成图示重排删除。"
+    red_green_pair_id: PAIR-MISS-FIGURE-LABEL-RENAME
+    regression_test_id: FIGURE_LABEL_RENAME_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: verified
+  - id: DEF-CASE-FOLD-HIDES-TECHNICAL-CASE-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "大小写敏感接口/枚举中的 Call ENABLE… → Call enable… 被当作排版强调隐藏；旧契约连 MAXIMUM→maximum 也隐藏。"
+    discovered_via: independent_code_review
+    failure_mechanism: "cosmetic_content_equal 对四字母以上整词的大小写差异一律按排版处理，只靠有限关键词上下文保护；纯全大写↔全小写因此可能承载语义却无差异卡。"
+    red_green_pair_id: PAIR-MISS-CASE-FOLD
+    regression_test_id: ALL_CAPS_TO_LOWERCASE_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: verified
+  - id: DEF-FALLBACK-MAJORITY-GATE-DEAD-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "章节配对大量依赖兜底相似度时，报告不出现降级提示（8/8 兜底仍显示可靠）。"
+    discovered_via: independent_code_review
+    failure_mechanism: "降级条件写成 fallback_pair_count > paired_count，而兜底配对本就是成对变化的子集，条件恒假；应比较兜底是否占成对变化多数。"
+    red_green_pair_id: PAIR-MISS-FALLBACK-MAJORITY
+    regression_test_id: FALLBACK_MAJORITY_DEGRADE_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: verified
+  - id: DEF-VISUAL-COVERAGE-SEMANTIC-PAGES-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "含正文变化的页面不做像素核对，覆盖状态却显示完成；同页图内变化可能漏报且无任何提示。"
+    discovered_via: independent_code_review
+    failure_mechanism: "视觉哨兵只核对可唯一文字配对的页面；因正文变化而未配对的页面被读者变化卡视作已覆盖，既不核对像素也不出现在未核对清单里。"
+    red_green_pair_id: PAIR-MISS-VISUAL-SEMANTIC-PAGES
+    regression_test_id: SEMANTIC_CHANGE_PAGES_DISCLOSED_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: verified
+  - id: DEF-VISUAL-PIXELS-ON-CHANGED-PAGES-20260927
+    acceptance_id: REQ-CONTENT-CORRESPONDENCE
+    user_symptom: "含正文变化的页面仍未做任何像素比较；本次只做到如实披露，图片内变化依旧不会被发现。"
+    discovered_via: independent_code_review
+    failure_mechanism: "对已变化页面做像素核对需要页级配准；正文编辑引起回流时，语义证据框以外的像素位移会被误报为视觉变化。当前先披露未核对事实，真正的逐页像素核对留作后续工作。"
+    red_green_pair_id: PAIR-MISS-VISUAL-SEMANTIC-PAGES
+    regression_test_id: SEMANTIC_CHANGE_PAGES_DISCLOSED_TEST
+    public_path_rerun_id: RUN-MISS-PATH-FIX-20260927
+    state: open

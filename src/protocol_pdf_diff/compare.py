@@ -2640,19 +2640,33 @@ def _append_order_conflict_reviews(
 
 
 def _section_with_descendant_body(parent: Section, child: Section) -> Section:
-    """Append a structurally moved child's source body to its matched parent."""
+    """Append a structurally moved child's heading and body to its matched parent.
 
+    被折叠子章的标题必须随正文一起并入父章：如果新版只是删掉小标题而保留正文，
+    只并正文会让“标题消失”这件事在两侧都不可见，差异清单就会漏报。
+    """
+
+    child_heading = child.heading.strip()
+    child_content = "\n".join(
+        value for value in (child_heading, child.body) if value.strip()
+    )
     page_lines: dict[int, list[str]] = defaultdict(list)
-    for section in (parent, child):
-        page_bodies = section.page_bodies or ((section.start_page, section.body),)
-        for page_number, body in page_bodies:
-            if body.strip():
-                page_lines[page_number].append(body.strip())
+    for section, heading, content in (
+        (parent, "", parent.body),
+        (child, child_heading, child.body),
+    ):
+        page_bodies = section.page_bodies or ((section.start_page, content),)
+        for position, (page_number, body) in enumerate(page_bodies):
+            text = body.strip()
+            if position == 0 and heading:
+                text = "\n".join(part for part in (heading, text) if part)
+            if text:
+                page_lines[page_number].append(text)
     return replace(
         parent,
         start_page=min(parent.start_page, child.start_page),
         end_page=max(parent.end_page, child.end_page),
-        body="\n".join(value for value in (parent.body, child.body) if value.strip()),
+        body="\n".join(value for value in (parent.body, child_content) if value.strip()),
         page_bodies=tuple(
             (page_number, "\n".join(values))
             for page_number, values in sorted(page_lines.items())

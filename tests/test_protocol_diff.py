@@ -368,6 +368,51 @@ class ProtocolDiffTests(unittest.TestCase):
         self.assertFalse(assessment.allows_no_difference_conclusion)
         self.assertTrue(any("顺序冲突" in reason for reason in assessment.reasons))
 
+    def test_pairing_review_degrades_when_fallback_pairing_dominates(self) -> None:
+        """兜底配对占成对变化多数时必须降级，数量对比不能是恒假条件。"""
+
+        body = (
+            "The receiver shall satisfy every normative electrical timing calibration and "
+            "interoperability requirement for all declared operating modes and data rates. "
+        ) * 12
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old_fallback_review.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{body}\n2 Requirements\n{body}")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new_fallback_review.pdf"),
+            pages=[PageText(page_number=1, text=f"1 Scope\n{body}\n2 Requirements\n{body}")],
+        )
+        old_sections = compare_module.section_document(old_extraction)
+        new_sections = compare_module.section_document(new_extraction)
+
+        dominated = compare_module.assess_pair(
+            old_extraction,
+            new_extraction,
+            old_sections,
+            new_sections,
+            pairing_review=compare_module.PairingReview(
+                change_count=8,
+                one_sided_count=0,
+                fallback_pair_count=8,
+            ),
+        )
+        self.assertEqual("degraded", dominated.state)
+        self.assertTrue(any("兜底相似度配对" in reason for reason in dominated.reasons))
+
+        minority = compare_module.assess_pair(
+            old_extraction,
+            new_extraction,
+            old_sections,
+            new_sections,
+            pairing_review=compare_module.PairingReview(
+                change_count=20,
+                one_sided_count=0,
+                fallback_pair_count=5,
+            ),
+        )
+        self.assertEqual("reliable", minority.state)
+
     def test_pairing_review_counts_reader_visible_change_bases(self) -> None:
         """配对审阅统计只使用最终读者可见变化的依据字段。"""
 

@@ -331,6 +331,8 @@ class VisualWatchdogAudit:
     coverage_issues: tuple[VisualCoverageIssue, ...] = ()
     identical_body_page_pairs: tuple[tuple[int, int], ...] = ()  # 独立原页渲染在已证明页眉/页脚屏蔽后逐像素相同的页对。
     identity_render_dpi: int | None = None  # 只有记录此分辨率下的精确渲染核验，才允许报告正文页对相同。
+    semantic_change_page_count: int = 0  # 含读者可见正文变化、因而未做像素核对的页面数；这些页的图内变化可能漏报。
+    semantic_change_pages: tuple[tuple[int | None, int | None], ...] = ()  # 上述页面的物理页码对，供人工按页复核。
 
 
 @dataclass(frozen=True)

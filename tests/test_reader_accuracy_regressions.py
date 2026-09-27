@@ -21,6 +21,7 @@ from protocol_pdf_diff.compare import (
     _match_sections,
     _paragraph_review_units,
     _review_unit_key,
+    _section_with_descendant_body,
     _table_caption_number,
     _table_serialization_candidates,
     _table_visuals_with_cross_page_captions,
@@ -46,6 +47,7 @@ from protocol_pdf_diff.models import (
 from protocol_pdf_diff.pdf_extract import _table_lines_from_rows_with_coverage
 from protocol_pdf_diff.figure_filters import (
     figure_crop_owns_whole_tokens,
+    figure_fragment_token_sets_regrouped,
     strip_coordinate_owned_visual_fragment,
 )
 from protocol_pdf_diff.reporting import (
@@ -256,6 +258,101 @@ class ReaderAccuracyRegressionTests(unittest.TestCase):
         self.assertFalse(
             figure_crop_owns_whole_tokens("a b c d e f g", ("a b c d e f g",))
         )
+
+    def test_figure_inventory_does_not_hide_mode_label_rename(self) -> None:
+        """图外模式项的改名不能仅因图中出现过这些词就被删除。"""
+
+        self.assertTrue(figure_fragment_token_sets_regrouped("Zero line", "Zero"))
+        self.assertTrue(figure_fragment_token_sets_regrouped("Signal", "Signal line"))
+        self.assertFalse(
+            figure_fragment_token_sets_regrouped("Transmit Only", "Receive Only")
+        )
+
+        inventory = ("Transmit Only Receive Only",)
+        old_section = Section(
+            "old-mode", "2.4 Modes", "Modes", 2, ("2.4 Modes",), ("2.4",), 20, 20,
+            "Figure 2-9. Mode selection\nTransmit Only\nReceive Only",
+        )
+        new_section = Section(
+            "new-mode", "2.4 Modes", "Modes", 2, ("2.4 Modes",), ("2.4",), 20, 20,
+            "Figure 2-9. Mode selection\nReceive Only\nReceive Only",
+        )
+        change = SectionChange(
+            "modified", old_section, new_section, 0.95,
+            replaced_snippets=[SnippetPair("Transmit Only", "Receive Only")],
+        )
+        kept = _reader_section_change(
+            change,
+            figure_visual_sides=(True, True),
+            figure_visual_texts=(inventory, inventory),
+        )
+        self.assertIsNotNone(kept)
+        self.assertTrue(
+            any(
+                pair.old == "Transmit Only" and pair.new == "Receive Only"
+                for pair in kept.replaced_snippets
+            )
+        )
+
+    def test_removed_subsection_heading_survives_body_fold(self) -> None:
+        """小标题被删除、正文并入父章时，标题必须仍作为差异出现。"""
+
+        parent = Section(
+            "old-parent", "2.3 Modes", "Modes", 2, ("2.3 Modes",), ("2.3",), 10, 10,
+            "The receiver shall support both modes.",
+        )
+        child = Section(
+            "old-child", "Optional behavior", "Optional behavior", 3,
+            ("2.3 Modes", "Optional behavior"), ("2.3", "2.3.1"), 11, 11,
+            "A transmitter may omit this behavior.",
+        )
+        merged = _section_with_descendant_body(parent, child)
+        self.assertIn("Optional behavior", merged.body)
+        self.assertIn(
+            "Optional behavior",
+            "\n".join(body for _page, body in merged.page_bodies),
+        )
+        from protocol_pdf_diff import compare as compare_module
+
+        delta = compare_module._summarize_text_delta(merged.body, parent.body, 20)
+        surfaced = [
+            *delta[0],
+            *delta[1],
+            *(pair.old for pair in delta[2]),
+            *(pair.new for pair in delta[2]),
+        ]
+        self.assertTrue(any("Optional behavior" in value for value in surfaced))
+
+    def test_semantic_change_pages_are_disclosed_as_unchecked(self) -> None:
+        """含正文变化而未做像素核对的页面必须显式披露，不能只显示完成。"""
+
+        from protocol_pdf_diff import visual_watchdog
+
+        old_extraction = ExtractionResult(
+            pdf_path=Path("old-unchecked.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nOld limit is 10.")],
+        )
+        new_extraction = ExtractionResult(
+            pdf_path=Path("new-unchecked.pdf"),
+            pages=[PageText(page_number=1, text="1 Scope\nNew limit is 20.")],
+        )
+        with mock.patch.object(
+            visual_watchdog, "_provable_exact_text_pairs",
+            return_value=([], (1,), (1,)),
+        ), mock.patch.object(
+            visual_watchdog, "_reader_visible_semantic_change_pages",
+            return_value=({1}, {1}),
+        ):
+            items, warnings, audit = visual_watchdog.detect_visual_review_items(
+                old_extraction,
+                new_extraction,
+                semantic_result=object(),
+            )
+        self.assertEqual([], items)
+        self.assertEqual(0, audit.ambiguous_page_count)
+        self.assertEqual(2, audit.semantic_change_page_count)
+        self.assertEqual(((1, None), (None, 1)), audit.semantic_change_pages)
+        self.assertTrue(any("未做像素层核对" in warning for warning in warnings))
 
     def test_figure_text_remains_when_no_coordinate_visual_owns_it(self) -> None:
         """A render/crop failure must fail closed and keep changed diagram values visible."""

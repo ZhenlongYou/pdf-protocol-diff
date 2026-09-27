@@ -76,6 +76,13 @@ def detect_visual_review_items(
         if unmatched_old_pages or unmatched_new_pages
         else (set(), set())
     )
+    # 这些页面有读者可见的正文变化卡，因此不会被当作“无对应页”降级；但它们的
+    # 像素从未参与核对，图内变化可能不在差异清单中。该事实必须显式披露，
+    # 不能靠 complete 状态暗示整页已核对。
+    semantic_change_pages = (
+        *((page, None) for page in sorted(unmatched_old_pages) if page in covered_old_pages),
+        *((None, page) for page in sorted(unmatched_new_pages) if page in covered_new_pages),
+    )
     ambiguous_page_count = sum(
         page_number not in covered_old_pages for page_number in unmatched_old_pages
     ) + sum(
@@ -101,6 +108,12 @@ def detect_visual_review_items(
             "视觉漏检哨兵跳过了 "
             f"{ambiguous_page_count} 个无法用完全一致或读者等价文字安全配对的页面。"
         )
+    if semantic_change_pages:
+        warnings.append(
+            f"另有 {len(semantic_change_pages)} 个页面含读者可见的正文变化，"
+            "未做像素层核对；这些页面的图片内变化不会出现在差异清单中，"
+            "如需像素级结论请按物理页码用页窗复核。"
+        )
 
     if not eligible_page_pairs:
         return [], warnings, VisualWatchdogAudit(
@@ -115,6 +128,8 @@ def detect_visual_review_items(
             complete=ambiguous_page_count == 0,
             source_hashes_match=None,
             coverage_issues=tuple(coverage_issues),
+            semantic_change_page_count=len(semantic_change_pages),
+            semantic_change_pages=semantic_change_pages,
         )
 
     try:
@@ -134,6 +149,8 @@ def detect_visual_review_items(
             complete=False,
             source_hashes_match=None,
             coverage_issues=tuple(coverage_issues),
+            semantic_change_page_count=len(semantic_change_pages),
+            semantic_change_pages=semantic_change_pages,
         )
 
     old_snapshot: BinaryIO | None = None
@@ -175,6 +192,8 @@ def detect_visual_review_items(
                 old_visual_source_sha256=old_visual_sha,
                 new_visual_source_sha256=new_visual_sha,
                 coverage_issues=tuple(coverage_issues),
+                semantic_change_page_count=len(semantic_change_pages),
+                semantic_change_pages=semantic_change_pages,
             )
 
         old_snapshot.seek(0)
@@ -324,6 +343,8 @@ def detect_visual_review_items(
         coverage_issues=tuple(coverage_issues),
         identical_body_page_pairs=tuple(identical_body_page_pairs),
         identity_render_dpi=VISUAL_IDENTITY_RENDER_DPI,
+        semantic_change_page_count=len(semantic_change_pages),
+        semantic_change_pages=semantic_change_pages,
     )
 
 
