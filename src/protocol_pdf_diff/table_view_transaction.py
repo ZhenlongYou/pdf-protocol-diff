@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .comparison_policy import configured_comparison
 from .comparison_session import comparison_session
 from .progress import ProgressEvent, notify_progress, progress_session
 
@@ -282,6 +283,7 @@ def _candidate_visual_evidence(original,candidate,sources,projected,options,reco
 
 @comparison_session
 @progress_session
+@configured_comparison
 def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
     from .compare import compare_extractions, run_diff
     from .prose_source_visuals import build_prose_source_visuals
@@ -307,6 +309,7 @@ def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
                     p,
                     text=state["pages"][(ex.pdf_path.name, p.page_number)],
                     source_char_map=(),
+                    comparison_blocks=(),  # 候选文字已变化，不能沿用原视图的区域阅读坐标计划。
                 )
                 if (ex.pdf_path.name, p.page_number) in state["pages"]
                 else p
@@ -695,6 +698,7 @@ def write_reports_transaction(bundle, output_dir, options):
         )
 
 
+@configured_comparison
 def report_outcome(result, output_dir, options, *, writer=None):
     """Keep injected writers' ordinary-result and dictionary contracts."""
     from .reporting import write_reports

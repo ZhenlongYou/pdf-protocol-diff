@@ -127,6 +127,10 @@ class PageText:
     url_literal_receipts: tuple[dict, ...] = ()
 
     source_char_map: tuple[tuple[str, float, float, float, float, int], ...] = ()
+    image_text_regions: tuple[DocumentBlock, ...] = ()  # 局部截图识别不进入正文条款流。
+    graphic_regions: tuple[tuple[str, str, tuple[float, float, float, float]], ...] = ()  # 类型、原文图题及无原生字形的区域。
+    publication_header_texts: tuple[str, ...] = ()  # 从正文分离的出版页眉始终保留，通用模式参与比较。
+    comparison_blocks: tuple[DocumentBlock, ...] = ()  # 经逐字核对的区域阅读视图，原始 blocks 保持不变。
 
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
@@ -333,6 +337,7 @@ class VisualWatchdogAudit:
     identity_render_dpi: int | None = None  # 只有记录此分辨率下的精确渲染核验，才允许报告正文页对相同。
     semantic_change_page_count: int = 0  # 含读者可见正文变化、因而未做像素核对的页面数；这些页的图内变化可能漏报。
     semantic_change_pages: tuple[tuple[int | None, int | None], ...] = ()  # 上述页面的物理页码对，供人工按页复核。
+    checked_graphic_regions: tuple[dict, ...] = ()  # 局部核对不计入整页覆盖。
 
 
 @dataclass(frozen=True)
@@ -477,10 +482,18 @@ class DiffOptions:
     ocr_language: str | None = None
     layout_backend: str = "native"  # 默认不启动重型版面解析，保护普通 PDF 的处理时间。
     visual_watchdog: bool = True  # 默认启用页级像素漏检哨兵；它只增加复核证据，不改写语义差异。
+    ocr_time_budget_seconds: float | None = 300.0  # 追加字段保持旧位置参数兼容；None 显式不限。
+    comparison_profile: str = "protocol"  # 通用文档保留作者、邮箱、修订与出版元信息。
 
     def __post_init__(self) -> None:
         """Reject comparison settings that would silently disable matching."""
 
+        if self.comparison_profile not in {"protocol", "general"}:
+            raise ValueError("比较用途必须是 protocol（协议）或 general（通用文档）。")
+        budget = self.ocr_time_budget_seconds  # 0 可用于仅消费已有 OCR 缓存，未识别区域会明确披露。
+        if budget is not None and (isinstance(budget, bool) or not isinstance(budget, Real)
+                                   or not math.isfinite(budget) or budget < 0):
+            raise ValueError("累计 OCR 识别时限必须是非负有限秒数，或 None（不限）。")
         threshold = self.min_section_match_similarity  # 统一读取 GUI、CLI 和 API 共用的章节匹配阈值。
         if (
             isinstance(threshold, bool)

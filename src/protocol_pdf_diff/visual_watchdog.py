@@ -30,6 +30,7 @@ from .models import (
     VisualReviewItem,
     VisualWatchdogAudit,
 )
+from .comparison_policy import includes_role
 from .text_utils import compact_inline
 from .visual_preview import full_width_preview_bbox, render_material_diff_preview
 
@@ -48,7 +49,14 @@ VISUAL_PREVIEW_PADDING = 48
 VISUAL_LAYOUT_COORDINATE_TOLERANCE_POINTS = 4.0
 
 
-def detect_visual_review_items(
+def detect_visual_review_items(old_extraction, new_extraction, *, semantic_result=None):
+    items, warnings, audit = _detect_page_review_items(old_extraction, new_extraction, semantic_result=semantic_result)
+    from .graphic_region_review import compare_captioned_graphics
+    extra, region_warnings, audit = compare_captioned_graphics(old_extraction, new_extraction, audit)
+    return [*items, *extra], [*warnings, *region_warnings], audit
+
+
+def _detect_page_review_items(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,
     *,
@@ -562,6 +570,7 @@ def _compare_page_images(
     new_page_bbox: tuple[float, float, float, float] | None = None,
     old_excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
     new_excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    allowed_bboxes: tuple[tuple[float, float, float, float], ...] = (),
 ) -> VisualReviewItem | None:
     """Create a review item when any connected material pixel delta remains."""
 
@@ -582,6 +591,11 @@ def _compare_page_images(
         page_bbox=new_page_bbox,
         source_size=new_image.size,
     )
+    if allowed_bboxes:
+        # 正向区域之外全部禁用，文字回流与其他图形不参与这个局部结论。
+        outside = np.ones_like(raw_mask)
+        _clear_excluded_regions(outside, allowed_bboxes, page_bbox=old_page_bbox, source_size=old_image.size)
+        raw_mask[outside.astype(bool)] = 0
     component_count, labels, stats, _ = cv2.connectedComponentsWithStats(
         raw_mask,
         connectivity=8,
@@ -939,7 +953,7 @@ def _reader_visible_semantic_change_pages(
     }
     reader_changes = []
     for change in result.changes:
-        if change.role == "document_metadata":
+        if not includes_role(change.role):
             continue
         reader_change = _reader_section_change(
             change,

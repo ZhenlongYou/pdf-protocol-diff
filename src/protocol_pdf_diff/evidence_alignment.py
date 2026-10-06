@@ -76,7 +76,8 @@ def evidence_from_extraction(extraction) -> EvidenceDocument:
             reasons.add("reading_order_unresolved")
         if page.ambiguous_line_number_sides:
             reasons.add("page_furniture_unresolved")
-        text_blocks = [b for b in page.blocks if b.kind != DocumentBlockKind.TABLE]
+        comparison_blocks = page.comparison_blocks or page.blocks  # 区域计划已逐字核对，原始视图仍另存。
+        text_blocks = [b for b in comparison_blocks if b.kind != DocumentBlockKind.TABLE]
         # Coordinate omission is page-local. Preserve the entire page as one
         # unresolved source record rather than silently dropping the missing text
         # or counting available blocks plus their page fallback twice.
@@ -95,7 +96,7 @@ def evidence_from_extraction(extraction) -> EvidenceDocument:
                 risks=("source_view_correspondence_unresolved",))
                 for index, block in enumerate(text_blocks) if block.text.strip())
             continue
-        for index, block in enumerate(page.blocks):
+        for index, block in enumerate(comparison_blocks):
             if block.kind == DocumentBlockKind.TABLE or not block.text.strip():
                 continue
             risks = ()

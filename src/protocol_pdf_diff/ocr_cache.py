@@ -50,6 +50,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from .ocr_policy import current_ocr_language, ocr_call_timeout  # 缓存键与实时 OCR 共用语言，只有 miss 才计时。
 
 _DISABLED_VALUES = frozenset({"0", "off", "false", "no", "disable", "disabled"})
 
@@ -72,6 +73,7 @@ def cached_image_to_string(
     a deterministic recognizer without touching this cache's contract.
     """
 
+    lang = lang if lang is not None else current_ocr_language()  # 先解析语言再计算缓存键，避免跨语言误命中。
     statistics["calls"] += 1
     directory = _cache_directory()
     engine = _engine_identity() if directory is not None else None
@@ -87,7 +89,8 @@ def cached_image_to_string(
             statistics["hits"] += 1
             return cached
         statistics["misses"] += 1
-    text = _call_tesseract(image, config=config, timeout=timeout, lang=lang)
+    with ocr_call_timeout(timeout) as effective_timeout:  # 冷缓存受整次比较剩余额度约束。
+        text = _call_tesseract(image, config=config, timeout=effective_timeout, lang=lang)
     if key is not None:
         _write_cached_text(_cache_path(directory, key), text)
         statistics["writes"] += 1

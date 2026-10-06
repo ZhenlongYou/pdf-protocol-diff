@@ -9,6 +9,8 @@ section context, but final sign-off should still inspect the source PDFs.
 
 from __future__ import annotations
 
+from .comparison_policy import configured_comparison, includes_role, is_general_document
+
 import difflib
 import re
 from bisect import bisect_left
@@ -38,6 +40,7 @@ from .models import (
 )
 from .monotonic_alignment import maximum_weight_monotonic_pairs
 from .page_ocr import normalize_ocr_language
+from .ocr_policy import ocr_scope  # 两份输入及其表格共用累计 OCR 额度。
 from .pdf_extract import (
     _looks_like_known_atomic_unit,
     _looks_like_missing_table_value,
@@ -140,6 +143,7 @@ _DISPLAYED_FORMULA_ARITHMETIC_RE = re.compile(r"[+*/^√∑∫]")
 
 @comparison_session
 @progress_session
+@configured_comparison
 def run_diff(
     old_pdf: str | Path,
     new_pdf: str | Path,
@@ -153,28 +157,29 @@ def run_diff(
         options,
         ocr_language=normalize_ocr_language(options.ocr_language),
     )
-    notify_progress(progress_observer, ProgressEvent(stage="read_old", side="old"))
-    old_extraction = extract_pdf_text(
-        old_pdf,
-        start_page=options.old_start_page,
-        end_page=options.old_end_page,
-        ocr_language=options.ocr_language,
-        layout_backend=options.layout_backend,
-        progress_observer=progress_observer,
-        progress_stage="read_old",
-        progress_side="old",
-    )
-    notify_progress(progress_observer, ProgressEvent(stage="read_new", side="new"))
-    new_extraction = extract_pdf_text(
-        new_pdf,
-        start_page=options.new_start_page,
-        end_page=options.new_end_page,
-        ocr_language=options.ocr_language,
-        layout_backend=options.layout_backend,
-        progress_observer=progress_observer,
-        progress_stage="read_new",
-        progress_side="new",
-    )
+    with ocr_scope(options.ocr_language, options.ocr_time_budget_seconds):
+        notify_progress(progress_observer, ProgressEvent(stage="read_old", side="old"))
+        old_extraction = extract_pdf_text(
+            old_pdf,
+            start_page=options.old_start_page,
+            end_page=options.old_end_page,
+            ocr_language=options.ocr_language,
+            layout_backend=options.layout_backend,
+            progress_observer=progress_observer,
+            progress_stage="read_old",
+            progress_side="old",
+        )
+        notify_progress(progress_observer, ProgressEvent(stage="read_new", side="new"))
+        new_extraction = extract_pdf_text(
+            new_pdf,
+            start_page=options.new_start_page,
+            end_page=options.new_end_page,
+            ocr_language=options.ocr_language,
+            layout_backend=options.layout_backend,
+            progress_observer=progress_observer,
+            progress_stage="read_new",
+            progress_side="new",
+        )
     notify_progress(progress_observer, ProgressEvent(stage="match_diff"))
     from .table_view_transaction import capture_extractions
     capture_extractions(old_extraction, new_extraction)
@@ -258,7 +263,7 @@ def _assessment_with_visual_review(
         )
     if audit.semantic_change_page_count:
         reasons.append(
-            f"有 {audit.semantic_change_page_count} 个含正文变化的页面未做像素核对；"
+            f"有 {audit.semantic_change_page_count} 个含正文变化的页面未做整页像素核对；"
             "同页图形变化仍需人工复核。"
         )
     if not audit.complete:
@@ -334,6 +339,7 @@ def _pairing_review(changes: list[SectionChange]) -> PairingReview:
 
 
 @comparison_session
+@configured_comparison
 def compare_extractions(
     old_extraction: ExtractionResult,
     new_extraction: ExtractionResult,
@@ -407,6 +413,9 @@ def compare_extractions(
         footer = _running_footer_section(extraction)
         if footer is not None:
             sections.insert(0, footer)
+    from .image_regions import image_region_sections
+    old_sections.extend(image_region_sections(old_extraction))
+    new_sections.extend(image_region_sections(new_extraction))
     provenance = build_provenance(old_extraction, new_extraction, options)
     identical_inputs = provenance_inputs_are_identical(provenance)
     old_table_visuals = _table_visuals_with_text_fallbacks(old_table_visuals, old_extraction.pages)
@@ -445,6 +454,9 @@ def compare_extractions(
                                 else None),
         )
     )  # 同一快照页窗不存在语义差异；不同输入仍只在各自版本隐藏已证明的表格原文单元。
+    changes = [replace(c, change_type="review", review_reason="局部图像 OCR 的文字和跨版对应尚需核对；不自动归入正文条款。")
+               if any(section and section.heading_provenance == "region-ocr-review"
+                      for section in (c.old_section, c.new_section)) else c for c in changes]
     warnings = list(old_extraction.warnings) + list(new_extraction.warnings)
     if old_extraction.formula_visuals or new_extraction.formula_visuals:
         warnings.append(
@@ -554,7 +566,7 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
     page_observations: list[tuple[int, str]] = []
     for page in extraction.pages:
         seen_on_page: set[str] = set()
-        for value in page.running_header_texts:
+        for value in (*page.running_header_texts, *(page.publication_header_texts if is_general_document() else ())):
             compact = compact_inline(value)
             if not compact or compact in seen_on_page:
                 continue
@@ -579,7 +591,7 @@ def _running_header_section(extraction: ExtractionResult) -> Section | None:
     end_page = max(
         page.page_number
         for page in extraction.pages
-        if page.running_header_texts
+        if page.running_header_texts or (is_general_document() and page.publication_header_texts)
     )
     heading = "运行页眉（坐标证据）"
     return Section(
@@ -678,7 +690,7 @@ def _running_header_observations_by_page(
     for page in extraction.pages:
         seen: set[str] = set()
         values: list[str] = []
-        for value in page.running_header_texts:
+        for value in (*page.running_header_texts, *(page.publication_header_texts if is_general_document() else ())):
             compact = compact_inline(value)
             if compact and compact not in seen:
                 seen.add(compact)
@@ -2093,6 +2105,7 @@ def _exact_table_text_page_number(
 
 
 @comparison_session
+@configured_comparison
 def compare_sections(
     old_sections: list[Section],
     new_sections: list[Section],
@@ -2105,6 +2118,8 @@ def compare_sections(
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
+    from .fallback_repagination import coalesce_exact_fallback_runs
+    old_sections, new_sections = coalesce_exact_fallback_runs(old_sections, new_sections)
     common_table_unit_keys = suppressed_table_unit_keys or set()
     old_table_unit_keys = common_table_unit_keys | (
         suppressed_old_table_unit_keys or set()
@@ -2551,7 +2566,7 @@ def _unique_section_content_move_pairs(
 
     def content_key(section: Section) -> tuple[str, str] | None:
         if (
-            section.role != "technical"
+            not includes_role(section.role)
             or section.section_id in {"running-header-evidence", "running-footer-evidence"}
             or not section.body.strip()
         ):
@@ -3646,8 +3661,8 @@ def _monotonic_related_section_pairs(
     has_technical_match = any(
         old_index is not None
         and new_index is not None
-        and old_sections[old_index].role == "technical"
-        and new_sections[new_index].role == "technical"
+        and includes_role(old_sections[old_index].role)
+        and includes_role(new_sections[new_index].role)
         and old_sections[old_index].section_id != "running-header-evidence"
         and new_sections[new_index].section_id != "running-header-evidence"
         for old_index, new_index, _score, _basis in matches
@@ -3665,7 +3680,7 @@ def _monotonic_related_section_pairs(
             )
             for index, section in enumerate(sections)
             if index not in matched_indexes
-            and section.role == "technical"
+            and includes_role(section.role)
             and section.section_id != "running-header-evidence"
             and section.body.strip()
         ]
@@ -3705,13 +3720,13 @@ def _monotonic_related_section_pairs(
     old_exact_title_counts = Counter(
         _review_unit_key(section.title)
         for section in old_sections
-        if section.role == "technical"
+        if includes_role(section.role)
         if _review_unit_key(section.title)
     )
     new_exact_title_counts = Counter(
         _review_unit_key(section.title)
         for section in new_sections
-        if section.role == "technical"
+        if includes_role(section.role)
         if _review_unit_key(section.title)
     )
     old_related_title_counts = Counter({index: 0 for index, _section, _units in old_candidates})
@@ -5223,6 +5238,8 @@ def _sections_effectively_unchanged(
             for line in new_section.body.splitlines()
             if compact_inline(line)
         ]
+        if is_general_document():
+            return old_header_lines == new_header_lines
         return (
             len(old_header_lines) == len(new_header_lines) == 1
             and _publication_header_case_equivalent(

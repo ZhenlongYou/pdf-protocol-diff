@@ -30,10 +30,12 @@ class VisualCoverageDisclosureTests(unittest.TestCase):
         issues=data['provenance']['visual_watchdog_run']['coverage_issues']
         audit=result.provenance.visual_watchdog_audit
         self.assertEqual(audit.ambiguous_page_count+audit.failed_page_pair_count,len(issues))
-        self.assertIn('查看未核对页面及原因',html)
+        self.assertIn('未检查或需要复核的内容',html)
+        self.assertIn('未检查或需要复核的内容', reports['markdown'].read_text())
+        self.assertTrue(data['coverage_review_items'])
         self.assertFalse(result.assessment.allows_no_difference_conclusion)
         for issue in issues:
-            old=issue['old_page_number'] or '未确定';new=issue['new_page_number'] or '未确定'
+            old=issue['old_page_number'] or '—';new=issue['new_page_number'] or '—'
             self.assertRegex(html, rf'<td>(?:<a[^>]*>)?{old}(?:</a>)?</td><td>(?:<a[^>]*>)?{new}(?:</a>)?</td>')
             self.assertIn(issue['reason'],html)
         return issues

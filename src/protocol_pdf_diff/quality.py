@@ -6,6 +6,8 @@ never removes or rewrites pages, sections, warnings, or comparison findings.
 
 from __future__ import annotations
 
+from .comparison_policy import includes_role
+
 import os
 import subprocess
 import re
@@ -163,6 +165,8 @@ class EffectiveThresholds:
     )
     min_single_character_line_ratio: float = MIN_SINGLE_CHARACTER_LINE_RATIO
     ocr_language: str | None = None
+    comparison_profile: str = "protocol"
+    ocr_time_budget_seconds: float | None = 300.0  # 报告记录运行时采用的累计 OCR 额度。
     layout_backend: str = "native"
     ocr_native_character_limit: int = OCR_NATIVE_CHARACTER_LIMIT
     ocr_minimum_image_coverage: float = OCR_MINIMUM_IMAGE_COVERAGE
@@ -309,7 +313,7 @@ def assess_pair(
         if metrics.ocr_pages:
             pages = "、".join(str(page) for page in metrics.ocr_pages)
             degraded_reasons.append(
-                f"{label}第 {pages} 页使用了整页 OCR；文字可用于定位差异，"
+                f"{label}第 {pages} 页使用了 OCR（整页或图像区域）；文字可用于定位差异，"
                 "但不能据此自动确认两份 PDF 一致。"
             )
         if metrics.image_dominant_pages:
@@ -415,7 +419,9 @@ def build_provenance(
                 MAX_AVERAGE_CHARACTERS_PER_FRAGMENTED_LINE
             ),
             min_single_character_line_ratio=MIN_SINGLE_CHARACTER_LINE_RATIO,
+            comparison_profile=options.comparison_profile,
             ocr_language=options.ocr_language,
+            ocr_time_budget_seconds=options.ocr_time_budget_seconds,
             ocr_native_character_limit=OCR_NATIVE_CHARACTER_LIMIT,
             ocr_minimum_image_coverage=OCR_MINIMUM_IMAGE_COVERAGE,
             ocr_native_text_vertical_band_count=OCR_NATIVE_TEXT_VERTICAL_BAND_COUNT,
@@ -448,14 +454,14 @@ def _document_metrics(
     stable_section_count = sum(
         not section.section_id.startswith("P")
         and section.section_id != "running-header-evidence"
-        and section.role == "technical"
+        and includes_role(section.role)
         and bool(section.number_path)
         for section in sections
     )
     unstructured_technical_section_count = sum(
         not section.section_id.startswith("P")
         and section.section_id != "running-header-evidence"
-        and section.role == "technical"
+        and includes_role(section.role)
         and not section.number_path
         for section in sections
     )
@@ -474,7 +480,7 @@ def _document_metrics(
     technical_sections = [
         section
         for section in sections
-        if section.role == "technical"
+        if includes_role(section.role)
         and section.section_id != "running-header-evidence"
     ]
     observed_page_numbers = {page.page_number for page in extraction.pages}
@@ -590,7 +596,7 @@ def _ambiguous_table_context_page_count(
     technical_sections = [
         section
         for section in sections
-        if section.role == "technical"
+        if includes_role(section.role)
         and section.section_id != "running-header-evidence"
     ]
     ambiguous_pages = 0

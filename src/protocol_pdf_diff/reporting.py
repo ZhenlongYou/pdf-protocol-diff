@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .comparison_policy import configured_comparison, includes_role, is_general_document
+
 from .comparison_session import comparison_session, memoize_comparison
 from .screenshot_presentation import IMAGE_VIEWER, table_context_image
 from .exact_match import ratio as exact_sequence_ratio
@@ -741,7 +743,7 @@ def _section_change_render_suppression_reason(
     result: DiffResult,
     page_pairs: dict[int, int],
 ) -> str | None:
-    if _proven_publication_header_section_change(change, result):
+    if not is_general_document() and _proven_publication_header_section_change(change, result):
         return "重复页眉与各自 PDF Title 及受限版本前缀精确相符；页眉差异保留在原始审计，不计入正文变化。"
     return _render_suppression_reason(
         _section_physical_pages(change.old_section, side="old", result=result),
@@ -770,6 +772,7 @@ def _render_suppression_reason(
 
 
 @comparison_session
+@configured_comparison
 def write_reports(
     result: DiffResult,
     output_dir: str | Path,
@@ -815,7 +818,7 @@ def write_reports(
     reader_table_changes = [
         change
         for change in _reader_table_changes(table_changes)
-        if not _table_change_has_rendered_equal_sources(
+        if is_general_document() or not _table_change_has_rendered_equal_sources(
             change,
             identical_body_page_pairs,
         )
@@ -824,7 +827,7 @@ def write_reports(
         *(
             change
             for change in table_changes
-            if not _table_change_has_rendered_equal_sources(
+            if is_general_document() or not _table_change_has_rendered_equal_sources(
                 change,
                 identical_body_page_pairs,
             )
@@ -832,7 +835,7 @@ def write_reports(
         *(
             group
             for group in table_groups
-            if not _table_change_has_rendered_equal_sources(
+            if is_general_document() or not _table_change_has_rendered_equal_sources(
                 group,
                 identical_body_page_pairs,
             )
@@ -905,11 +908,11 @@ def write_reports(
 
     for change in result.changes:
         # 作者、邮箱、版权和修订记录只保留在原始 JSON 审计面。
-        if change.role == "document_metadata":
+        if not includes_role(change.role):
             continue
-        if _proven_publication_header_section_change(change, result):
+        if not is_general_document() and _proven_publication_header_section_change(change, result):
             continue  # Title 匹配且版本前缀受限的正式出版页眉属于元数据，不随正文改字重新进入读者差异。
-        if _section_change_has_rendered_equal_sources(
+        if not is_general_document() and _section_change_has_rendered_equal_sources(
             change,
             result,
             identical_body_page_pairs,
@@ -977,7 +980,7 @@ def write_reports(
     reader_change_card_ids = {
         _section_change_reader_identity(change): f"C{index}"
         for index, change in enumerate(
-            (change for change in reader_changes if change.role == "technical"),
+            (change for change in reader_changes if includes_role(change.role)),
             start=1,
         )
     }
@@ -1076,8 +1079,10 @@ def write_reports(
     text += formula_txt
     csv_rows = _rows_for_csv(reader_changes)
     table_csv_rows = _rows_for_table_csv(reader_table_changes)
+    from .coverage_review import coverage_review_items
     sections_payload = {
         "comparison_focus": "substantive_content",
+        "comparison_profile": options.comparison_profile,
         "formula_source_review_count": len(formula_records),
         "formula_source_reviews": formula_records,
         "uncertain_table_correspondences": uncertainty_rows,
@@ -1085,6 +1090,7 @@ def write_reports(
         "physical_table_dedup_authorizations": sorted(physical_receipts),
         "visual_owned_spans": result.visual_owned_spans,
         "url_literal_source_receipts": {"old": result.old_url_literal_receipts, "new": result.new_url_literal_receipts},
+        "coverage_review_items": coverage_review_items(result),
         "content_changes": [_change_to_dict(change) for change in reader_changes],
         "content_table_changes": [_table_change_to_dict(change) for change in reader_table_changes],
         "similarity_review_changes": [_change_to_dict(c) for c in similarity_review_changes],
@@ -1455,7 +1461,7 @@ def _render_markdown(
 
     counts = _change_counts(result.changes)
     # write_reports 已把元信息从读者副本剔除；此处只渲染技术正文，避免空板块和零值指标占空间。
-    technical_changes = [change for change in result.changes if change.role == "technical"]
+    technical_changes = [change for change in result.changes if includes_role(change.role)]
     technical_review_count = sum(
         len(change.formula_review_records) + len(change.review_replaced_snippets)
         or (1 if change.change_type == "review" else 0)
@@ -1518,6 +1524,8 @@ def _render_markdown(
         "",
     ]
 
+    lines.extend(_coverage_review_markdown(result))
+
     # 表格截图和行级事实是读者的首要对比证据，必须先于长篇技术正文。
     if table_changes:
         _append_markdown_table_changes(lines, table_changes)
@@ -1527,7 +1535,7 @@ def _render_markdown(
             [
                 "## 视觉漏检核对",
                 "",
-                "说明: 这些页面的可抽取文字完全一致，或只含已用逐行坐标屏蔽的引用定位编号变化，但源 PDF 仍存在未解释的实质像素变化；该证据只提示可能漏识别，不自动解释图形语义。",
+                "说明: 已核对的整页或固定图示区域存在未解释的像素变化；各项说明列出核对范围，该证据不自动解释图形语义。",
                 "",
             ]
         )
@@ -1774,7 +1782,7 @@ def _render_html(
     assessment_html = _render_assessment_html(_assessment_for_report(result))
     assessment_html += _render_visual_coverage_html(result)
     # HTML 与 Markdown 共用技术正文口径，元信息只留在机器审计文件。
-    technical_changes = [change for change in result.changes if change.role == "technical"]
+    technical_changes = [change for change in result.changes if includes_role(change.role)]
     technical_review_count = sum(
         len(change.formula_review_records) + len(change.review_replaced_snippets)
         or (1 if change.change_type == "review" else 0)
@@ -2085,6 +2093,12 @@ def _render_html(
       border-radius: 8px;
       background: var(--panel);
     }}
+    .visual-coverage-details {{ margin: 18px 22px; padding: 16px 20px; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow-x: auto; }}
+    .visual-coverage-details summary {{ font-weight: 650; cursor: pointer; }}
+    .visual-coverage-details table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+    .visual-coverage-details th, .visual-coverage-details td {{ padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid #dce2e9; }}
+    .visual-coverage-details th {{ background: #f3f6fa; }}
+    .visual-coverage-details a {{ color: var(--blue); }}
     .assessment-banner h2 {{ font-size: 20px; }}
     .assessment-banner p {{ margin: 6px 0 0; }}
     .assessment-banner ul {{ margin: 8px 0 0; padding-left: 20px; }}
@@ -3001,7 +3015,7 @@ def _render_visual_review_items_html(items: list[VisualReviewItem]) -> str:
     return f"""
       <section class="table-visuals" id="visual-review-items">
         <h2>视觉漏检核对</h2>
-        <p class="change-summary">以下页面的可抽取文字完全一致，或只含已用逐行坐标屏蔽的引用定位编号变化，但源 PDF 仍存在未解释的实质像素变化。它们是防止漏报的人工复核证据，不会被自动解释成正文、表格或公式修改。</p>
+        <p class="change-summary">已核对的整页或固定图示区域存在未解释的像素变化。各项说明列出核对范围；这些是人工复核证据，不自动解释为正文、表格或公式修改。</p>
         {cards}
       </section>
     """
@@ -12152,7 +12166,7 @@ def _reader_table_changes(
     reader_changes: list[TableChange] = []
     for change in changes:
         # 出版历史类表格仍写入原始 JSON/CSV，但不占用面向技术读者的表格证据区。
-        if change.role == "document_metadata":
+        if not includes_role(change.role):
             continue
         can_hide_generic_review = bool(
             change.old_tables
@@ -12369,11 +12383,12 @@ def _reader_section_change(
     # raw comparison/audit fields; remove only exact metadata snippets from
     # the reader projection so a copyright or draft notice is never presented
     # as a protocol requirement change.
-    change = _reader_change_without_publication_metadata(change)
-    if change is None:
-        return None
-    if _is_reader_page_furniture_change(change):
-        return None
+    if not is_general_document():
+        change = _reader_change_without_publication_metadata(change)
+        if change is None:
+            return None
+        if _is_reader_page_furniture_change(change):
+            return None
 
     # The full heading fact is the strongest proof of a pure locator renumber.
     # Remove it before coordinate-owned Figure/Table cleanup can trim only the
@@ -16372,13 +16387,17 @@ def _comparison_method_note(result: DiffResult) -> str:
 def _report_scope_note(options: DiffOptions) -> str:
     """Explain output boundaries that matter during protocol review."""
 
+    if options.comparison_profile == "general":
+        return ("通用文档模式：比较正文、表格、作者、邮箱和出版修订记录；"
+                "重复页眉页脚按内容比较，不按重复页数报差异。已证明的纯排版和引用改号仍被过滤。"
+                "OCR 及复杂版面需复核，公式不自动比较；未检查区域在覆盖清单中列出。")
     return (
         "只报告正文和表格的实质内容差异；作者、联系方式、目录及出版记录不计入差异，"
         "已确认的纯排版、自动折行和章节改号不计入差异；"
         "正文以源 PDF 截图作为第一视觉层，"
         "表格会额外提供截图辅助复核；"
         "公式自动对比已关闭：分式、根号、上下标和式号只用于版面隔离，不生成公式增删、修改、相似度或颜色差分结论；"
-        "文字一致页的图片、印章和普通矢量图变化会由视觉漏检哨兵提示，但不会自动解释图形语义；"
+        "视觉核对覆盖文字一致页，以及正文变化页中图题唯一且位置固定的无原生文字图示区域；未覆盖范围单独列出，不自动解释图形语义；"
         "重复页眉页脚和动态页码会尽量过滤；"
         "章节、Figure、表格和条件的引用编号、列表及范围变化不计入读者差异，数值、限值和单位仍严格比较；"
         f"每个章节最多展示 {options.max_snippets_per_section} 条差异片段，完整章节仍会参与匹配和比较。"
@@ -16415,39 +16434,44 @@ def _assessment_for_report(result: DiffResult) -> PairAssessment:
     )
 
 
-def _render_visual_coverage_html(result: DiffResult) -> str:
-    """Make incomplete pixel coverage locatable without claiming a difference."""
+def _coverage_source_label(result, side, page, *, html=False):
+    if page is None:
+        return "—"
+    uri = Path(getattr(result, side + "_pdf")).resolve().as_uri() + f"#page={page}"
+    return f'<a href="{_escape(uri)}">{page}</a>' if html else f"[{page}]({uri})"
 
-    audit = result.provenance.visual_watchdog_audit if result.provenance else None
-    if audit is None:
+
+def _render_visual_coverage_html(result: DiffResult) -> str:
+    """同一份覆盖清单供读者和机器输出使用；计数按事项，不按页数。"""
+    from .coverage_review import coverage_review_items
+    items = coverage_review_items(result)
+    if not items:
         return ""
-    def source_link(path: Path, page: int | None) -> str:
-        if page is None:
-            return "未确定"
-        return f'<a href="{_escape(Path(path).resolve().as_uri())}#page={page}">{page}</a>'
-    semantic_rows = "".join(
-        f"<tr><td>{source_link(result.old_pdf, old_page)}</td>"
-        f"<td>{source_link(result.new_pdf, new_page)}</td>"
-        "<td>该页含读者可见的正文变化，未做像素层核对；图片内变化可能不在差异清单中。</td></tr>"
-        for old_page, new_page in audit.semantic_change_pages
-    )
     rows = "".join(
-        f"<tr><td>{source_link(result.old_pdf, issue.old_page_number)}</td>"
-        f"<td>{source_link(result.new_pdf, issue.new_page_number)}</td>"
-        f"<td>{_escape(issue.reason)}</td></tr>"
-        for issue in audit.coverage_issues
-    ) + semantic_rows
-    total = len(audit.coverage_issues) + len(audit.semantic_change_pages)
-    if not total:
-        return ""
-    return (
-        '<details class="visual-coverage-details"><summary>查看未核对页面及原因'
-        f'（{total} 项）</summary>'
-        '<p>下表使用 PDF 物理页码。这些页面尚未完成像素比较，不能据此判断图形相同或不同。'
-        '“未确定”表示没有安全的对应页，请回到源文件人工核对。</p>'
-        '<table><thead><tr><th>旧版 PDF 页</th><th>新版 PDF 页</th><th>原因</th></tr></thead>'
-        f'<tbody>{rows}</tbody></table></details>'
-    )
+        "<tr><td>" + _coverage_source_label(result, "old", item["old_page"], html=True)
+        + "</td><td>" + _coverage_source_label(result, "new", item["new_page"], html=True)
+        + "</td><td>" + _escape(item["scope"]) + "</td><td>" + _escape(item["reason"])
+        + "</td><td>" + _escape(item["action"]) + "</td></tr>" for item in items)
+    return ('<details class="visual-coverage-details"><summary>未检查或需要复核的内容'
+            f'（{len(items)} 项）</summary><p>点击 PDF 物理页码返回源文件；— 表示此侧不适用或没有安全对应页。'
+            '以下事项不等于已确认差异。</p><table><thead><tr><th>旧页</th><th>新页</th>'
+            '<th>范围</th><th>原因</th><th>下一步</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></details>')
+
+
+def _coverage_review_markdown(result):
+    from .coverage_review import coverage_review_items
+    items = coverage_review_items(result)
+    if not items:
+        return []
+    lines = ["", f"## 未检查或需要复核的内容（{len(items)} 项）", "",
+             "页码为源 PDF 物理页。事项不等于已确认差异；— 表示此侧不适用或没有安全对应页。", "",
+             "| 旧页 | 新页 | 范围 | 原因 | 下一步 |", "|---|---|---|---|---|"]
+    for item in items:
+        values = [_coverage_source_label(result, side, item[side + "_page"]) for side in ("old", "new")]
+        values += [str(item[key]).replace("|", " / ").replace("\n", " ") for key in ("scope", "reason", "action")]
+        lines.append("| " + " | ".join(values) + " |")
+    return lines + [""]
 
 
 def _render_assessment_html(assessment: PairAssessment) -> str:
@@ -16601,6 +16625,7 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
                      "category": issue.category}
                     for issue in visual_audit.coverage_issues
                 ],
+                "checked_graphic_regions": list(visual_audit.checked_graphic_regions),
                 "semantic_change_page_count": visual_audit.semantic_change_page_count,
                 "semantic_change_pages": [
                     [old_page, new_page]
@@ -16614,6 +16639,8 @@ def _provenance_to_dict(provenance: DiffProvenance | None) -> dict[str, object] 
             "min_section_match_similarity": thresholds.min_section_match_similarity,
             "max_snippets_per_section": thresholds.max_snippets_per_section,
             "ocr_language": thresholds.ocr_language,
+            "ocr_time_budget_seconds": thresholds.ocr_time_budget_seconds,
+            "comparison_profile": thresholds.comparison_profile,
             "layout_backend": thresholds.layout_backend,
             "ocr_native_character_limit": thresholds.ocr_native_character_limit,
             "ocr_minimum_image_coverage": thresholds.ocr_minimum_image_coverage,

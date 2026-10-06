@@ -24,6 +24,7 @@ from protocol_pdf_diff.models import (
     PageText,
 )
 from protocol_pdf_diff.pdf_extract import extract_pdf_text
+from protocol_pdf_diff.page_ocr import _merge_native_and_ocr_lines  # 锁定重复次数与字面大小写保留合同。
 
 
 class _ScannedPage:
@@ -63,6 +64,33 @@ class _OnePagePdf:
 
 
 class PageOcrTests(unittest.TestCase):
+    def test_ocr_merge_preserves_occurrences_case_and_source_order(self) -> None:
+        """删除重复项和大小写不同的接口名不能在 OCR 合并时消失。"""
+        cases = (  # 每项是手工预期，覆盖纯扫描、部分文字层及互相冲突的顺序。
+            ("", "Call ENABLE\nCall enable", "Call ENABLE\nCall enable"),
+            ("", "Limit 3.3 V\nLimit 3.3 V", "Limit 3.3 V\nLimit 3.3 V"),
+            ("Limit 3.3 V", "Limit 3.3 V\nLimit 3.3 V", "Limit 3.3 V\nLimit 3.3 V"),
+            ("A\nB\nA", "A\nB", "A\nB\nA"),
+        )
+        for native, ocr, expected in cases:  # 同源重复必须保留，双源相同观测按次数配对。
+            with self.subTest(native=native, ocr=ocr):
+                self.assertEqual(expected, _merge_native_and_ocr_lines(native, ocr))
+        # 原缺陷中的两份文字不能再被合并成同一个结果。
+        self.assertNotEqual(_merge_native_and_ocr_lines("", "Call ENABLE\nCall enable"),
+                            _merge_native_and_ocr_lines("", "Call ENABLE"))
+
+    def test_public_scan_extraction_preserves_repeated_and_case_distinct_lines(self) -> None:
+        """通过公开 PDF 抽取入口验证 OCR 行保留；外部识别仅作为可控输入。"""
+        text = "1 Scope\nCall ENABLE\nCall enable\nLimit 3.3 V\nLimit 3.3 V"  # 原页预期出现次数。
+        with tempfile.TemporaryDirectory() as temp_dir:  # 临时输入随检查释放，不保留无用 PDF。
+            pdf_path = Path(temp_dir) / "occurrences.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")  # PDF 边界由 mock 页面提供，抽取与合并真实执行。
+            with (mock.patch("pdfplumber.open", return_value=_OnePagePdf(_ScannedPage())),
+                  mock.patch("shutil.which", return_value="/usr/local/bin/tesseract"),
+                  mock.patch("pytesseract.image_to_string", return_value=text)):
+                extraction = extract_pdf_text(pdf_path)  # 使用产品入口，不能只验证私有合并函数。
+        self.assertEqual(text, extraction.pages[0].text)  # 大小写、次数及原始行序都必须相同。
+
     def test_scanned_page_uses_ocr_without_becoming_reliable_native_text(self) -> None:
         """A raster-only page should yield reviewable OCR text and explicit risk."""
 

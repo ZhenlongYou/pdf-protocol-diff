@@ -47,6 +47,7 @@ MAX_SNIPPETS_PER_SECTION = 20
 # Optional Tesseract language expression for scan-like pages. Examples:
 # "eng", "chi_sim", or "chi_sim+eng". Leave as None for Tesseract's default.
 OCR_LANGUAGE = None
+OCR_TIME_BUDGET_SECONDS = 300.0  # 旧/新两侧累计识别时间，设 None 表示不限；不含解析与报告。
 
 # Optional layout parser policy. ``native`` is the fast default and never
 # imports Docling. Set ``auto`` only when testing complex multi-column pages;
@@ -164,6 +165,10 @@ def parse_args() -> argparse.Namespace:
         default=LAYOUT_BACKEND,
         help="版面解析策略：native（默认快速）、auto（仅复杂页）或 docling（需可选依赖）",
     )
+    parser.add_argument("--comparison-profile", choices=("protocol", "general"), default="protocol",
+                        help="protocol 保持协议内容过滤；general 保留作者、邮箱和出版记录。")
+    parser.add_argument("--ocr-time-budget-seconds", type=float, default=OCR_TIME_BUDGET_SECONDS,
+                        help="旧/新 PDF 累计 OCR 识别时限（秒），默认 300；耗尽后保留未识别说明")
     parser.add_argument(
         "--no-visual-watchdog",
         action="store_false",
@@ -229,7 +234,9 @@ def main() -> int:
             old_end_page=args.old_end_page,
             new_start_page=args.new_start_page,
             new_end_page=args.new_end_page,
+            comparison_profile=args.comparison_profile,
             ocr_language=args.ocr_language,
+            ocr_time_budget_seconds=args.ocr_time_budget_seconds,
             layout_backend=args.layout_backend,
             visual_watchdog=args.visual_watchdog,
         )  # 共享配置验证属于可预期的用户输入错误，必须由同一中文错误路径捕获。

@@ -9,6 +9,8 @@ document structure.
 
 from __future__ import annotations
 
+from .comparison_policy import is_general_document
+
 import re
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -202,9 +204,11 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
         formula_boxes.setdefault(formula.page_number, []).append(formula.bbox)
     source_pages = [replace(page, formula_bboxes=tuple(formula_boxes.get(page.page_number, ())))
                     for page in extraction.pages]
+    if not is_general_document():
+        source_pages = _remove_repeating_page_furniture(_remove_proven_margin_noise(source_pages))
     cleaned_pages = _merge_standalone_heading_lines(
         _merge_source_split_heading_lines(
-            _remove_repeating_page_furniture(_remove_proven_margin_noise(source_pages))
+            source_pages
         )
     )
     sections: list[Section] = []

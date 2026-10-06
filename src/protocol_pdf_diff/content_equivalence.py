@@ -5,6 +5,8 @@ never infer paraphrases or compare bags of words across different conditions.
 """
 from __future__ import annotations
 
+from .comparison_policy import is_general_document
+
 import re
 
 _LITERAL_CONTEXT = re.compile(
@@ -20,12 +22,12 @@ def without_email_addresses(value: str) -> str:
 
     Remove only the address span; the surrounding requirement remains intact.
     """
-    return _EMAIL.sub('', value)
+    return value if is_general_document() else _EMAIL.sub('', value)
 
 
 def neutral_email_text(value: str) -> str:
     """Keep sentence structure while making excluded addresses unhighlightable."""
-    if _EMAIL.search(value) is None:
+    if is_general_document() or _EMAIL.search(value) is None:
         return value
     remainder = without_email_addresses(value).strip()
     if not remainder or re.fullmatch(r"(?i)(?:e-?mail|邮箱|电子邮件)\s*[:：]?", remainder):

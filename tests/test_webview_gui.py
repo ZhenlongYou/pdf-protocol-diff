@@ -22,6 +22,12 @@ from protocol_pdf_diff.webview_gui import (
 
 
 class WebviewGuiTests(unittest.TestCase):
+    def test_missing_comparable_evidence_is_not_labeled_as_ordinary_review(self):
+        result = SimpleNamespace(assessment=SimpleNamespace(state="indeterminate"))
+        with mock.patch("protocol_pdf_diff.webview_gui.reported_reader_summary", return_value=None):
+            payload = ProtocolDiffWebApi._success_payload(result, {"html": Path("report.html")})
+        self.assertEqual("无法判断", payload["reliability"])
+
     def test_shared_html_is_the_single_visual_contract_for_macos_and_windows(self) -> None:
         html = load_web_ui()
 
@@ -117,6 +123,8 @@ class WebviewGuiTests(unittest.TestCase):
                 self.assertEqual(18, options.old_end_page)
                 self.assertEqual(33, options.new_start_page)
                 self.assertEqual(35, options.new_end_page)
+                self.assertEqual("chi_sim+eng", options.ocr_language)  # 桌面显示选择必须真实传到任务。
+                self.assertEqual(120.0, options.ocr_time_budget_seconds)  # 分钟在入口统一换为秒。
                 return result
 
             api = ProtocolDiffWebApi(
@@ -139,6 +147,8 @@ class WebviewGuiTests(unittest.TestCase):
                     "max_snippets": "20",
                     "include_unchanged": False,
                     "auto_open": False,
+                    "ocr_language": "chi_sim+eng",
+                    "ocr_budget_minutes": "2",
                 }
             )
 

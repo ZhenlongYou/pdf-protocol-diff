@@ -147,10 +147,11 @@
     .advanced-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
     .advanced h3 { margin: 0; font-size: 17px; }
     .advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 22px; }
-    .field { display: grid; gap: 7px; }
+    .field { display: grid; gap: 7px; align-content: start; }
     .field.full { grid-column: 1 / -1; }
     .field span, .check span { color: var(--soft); font-size: 11px; }
     .field input[type="text"] { width: 100%; }
+    .field select, .field input[type="number"] { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #222238; font: inherit; }
     .path-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .check { display: flex; align-items: center; gap: 8px; }
     .close { border: 0; background: transparent; color: var(--soft); cursor: pointer; font-size: 20px; }
@@ -221,6 +222,9 @@
       <div class="advanced-head"><h3>报告设置</h3><button id="advanced-close" class="close" type="button" aria-label="关闭">×</button></div>
       <div class="advanced-grid">
         <label class="field full"><span>输出目录</span><span class="path-row"><input id="output-dir" type="text"><button id="choose-output" class="chip" type="button">选择</button></span></label>
+        <label class="field full"><span>比较用途</span><select id="comparison-profile"><option value="protocol">协议审阅：正文与技术表格</option><option value="general">通用文档：包括作者、邮箱与出版记录</option></select></label>
+        <label class="field"><span>扫描文字语言</span><select id="ocr-language"><option value="">默认</option><option value="eng">英文</option><option value="chi_sim+eng">简体中文与英文</option><option value="chi_tra+eng">繁体中文与英文</option></select></label>
+        <label class="field"><span>累计文字识别时限（分钟）</span><input id="ocr-budget" type="number" min="0" step="1" value="5"><span>耗尽后列出未识别区域，可缩小页窗重试。</span></label>
         <label class="check"><input id="auto-open" type="checkbox"><span>完成后自动打开报告</span></label>
       </div>
     </section>
@@ -259,7 +263,7 @@
         state.running = running; app.classList.toggle("running", running);
         start.disabled = running; start.textContent = running ? "比较中" : "开始比较";
         cancel.hidden = !running; cancel.disabled = false; cancel.textContent = "终止比较";
-        document.querySelectorAll("button, input").forEach(control => { if (control !== start && control !== cancel) control.disabled = running; });
+        document.querySelectorAll("button, input, select").forEach(control => { if (control !== start && control !== cancel) control.disabled = running; });
         clearInterval(timer); timer = null;
         if (running) {
           startedAt = Date.now();
@@ -278,6 +282,9 @@
           max_snippets: internalConfig.max_snippets,
           include_unchanged: internalConfig.include_unchanged,
           auto_open: document.querySelector("#auto-open").checked,
+          comparison_profile: document.querySelector("#comparison-profile").value,
+          ocr_language: document.querySelector("#ocr-language").value,
+          ocr_budget_minutes: document.querySelector("#ocr-budget").value,
         };
       }
       async function choosePdf(side) {
@@ -348,7 +355,7 @@
         if (!dialog.classList.contains("visible")) return;
         if (event.key === "Escape") { setAdvanced(false); return; }
         if (event.key !== "Tab") return;
-        const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled])")];
+        const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled])")];
         if (!focusable.length) return;
         const first = focusable[0], last = focusable[focusable.length - 1];
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
@@ -366,6 +373,9 @@
       });
       document.querySelectorAll(".range input").forEach(input => input.addEventListener("input", () => invalidateResult()));
       document.querySelector("#output-dir").addEventListener("input", () => invalidateResult());
+      document.querySelector("#ocr-language").addEventListener("change", () => invalidateResult());
+      document.querySelector("#comparison-profile").addEventListener("change", () => invalidateResult());
+      document.querySelector("#ocr-budget").addEventListener("input", () => invalidateResult());
       document.querySelector("#start").addEventListener("click", async () => {
         if (state.running) return;
         runGeneration += 1;
@@ -389,6 +399,9 @@
         try {
           const defaults = await window.pywebview.api.get_defaults();
           document.querySelector("#output-dir").value = defaults.output_dir;
+          document.querySelector("#comparison-profile").value = defaults.comparison_profile;
+          document.querySelector("#ocr-language").value = defaults.ocr_language || "";
+          document.querySelector("#ocr-budget").value = defaults.ocr_budget_minutes;
         } catch (_error) { status.textContent = "无法读取默认设置。"; }
       });
     })();

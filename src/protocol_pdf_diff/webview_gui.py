@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from .comparison_job import ComparisonCancelled, run_isolated_comparison
 from .progress import ProgressEvent
+from .page_ocr import normalize_ocr_language  # 在启动任务前验证用户选择的扫描文字语言。
 from .ui_shared import (
     default_output_dir,
     open_path,
@@ -179,6 +180,9 @@ class ProtocolDiffWebApi:
                 "include_unchanged_sections"
             ],
             "auto_open": False,
+            "comparison_profile": "protocol",
+            "ocr_language": "",  # 默认沿用引擎设置，中文/中英混合可按输入切换。
+            "ocr_budget_minutes": "5",  # 累计识别额度，不作为整个比较的完成时限。
         }
 
     def choose_pdf(self, side: str) -> dict[str, object]:
@@ -419,6 +423,9 @@ class ProtocolDiffWebApi:
             "新版",
         )
         options = DiffOptions(
+            comparison_profile=str(config.get("comparison_profile", "protocol")),
+            ocr_language=normalize_ocr_language(str(config.get("ocr_language", ""))),
+            ocr_time_budget_seconds=float(config.get("ocr_budget_minutes", "5")) * 60,
             min_section_match_similarity=INTERNAL_COMPARISON_OPTIONS[
                 "min_section_match_similarity"
             ],
@@ -465,6 +472,9 @@ class ProtocolDiffWebApi:
         if assessment is None:
             reliability = "无法判断"
             status = "报告已生成，请人工复核。"
+        elif assessment.state == "indeterminate":
+            reliability = "无法判断"
+            status = "报告已生成，可比较证据不足。"
         elif assessment.state == "reliable":
             reliability = "可靠"
             status = "比较完成。"

@@ -1,3 +1,7 @@
+做了什么：完成 PDF 适用性五项优化：OCR 大小写/重复计数、分区双栏和纯重分页、局部截图/固定图示复核、统一未检查清单、通用用途及累计 OCR 设置；294 项相关回归通过，真实数据只跑指定 1–3 页切片；证据及剩余边界见 docs/verification/pdf-adaptability-20261007.md。
+当前状态：源码写入已停止；位于 /Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff，分支 codex/pdf-adaptability-20261007，当前为基线 c2dbc9a 上待同次提交的代码/测试/文档；本记录随该任务提交进入历史。GUI/实际 HTML 已验收，临时输出 79,667,273 字节已删除，原文件及其他任务资源保留。
+下一步：释放本任务 writer，取得 integration 通道，fetch 后合入 main 和已有 project/pdf-protocol-diff，再 fetch 并仅推送这两个分支；若已合入，以两分支实际 OID 为准。复杂表格拆并、公式语义、移动图示和局部文字高亮仍按记录中的范围人工复核；未跑整本或全语料门禁。
+
 # PDF Protocol Diff Handoff
 
 ## OpenCode Codex 漏报路径修复（2026-09-27）

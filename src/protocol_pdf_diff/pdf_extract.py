@@ -46,6 +46,8 @@ from .models import (
     TableVisual,
 )
 from .ocr_cache import cached_image_to_string  # 表格截图 OCR 复用按图像字节命中的历史结果。
+from .ocr_policy import ocr_extraction  # 同一文件的表格与整页识别共享语言和预算。
+from .region_reading import column_region_blocks, verified_comparison_blocks  # 全宽/分栏区域与其来源共同排序。
 from .page_furniture import (
     looks_like_page_bearing_running_header,
     looks_like_revision_or_publication_date,
@@ -146,6 +148,7 @@ _SIGNED_RATIONAL_SUBSCRIPT_RE = re.compile(
 )  # 仅供坐标已证明的视觉下标；不在普通文字层做形状替换。
 
 
+@ocr_extraction
 def extract_pdf_text(
     pdf_path: str | Path,
     start_page: int | None = None,
@@ -464,6 +467,16 @@ def _extract_pdf_text_with_pdfplumber(
                 index,
                 excluded_bboxes=tuple(visual.bbox for visual in page_visuals),
             )
+            from .image_regions import extract_image_region_text, captioned_graphic_regions
+            region_excluded = tuple(v.bbox for v in (*page_visuals, *page_formulas))
+            image_text_regions, region_warnings = ((), []) if image_dominant or ocr_used else extract_image_region_text(
+                page, index, region_excluded)
+            warnings.extend(region_warnings)
+            if image_text_regions or region_warnings:
+                layout_risk = True  # 局部识别成功不证明整页阅读归属完整。
+            graphic_regions = captioned_graphic_regions(
+                page, coordinate_evidence[index][0], vector_graphic_bboxes,
+                (*region_excluded, *visual_noise_bboxes))
             formula_visuals.extend(page_formulas)
             warnings.extend(formula_warnings)
             try:
@@ -482,8 +495,11 @@ def _extract_pdf_text_with_pdfplumber(
                     text=text,
                     physical_native_text=physical_native_text,
                     layout_risk=layout_risk,
-                    ocr_used=ocr_used,
-                    blocks=blocks,
+                    ocr_used=ocr_used or bool(image_text_regions),
+                    blocks=(*blocks, *image_text_regions),
+                    comparison_blocks=verified_comparison_blocks(page, text),
+                    image_text_regions=image_text_regions,
+                    graphic_regions=graphic_regions,
                     image_dominant=image_dominant,
                     parser_route=classify_page_parser_route(
                         text=text,
@@ -494,6 +510,10 @@ def _extract_pdf_text_with_pdfplumber(
                     page_bbox=page_bounds(page),
                     ambiguous_line_number_sides=ambiguous_gutter_sides_by_page[index],
                     visual_noise_bboxes=visual_noise_bboxes,
+                    publication_header_texts=tuple(
+                        value for value in header_evidence_by_page.get(index, ((), ()))[1]
+                        if _looks_like_publication_version_header(value)
+                    ),
                     running_header_texts=tuple(
                         text
                         for text in header_evidence_by_page.get(index, ((), ()))[1]
@@ -752,10 +772,11 @@ def _extract_pdfplumber_page_text(
 
     # pdfplumber 默认按同一 y 基线行优先输出；只有坐标词完整覆盖且高证据证明
     # 两个平行正文栏时，才用可复核的 column-major 顺序替换该默认顺序。
-    column_major_text = _high_confidence_column_major_text(
-        filtered_page,
-        comparison_coordinate_words,
-    )
+    page._comparison_region_blocks = column_region_blocks(
+        filtered_page, comparison_coordinate_words, page_number,
+    )  # 页面生命周期内暂存，最终文本变动后必须重新校验对应关系。
+    column_major_text = ("\n".join(block.text for block in page._comparison_region_blocks)
+                         if page._comparison_region_blocks else None)
     if column_major_text is not None:
         text = column_major_text
     else:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from difflib import SequenceMatcher  # 双来源只按有序、大小写完全一致的行配对，保留重复次数。
 
 from .models import classify_page_parser_route  # 重新导出模型层纯路由器，避免 PageText 不变量产生循环依赖。
 from .ocr_cache import cached_image_to_string  # 整页 OCR 复用按渲染像素命中的历史结果。
@@ -231,16 +232,20 @@ def _clean_ocr_text(text: str) -> str:
 
 
 def _merge_native_and_ocr_lines(native_text: str, ocr_text: str) -> str:
-    """Preserve native lines and append only distinct OCR observations."""
+    """合并页面的两种文字观测，保留每个来源的大小写及有序出现次数。
 
-    merged: list[str] = []
-    seen: set[str] = set()
-    for source in (native_text, ocr_text):
-        for raw_line in source.splitlines():
-            line = normalize_line(raw_line)
-            key = line.casefold()
-            if not line or key in seen:
-                continue
-            merged.append(line)
-            seen.add(key)
-    return "\n".join(merged)
+    相同行不是集合：同一要求出现两次，删除其中一次也应保留差异证据。
+    没有坐标时，这里只提供线性文字视图，不认证两种来源的位置归属；
+    冲突两侧都保留，原始 OCR 与原生坐标块继续独立供回源核对。
+    """
+
+    # 空白规整沿用抽取合同，不折叠标识符大小写或删掉源内重复行。
+    native, ocr = ([line for raw in source.splitlines() if (line := normalize_line(raw))]
+                   for source in (native_text, ocr_text))
+    merged: list[str] = []  # 保存有序出现，不用全页 seen 集合去重。
+    # 一对相同观测最多消费双方各一次；冲突或单侧内容不会被模糊匹配吞掉。
+    for tag, a, b, c, d in SequenceMatcher(None, native, ocr, autojunk=False).get_opcodes():
+        merged.extend(native[a:b])  # equal/delete/replace 均保留原生拼写与次数。
+        if tag != "equal":  # 仅逐字相同的双来源候选共用一次显示；其他 OCR 观测全部追加。
+            merged.extend(ocr[c:d])
+    return "\n".join(merged)  # 两个来源各自的行序列均能在结果中完整找到。

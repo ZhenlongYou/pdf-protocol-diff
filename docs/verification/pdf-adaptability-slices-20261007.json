@@ -1,0 +1,73 @@
+[
+  {
+    "name": "oif-np",
+    "old": "/Users/mac/Downloads/oif2024.058.11.pdf",
+    "new": "/Users/mac/Documents/Serdes agent/serdes knowledge base/raw/private/oif/oif2024.058.13.pdf",
+    "old_pages": [
+      13,
+      13
+    ],
+    "new_pages": [
+      15,
+      15
+    ],
+    "replacements": [
+      {
+        "section": "32.3.1.6.1",
+        "old_page": "13",
+        "new_page": "15",
+        "old": "Np=53",
+        "new": "Np=60"
+      },
+      {
+        "section": "32.3.1.6.2",
+        "old_page": "13",
+        "new_page": "15",
+        "old": "Np=53",
+        "new": "Np=60"
+      }
+    ],
+    "old_sha256": "23dc1d5209f4e5494f72e8d1eca4bf13eb31b8ec1c05bd23809df9fc62b613a7",
+    "new_sha256": "2660420d77fea471a86a2de624e43785d43cebfdaba795d7041e84163b490263"
+  },
+  {
+    "name": "oif-figure",
+    "old": "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/work/page-window-gate/input_root/Desktop/OIF-CEI-5.1.pdf",
+    "new": "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/work/page-window-gate/input_root/Desktop/OIF-CEI-05.3.pdf",
+    "old_pages": [
+      105,
+      105
+    ],
+    "new_pages": [
+      109,
+      109
+    ],
+    "no_material_change": true,
+    "old_sha256": "3bc6c38731ac20f9bf8c6a2c7e9c4baccbab34dc3d43ad645ee18bb2cf2e1bd5",
+    "new_sha256": "1fa2417c96f06bc8115bcc79b7d2f7a160e35b8cc5bbebe7051fd446833e2f72"
+  },
+  {
+    "name": "cem-tables",
+    "old": "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/work/page-window-gate/input_root/PCIe/pcie_cem_r4.pdf",
+    "new": "/Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff/work/page-window-gate/input_root/PCIe/pcie_cem_r51.pdf",
+    "old_pages": [
+      42,
+      43
+    ],
+    "new_pages": [
+      51,
+      52
+    ],
+    "table_review_contains": [
+      "Table 5:",
+      "Table 6:",
+      "Table 4-1:",
+      "Table 4-2:"
+    ],
+    "reader_contains": [
+      "12V-2x6 Connector"
+    ],
+    "old_sha256": "15b3845c8c9a39e165c2d270387c28586bf7d4d5b949cb4183f11518a67a7050",
+    "new_sha256": "91fd93fb0a3aca34bb88cbb4152af6209e8bec8639461e929fab96ed3aaa9473"
+  }
+]
