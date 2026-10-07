@@ -17,6 +17,21 @@ class FallbackRepaginationTests(unittest.TestCase):
     b='the command ENABLE sets the output for the entire operating interval.'
     c='the controller records each measurement after the selected interval ends.'
 
+    def test_same_page_count_reflow_and_other_decimal_values_keep_one_edit(self):
+        for end,new_pages in (
+            (self.c,[self.a.replace('+3.0','+3.5'),self.b+' '+self.c]),
+            (self.c+' with reference limit +5.0 V.',[self.a.replace('+3.0','+3.5'),self.b,self.c+' with reference limit +5.0 V.']),
+        ):
+            with self.subTest(new_pages=len(new_pages)):
+                result=compare_extractions(extraction([self.a+' '+self.b,end]),extraction(new_pages),DiffOptions())
+                self.assertEqual(['modified'],[c.change_type for c in result.changes])
+                change=result.changes[0]
+                self.assertFalse(change.added_snippets or change.removed_snippets)
+                self.assertEqual(1,len(change.replaced_snippets))
+                self.assertIn('+3.0',change.replaced_snippets[0].old)
+                self.assertIn('+3.5',change.replaced_snippets[0].new)
+                self.assertFalse(result.assessment.allows_no_difference_conclusion)
+
     def test_two_to_three_pages_keep_sources_and_do_not_create_differences(self):
         old=extraction([self.a+' '+self.b,self.c])
         # 在单词之间分页；不能因分词破坏输入预期。

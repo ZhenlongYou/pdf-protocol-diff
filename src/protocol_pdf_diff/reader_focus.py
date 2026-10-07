@@ -11,6 +11,7 @@ import html
 import json
 import re
 from collections.abc import Callable
+from .literal_atoms import literal_atom_spans
 
 
 def difference_windows(old: str, new: str, tokenize: Callable, context: int = 8):
@@ -119,9 +120,7 @@ def delta_spans(old: str, new: str):
     Signs, decimal digits and exponents stay with their number on both sides.
     These are text edits, not inferred parameter ownership or engineering facts.
     """
-    number = r'(?<![\w.])[+−-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+−-]?\d+)?(?![\w.])'
-    pattern = number + r'|\w+|[^\w\s]'
-    parts = [list(re.finditer(pattern,text)) for text in (old,new)]
+    parts = [literal_atom_spans(text) for text in (old,new)]
     literal = [list(re.finditer(r'\w+|[^\w\s]',text)) for text in (old,new)]
     matcher = difflib.SequenceMatcher(None,[m.group() for m in parts[0]], [m.group() for m in parts[1]],autojunk=False)
     for tag,a,b,c,d in matcher.get_opcodes():

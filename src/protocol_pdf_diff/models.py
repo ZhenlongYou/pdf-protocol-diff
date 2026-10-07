@@ -313,7 +313,7 @@ class VisualCoverageIssue:
     old_page_number: int | None
     new_page_number: int | None
     reason: str
-    category: str = "unpaired"  # unpaired / layout / locator / unavailable / error
+    category: str = "unpaired"  # unpaired / layout / locator / residual / unavailable / error
 
 
 @dataclass(frozen=True)

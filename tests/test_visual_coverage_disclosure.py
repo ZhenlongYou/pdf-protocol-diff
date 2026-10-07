@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import fitz
+import io
+from PIL import Image, ImageDraw
 from protocol_pdf_diff.compare import run_diff
 from protocol_pdf_diff.models import DiffOptions
 from protocol_pdf_diff.reporting import write_reports
@@ -22,7 +24,48 @@ def pdf(path, texts, offset=0):
     return path
 
 
+def small_decimal_pdf(path, *, decimal=True):
+    """正文完全相同；仅小栅格数值里的小数点决定图片是否变化。"""
+    image=Image.new('RGB',(100,40),'white')
+    draw=ImageDraw.Draw(image)
+    draw.text((4,10),'1',fill='black');draw.text((16,10),'0 V',fill='black')
+    if decimal:
+        draw.rectangle((12,18,13,19),fill='black')
+    buffer=io.BytesIO();image.save(buffer,format='PNG')
+    with fitz.open() as doc:
+        page=doc.new_page(width=612,height=792)
+        text='1 Receiver requirements\n'+' '.join(
+            f'The receiver shall retain calibration setting {i} while the reference clock remains stable.' for i in range(12))
+        assert page.insert_textbox((60,50,550,400),text,fontsize=10)>=0
+        page.insert_image(fitz.Rect(80,450,130,470),stream=buffer.getvalue())
+        doc.save(path)
+    return path
+
+
 class VisualCoverageDisclosureTests(unittest.TestCase):
+    def test_small_decimal_residual_cannot_authorize_no_difference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            old=small_decimal_pdf(root/'old.pdf')
+            new=small_decimal_pdf(root/'new.pdf',decimal=False)
+            result=run_diff(old,new,DiffOptions())
+            self.assertFalse(result.changes)
+            self.assertFalse(result.visual_review_items)  # 不降低阈值来制造确定的视觉差异卡。
+            self.assertFalse(result.assessment.allows_no_difference_conclusion)
+            issues=self.check_reports(result,root)
+            self.assertEqual(1,len(issues))
+            self.assertEqual('residual',issues[0]['category'])
+            self.assertEqual((1,1),(issues[0]['old_page_number'],issues[0]['new_page_number']))
+            self.assertFalse(result.provenance.visual_watchdog_audit.identical_body_page_pairs)
+
+    def test_identical_small_rasters_still_have_positive_identity_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            old=small_decimal_pdf(root/'old.pdf');new=small_decimal_pdf(root/'new.pdf')
+            result=run_diff(old,new,DiffOptions())
+            self.assertTrue(result.assessment.allows_no_difference_conclusion)
+            self.assertEqual(((1,1),),result.provenance.visual_watchdog_audit.identical_body_page_pairs)
+
     def check_reports(self, result, root):
         reports=write_reports(result, root/'reports', DiffOptions())
         html=reports['html'].read_text(encoding='utf-8')

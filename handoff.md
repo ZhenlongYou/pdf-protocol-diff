@@ -1,3 +1,7 @@
+做了什么：实现小图像残留像素复核、完整字面数值摘要、同页数重分页配对、两列叙述格跨页集中复核；328 项相关测试、1 项反向拆页测试和 20 项视觉回归通过，8 组公开入口小样本及 CEM 两页回归通过，3 份实际 HTML 已点击/截图核对；证据与边界见 docs/verification/pdf-boundary-accuracy-20261007.md。
+当前状态：源码写入已停止；工作区 /Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff，分支 codex/pdf-boundary-accuracy-20261007，基线 909714ccc885710d8855ded28439660a9ac451c7 上代码/测试/文档待同次提交；本记录随任务提交进入历史。13 个 Python 文件 AST、diff 检查通过；主任务 3,210,786 字节及子任务 2,724,736 字节临时输出已删，浏览器页和临时服务已关闭，原始输入保留。
+下一步：释放本任务 writer，取得 integration 通道，fetch 后合入 main 与 project/pdf-protocol-diff，再 fetch 并仅推送这两分支；已集成时以实际 OID 为准。跨页表格仍为有来源的人工复核，多处改字、复杂合并格及图形语义不在本轮保证范围；未跑整本/全语料或桌面重打包。
+
 做了什么：完成原文导航和无标题连续页“一处改字+重分页”优化；精确源词与高亮分开判断，局部 OCR 使用各自原图区域，原生文字无法精确定位时保留整页；309 项相关测试通过，OIF 单页版本对和手册段落受控重排通过，实际 HTML 已点击核对；证据见 docs/verification/pdf-source-repagination-20261007.md。
 当前状态：源码写入已停止；工作区 /Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff，分支 codex/pdf-source-repagination-20261007，基线 2288c99f053470801e91f9d138531621c5ac8dbd 上代码/测试/文档待同次提交；本记录随任务提交进入历史。10 个 Python 文件 AST 与 diff 检查通过，四个临时输出目录共 4,723,551 字节已删除，浏览器页和临时服务器已关闭。
 下一步：释放本任务 writer，取得 integration 通道，fetch 后合入 main 和 project/pdf-protocol-diff，再 fetch 并仅推送这两分支；已集成时以实际 OID 为准。多处改字、移动/重复内容和子章字级定位仍有边界，复杂表格、脚注图注及图形语义留待后续；未跑整本或全语料门禁。

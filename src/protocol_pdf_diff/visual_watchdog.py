@@ -289,6 +289,21 @@ def _detect_page_review_items(
                     old_excluded_bboxes=old_excluded,
                     new_excluded_bboxes=new_excluded,
                 )
+                # 生成差异卡的像素阈值不能证明原页一致：小数点等细小变化可能被过滤。
+                # 只沿用已有证据负责的排除区域；余区仍不一致就保留复核，不伪造语义变化。
+                if item is None and not _body_page_rasters_are_identical(
+                    old_identity_image, new_identity_image,
+                    old_page_bbox=old_page.page_bbox, new_page_bbox=new_page.page_bbox,
+                    old_noise_bboxes=old_excluded, new_noise_bboxes=new_excluded,
+                ):
+                    failed_page_pair_count += 1
+                    coverage_issues.append(VisualCoverageIssue(
+                        old_page_number, new_page_number,
+                        "未生成视觉变化卡，但排除已有证据覆盖的区域后，仍未能证明原页像素一致；请核对源页。",
+                        "residual",
+                    ))
+                    processed_pairs.add((old_page_number, new_page_number))
+                    continue
                 checked_page_pair_count += 1
                 processed_pairs.add((old_page_number, new_page_number))
             except Exception as exc:

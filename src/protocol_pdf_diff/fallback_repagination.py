@@ -1,10 +1,10 @@
-"""仅对无编号连续正文证明纯重分页，真实改字仍走原有差异路径。"""
+"""连续无编号正文的重分页配对；保留全文与来源，真实改字仍显示为差异。"""
 
 from dataclasses import replace
 from hashlib import sha1
 from difflib import SequenceMatcher
-import re
 from .evidence_alignment import literal_key
+from .literal_atoms import literal_atoms
 
 
 def coalesce_exact_fallback_runs(old_sections, new_sections):
@@ -31,7 +31,7 @@ def coalesce_exact_fallback_runs(old_sections, new_sections):
 def coalesce_anchored_fallback_runs(old_sections, new_sections):
     """用唯一前后锚点配对一次局部改动；保留双方全文，不授予判等结论。
 
-    仅覆盖无标题连续页、页数改变、一个句段内的一次编辑。移动、多个编辑、
+    仅覆盖无标题连续页、一个句段内的一次编辑；页数可相同。移动、多个编辑、
     重复锚点或不守恒的分句结果继续交原匹配路径，不能靠相似度吞掉不确定性。
     """
     def eligible(sections):
@@ -41,13 +41,12 @@ def coalesce_anchored_fallback_runs(old_sections, new_sections):
             and s.role == sections[0].role for s in sections
         ) and all(a.end_page + 1 == b.start_page for a, b in zip(sections, sections[1:]))
 
-    if (not eligible(old_sections) or not eligible(new_sections)
-            or old_sections[0].role != new_sections[0].role
-            or len(old_sections) == len(new_sections)):
+    if (max(len(old_sections), len(new_sections)) < 2
+            or not eligible(old_sections) or not eligible(new_sections)
+            or old_sections[0].role != new_sections[0].role):
         return old_sections, new_sections
-    # 汉字按字保留，其余词、数字和符号保持字面身份，不折叠大小写或正负号。
-    def tokens(value):
-        return re.findall(r"[\u3400-\u9fff]|[^\W\u3400-\u9fff]+|[^\w\s]", value)
+    # 小数必须完整：不能因为另一段存在数字 0，就把 +3.0→+3.5 当成移动。
+    tokens = literal_atoms
 
     # 仅去掉物理页边界：例如单位 V. 被挤到下一页时不能变成一个新列表项。
     # 页内换行及所有原页文本仍分别保留在 body / page_bodies。

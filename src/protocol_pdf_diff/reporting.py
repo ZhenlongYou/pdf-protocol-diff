@@ -3180,6 +3180,11 @@ def _build_table_changes(result: DiffResult, *, table_groups=None) -> list[Table
                 group.new_tables,
                 _make_table_row_change,
             )
+            from .table_repagination import review_split_cells
+            row_change_list = review_split_cells(
+                row_change_list, group.old_tables, group.new_tables,
+                _table_geometry_supports_page_boundary_continuation,
+            )
         unreliable_multirow_alignment = _table_group_has_unreliable_multirow_alignment(group)
         alignment_review_is_reader_evidence = bool(
             unreliable_multirow_alignment

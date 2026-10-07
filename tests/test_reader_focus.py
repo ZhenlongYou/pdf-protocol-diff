@@ -34,6 +34,20 @@ def source(text, page=12, y=30):
 
 
 class ReaderFocusTests(unittest.TestCase):
+    def test_compact_numeric_changes_keep_attached_units_and_chinese_boundaries(self):
+        cases = (
+            ('3.3V','3.5V','3.3','3.5'),
+            ('1e-6s','1e-9s','1e-6','1e-9'),
+            ('电压不得超过3.3V。','电压不得超过3.5V。','3.3','3.5'),
+            ('偏移+1.50mV','偏移-1.50mV','+1.50','-1.50'),
+            ('3.0V','3.00V','3.0','3.00'),
+            ('MODE3.3','MODE3.5','MODE3.3','MODE3.5'),
+        )
+        for old,new,a,b in cases:
+            with self.subTest(old=old):
+                actual=[(old[x[0]:x[1]],new[y[0]:y[1]]) for x,y in delta_spans(old,new)]
+                self.assertEqual([(a,b)],actual)
+
     def test_context_navigation_is_neutral_unique_and_preserves_side_coordinates(self):
         text = 'Image threshold shall be 3.3 V.'
         old = replace(source(text, 4), source_words=(), context_bbox=(30,20,240,70),
