@@ -730,6 +730,7 @@ def _build_side_visuals(
     visuals: list[ProseSourceVisual] = []
     for page_number, _score, boxes, crop_regions, matched_snippet_count in selected:
         page = pages[page_number]
+        context_bbox, context_precision = _source_context_region(page, section, page_number)
         cache = render_cache if render_cache is not None else {}
         key = (id(document), page_number)
         image = cache.get(key)
@@ -771,11 +772,27 @@ def _build_side_visuals(
                          *(excluded_bboxes_by_page or {}).get(page_number, ()),
                          *_section_page_boundary_bboxes(page, section, page_number=page_number)),
                         page_body_by_number.get(page_number, ""),
-                    ) if crop_highlight_boxes else (),
+                    ),  # 原始词坐标与差异标色分别验收；没标色不代表不能精确导航。
                     source_view_box=_rounded_crop_view_box(page.page_bbox, crop_bbox, image.size),
+                    context_bbox=context_bbox,
+                    context_text=page_body_by_number.get(page_number, ""),
+                    context_precision=context_precision,
                 )
             )
     return visuals, max(0, len(ranked) - len(selected))
+
+
+def _source_context_region(page, section, page_number):
+    """只缩小到有直接来源证据的区域；无安全边界时保留整页上下文。"""
+    if section.heading_provenance == "region-ocr-review":
+        for index, block in enumerate(getattr(page, "image_text_regions", ()), 1):
+            if (section.section_id == f"image-region-{page_number}-{index}"
+                    and " ".join(section.body.split()) == " ".join(block.text.split())):
+                return block.bbox, "source-image-region"
+        return page.page_bbox, "source-page"
+    # 子章正文可能已并入父章，下一标题并不是可靠边界；多栏也不能按上下位置猜归属。
+    # 没有字级证据时保留整页，精确导航仍由独立的源词定位负责。
+    return page.page_bbox, "source-page"
 
 
 def _rounded_crop_view_box(page_bbox, crop_bbox, image_size):

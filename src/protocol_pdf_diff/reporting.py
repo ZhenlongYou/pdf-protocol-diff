@@ -79,7 +79,7 @@ from .text_utils import (
     truncate,
 )
 from .visual_preview import VISUAL_REVIEW_IMAGE_CSS, render_visual_mask_disclosure
-from .reader_focus import FOCUS_CSS, FOCUS_SCRIPT, render_change_focus, source_button
+from .reader_focus import FOCUS_CSS, FOCUS_SCRIPT, render_change_focus, source_button, context_source_images
 from .content_equivalence import cosmetic_content_equal, neutral_email_text
 
 _CHANGE_LABELS = {
@@ -2532,6 +2532,7 @@ def _render_html(
       {appendix_html}
     </main>
   </div>
+{context_source_images(materialized_source_visuals, ''.join(entry[3] for entry in page_ordered_entries) + appendix_cards)}
 {FOCUS_SCRIPT}
 {IMAGE_VIEWER}
 </body>
@@ -17074,6 +17075,11 @@ def _prose_source_visual_group_to_dict(
         ),
         "old_omitted_page_count": group.old_omitted_page_count,
         "new_omitted_page_count": group.new_omitted_page_count,
+        "source_contexts": {
+            side: [{"page": v.page_number, "bbox": list(v.context_bbox), "precision": v.context_precision}
+                   for v in visuals if v.context_bbox is not None]
+            for side, visuals in (("old", old_visuals), ("new", new_visuals))
+        },
         "precision": "source-coordinate-word-translucent-highlight",
         "figure_precision": "source-figure-uncompared",
         "has_embedded_images": bool(

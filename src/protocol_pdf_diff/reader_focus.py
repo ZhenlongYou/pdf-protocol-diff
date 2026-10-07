@@ -85,6 +85,34 @@ def changed_ranges(old, new):
     return (min(op[1] for op in ops),max(op[2] for op in ops)), (min(op[3] for op in ops),max(op[4] for op in ops))
 
 
+def locate_context_source(text, visuals, prefix, section_text=None):
+    """导航到所属来源区域，不伪造 OCR 字框或重复片段的具体出现位置。"""
+    needle = literal_tokens(text)
+    if not needle:
+        return None
+
+    def occurrences(value):
+        tokens = literal_tokens(value)
+        return sum(tokens[i:i+len(needle)] == needle for i in range(len(tokens)-len(needle)+1))
+
+    if occurrences(section_text or "") != 1:
+        return None
+    matches = {}
+    for index, visual in enumerate(visuals):
+        if visual.context_bbox is None or not visual.source_view_box or occurrences(visual.context_text) != 1:
+            continue
+        # bbox 来自本侧原始图像对象或原页，不来自另一版的位置。
+        matches.setdefault((visual.page_number, visual.context_bbox), dict(
+            id=f"{prefix}-{index}", box=list(visual.context_bbox), page=visual.page_number,
+            scope=visual.context_precision))
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _source_target(text, visuals, prefix, section_text, required_range=None):
+    return (locate_source(text, visuals, prefix, section_text, required_range)
+            or locate_context_source(text, visuals, prefix, section_text))
+
+
 def delta_spans(old: str, new: str):
     """Compare literal written numbers atomically; navigation uses word evidence.
 
@@ -113,8 +141,25 @@ def delta_spans(old: str, new: str):
 def source_button(targets, label='定位对应原文'):
     if not any(targets.values()):
         return '<span class="focus-unresolved">截图定位未确定；请结合下方原文核对。</span>'
+    if any(target and target.get("scope") for target in targets.values()):
+        label = '查看原文上下文（未精确到文字）'
+    contexts = " ".join(f"{side}:{target['page']}" for side, target in targets.items()
+                        if target and target.get("scope"))
     encoded = html.escape(json.dumps(targets, ensure_ascii=False), quote=True)
-    return f'<button type="button" class="source-focus-button" data-focus-targets="{encoded}">{html.escape(label)}</button>'
+    return f'<button type="button" class="source-focus-button" data-context-sources="{contexts}" data-focus-targets="{encoded}">{html.escape(label)}</button>'
+
+
+def context_source_images(groups, cards_html):
+    """只嵌入实际上下文按钮需要的原始页图，每侧每页一份，不沿用标色截图。"""
+    needed = {key for value in re.findall(r'data-context-sources="([a-z0-9: ]*)"', cards_html) for key in value.split()}
+    images = {}
+    for group in groups:
+        for side, visuals in (("old", group.old_visuals), ("new", group.new_visuals)):
+            for visual in visuals:
+                key = f"{side}:{visual.page_number}"
+                if key in needed and visual.raw_image_data_uri and visual.source_view_box:
+                    images.setdefault(key, dict(uri=visual.raw_image_data_uri, view=visual.source_view_box))
+    return '<script type="application/json" id="context-source-images">' + json.dumps(images).replace('<', '\\u003c') + '</script>'
 
 
 def render_change_focus(change, group, prefix, tokenize, inline, glyph_note=None, format_context=None, allow_deltas=None, escape_text=html.escape):
@@ -136,16 +181,16 @@ def render_change_focus(change, group, prefix, tokenize, inline, glyph_note=None
         old_html,new_html = (format_context(old,new,review) if format_context else
                              ((html.escape(old),html.escape(new)) if review or not old or not new else inline(old,new)))
         # A neutral review target identifies the source excerpt, not a proven change.
-        targets = {'old': locate_source(old,old_visuals,prefix+'-old',change.old_section.body if change.old_section else ''),
-                   'new': locate_source(new,new_visuals,prefix+'-new',change.new_section.body if change.new_section else '')}
+        targets = {'old': _source_target(old,old_visuals,prefix+'-old',change.old_section.body if change.old_section else ''),
+                   'new': _source_target(new,new_visuals,prefix+'-new',change.new_section.body if change.new_section else '')}
         button = source_button(targets)
         deltas = []
         if old and new and not review and (allow_deltas is None or allow_deltas(old,new)):
             for (lo,hi,a,b),(ln,hn,c,d) in delta_spans(old,new):
                 before, after = old[lo:hi], new[ln:hn]
                 local_targets = {
-                    'old': locate_source(old,old_visuals,prefix+'-old',change.old_section.body if change.old_section else '',(a,b)),
-                    'new': locate_source(new,new_visuals,prefix+'-new',change.new_section.body if change.new_section else '',(c,d)),
+                    'old': _source_target(old,old_visuals,prefix+'-old',change.old_section.body if change.old_section else '',(a,b)),
+                    'new': _source_target(new,new_visuals,prefix+'-new',change.new_section.body if change.new_section else '',(c,d)),
                 }
                 uncertain_glyph = bool(re.search(r'[\ue000-\uf8ff]',before+after))
                 left_tag, right_tag = ('span','span') if uncertain_glyph else ('del','ins')
@@ -216,7 +261,7 @@ function resolveSource(node) {
   }
   return node;
 }
-document.addEventListener('click', function(event) {
+document.addEventListener('click', async function(event) {
   const link = event.target.closest('a[href^="#"]');
   if (link) {
     const target = document.getElementById(link.getAttribute('href').slice(1));
@@ -228,33 +273,44 @@ document.addEventListener('click', function(event) {
   const panel = card && card.querySelector('.focus-preview');
   if (!panel) return;
   const targets = JSON.parse(button.dataset.focusTargets);
+  const request = {}; panel.focusRequest = request;
   panel.replaceChildren();
   const point = button.closest('li')?.querySelector('.focus-delta-label')?.textContent || button.textContent;
   const heading = document.createElement('h4'); heading.textContent = point + ' · 原文局部（琥珀框仅用于定位）'; panel.append(heading);
   const grid = document.createElement('div'); grid.className='focus-preview-grid'; panel.append(grid);
-  ['old','new'].forEach(side => {
+  for (const side of ['old','new']) {
     const figure = document.createElement('figure'); grid.append(figure);
     const caption = document.createElement('div'); caption.className='focus-caption'; figure.append(caption);
     const target = targets[side];
     const source = resolveSource(target && document.getElementById(target.id));
-    const img = source && source.querySelector('img');
-    const view = source && JSON.parse(source.dataset.sourceView || 'null');
+    let img = source && source.querySelector('img');
+    let view = source && JSON.parse(source.dataset.sourceView || 'null');
     caption.textContent = (side==='old'?'旧版':'新版') + (target?' · PDF 第 '+target.page+' 页':' · 此条无可靠定位');
+    if (target && target.scope) caption.textContent += ' · 来源上下文，未精确到文字';
+    if (target && target.scope) {
+      const raw = JSON.parse(document.getElementById('context-source-images')?.textContent || '{}')[side+':'+target.page];
+      img = null; view = null;
+      if (raw) {
+        img = new Image(); img.src = raw.uri; view = raw.view;
+        try { await img.decode(); } catch (_error) { img = null; }
+        if (panel.focusRequest !== request) return;
+      }
+    }
     if (!img || !img.complete || !img.naturalWidth || !view) {
-      const note=document.createElement('p'); note.textContent='此侧未提供可核验的截图定位，请查看完整证据。'; figure.append(note); return;
+      const note=document.createElement('p'); note.textContent='此侧未提供可核验的截图定位，请查看完整证据。'; figure.append(note); continue;
     }
     const sx=img.naturalWidth/(view[2]-view[0]), sy=img.naturalHeight/(view[3]-view[1]);
     const b=target.box;
     const x=Math.max(0,(b[0]-view[0])*sx), y=Math.max(0,(b[1]-view[1])*sy);
     const right=Math.min(img.naturalWidth,(b[2]-view[0])*sx), bottom=Math.min(img.naturalHeight,(b[3]-view[1])*sy);
-    if (![x,y,right,bottom,sx,sy].every(Number.isFinite) || right<=x || bottom<=y) return;
+    if (![x,y,right,bottom,sx,sy].every(Number.isFinite) || right<=x || bottom<=y) continue;
     const top=Math.max(0,y-32), end=Math.min(img.naturalHeight,bottom+32), height=end-top;
     // Full-width band preserves row/paragraph context and never enlarges pixels.
     const svg=svgElement('svg',{viewBox:`0 ${top} ${img.naturalWidth} ${height}`,width:img.naturalWidth,height,role:'img','aria-label':caption.textContent+'定位区域'});
     svg.append(svgElement('image',{href:img.src,x:0,y:0,width:img.naturalWidth,height:img.naturalHeight}));
     svg.append(svgElement('rect',{x,y,width:right-x,height:bottom-y,fill:'none',stroke:'#b78223','stroke-width':2,'vector-effect':'non-scaling-stroke'}));
     figure.append(svg);
-  });
+  }
   card.querySelectorAll('.source-focus-button').forEach(b => b.setAttribute('aria-pressed',b===button?'true':'false'));
   panel.scrollIntoView({block:'center',behavior:'auto'});
 });

@@ -12,7 +12,7 @@ import unittest
 import fitz
 from PIL import Image, ImageDraw
 from protocol_pdf_diff.models import DiffOptions, ProseSourceVisual, ProseSourceVisualGroup, Section, SectionChange, SnippetPair, TableChange, TableRowChange, TableVisual
-from protocol_pdf_diff.reader_focus import difference_windows, locate_source, delta_spans
+from protocol_pdf_diff.reader_focus import difference_windows, locate_source, locate_context_source, delta_spans, context_source_images
 from protocol_pdf_diff.reporting import _build_page_source_aliases, _build_prose_source_aliases, _inline_tokens, _render_change_html, _render_table_change_html, _render_visual_review_item_html, _section_change_page_sort_key, _table_change_page_sort_key, write_reports
 from protocol_pdf_diff.visual_watchdog import _compare_page_images
 from protocol_pdf_diff.compare import run_diff
@@ -34,6 +34,33 @@ def source(text, page=12, y=30):
 
 
 class ReaderFocusTests(unittest.TestCase):
+    def test_context_navigation_is_neutral_unique_and_preserves_side_coordinates(self):
+        text = 'Image threshold shall be 3.3 V.'
+        old = replace(source(text, 4), source_words=(), context_bbox=(30,20,240,70),
+                      context_text=text, context_precision='source-image-region')
+        new = replace(old, page_number=7, context_bbox=(60,30,270,80))
+        target = locate_context_source(text, (old,), 'old', text)
+        self.assertEqual((4,[30,20,240,70],'source-image-region'), (target['page'],target['box'],target['scope']))
+        self.assertEqual([60,30,270,80],locate_context_source(text,(new,),'new',text)['box'])
+        self.assertIsNone(locate_source(text,(old,),'old',text))
+        self.assertIsNone(locate_context_source(text,(old,new),'old',text))
+        self.assertIsNone(locate_context_source(text,(old,),'old',text+' '+text))
+        group = ProseSourceVisualGroup('review','s','n',(old,),(new,))
+        rendered = _render_change_html(1, SectionChange('review',section(text),section(text,sid='n'),.5,
+                         review_replaced_snippets=[SnippetPair(text,text)]), prose_source_visual=group)
+        self.assertIn('查看原文上下文（未精确到文字）', rendered)
+        self.assertNotIn('<del>', rendered)
+        self.assertNotIn('<ins>', rendered)
+
+    def test_context_preview_embeds_only_requested_raw_pages_once(self):
+        a=replace(source('source',4),raw_image_data_uri='raw-original')
+        b=replace(source('source',5),raw_image_data_uri='unused-original')
+        group=ProseSourceVisualGroup('review','s','n',(a,a,b),())
+        output=context_source_images((group,),'<button data-context-sources="old:4"></button>')
+        self.assertEqual(1,output.count('raw-original'))
+        self.assertNotIn('unused-original',output)
+        self.assertNotIn(a.image_data_uri,output)
+
     def test_table_and_prose_same_page_share_one_source_screenshot(self):
         table = TableVisual(8, 1, "Table 1", (0, 0, 100, 100), source("table").image_data_uri, [], "")
         table_change = TableChange("modified", (table,), (), 0.9, False, ())

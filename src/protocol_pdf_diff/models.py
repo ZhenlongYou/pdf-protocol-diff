@@ -567,6 +567,9 @@ class ProseSourceVisual:
     source_words: tuple[tuple[float, float, float, float, str], ...] = ()  # 实际源词；空词标记被过滤/跨block的断点，禁止跨断点导航。
     source_view_box: tuple[float, float, float, float] | None = None  # 像素取整后截图实际对应的 PDF 区域。
     raw_image_data_uri: str = field(default="", repr=False)
+    context_bbox: tuple[float, float, float, float] | None = None  # 来源区域只支持上下文查看，不证明字级位置。
+    context_text: str = field(default="", repr=False)  # 此页属于该章节的文字，用于防止导航到同句的另一页。
+    context_precision: str = ""  # source-image-region / source-page。
 
 
 @dataclass(frozen=True)

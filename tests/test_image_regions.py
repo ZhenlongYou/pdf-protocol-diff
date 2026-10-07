@@ -4,9 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from PIL import Image
 from protocol_pdf_diff.image_regions import extract_image_region_text, captioned_graphic_regions, image_region_sections
-from protocol_pdf_diff.models import PageText, ExtractionResult, DiffOptions
-from protocol_pdf_diff.compare import compare_extractions
+from protocol_pdf_diff.models import PageText, ExtractionResult, DiffOptions, Section, DocumentBlock, DocumentBlockKind
+from protocol_pdf_diff.compare import compare_extractions, _section_with_descendant_body
 from pathlib import Path
+from dataclasses import replace
+from protocol_pdf_diff.prose_source_visuals import _source_context_region
 
 
 class RegionPage:
@@ -19,6 +21,31 @@ class RegionPage:
 
 
 class ImageRegionsTests(unittest.TestCase):
+    def test_merged_child_context_is_not_cropped_at_child_heading(self):
+        parent=Section('1','1 Scope','Scope',1,('1 Scope',),('1',),1,1,'Parent condition.')
+        child=Section('1.1','1.1 Limits','Limits',2,('1 Scope','1.1 Limits'),('1','1'),1,1,'Child limit is 3.3 V.')
+        merged=_section_with_descendant_body(parent,child)
+        blocks=tuple(DocumentBlock(1,box,DocumentBlockKind.TEXT,text,i,'pdfplumber')
+                     for i,(box,text) in enumerate((
+                         ((50,50,200,65),'1 Scope'),
+                         ((50,90,300,105),'Parent condition.'),
+                         ((50,150,200,165),'1.1 Limits'),
+                         ((50,190,300,205),'Child limit is 3.3 V.'))))
+        page=PageText(1,'\n'.join(b.text for b in blocks),blocks=blocks,page_bbox=(0,0,612,792))
+        self.assertIn(child.body,dict(merged.page_bodies)[1])
+        self.assertEqual((page.page_bbox,'source-page'),_source_context_region(page,merged,1))
+
+    def test_duplicate_ocr_text_uses_explicit_region_identity(self):
+        with patch('protocol_pdf_diff.image_regions.cached_image_to_string',return_value='Threshold shall be 3.3 V.'):
+            regions,_=extract_image_region_text(RegionPage(),1)
+        first=regions[0];second=replace(first,bbox=(80,400,400,500))
+        page=PageText(1,'1 Scope',page_bbox=(0,0,612,792),image_text_regions=(first,second))
+        sections=image_region_sections(ExtractionResult(Path('regions.pdf'),[page]))
+        for s,b in zip(sections,(first,second)):
+            self.assertEqual((b.bbox,'source-image-region'),_source_context_region(page,s,1))
+        wrong=replace(sections[0],body='Different OCR content.')
+        self.assertEqual((page.page_bbox,'source-page'),_source_context_region(page,wrong,1))
+
     def test_partial_image_has_own_bbox_and_does_not_enter_native_clause(self):
         with patch('protocol_pdf_diff.image_regions.cached_image_to_string',return_value='Call ENABLE\nCall enable'):
             regions,warnings=extract_image_region_text(RegionPage(),1)

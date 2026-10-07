@@ -2118,8 +2118,9 @@ def compare_sections(
 ) -> list[SectionChange]:
     """Match old/new sections and classify section-level changes."""
 
-    from .fallback_repagination import coalesce_exact_fallback_runs
+    from .fallback_repagination import coalesce_exact_fallback_runs, coalesce_anchored_fallback_runs
     old_sections, new_sections = coalesce_exact_fallback_runs(old_sections, new_sections)
+    old_sections, new_sections = coalesce_anchored_fallback_runs(old_sections, new_sections)
     common_table_unit_keys = suppressed_table_unit_keys or set()
     old_table_unit_keys = common_table_unit_keys | (
         suppressed_old_table_unit_keys or set()
