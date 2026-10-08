@@ -276,32 +276,18 @@ def _detect_page_review_items(
                         "但没有高分辨率原页正文完全相同的证据，也没有逐字符编号坐标；保留人工复核状态。"
                     )
                     continue
-                old_image = _render_page(old_document, old_page_number)
-                new_image = _render_page(new_document, new_page_number)
-                item = _compare_page_images(
-                    old_image,
-                    new_image,
-                    old_page_number=old_page_number,
-                    new_page_number=new_page_number,
-                    alignment_method=alignment_method,
-                    old_page_bbox=old_page.page_bbox,
-                    new_page_bbox=new_page.page_bbox,
-                    old_excluded_bboxes=old_excluded,
-                    new_excluded_bboxes=new_excluded,
-                )
-                # 生成差异卡的像素阈值不能证明原页一致：小数点等细小变化可能被过滤。
-                # 只沿用已有证据负责的排除区域；余区仍不一致就保留复核，不伪造语义变化。
-                if item is None and not _body_page_rasters_are_identical(
+                review = review_source_pixels(
                     old_identity_image, new_identity_image,
+                    old_page_number=old_page_number, new_page_number=new_page_number,
+                    alignment_method=alignment_method,
                     old_page_bbox=old_page.page_bbox, new_page_bbox=new_page.page_bbox,
-                    old_noise_bboxes=old_excluded, new_noise_bboxes=new_excluded,
-                ):
+                    old_excluded_bboxes=old_excluded, new_excluded_bboxes=new_excluded,
+                )
+                item = review.item
+                if review.status == "unresolved":
                     failed_page_pair_count += 1
-                    coverage_issues.append(VisualCoverageIssue(
-                        old_page_number, new_page_number,
-                        "未生成视觉变化卡，但排除已有证据覆盖的区域后，仍未能证明原页像素一致；请核对源页。",
-                        "residual",
-                    ))
+                    coverage_issues.append(VisualCoverageIssue(old_page_number, new_page_number,
+                        "未能完成原像素核对，请核对源页。", "residual"))
                     processed_pairs.add((old_page_number, new_page_number))
                     continue
                 checked_page_pair_count += 1
@@ -528,7 +514,7 @@ def _semantic_evidence_bboxes(
     # from this module. Only material table cards and formula findings are
     # covered; unchanged structured regions remain eligible for the watchdog to
     # catch a glyph that their semantic extractor missed.
-    from .reporting import _build_table_changes
+    from .comparison_content import _build_table_changes
 
     table_changes = _build_table_changes(result)
     grouped: dict[int, list[tuple[float, float, float, float]]] = {}
@@ -586,6 +572,8 @@ def _compare_page_images(
     old_excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
     new_excluded_bboxes: tuple[tuple[float, float, float, float], ...] = (),
     allowed_bboxes: tuple[tuple[float, float, float, float], ...] = (),
+    pixel_delta_threshold: int = VISUAL_PIXEL_DELTA_THRESHOLD,
+    minimum_component_area: int = VISUAL_MIN_COMPONENT_AREA,
 ) -> VisualReviewItem | None:
     """Create a review item when any connected material pixel delta remains."""
 
@@ -593,7 +581,7 @@ def _compare_page_images(
     old_array = np.asarray(old_canvas, dtype=np.int16)
     new_array = np.asarray(new_canvas, dtype=np.int16)
     maximum_channel_delta = np.max(np.abs(old_array - new_array), axis=2).astype(np.uint8)
-    raw_mask = (maximum_channel_delta >= VISUAL_PIXEL_DELTA_THRESHOLD).astype(np.uint8)
+    raw_mask = (maximum_channel_delta >= pixel_delta_threshold).astype(np.uint8)
     _clear_excluded_regions(
         raw_mask,
         old_excluded_bboxes,
@@ -617,7 +605,7 @@ def _compare_page_images(
     )
     material_mask = np.zeros_like(raw_mask)
     for label in range(1, component_count):
-        if int(stats[label, cv2.CC_STAT_AREA]) >= VISUAL_MIN_COMPONENT_AREA:
+        if int(stats[label, cv2.CC_STAT_AREA]) >= minimum_component_area:
             material_mask[labels == label] = 1
     changed_pixels = int(np.count_nonzero(material_mask))
     if changed_pixels == 0:
@@ -729,7 +717,7 @@ def _normalized_page_text(value: str) -> str:
 def _reader_page_identity(value: str) -> str:
     """Use the same fail-closed locator neutralization as reader reports."""
 
-    from .reporting import _reader_neutralize_locator_numbers
+    from .comparison_content import _reader_neutralize_locator_numbers
 
     return _reader_neutralize_locator_numbers(value)
 
@@ -749,7 +737,7 @@ def _text_layout_incompatibility(old_page: PageText, new_page: PageText) -> str 
     page-wide visual change from layout movement.
     """
 
-    from .reporting import _reader_neutralize_locator_numbers
+    from .comparison_content import _reader_neutralize_locator_numbers
 
     def visible_text_blocks(
         page: PageText,
@@ -941,51 +929,16 @@ def _reader_visible_semantic_change_pages(
 
     if result is None:
         return set(), set()
-    from .reporting import (
-        _build_table_changes,
-        _ordered_table_changes,
-        _paired_table_visuals,
-        _reader_changes_without_cross_card_locator_pairs,
-        _reader_section_change,
-        _reader_table_changes,
-    )
-
-    table_groups = _paired_table_visuals(
-        result.old_table_visuals,
-        result.new_table_visuals,
-        old_sections=result.old_sections,
-        new_sections=result.new_sections,
-    )
-    table_changes = _ordered_table_changes(_build_table_changes(result))
-    table_evidence = [*table_changes, *table_groups]
-    figure_visual_sides_by_identity = {
-        (group.change_type, group.old_section_id, group.new_section_id): (
-            bool(group.old_figure_visuals),
-            bool(group.new_figure_visuals),
-        )
-        for group in result.prose_source_visuals
-        if group.old_figure_visuals or group.new_figure_visuals
-    }
-    reader_changes = []
-    for change in result.changes:
-        if not includes_role(change.role):
-            continue
-        reader_change = _reader_section_change(
-            change,
-            table_evidence,
-            figure_visual_sides=figure_visual_sides_by_identity.get(
-                (
-                    change.change_type,
-                    change.old_section.section_id if change.old_section else None,
-                    change.new_section.section_id if change.new_section else None,
-                ),
-                (False, False),
-            ),
-        )
-        if reader_change is not None:
-            reader_changes.append(reader_change)
-    reader_changes = _reader_changes_without_cross_card_locator_pairs(reader_changes)
-
+    from .comparison_content import build_comparison_view
+    from .models import DiffOptions
+    # No file-based deduplication has been accepted at this stage. Full source
+    # occurrences remain visible; display limits cannot grant or remove coverage.
+    profile = getattr(getattr(result.provenance, "effective_thresholds", None), "comparison_profile", "protocol")
+    threshold = getattr(getattr(result.provenance, "effective_thresholds", None), "min_section_match_similarity", 0.72)
+    backend = getattr(getattr(result.provenance, "effective_thresholds", None), "layout_backend", "native")
+    view = build_comparison_view(result, result.comparison_options or DiffOptions(comparison_profile=profile,
+        min_section_match_similarity=threshold, layout_backend=backend))
+    reader_changes = view.reader_changes
     old_pages: set[int] = set()
     new_pages: set[int] = set()
     for change in reader_changes:
@@ -1004,7 +957,7 @@ def _reader_visible_semantic_change_pages(
             new_pages.update(
                 _reader_snippet_unique_page(change.new_section, snippet)
             )
-    for change in _reader_table_changes(table_changes):
+    for change in view.reader_table_changes:
         old_pages.update(table.page_number for table in change.old_tables)
         new_pages.update(table.page_number for table in change.new_tables)
     for change in result.formula_changes:
@@ -1047,3 +1000,27 @@ def _reader_snippet_unique_page(
         if normalized in compact_inline(body)
     }
     return occurrence_pages if len(occurrence_pages) == 1 else set()
+
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PixelReview:
+    """像素核对的三个互斥结果；没有差异卡不再隐含“相同”。"""
+    status: str
+    item: VisualReviewItem | None = None
+
+
+def review_source_pixels(old_image, new_image, **scope):
+    """正文页与局部图示共用：全部残差进入原图复核，不解释技术含义。"""
+    if old_image.size != new_image.size or not scope.get("old_page_bbox") or not scope.get("new_page_bbox"):
+        return PixelReview("unresolved")
+    # 较大的连通域可用于排序，却不能删去小数点、箭头或细线。这里保留
+    # 高分辨率源图中每个残差像素，大片变化和远处小点共存时也完整标出。
+    material = _compare_page_images(old_image, new_image, **scope)
+    item = _compare_page_images(old_image, new_image, **scope,
+                                pixel_delta_threshold=1, minimum_component_area=1)
+    if item is not None and material is None:
+        return PixelReview("unresolved")  # 仅有细微残差时保留复核，不冒充确定变化。
+    return PixelReview("changed" if item is not None else "identical", item)

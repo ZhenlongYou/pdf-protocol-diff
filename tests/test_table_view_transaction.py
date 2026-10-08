@@ -11,6 +11,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from protocol_pdf_diff import table_view_transaction as t
+from protocol_pdf_diff.models import DiffOptions
 
 
 class RowEvidenceTests(unittest.TestCase):
@@ -136,7 +137,7 @@ class ContractTests(unittest.TestCase):
             calls.append(result)
             return {"html": Path("original.html")}
 
-        outcome = t.report_outcome(bundle, ".", None, writer=writer)
+        outcome = t.report_outcome(bundle, ".", DiffOptions(), writer=writer)
         self.assertEqual(calls, [original])
         self.assertIs(outcome.selected_result, original)
         self.assertEqual(outcome.outputs, {"html": Path("original.html")})
@@ -145,7 +146,7 @@ class ContractTests(unittest.TestCase):
         original = object()
         seen = []
         outcome = t.report_outcome(
-            original, ".", None, writer=lambda r, *a: seen.append(r) or {}
+            original, ".", DiffOptions(), writer=lambda r, *a: seen.append(r) or {}
         )
         self.assertIs(outcome.selected_result, original)
         self.assertEqual(seen, [original])
@@ -239,8 +240,8 @@ class FinalReceiptTests(unittest.TestCase):
             out = t.write_reports_transaction(self.bundle, directory, self.options)
             self.assertIs(out.selected_result, self.bundle.original)
 
-    def test_final_copy_failure_publishes_clean_fallback(self):
-        original_write = Path.write_bytes
+    def test_final_receipt_write_failure_publishes_clean_fallback(self):
+        original_write = Path.open
 
         def written(path, *args, **kwargs):
             if path.name == "three_cell_records.csv":
@@ -250,7 +251,7 @@ class FinalReceiptTests(unittest.TestCase):
         before = pickle.dumps(self.bundle.original)
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch.object(Path, "write_bytes", written),
+            patch.object(Path, "open", written),
         ):
             out = t.write_reports_transaction(self.bundle, directory, self.options)
             self.assertIs(out.selected_result, self.bundle.original)
@@ -283,7 +284,7 @@ class GroupIdentityTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             patch(
-                "protocol_pdf_diff.reporting._paired_table_visuals", return_value=groups
+                "protocol_pdf_diff.comparison_content._paired_table_visuals", return_value=groups
             ),
         ):
             self.assertFalse(t._write_receipts(self.bundle, Path(directory)))
@@ -302,7 +303,7 @@ class GroupIdentityTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             patch(
-                "protocol_pdf_diff.reporting._paired_table_visuals", return_value=groups
+                "protocol_pdf_diff.comparison_content._paired_table_visuals", return_value=groups
             ),
         ):
             self.assertTrue(t._write_receipts(self.bundle, Path(directory)))
@@ -371,11 +372,11 @@ class ExclusivePublicationTests(unittest.TestCase):
             def now():
                 return datetime(2026, 9, 14, 8, 0, 0)  # noqa: DTZ001 -- Mirror the writer's local clock.
 
-        original = Path.write_bytes
+        original = Path.open
 
         def write(path, *args, **kwargs):
             if path.name == "three_cell_records.csv":
-                raise OSError("final copy fault")
+                raise OSError("final receipt write fault")
             return original(path, *args, **kwargs)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -385,7 +386,7 @@ class ExclusivePublicationTests(unittest.TestCase):
             sentinel.write_text("must survive")
             with (
                 patch.object(reporting, "datetime", Clock),
-                patch.object(Path, "write_bytes", write),
+                patch.object(Path, "open", write),
             ):
                 out = t.write_reports_transaction(self.bundle, directory, self.options)
             self.assertEqual(sentinel.read_text(), "must survive")

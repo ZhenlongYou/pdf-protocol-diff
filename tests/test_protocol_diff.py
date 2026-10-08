@@ -16760,11 +16760,11 @@ class ProtocolDiffTests(unittest.TestCase):
                 self.assertEqual(expected_basis, change.match_basis)
                 self.assertLess(change.similarity, options.min_section_match_similarity)
         self.assertEqual(
-            "similarity_fallback",
+            "unique_body_content_anchor",
             by_titles[("Clock Recovery", "Clock Recovery")].match_basis,
         )
         self.assertEqual(
-            "similarity_fallback",
+            "unique_body_content_anchor",
             by_titles[("Receiver Output", "Receiver Output")].match_basis,
         )
 

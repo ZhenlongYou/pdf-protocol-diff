@@ -9,7 +9,7 @@ from .models import VisualCoverageIssue
 
 def compare_captioned_graphics(old, new, audit):
     """局部结果不会升级整页覆盖，也不会推断图的技术含义。"""
-    from .visual_watchdog import _snapshot_pdf, _render_page, _compare_page_images
+    from .visual_watchdog import _snapshot_pdf, _render_page, review_source_pixels, VISUAL_IDENTITY_RENDER_DPI
     changed_old = {a for a, _b in audit.semantic_change_pages if a is not None}
     changed_new = {b for _a, b in audit.semantic_change_pages if b is not None}
     observations = []
@@ -44,16 +44,20 @@ def compare_captioned_graphics(old, new, audit):
             for (kind, label), a, b, box in sorted(candidates, key=lambda c: (c[1].page_number, c[3])):
                 for index, page in enumerate((a, b)):
                     if page.page_number not in rendered[index]:
-                        rendered[index][page.page_number] = _render_page(snapshots[index], page.page_number)
+                        rendered[index][page.page_number] = _render_page(snapshots[index], page.page_number, dpi=VISUAL_IDENTITY_RENDER_DPI)
                 old_image, new_image = rendered[0][a.page_number], rendered[1][b.page_number]
                 if old_image.size != new_image.size:
                     issues.append(VisualCoverageIssue(a.page_number, b.page_number, "固定图示所在页渲染尺寸不同，未核对该区域。", "region"))
                     continue
-                item = _compare_page_images(old_image, new_image, old_page_number=a.page_number,
+                review = review_source_pixels(old_image, new_image, old_page_number=a.page_number,
                     new_page_number=b.page_number, alignment_method="unique-caption-fixed-region",
                     old_page_bbox=a.page_bbox, new_page_bbox=b.page_bbox, allowed_bboxes=(box,))
+                item = review.item
+                if review.status == "unresolved":
+                    issues.append(VisualCoverageIssue(a.page_number, b.page_number, "图示区域像素核对未决。", "region"))
+                    continue
                 checked.append(dict(old_page=a.page_number, new_page=b.page_number, bbox=list(box),
-                                    caption=label, kind=kind, changed=item is not None,
+                                    caption=label, kind=kind, status=review.status, changed=item is not None,
                                     method="unique-caption-fixed-region"))
                 if item:
                     items.append(replace(item, reason=f"{label}：相同图题及固定区域内出现像素变化，请核对源图；未解释图形语义。"))

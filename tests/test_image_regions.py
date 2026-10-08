@@ -73,6 +73,8 @@ class ImageRegionsTests(unittest.TestCase):
         page=RegionPage()
         self.assertEqual((('raster','Figure 1. Receiver path',(80,200,400,300)),),captioned_graphic_regions(page,words,()))
         page.chars=[dict(text='Label',x0=90,top=210,x1=140,bottom=222)]
+        self.assertTrue(captioned_graphic_regions(page,words,()))  # 完整图内原生标签仍属于该图。
+        page.chars=[dict(text='Crossing body',x0=60,top=210,x1=140,bottom=222)]
         self.assertFalse(captioned_graphic_regions(page,words,()))
         page.chars=[dict(text='broken')]
         self.assertFalse(captioned_graphic_regions(page,words,()))

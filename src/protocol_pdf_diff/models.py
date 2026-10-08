@@ -132,6 +132,22 @@ class PageText:
     publication_header_texts: tuple[str, ...] = ()  # 从正文分离的出版页眉始终保留，通用模式参与比较。
     comparison_blocks: tuple[DocumentBlock, ...] = ()  # 经逐字核对的区域阅读视图，原始 blocks 保持不变。
 
+    derived_table_spans: tuple[tuple[int, int], ...] = ()  # 仅组合器追加的表行区间，禁止按同文猜测删除。
+
+    def without_derived_tables(self):
+        """结构化表行已有独立对象，不再借页尾位置进入最后一个章节。"""
+        from dataclasses import replace
+        if not self.derived_table_spans:
+            return self
+        cursor, parts = 0, []
+        for start, end in self.derived_table_spans:
+            if not cursor <= start < end <= len(self.text):
+                raise ValueError("派生表行来源区间失效")
+            parts.append(self.text[cursor:start])
+            cursor = end
+        parts.append(self.text[cursor:])
+        return replace(self, text="".join(parts), derived_table_spans=())
+
     def __post_init__(self) -> None:
         """Normalize the route so legacy and explicit constructions cannot contradict facts."""
 
@@ -168,6 +184,9 @@ class PageExtractionAudit:
     running_footer_texts: tuple[str, ...] = ()
     page_identity_header_texts: tuple[str, ...] = ()  # 精确匹配 PDF 标题的出版物页眉，用于独立于正文变化的元数据过滤。
     blank_glyph_evidence: tuple[tuple[str, str, int, int, int], ...] = ()  # 原始字符、字体摘要、CID、GID、数量。
+
+
+    local_ocr_region_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -207,6 +226,7 @@ def snapshot_page_extraction_audit(
             parser_route=page.parser_route,
             image_dominant=page.image_dominant,
             ocr_used=page.ocr_used,
+            local_ocr_region_count=len(page.image_text_regions),
             layout_risk=page.layout_risk,
             block_count=len(page.blocks),
             comparison_text_source=page.comparison_text_source,
@@ -259,6 +279,9 @@ class TableVisual:
     physical_rows: tuple[PhysicalTableRow, ...] = ()
     raw_source_cells: tuple = ()
     raw_cell_bounds: tuple = ()
+    source_id: str = ""  # 同一快照内的物理对象身份，不是两版对应关系。
+    crop_bbox: tuple[float, float, float, float] | None = None
+    image_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -420,6 +443,9 @@ class Section:
         compare=False,
         repr=False,
     )  # 直接标题位于歧义恢复章节之下时也只能作为结构复核证据。
+
+    source_heading_bbox: tuple[float, float, float, float] | None = None
+    table_source_ids: tuple[str, ...] = ()
 
     @property
     def location(self) -> str:
@@ -638,6 +664,7 @@ class DiffResult:
     old_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()  # 仅供读者恢复原生上标排印，不影响比较。
     new_superscript_receipts: tuple[tuple[int, str, tuple[tuple[int, int], ...]], ...] = ()
     visual_review_warnings: tuple[str, ...] = ()  # Explicit watchdog diagnostics, separate from prose warnings.
+    comparison_options: DiffOptions | None = None  # 运行时固定的配置；展示预算可独立调整。
 
 
 def _normalize_key(value: str) -> str:

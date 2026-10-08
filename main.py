@@ -40,8 +40,8 @@ OUTPUT_DIR = "results"
 # more sections as added/deleted.
 MIN_SECTION_MATCH_SIMILARITY = 0.72
 
-# Maximum visible diff snippets per changed section. This does not limit
-# section matching or comparison; it only keeps the generated report readable.
+# Budget for intermediate section summaries. Complete audited occurrences
+# still participate in comparison and remain available in the final report.
 MAX_SNIPPETS_PER_SECTION = 20
 
 # Optional Tesseract language expression for scan-like pages. Examples:
@@ -56,8 +56,8 @@ OCR_TIME_BUDGET_SECONDS = 300.0  # 旧/新两侧累计识别时间，设 None �
 LAYOUT_BACKEND = "native"
 
 # Keep the source-pixel watchdog enabled for normal reviews.  It only compares
-# pages whose extracted text is identical and reports unexplained graphics as
-# manual-review evidence; it never turns pixels into invented technical text.
+# text-equivalent pages and eligible fixed graphic regions on changed pages.
+# Unexplained pixels remain manual-review evidence.
 VISUAL_WATCHDOG = True
 
 # When both paths above are blank, generate multi-page demo PDFs so the
@@ -89,7 +89,7 @@ if __name__ == "__main__":  # PyCharm 直接运行 main.py 时先切到项目 .v
     freeze_support()
     reexec_into_project_venv(PROJECT_ROOT, Path(__file__).resolve())  # 使用 sys.prefix 判断环境，避开 macOS 软链接误判。
 
-from protocol_pdf_diff.table_view_transaction import run_diff_transaction as run_diff, report_outcome  # noqa: E402
+from protocol_pdf_diff.table_view_transaction import run_comparison  # noqa: E402
 from protocol_pdf_diff.models import DiffOptions  # noqa: E402
 from protocol_pdf_diff.pdf_extract import MissingDependencyError, PdfReadError  # noqa: E402
 from protocol_pdf_diff.quality import ReliabilityState  # noqa: E402
@@ -146,7 +146,7 @@ def parse_args() -> argparse.Namespace:
         "--max-snippets",
         type=int,
         default=MAX_SNIPPETS_PER_SECTION,
-        help="每个章节最多展示的差异片段数；不限制完整章节匹配和比较",
+        help="每节中间摘要的片段预算；最终报告仍保留全部已识别差异",
     )
     parser.add_argument(
         "--include-unchanged",
@@ -241,8 +241,7 @@ def main() -> int:
             visual_watchdog=args.visual_watchdog,
         )  # 共享配置验证属于可预期的用户输入错误，必须由同一中文错误路径捕获。
         old_pdf, new_pdf = resolve_inputs(args)
-        result = run_diff(old_pdf, new_pdf, options)
-        outcome = report_outcome(result, PROJECT_ROOT / args.output_dir, options, writer=write_reports)
+        outcome = run_comparison(old_pdf, new_pdf, PROJECT_ROOT / args.output_dir, options)
         result, outputs = outcome.selected_result, outcome.outputs
     except (FileNotFoundError, MissingDependencyError, PdfReadError, ValueError) as exc:
         print(f"运行失败: {exc}", file=sys.stderr)

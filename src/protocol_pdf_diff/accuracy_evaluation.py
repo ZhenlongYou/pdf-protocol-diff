@@ -19,7 +19,7 @@ from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from .compare import run_diff
+from .table_view_transaction import run_comparison
 from .models import DiffOptions, DiffResult
 from .reporting import write_reports
 
@@ -362,10 +362,10 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
         layout_backend=options_payload.get("layout_backend", "native"),
     )
     try:
-        result = run_diff(old_path, new_path, options)
-        family_source_pair = _gold_source_pair_key(result)
         with TemporaryDirectory(prefix="pdf_diff_gold_") as report_root:
-            outputs = write_reports(result, report_root, options)
+            outcome = run_comparison(old_path, new_path, report_root, options)
+            result, outputs = outcome.selected_result, outcome.outputs
+            family_source_pair = _gold_source_pair_key(result)
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
             reader_surfaces = {
                 "markdown": _read_markdown_evidence(outputs["markdown"]),
@@ -385,6 +385,7 @@ def _run_case(case: dict[str, Any], root: Path, *, case_index: int) -> dict[str,
     matched_expected, matched_actual, failures = _match_expected_events(
         expected_events,
         actual_events,
+        reader_surfaces=reader_surfaces,
     )
     visual_audit = payload.get("provenance", {}).get("visual_watchdog_run")
     visual_coverage_required = case.get("visual_coverage_required", True)
@@ -732,6 +733,7 @@ def _literal_visibility(
 def _match_expected_events(
     expected_events: list[dict[str, Any]],
     actual_events: list[dict[str, Any]],
+    *, reader_surfaces=None,
 ) -> tuple[set[int], set[int], list[str]]:
     matched_expected: set[int] = set()
     matched_actual: set[int] = set()
@@ -751,7 +753,10 @@ def _match_expected_events(
             continue
         matched_expected.add(expected_index)
         matched_actual.update(candidate_indexes)
-        if any(
+        if reader_surfaces is not None:
+            failures.extend(f"expected event {expected_index + 1} {message}"
+                            for message in _expected_reader_failures(expected, reader_surfaces))
+        elif any(
             not _reader_visibility_matches(
                 expected["reader_visible"],
                 actual_events[actual_index],
@@ -1114,3 +1119,29 @@ def _manifest_failure(failures: list[str]) -> dict[str, Any]:
         },
         "cases": [{"case_index": 0, "status": "fail", "failures": failures}],
     }
+
+
+def _expected_reader_failures(expected, surfaces):
+    """直接查先验事件在实际输出中的可见性，不让 JSON 自报隐藏充当证明。"""
+    literals = ((f"旧页 {expected['old_page']} / 新页 {expected['new_page']}",)
+                if expected["kind"] == "visual" else
+                tuple(str(expected[side]) for side in ("old", "new") if expected.get(side)))
+    needed = Counter(literals)
+    failures = []
+    for name in ("html", "markdown", "text"):
+        evidence = surfaces.get(name)
+        if not isinstance(evidence, _ReaderSurfaceEvidence):
+            failures.append(f"{name}: structured reader evidence missing")
+            continue
+        blocks = [text for _key, text in evidence.blocks]
+        location = expected.get("location", "")
+        candidates = ([text for text in blocks if not location or _literal_matches(location, text)]
+                      if expected["reader_visible"] else blocks or [evidence.full_text])
+        count = sum(min(_literal_occurrences(literal, text) // multiplicity
+                        for literal, multiplicity in needed.items())
+                    for text in candidates) if needed else 0
+        if expected["reader_visible"] and count < expected.get("occurrences", 1):
+            failures.append(f"{name}: reader visibility mismatch (found {count})")
+        elif not expected["reader_visible"] and count:
+            failures.append(f"{name}: reader visibility mismatch (hidden event appears in rendered output)")
+    return failures

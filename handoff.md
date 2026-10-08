@@ -1,3 +1,7 @@
+做了什么：完成 PDF 对比主链路重构：内容视图与报告分离、来源身份和物理归属、章节候选统一竞争、正文/表格数值规则统一、大小像素残差共同定位及实际报告独立预期检查；1,893 项宽测、8 组适用性样本、3 组来源/重分页检查通过，CEM 强断言最终单独复跑通过；main.py 真实页窗及实际 HTML 已核对，证据见 docs/verification/pdf-core-architecture-20261009.md。
+当前状态：源码写入已停止；工作区 /Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff，分支 codex/pdf-core-architecture-20261009，基线 069e3ec739af5106b225ae185389b67d7ee9b9c4 上代码/测试/文档待同次提交；本记录随任务提交进入历史。diff 与 Ruff F821 检查通过；本轮临时输出 64,485,043 字节及新增模块编译缓存 537,774 字节已删除，临时浏览器和服务已关闭，真实输入与运行环境保留。
+下一步：释放本任务 writer，取得 integration 通道，fetch 后合入 main 与 project/pdf-protocol-diff，再 fetch 并仅推送两分支；已集成时以实际 OID 为准。复杂跨页表格仍为来源可查的复核，未承诺图形语义或整本识别准确率；未运行 Windows 实机与桌面重打包，公式自动比较仍关闭。
+
 做了什么：实现小图像残留像素复核、完整字面数值摘要、同页数重分页配对、两列叙述格跨页集中复核；328 项相关测试、1 项反向拆页测试和 20 项视觉回归通过，8 组公开入口小样本及 CEM 两页回归通过，3 份实际 HTML 已点击/截图核对；证据与边界见 docs/verification/pdf-boundary-accuracy-20261007.md。
 当前状态：源码写入已停止；工作区 /Users/mac/PycharmProjects/RinysProject/codex_projects/pdf_protocol_diff，分支 codex/pdf-boundary-accuracy-20261007，基线 909714ccc885710d8855ded28439660a9ac451c7 上代码/测试/文档待同次提交；本记录随任务提交进入历史。13 个 Python 文件 AST、diff 检查通过；主任务 3,210,786 字节及子任务 2,724,736 字节临时输出已删，浏览器页和临时服务已关闭，原始输入保留。
 下一步：释放本任务 writer，取得 integration 通道，fetch 后合入 main 与 project/pdf-protocol-diff，再 fetch 并仅推送这两分支；已集成时以实际 OID 为准。跨页表格仍为有来源的人工复核，多处改字、复杂合并格及图形语义不在本轮保证范围；未跑整本/全语料或桌面重打包。

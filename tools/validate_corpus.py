@@ -18,7 +18,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from protocol_pdf_diff.compare import run_diff
+from protocol_pdf_diff.table_view_transaction import run_comparison
 from protocol_pdf_diff.models import DiffOptions, Section
 from protocol_pdf_diff.reporting import write_reports
 
@@ -412,8 +412,8 @@ def _run_case(case: dict[str, Any], corpus_root: Path) -> dict[str, Any]:
         new_end_page=descriptors[1].get("end_page"),
     )
     with TemporaryDirectory(prefix="pdf_diff_corpus_") as temp_dir:
-        result = run_diff(paths[0], paths[1], options)
-        report_paths = write_reports(result, temp_dir, options)
+        outcome = run_comparison(paths[0], paths[1], temp_dir, options)
+        result, report_paths = outcome.selected_result, outcome.outputs
         payload = json.loads(report_paths["json"].read_text(encoding="utf-8"))
         searchable = _combined_report_text(report_paths, payload)
         material_searchable = _material_report_text(payload)

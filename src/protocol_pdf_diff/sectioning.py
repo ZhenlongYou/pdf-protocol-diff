@@ -143,6 +143,7 @@ class _OpenSection:
     proven_numbered_heading_candidates: list[str]
     heading_provenance: str
     inherited_heading_provenance: bool
+    source_heading_bbox: tuple | None = None
 
 
 def _merge_source_split_heading_lines(pages: list[PageText]) -> list[PageText]:
@@ -199,6 +200,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     document titles, confidentiality banners, and similar furniture.
     """
 
+    extraction = replace(extraction, pages=[p.without_derived_tables() for p in extraction.pages])
     formula_boxes = {}
     for formula in extraction.formula_visuals:
         formula_boxes.setdefault(formula.page_number, []).append(formula.bbox)
@@ -527,6 +529,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
                 else:
                     deep_numeric_context = ()
                 current = _OpenSection(
+                    source_heading_bbox=_heading_source_box(page, heading_candidate),
                     heading=heading.raw,
                     title=heading.title or heading.raw,
                     level=heading.level,
@@ -613,7 +616,7 @@ def section_document(extraction: ExtractionResult) -> list[Section]:
     ]  # 编号容器标题本身也是可比较事实，即使正文全部位于子条款中也不能丢弃。
     if not saw_heading:
         return _page_fallback_sections(cleaned_pages)
-    return meaningful_sections
+    return _bind_table_sources(meaningful_sections, extraction)
 
 
 def _is_contents_page(text: str) -> bool:
@@ -1318,6 +1321,7 @@ def _close_section(open_section: _OpenSection, index: int) -> Section:
         proven_numbered_heading_candidates=tuple(
             open_section.proven_numbered_heading_candidates
         ),
+        source_heading_bbox=open_section.source_heading_bbox,
         heading_provenance=open_section.heading_provenance,
         inherited_heading_provenance=open_section.inherited_heading_provenance,
     )
@@ -3897,3 +3901,46 @@ def _looks_like_instruction_sentence(title: str) -> bool:
     }
     lowered = {word.casefold() for word in words}
     return bool(lowered & instruction_markers)
+
+
+def _heading_source_box(page, text):
+    words = line_word_evidence(page, text)
+    if not words:
+        return None
+    boxes = [word for word, _style in words]
+    return (min(w[1] for w in boxes), min(w[2] for w in boxes),
+            max(w[3] for w in boxes), max(w[4] for w in boxes))
+
+
+def _bind_table_sources(sections, extraction):
+    """只按可证明的单栏物理顺序归属表；缺坐标的章节边界不可跨越。"""
+    bindings = {s.section_id: [] for s in sections}
+    pages = {p.page_number: p for p in extraction.pages}
+    for table in extraction.table_visuals:
+        page = pages.get(table.page_number)
+        if not table.source_id or page is None or page.layout_risk or page.ocr_used:
+            continue
+        owner = None
+        for section in sections:
+            if section.start_page > table.page_number:
+                break
+            if section.start_page < table.page_number:
+                owner = section if all(n in pages for n in range(section.start_page, table.page_number + 1)) else None
+                continue
+            box = section.source_heading_bbox
+            if box is None:
+                owner = None
+                break  # 不能跳过未知边界，把表借给更早的已知标题。
+            if box[1] >= table.bbox[3]:
+                break
+            if box[3] <= table.bbox[1]:
+                owner = section
+            else:
+                owner = None
+                break
+        if owner is not None:
+            bindings[owner.section_id].append(table.source_id)
+    source_pages = {t.source_id: t.page_number for t in extraction.table_visuals}
+    return [replace(s, table_source_ids=tuple(bindings[s.section_id]),
+                    end_page=max([s.end_page, *(source_pages[i] for i in bindings[s.section_id])]))
+            for s in sections]

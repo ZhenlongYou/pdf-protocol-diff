@@ -39,7 +39,8 @@ def build_visual_owned_spans(result, old_extraction, new_extraction, visual_grou
         figure_boxes = defaultdict(list)
         box_owners = defaultdict(set)
         for table in getattr(result, side + '_table_visuals'):
-            if (table.bbox and table.row_texts and table.content_fully_represented
+            if (table.bbox and (table.image_data_uri or table.context_image_data_uri)
+                    and table.row_texts and table.content_fully_represented
                     and table.row_alignment_reliable and table.data_rows_fully_represented):
                 boxes[table.page_number].append(table.bbox)
         pages = {page.page_number: page for page in extraction.pages}

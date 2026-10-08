@@ -22,6 +22,7 @@ from collections import (
 )
 from collections.abc import Iterable
 from pathlib import Path
+from dataclasses import replace
 from statistics import median
 
 from .source_regions import (
@@ -472,8 +473,6 @@ def _extract_pdf_text_with_pdfplumber(
             image_text_regions, region_warnings = ((), []) if image_dominant or ocr_used else extract_image_region_text(
                 page, index, region_excluded)
             warnings.extend(region_warnings)
-            if image_text_regions or region_warnings:
-                layout_risk = True  # 局部识别成功不证明整页阅读归属完整。
             graphic_regions = captioned_graphic_regions(
                 page, coordinate_evidence[index][0], vector_graphic_bboxes,
                 (*region_excluded, *visual_noise_bboxes))
@@ -493,9 +492,10 @@ def _extract_pdf_text_with_pdfplumber(
                 PageText(
                     page_number=index,
                     text=text,
+                    derived_table_spans=getattr(page, "_derived_table_spans", ()),
                     physical_native_text=physical_native_text,
                     layout_risk=layout_risk,
-                    ocr_used=ocr_used or bool(image_text_regions),
+                    ocr_used=ocr_used,
                     blocks=(*blocks, *image_text_regions),
                     comparison_blocks=verified_comparison_blocks(page, text),
                     image_text_regions=image_text_regions,
@@ -597,7 +597,7 @@ def _extract_pdf_text_with_pdfplumber(
         total_pages=total_pages,
         selected_start=selected_start,
         selected_end=selected_end,
-        table_visuals=table_visuals,
+        table_visuals=[replace(t, source_id=f"{source_digest.hexdigest()}:p{t.page_number}:t{t.table_number}") for t in table_visuals],
         formula_visuals=formula_visuals,
         source_sha256=source_digest.hexdigest(),
         outline_heading_paths=outline_heading_paths,
@@ -853,6 +853,8 @@ def _extract_pdfplumber_page_text(
     from .table_view_transaction import capture_page
     capture_page(filtered_page, pdf_name, page_number, comparison_coordinate_words, fully_covered_table_bboxes, table_lines, block_warnings, coordinate_error, ocr_used)
     combined_text = _combine_text_and_table_lines(text, table_lines)
+    prose_length = len(_combine_text_and_table_lines(text, []))
+    page._derived_table_spans = ((prose_length, len(combined_text)),) if len(combined_text) > prose_length else ()
     comparable_text_characters = len(re.sub(r"\s+", "", combined_text))
     coordinate_coverage_insufficient = (
         coordinate_text_characters is not None
@@ -6237,13 +6239,12 @@ def _build_table_visual(
     bbox = _table_bbox(table)  # 复用统一 bbox 解析，避免过滤和截图路径口径不一致。
     if bbox is None:
         return None, "未取得可靠表格边界"
-    image, padded_bbox, image_status = _table_screenshot_image(page, bbox)  # 生成带橙色边框的表格截图。
-    if image is None:
-        return None, image_status or "截图为空"
+    image, padded_bbox, image_status = _table_screenshot_image(page, bbox)  # 获取原始表格截图；物理结构不依赖渲染成功。
     title = title or _table_title_above_bbox(page, bbox)  # 调用方通常已抽过表题；兜底再取一次。
-    image_data_uri = _image_to_data_uri(image)  # 把截图内嵌到 HTML，便于手机直接查看。
-    grid_summary = _opencv_grid_summary(image)  # 用 OpenCV 检测截图内网格线，说明视觉表格证据强弱。
-    ocr_text, ocr_status = _ocr_table_image(image)  # 有 tesseract 引擎时做 OCR，否则明确说明跳过。
+    # 识别只读取未经标注的原始像素，显示标记不得成为识别证据。
+    image_data_uri = _image_to_data_uri(image) if image is not None else ""
+    grid_summary = _opencv_grid_summary(image) if image is not None else "无截图，保留原生表结构"
+    ocr_text, ocr_status = _ocr_table_image(image) if image is not None else ("", "未运行：无截图")
     if image_status:
         grid_summary = f"{grid_summary}; {image_status}"
     return (
@@ -6251,7 +6252,9 @@ def _build_table_visual(
             page_number=page_number,
             table_number=table_number,
             title=title,
-            bbox=padded_bbox,
+            bbox=bbox,
+            crop_bbox=padded_bbox,
+            image_status=image_status,
             image_data_uri=image_data_uri,
             row_texts=table_lines,
             grid_summary=grid_summary,
@@ -6269,7 +6272,7 @@ def _build_table_visual(
             context_bbox=_table_page_bbox(page),
             context_words=context_words,
         ),
-        "",
+        image_status,
     )
 
 
@@ -6321,7 +6324,7 @@ def _table_screenshot_image(
     page: object,
     bbox: tuple[float, float, float, float],
 ) -> tuple[object | None, tuple[float, float, float, float], str]:
-    """Render a padded table crop and draw the detected bbox in orange."""
+    """Render a raw source crop; detector/OCR input never contains display overlays."""
 
     padded_bbox = _padded_bbox(page, bbox, _TABLE_SCREENSHOT_PADDING)  # 只保留边框安全边距，避免截进半行表题。
     try:
@@ -6329,18 +6332,6 @@ def _table_screenshot_image(
         image = cropped_page.to_image(resolution=_TABLE_SCREENSHOT_RESOLUTION).original.convert("RGB")
     except Exception as exc:
         return None, padded_bbox, f"截图失败: {exc}"
-    try:
-        from PIL import ImageDraw
-
-        scale = _TABLE_SCREENSHOT_RESOLUTION / 72.0  # PDF point 到截图像素的比例。
-        draw = ImageDraw.Draw(image)  # 在截图上画橙框，标出自动识别的表格网格区域。
-        x0 = max(0, int((bbox[0] - padded_bbox[0]) * scale))
-        y0 = max(0, int((bbox[1] - padded_bbox[1]) * scale))
-        x1 = min(image.width - 1, int((bbox[2] - padded_bbox[0]) * scale))
-        y1 = min(image.height - 1, int((bbox[3] - padded_bbox[1]) * scale))
-        draw.rectangle([x0, y0, x1, y1], outline=(217, 119, 6), width=4)
-    except Exception as exc:
-        return image, padded_bbox, f"橙框绘制失败: {exc}"
     return image, padded_bbox, ""
 
 

@@ -32,6 +32,7 @@ class ReportOutcome:
     selected_result: object
     outputs: dict
     selection_reason: str
+    final_view: object | None = None
 
 
 def begin_extraction(path):
@@ -212,6 +213,9 @@ def capture_page(page, name, number, words, covered, table_lines, warnings, erro
         state["pages"][(name, number)] = e._combine_text_and_table_lines(
             e._clean_extracted_page_text(text), table_lines
         )
+        plain = e._combine_text_and_table_lines(e._clean_extracted_page_text(text), [])
+        combined = state["pages"][(name, number)]
+        state.setdefault("derived_spans", {})[(name, number)] = ((len(plain), len(combined)),) if len(combined) > len(plain) else ()
 
 
 def capture_extractions(old, new):
@@ -308,6 +312,7 @@ def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
                 replace(
                     p,
                     text=state["pages"][(ex.pdf_path.name, p.page_number)],
+                    derived_table_spans=state.get("derived_spans", {}).get((ex.pdf_path.name, p.page_number), ()),
                     source_char_map=(),
                     comparison_blocks=(),  # 候选文字已变化，不能沿用原视图的区域阅读坐标计划。
                 )
@@ -344,7 +349,7 @@ def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
         or original.new_table_visuals != candidate.new_table_visuals
     ):
         return DualResult(original, None, [], "complete table source changed")
-    from .reporting import _build_table_changes, _paired_table_visuals
+    from .comparison_content import _build_table_changes, _paired_table_visuals
 
     groups_for = lambda r: _paired_table_visuals(
         r.old_table_visuals,
@@ -360,10 +365,12 @@ def run_diff_transaction(old_pdf, new_pdf, options, *, progress_observer=None):
             original, None, [], "table groups or complete table changes changed"
         )
     notify_progress(progress_observer, ProgressEvent(stage="visual_evidence", detail="候选视图视觉证据"))
-    visual_items, visual_warnings, visual_audit = _candidate_visual_evidence(original,candidate,(old,new),projected,options,state.get('visual_inputs'))
+
     from .compare import _assessment_with_visual_review
     # Rebuild text-dependent source visuals; reuse only pixel review with unchanged section mapping.
     groups, warnings = build_prose_source_visuals(candidate, *projected)
+    candidate = replace(candidate, prose_source_visuals=groups)
+    visual_items, visual_warnings, visual_audit = _candidate_visual_evidence(original,candidate,(old,new),projected,options,state.get('visual_inputs'))
     from .formula_source_review import build_formula_source_reviews
 
     # The candidate has its own PageText offsets. Original formula receipts cannot
@@ -464,7 +471,7 @@ def _source_row_matches(record, table):
 
 def _write_receipts(bundle, directory):
     from .physical_table_rows import _image_is_decodable
-    from .reporting import _paired_table_visuals
+    from .comparison_content import _paired_table_visuals
 
     rows = bundle.rows
     required = [r for r in rows if r["proposed"]]
@@ -575,81 +582,28 @@ def _write_receipts(bundle, directory):
 
 
 def _write_reports_staged(bundle, output_dir, options):
-    from .reporting import write_reports
+    from .reporting import _create_report_directory, render_reports
+    from .comparison_content import build_table_content, build_comparison_view, validate_result_options
+    from .comparison_preparation import prepare_comparison_evidence
 
-    if not isinstance(bundle, DualResult):
-        return ReportOutcome(
-            bundle, write_reports(bundle, output_dir, options), "ordinary result"
-        )
-    import tempfile
-
-    with tempfile.TemporaryDirectory(
-        prefix="table-receipts-",
-        dir=Path(output_dir).mkdir(parents=True, exist_ok=True) or output_dir,
-    ) as tmp:
-        receipts = (
-            _write_receipts(bundle, Path(tmp))
-            if bundle.candidate is not None
-            else False
-        )
-        selected = bundle.candidate if receipts else bundle.original
-        outputs = write_reports(selected, output_dir, options)
-        if receipts:
-            payload, text, fragment, csvpath = receipts
-            try:
-                destination = outputs["json"].parent / "three_cell_records.csv"
-                destination.write_bytes(csvpath.read_bytes())
-                if destination.read_bytes() != csvpath.read_bytes():
-                    raise OSError("receipt copy mismatch")
-                for kind in ["markdown", "text"]:
-                    if kind in outputs:
-                        with outputs[kind].open("a", encoding="utf-8") as f:
-                            f.write(
-                                "\n\n原物理三格（未证明整表逻辑对应）\n" + text + "\n"
-                            )
-                hp = outputs["html"]
-                s = hp.read_text(encoding="utf-8")
-                hp.write_text(
-                    s.replace("</body>", fragment + "</body>"), encoding="utf-8"
-                )
-                if fragment not in hp.read_text(encoding="utf-8"):
-                    raise OSError("missing HTML receipt")
-                jp = outputs["json"]
-                data = json.loads(jp.read_text(encoding="utf-8"))
-                data[
-                    "original_changes_audit"
-                ] = []  # Filled below from the original public serialization.
-                from .reporting import _change_to_dict
-
-                data["original_changes_audit"] = [
-                    _change_to_dict(c) for c in bundle.original.changes
-                ]
-                data["three_cell_records"] = [
-                    {
-                        **{k: v for k, v in r.items() if k != "image"},
-                        "image_sha256": hashlib.sha256(r["image"].encode()).hexdigest(),
-                    }
-                    for r in payload
-                ]
-                data["table_projection_selection"] = "candidate"
-                jp.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            except (OSError, ValueError, TypeError):
-                # The isolated publisher requires report_dir directly below staging.
-                # Remove rejected draft from that publication root before rebuilding.
-                rejected = outputs["json"].parent
-                rejected.rename(Path(tmp) / "rejected-draft")
-                selected = bundle.original
-                outputs = write_reports(selected, output_dir, options)
-                return ReportOutcome(
-                    selected, outputs, "final receipt failed; whole original result"
-                )
-        return ReportOutcome(
-            selected,
-            outputs,
-            "candidate with final receipts" if receipts else "whole original result",
-        )
+    original = bundle.original if isinstance(bundle, DualResult) else bundle
+    validate_result_options(original, options)
+    report_dir = _create_report_directory(original, output_dir, exclusive=True)
+    receipts = _write_receipts(bundle, report_dir) if isinstance(bundle, DualResult) and bundle.candidate is not None else False
+    selected = bundle.candidate if receipts else original
+    reason = "candidate with final receipts" if receipts else "whole original result"
+    if not receipts:
+        # A rejected receipt is owned staging data, never part of an original result.
+        (report_dir / "three_cell_records.csv").unlink(missing_ok=True)
+    tables = build_table_content(selected)
+    evidence = prepare_comparison_evidence(selected, tables, report_dir)
+    view = build_comparison_view(selected, options, tables=tables,
+                                physical_receipts=evidence.physical_receipts,
+                                formula_accepted=evidence.formula_accepted)
+    outputs = render_reports(view, report_dir, evidence,
+                             transaction_receipts=receipts or None,
+                             original_changes=original.changes)
+    return ReportOutcome(selected, outputs, reason, view)
 
 
 def write_reports_transaction(bundle, output_dir, options):
@@ -695,6 +649,7 @@ def write_reports_transaction(bundle, output_dir, options):
             outcome.selected_result,
             {key: destination / path for key, path in relative.items()},
             outcome.selection_reason,
+            outcome.final_view,
         )
 
 
@@ -711,3 +666,15 @@ def report_outcome(result, output_dir, options, *, writer=None):
             "injected writer: original view",
         )
     return write_reports_transaction(result, output_dir, options)
+
+
+@comparison_session
+@progress_session
+@configured_comparison
+def run_comparison(old_pdf, new_pdf, output_dir, options, *, progress_observer=None):
+    """生产、桌面和基准共享的完整入口：固定配置、选择结果、原子发布。"""
+    from .page_ocr import normalize_ocr_language
+    options = replace(options, ocr_language=normalize_ocr_language(options.ocr_language))
+    bundle = run_diff_transaction(old_pdf, new_pdf, options, progress_observer=progress_observer)
+    notify_progress(progress_observer, ProgressEvent(stage="report"))
+    return report_outcome(bundle, output_dir, options)

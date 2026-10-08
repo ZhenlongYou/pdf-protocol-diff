@@ -37,3 +37,12 @@ def configured_comparison(function):
         with comparison_profile(options.comparison_profile):
             return function(*args, **kwargs)
     return run
+
+
+def configured_view(function):
+    """输出只能继承固定视图的配置，不能用环境中的另一轮配置重新解释。"""
+    @wraps(function)
+    def run(view, *args, **kwargs):
+        with comparison_profile(view.options.comparison_profile):
+            return function(view, *args, **kwargs)
+    return run

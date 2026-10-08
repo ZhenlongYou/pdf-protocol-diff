@@ -120,7 +120,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
                 new_pdf,
                 DiffOptions(visual_watchdog=False, max_snippets_per_section=20),
             )
-            outputs = write_reports(result, root / "reports", DiffOptions())
+            outputs = write_reports(result, root / "reports", result.comparison_options or DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
@@ -165,7 +165,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
             )
 
             result = run_diff(old_pdf, new_pdf, DiffOptions(visual_watchdog=False))
-            outputs = write_reports(result, root / "reports", DiffOptions())
+            outputs = write_reports(result, root / "reports", result.comparison_options or DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
 
@@ -196,7 +196,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
                 new_pdf,
                 DiffOptions(visual_watchdog=False),
             )
-            outputs = write_reports(result, root / "reports", DiffOptions())
+            outputs = write_reports(result, root / "reports", result.comparison_options or DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
 
             self.assertIn('class="figure-source-visual-grid"', html)
@@ -1668,7 +1668,7 @@ class ProseSourceVisualReportTests(unittest.TestCase):
                     new_pdf,
                     DiffOptions(visual_watchdog=False),
                 )
-            outputs = write_reports(result, root / "reports", DiffOptions())
+            outputs = write_reports(result, root / "reports", result.comparison_options or DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
 
             self.assertEqual([], result.prose_source_visuals)

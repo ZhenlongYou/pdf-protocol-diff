@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'src'))
 import fitz
 from protocol_pdf_diff.models import DiffOptions
-from protocol_pdf_diff.table_view_transaction import run_diff_transaction, report_outcome
+from protocol_pdf_diff.table_view_transaction import run_comparison
 
 
 class FocusTargets(HTMLParser):
@@ -31,7 +31,7 @@ class FocusTargets(HTMLParser):
 
 def run_case(old, new, output, options=None):
     options=options or DiffOptions(ocr_language='eng',ocr_time_budget_seconds=30)
-    outcome=report_outcome(run_diff_transaction(old,new,options),output,options)
+    outcome=run_comparison(old,new, output, options)
     payload=json.loads(outcome.outputs['json'].read_text())
     parsed=FocusTargets();parsed.feed(outcome.outputs['html'].read_text())
     return payload,parsed,str(outcome.outputs['html'])

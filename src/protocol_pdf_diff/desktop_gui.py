@@ -21,7 +21,7 @@ import tkinter as tk
 import tkinter.font as tkfont  # 读取当前 Tcl/Tk 实际可用字体，避免 Windows 回退不存在的 macOS 字体。
 from tkinter import ttk
 
-from .table_view_transaction import run_diff_transaction as run_diff, report_outcome
+from .table_view_transaction import run_comparison
 from .desktop_visuals import (
     DropZone,
     GlassPanel,
@@ -1191,14 +1191,10 @@ class ProtocolDiffDesktopApp:
 
         try:
             observer = lambda event: self._result_queue.put(("progress", event))
-            result = run_diff(
-                config.old_pdf,
-                config.new_pdf,
-                config.options,
+            outcome = run_comparison(
+                config.old_pdf, config.new_pdf, config.output_dir, config.options,
                 progress_observer=observer,
             )
-            notify_progress(observer, ProgressEvent(stage="report"))
-            outcome = report_outcome(result, config.output_dir, config.options, writer=write_reports)
             result, outputs = outcome.selected_result, outcome.outputs
         except (FileNotFoundError, MissingDependencyError, PdfReadError, ValueError) as exc:
             self._result_queue.put(("error", exc))

@@ -181,17 +181,13 @@ class ProgressObserverTests(unittest.TestCase):
         )
         result = DiffResult(Path("old.pdf"), Path("new.pdf"), [], [], [], [])
 
-        def fake_run_diff(*_args: object, **kwargs: object) -> DiffResult:
+        def fake_run_comparison(*_args: object, **kwargs: object):
+            from protocol_pdf_diff.table_view_transaction import ReportOutcome
             kwargs["progress_observer"](ProgressEvent(stage="visual_evidence"))
-            return result
+            kwargs["progress_observer"](ProgressEvent(stage="report"))
+            return ReportOutcome(result, {"html": Path("report.html")}, "test")
 
-        with (
-            mock.patch("protocol_pdf_diff.desktop_gui.run_diff", side_effect=fake_run_diff),
-            mock.patch(
-                "protocol_pdf_diff.desktop_gui.write_reports",
-                return_value={"html": Path("report.html")},
-            ),
-        ):
+        with mock.patch("protocol_pdf_diff.desktop_gui.run_comparison", side_effect=fake_run_comparison):
             app._run_worker(config)
 
         queued = []

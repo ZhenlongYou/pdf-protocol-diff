@@ -47,9 +47,12 @@ def extract_image_region_text(page, page_number, excluded_bboxes=()):
     regions, warnings = [], []
     for box in raster_bboxes(page):
         width, height = box[2]-box[0], box[3]-box[1]
-        if width < 60 or height < 20 or any(overlaps(box, other) for other in (*char_boxes, *excluded_bboxes)):
+        if width < 60 or height < 20 or any(overlaps(box, other) for other in excluded_bboxes):
             continue
         label = f"第 {page_number} 页图像区域 {tuple(round(v, 1) for v in box)}"
+        if any(overlaps(box, other) for other in char_boxes):
+            warnings.append(label + "与原生文字重叠，局部 OCR 未运行；该图像仍需核对。")
+            continue
         if width * height * (OCR_RENDER_RESOLUTION / 72)**2 > OCR_MAXIMUM_RENDER_PIXELS:
             warnings.append(label + "尺寸过大，未执行局部 OCR。")
             continue
@@ -84,7 +87,7 @@ def image_region_sections(extraction):
 
 
 def captioned_graphic_regions(page, words, vectors, excluded_bboxes=()):
-    """图题、位置及无原生文字覆盖共同限定区域；只接受下方紧邻且唯一的原文图题。"""
+    """唯一图题和完整物理区域限定图示；图内标签保留，跨边界正文不借用。"""
     from .pdf_extract import _visual_word_lines, _words_to_visual_line
     chars = native_char_boxes(page)
     bounds = page_bounds(page)
@@ -100,7 +103,10 @@ def captioned_graphic_regions(page, words, vectors, excluded_bboxes=()):
         for box in boxes:
             if (box[2]-box[0] < 60 or box[3]-box[1] < 20 or box[0] < bounds[0] or box[1] < bounds[1]
                     or box[2] > bounds[2] or box[3] > bounds[3]
-                    or any(overlaps(box, other, 2) for other in (*chars, *excluded_bboxes))):
+                    or any(overlaps(box, other, 2) for other in excluded_bboxes)
+                    or any(overlaps(box, other, 2) and not
+                           (box[0] <= other[0] <= other[2] <= box[2]
+                            and box[1] <= other[1] <= other[3] <= box[3]) for other in chars)):
                 continue
             labels = [label for label, top, left, right in captions
                       if 2 <= top-box[3] <= 40 and left < box[2] and right > box[0]]

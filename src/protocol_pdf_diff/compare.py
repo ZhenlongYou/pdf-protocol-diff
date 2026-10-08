@@ -185,6 +185,12 @@ def run_diff(
     capture_extractions(old_extraction, new_extraction)
     result = compare_extractions(old_extraction, new_extraction, options)
     notify_progress(progress_observer, ProgressEvent(stage="visual_evidence"))
+    prose_source_visuals, prose_visual_warnings = build_prose_source_visuals(
+        result,
+        old_extraction,
+        new_extraction,
+    )  # 仍持有页面坐标与抽取快照散列时生成长正文截图，报告层不再事后猜位置。
+    result = replace(result, prose_source_visuals=prose_source_visuals)
     from .table_view_transaction import capture_visual_inputs
     if options.visual_watchdog:
         capture_visual_inputs(old_extraction, new_extraction, result)
@@ -213,11 +219,6 @@ def run_diff(
         if result.provenance is not None
         else None
     )
-    prose_source_visuals, prose_visual_warnings = build_prose_source_visuals(
-        result,
-        old_extraction,
-        new_extraction,
-    )  # 仍持有页面坐标与抽取快照散列时生成长正文截图，报告层不再事后猜位置。
     from .visual_ownership import build_visual_owned_spans
     owned_spans = build_visual_owned_spans(result, old_extraction, new_extraction, prose_source_visuals)
     from .formula_source_review import build_formula_source_reviews
@@ -490,6 +491,7 @@ def compare_extractions(
         # every long-document page while retaining the same source proof.
         old_superscript_receipts, new_superscript_receipts = source_typography_receipts
     return DiffResult(
+        comparison_options=options,
         old_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in old_comparison_extraction.pages if p.caption_source_spans),
         new_formula_page_maps=tuple((p.page_number, p.text, p.caption_source_spans, p.caption_removed_spans) for p in new_comparison_extraction.pages if p.caption_source_spans),
         old_pdf=old_extraction.pdf_path,
@@ -719,6 +721,7 @@ def _extraction_without_page_bound_table_captions(
 ) -> ExtractionResult:
     """Remove only caption occurrences proven by a visual on the same source page."""
 
+    extraction = replace(extraction, pages=[p.without_derived_tables() for p in extraction.pages])
     source_pages = {page.page_number: page for page in extraction.pages}
     caption_options: dict[int, list[tuple[str, str, tuple[int, ...]]]] = {}
     for original, repaired in zip(original_tables, repaired_tables, strict=True):
@@ -2639,11 +2642,8 @@ def _unique_section_content_move_pairs(
         if old_degree[candidate[0]] == 1 and new_degree[candidate[1]] == 1
     ]
     ordered_pairs = sorted(unique_pairs, key=lambda item: item[0])
-    if all(
-        left[1] < right[1]
-        for left, right in pairwise(ordered_pairs)
-    ):
-        return []  # Aligned exact bodies belong to the monotonic primary solver.
+    if all(left[1] < right[1] for left, right in pairwise(ordered_pairs)):
+        return [(a, b, "unique_body_content_anchor") for a, b, _basis in unique_pairs]
     return unique_pairs
 
 
@@ -2720,6 +2720,15 @@ def _match_sections(
     a moved or repeated clause cannot create a crossing match.
     """
 
+    # 全文原样保留的文档无需候选扫描；局部改动仍进入统一竞争。
+    if len(old_sections) == len(new_sections) and all(
+        a.identity_key == b.identity_key and a.comparable_text == b.comparable_text
+        for a, b in zip(old_sections, new_sections)
+    ):
+        report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
+        report_progress("match_rescue", detail="核对章节对应关系")
+        return [(i, i, 1.0, "similarity_exact") for i in range(len(old_sections))]
+
     exact_old_by_key: dict[str, list[int]] = {}
     for old_index, old_section in enumerate(old_sections):
         exact_old_by_key.setdefault(old_section.identity_key, []).append(old_index)
@@ -2762,28 +2771,24 @@ def _match_sections(
 
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
-    for old_index, new_index, match_basis in _unique_section_content_move_pairs(
-        old_sections,
-        new_sections,
-        matched_old,
-        matched_new,
+    primary_candidates = []
+    proven_pairs = set()
+    for old_index, new_index, basis in _unique_section_content_move_pairs(
+        old_sections, new_sections, matched_old, matched_new,
         options.min_section_match_similarity,
     ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append(
-            (
-                old_index,
-                new_index,
-                _section_similarity(
-                    old_sections[old_index].comparable_text,
-                    new_sections[new_index].comparable_text,
-                ),
-                match_basis,
-            )
-        )
+        similarity = _section_similarity(old_sections[old_index].comparable_text,
+                                         new_sections[new_index].comparable_text)
+        if basis == "unique_body_move_anchor":
+            # 双侧唯一完整正文证明真实移动；普通模糊候选仍不得交叉。
+            matched_old.add(old_index)
+            matched_new.add(new_index)
+            matches.append((old_index, new_index, similarity, basis))
+        else:
+            primary_candidates.append((similarity, old_index, new_index, basis))
+            proven_pairs.add((old_index, new_index))
 
-    exact_candidates: list[tuple[float, int, int, str]] = []
+    exact_candidates = primary_candidates
     exact_total = sum(len(old_indexes) * len(exact_new_by_key.get(key, []))
                       for key, old_indexes in exact_old_by_key.items())
     exact_completed = 0
@@ -2821,33 +2826,12 @@ def _match_sections(
                     exact_candidates.append(
                         (similarity, old_index, new_index, "similarity_exact")
                     )
+                    if old_section.body.strip() and _review_unit_key(old_section.body) == _review_unit_key(new_section.body):
+                        proven_pairs.add((old_index, new_index))
                 # 相同编号并不保证是同一条款：插入新条款会占用旧编号并整体后移。
                 # 即使标题未变，也必须由实际可比文本达到用户阈值；证据不足时保守显示新增/删除。
 
     report_progress("match_exact", exact_completed, exact_total, unit="候选对")
-    for similarity, old_index, new_index, match_basis in (
-        _select_monotonic_section_candidates(
-            exact_candidates,
-            matches,
-            minimum_similarity=options.min_section_match_similarity,
-            order_conflict_old=order_conflict_old,
-            order_conflict_new=order_conflict_new,
-        )
-    ):
-        matched_old.add(old_index)
-        matched_new.add(new_index)
-        matches.append((old_index, new_index, similarity, match_basis))
-
-    _append_order_conflict_reviews(
-        order_conflict_old,
-        order_conflict_new,
-        matched_old,
-        matched_new,
-        matches,
-    )
-    order_conflict_old.clear()
-    order_conflict_new.clear()
-
     # An incomplete ancestor stack must not let an unrelated chapter consume
     # an existing leaf. This rescue requires unique full leaf numbers, matching
     # titles and exact substantive body, never a repeated short reference.
@@ -2869,19 +2853,9 @@ def _match_sections(
                 and _review_unit_key(old_section.title) == _review_unit_key(new_section.title)
                 and body == _review_unit_key(new_section.body)
                 and (len(old_section.number_path) == 1 or len(new_section.number_path) == 1)):
-            matched_old.add(old_index)
-            matched_new.add(new_index)
-            matches.append((old_index, new_index, leaf_similarity,
-                            "structural_leaf_body_anchor"))
-
-    # Once every section on both sides has a one-to-one match, all remaining
-    # rescue passes are provably no-ops: they only inspect unmatched sections.
-    # Preserve the exact match list and progress contract while avoiding the
-    # quadratic fallback/rescue scans on long documents with stable outlines.
-    if len(matched_old) == len(old_sections) and len(matched_new) == len(new_sections):
-        report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
-        report_progress("match_rescue", detail="核对章节对应关系")
-        return matches
+            exact_candidates.append((leaf_similarity, old_index, new_index,
+                                     "structural_leaf_body_anchor"))
+            proven_pairs.add((old_index, new_index))
 
     old_table_unit_keys = suppressed_old_table_unit_keys or set()
     new_table_unit_keys = suppressed_new_table_unit_keys or set()
@@ -2895,12 +2869,14 @@ def _match_sections(
     late_fallback_candidates: list[tuple[float, int, int, str]] = []
     old_matching_bodies: dict[int, str] = {}
     new_matching_bodies: dict[int, str] = {}
+    proven_old = {a for a, _b in proven_pairs}
+    proven_new = {b for _a, b in proven_pairs}
     for new_index, new_section in enumerate(new_sections):
         report_progress("match_fallback", new_index, len(new_sections), unit="章节")
-        if new_index in matched_new:
+        if new_index in matched_new or new_index in proven_new:
             continue
         for old_index, old_section in enumerate(old_sections):
-            if old_index in matched_old:
+            if old_index in matched_old or old_index in proven_old:
                 continue
             if (old_index, new_index) in rejected_exact_pairs:
                 continue
@@ -2978,7 +2954,20 @@ def _match_sections(
 
     report_progress("match_fallback", len(new_sections), len(new_sections), unit="章节")
     report_progress("match_rescue", detail="核对章节对应关系")
-    consume_rescue_candidates(fallback_candidates)
+    # 同号、完整正文、同叶和普通相似候选在同一轮仲裁，之后才冻结锚点。
+    for similarity, old_index, new_index, basis in _select_monotonic_section_candidates(
+        [*exact_candidates, *fallback_candidates], matches,
+        minimum_similarity=options.min_section_match_similarity,
+        order_conflict_old=order_conflict_old, order_conflict_new=order_conflict_new,
+        proven_pairs=proven_pairs,
+    ):
+        matched_old.add(old_index)
+        matched_new.add(new_index)
+        matches.append((old_index, new_index, similarity, basis))
+    _append_order_conflict_reviews(order_conflict_old, order_conflict_new,
+                                   matched_old, matched_new, matches)
+    order_conflict_old.clear()
+    order_conflict_new.clear()
 
     ordinary_matches = tuple(matches)  # 后置结构救援只能引用首轮普通配对，禁止候选互相循环自证。
     consume_rescue_candidates(
@@ -3131,6 +3120,7 @@ def _select_monotonic_section_candidates(
     matches: list[tuple[int | None, int | None, float, str]],
     *,
     minimum_similarity: float = 0.72,
+    proven_pairs: set[tuple[int, int]] | frozenset = frozenset(),
     order_conflict_old: set[int] | None = None,
     order_conflict_new: set[int] | None = None,
 ) -> list[tuple[float, int, int, str]]:
@@ -3184,7 +3174,9 @@ def _select_monotonic_section_candidates(
         pair = (old_index, new_index)
         candidate = (score, old_index, new_index, match_basis)
         current = best_by_pair.get(pair)
-        if current is None or (score, match_basis) > (current[0], current[3]):
+        basis_priority = {"structural_leaf_body_anchor": 3, "unique_body_content_anchor": 2,
+                          "similarity_exact": 2, "similarity_fallback": 1}
+        if current is None or (basis_priority.get(match_basis, 0), score) > (basis_priority.get(current[3], 0), current[0]):
             best_by_pair[pair] = candidate
 
     candidate_values = list(best_by_pair.values())
@@ -3195,8 +3187,10 @@ def _select_monotonic_section_candidates(
         by_new[candidate[2]].append(candidate)
 
     def unique_best(edges: list[tuple[float, int, int, str]]) -> tuple[float, int, int, str] | None:
-        best_score = max(edge[0] for edge in edges)
-        best_edges = [edge for edge in edges if edge[0] == best_score]
+        def rank(edge):
+            return ((edge[1], edge[2]) in proven_pairs, edge[0])
+        best_score = max(rank(edge) for edge in edges)
+        best_edges = [edge for edge in edges if rank(edge) == best_score]
         return best_edges[0] if len(best_edges) == 1 else None
 
     mutual_best: list[tuple[float, int, int, str]] = []
@@ -3261,11 +3255,12 @@ def _select_monotonic_section_candidates(
     states: list[
         tuple[float, int, int | None, tuple[float, int, int, str]]
     ] = []
+    proven_counts = []
     fenwick: list[int | None] = [None] * (len(new_coordinates) + 1)
 
     def state_key(state_index: int) -> tuple[float, int, int, int]:
         score, count, _previous, candidate = states[state_index]
-        return (score, count, -candidate[2], -candidate[1])
+        return (proven_counts[state_index], score, count, -candidate[2], -candidate[1])
 
     def better_state(left: int | None, right: int | None) -> int | None:
         if left is None:
@@ -3312,6 +3307,8 @@ def _select_monotonic_section_candidates(
                     candidate,
                 )
             )
+            proven_counts.append((proven_counts[previous] if previous is not None else 0)
+                                 + int((candidate[1], candidate[2]) in proven_pairs))
             pending_updates.append((rank + 1, len(states) - 1))
 
         # Delaying updates until the old-index group is complete prevents two
@@ -4179,6 +4176,7 @@ def _shifted_section_rescue_pairs(
         and new_index is not None
         and match_basis in {
             "similarity_exact",
+            "unique_body_content_anchor",
             "similarity_fallback",
             "evidence_suppressed_similarity_fallback",
         }
@@ -6776,25 +6774,11 @@ def _normalize_math_symbol_artifacts(value: str) -> str:
 
 
 def _canonical_review_token(token: str) -> str:
-    """Canonicalize token values only where protocol meaning is preserved."""
-
+    """正文判定、表格判定和高亮共用同一数字内容规则。"""
+    from .text_utils import canonical_content_number
     if not _NUMBER_TOKEN_RE.fullmatch(token):
         return token
-    sign = "-" if token.startswith("-") else "+" if token.startswith("+") else ""
-    body = token.lstrip("+-").replace(",", "")
-    if body.startswith("."):
-        body = f"0{body}"
-    try:
-        value = Decimal(body)
-    except InvalidOperation:
-        return token
-    # ``normalize()`` obeys Decimal's process-wide precision and can round two
-    # long observed integers into the same key.  Fixed formatting preserves
-    # the exact coefficient while still expanding an exponent spelling.
-    numeric = format(value, "f")
-    if "." in numeric:
-        numeric = numeric.rstrip("0").rstrip(".")
-    return f"{sign}{numeric}"
+    return canonical_content_number(token)
 
 
 def _report_unit(value: str) -> str:

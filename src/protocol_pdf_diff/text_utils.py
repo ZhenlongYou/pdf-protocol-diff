@@ -1235,3 +1235,16 @@ def _parse_chinese_number(token: str) -> int | None:
             continue
         return None
     return total + section + number
+
+
+def canonical_content_number(token: str) -> str:
+    """共享数字内容键：保留普通小数尾零，避免上下文精度导致长整数舍入。"""
+    sign = token[0] if token.startswith(("+", "-")) else ""
+    body = token.lstrip("+-").replace(",", "")
+    try:
+        value = Decimal(body)
+    except InvalidOperation:
+        return token
+    if not value.is_finite():
+        return token
+    return sign + format(value, "f")

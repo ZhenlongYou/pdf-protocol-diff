@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]  # 从真实项目加载修改后的�
 sys.path.insert(0, str(ROOT / "src"))
 import fitz
 from protocol_pdf_diff.models import DiffOptions
-from protocol_pdf_diff.table_view_transaction import run_diff_transaction, report_outcome
+from protocol_pdf_diff.table_view_transaction import run_comparison
 
 
 def make_scan(path, lines):
@@ -54,7 +54,7 @@ def run_manifest(path, output):
                               new_start_page=windows["new"][0], new_end_page=windows["new"][1],
                               ocr_time_budget_seconds=30)
         started = time.monotonic()
-        outcome = report_outcome(run_diff_transaction(case["old"], case["new"], options), output/case["name"], options)
+        outcome = run_comparison(case["old"], case["new"], output/case["name"], options)
         payload = json.loads(outcome.outputs["json"].read_text())
         failures = []
         for expected in case.get("replacements", []):
@@ -113,8 +113,7 @@ def run_region_controls(output):
                 pdf.save(directory / (side + ".pdf"))
         options = DiffOptions(ocr_language="eng", ocr_time_budget_seconds=30)
         started = time.monotonic()
-        outcome = report_outcome(run_diff_transaction(directory/"old.pdf", directory/"new.pdf", options),
-                                 directory/"reports", options)
+        outcome = run_comparison(directory/"old.pdf", directory/"new.pdf", directory/"reports", options)
         payload = json.loads(outcome.outputs["json"].read_text())
         if case == "mixed":
             changes = payload["content_changes"]
@@ -158,7 +157,7 @@ def main():
         make_scan(new, new_lines)
         options = DiffOptions(ocr_language="eng", ocr_time_budget_seconds=30)
         started = time.monotonic()
-        outcome = report_outcome(run_diff_transaction(old, new, options), directory / "reports", options)
+        outcome = run_comparison(old, new, directory / "reports", options)
         payload = json.loads(outcome.outputs["json"].read_text())
         changes = payload.get("content_changes", [])
         expected = "Call enable" if name == "scan-occurrence" else "The output shall remain enabled."
@@ -175,7 +174,7 @@ def main():
         print(json.dumps(results[-1], ensure_ascii=False), flush=True)
     # 同一真实扫描文件，零识别额度必须明确无法判断，不能生成假一致结果。
     options = DiffOptions(ocr_language="eng", ocr_time_budget_seconds=0)
-    outcome = report_outcome(run_diff_transaction(old, old, options), args.output / "budget-zero", options)
+    outcome = run_comparison(old, old, args.output / "budget-zero", options)
     result = outcome.selected_result
     assert not result.assessment.allows_no_difference_conclusion
     assert any("累计 OCR" in warning for warning in result.warnings)

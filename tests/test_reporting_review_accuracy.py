@@ -170,7 +170,7 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         self.assertEqual(1, len(changes))
         self.assertEqual("review", changes[0].change_type)
         with tempfile.TemporaryDirectory() as temp_dir:
-            outputs = reporting.write_reports(result, temp_dir, DiffOptions())
+            outputs = reporting.write_reports(result, temp_dir, result.comparison_options or DiffOptions())
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
             html = outputs["html"].read_text(encoding="utf-8")
             table_csv = outputs["table_csv"].read_text(encoding="utf-8-sig")
@@ -272,7 +272,7 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            outputs = reporting.write_reports(result, temp_dir, DiffOptions())
+            outputs = reporting.write_reports(result, temp_dir, result.comparison_options or DiffOptions())
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
             html = outputs["html"].read_text(encoding="utf-8")
 
@@ -375,7 +375,7 @@ class ReportingReviewAccuracyTests(unittest.TestCase):
             warnings=[],
         )
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch.object(reporting, "_build_table_changes", return_value=[change]):
+            with mock.patch("protocol_pdf_diff.comparison_content._build_table_changes", return_value=[change]):
                 outputs = reporting.write_reports(empty_result, temp_dir, DiffOptions())
             html = outputs["html"].read_text(encoding="utf-8")
             markdown = outputs["markdown"].read_text(encoding="utf-8")

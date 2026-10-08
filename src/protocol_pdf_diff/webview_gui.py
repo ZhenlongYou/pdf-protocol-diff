@@ -147,9 +147,11 @@ class ProtocolDiffWebApi:
     def __init__(
         self,
         *,
+        run_comparison_func: Callable[..., Any] | None = None,
         run_diff_func: Callable[..., Any] | None = None,
         write_reports_func: Callable[..., dict[str, Path]] | None = None,
     ) -> None:
+        self._run_comparison = run_comparison_func
         self._run_diff = run_diff_func
         self._write_reports = write_reports_func
         self._window: Any | None = None
@@ -246,23 +248,30 @@ class ProtocolDiffWebApi:
         try:
             old_pdf, new_pdf, output_dir, options = self._collect_config(config)
             self._emit({"type": "running", "stage": "read_old"})
-            runner = self._run_diff
-            if runner is None:
-                from .table_view_transaction import run_diff_transaction as runner
+            if self._run_diff is not None or self._write_reports is not None:
+                # 显式旧接口适配只供旧嵌入调用方；默认生产与基准均走统一出口。
+                runner = self._run_diff
+                if runner is None:
+                    from .table_view_transaction import run_diff_transaction as runner
 
-            result = runner(
-                old_pdf,
-                new_pdf,
-                options,
-                progress_observer=self._emit_progress,
-            )
-            self._emit_progress(ProgressEvent(stage="report"))
-            writer = self._write_reports
-            if writer is None:
-                from .reporting import write_reports as writer
+                result = runner(
+                    old_pdf,
+                    new_pdf,
+                    options,
+                    progress_observer=self._emit_progress,
+                )
+                self._emit_progress(ProgressEvent(stage="report"))
+                writer = self._write_reports
+                if writer is None:
+                    from .reporting import write_reports as writer
 
-            from .table_view_transaction import report_outcome
-            outcome = report_outcome(result, output_dir, options, writer=writer)
+                from .table_view_transaction import report_outcome
+                outcome = report_outcome(result, output_dir, options, writer=writer)
+            else:
+                from .table_view_transaction import run_comparison
+                runner = self._run_comparison or run_comparison
+                outcome = runner(old_pdf, new_pdf, output_dir, options,
+                                 progress_observer=self._emit_progress)
             result, outputs = outcome.selected_result, outcome.outputs
             self._last_outputs = {key: Path(value) for key, value in outputs.items()}
             payload = self._success_payload(result, self._last_outputs)

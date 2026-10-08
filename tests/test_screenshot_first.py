@@ -228,7 +228,7 @@ class ScreenshotFirstTests(unittest.TestCase):
             old=write_multipage_text_pdf(root/'old.pdf',[['1 Receiver','The receiver limit is 100 mV.','Following context remains visible.']])
             new=write_multipage_text_pdf(root/'new.pdf',[['1 Receiver','The receiver limit is 120 mV.','Following context remains visible.']])
             result=run_diff(old,new,DiffOptions(visual_watchdog=False))
-            out=write_reports(result,root/'report',DiffOptions());html=out['html'].read_text()
+            out=write_reports(result,root/'report',result.comparison_options or DiffOptions());html=out['html'].read_text()
             group=next(g for g in result.prose_source_visuals if g.old_visuals)
             self.assertGreater(group.old_visuals[0].highlight_region_count,0)
             self.assertEqual((0.,0.),group.old_visuals[0].crop_bbox[:2])
@@ -339,7 +339,7 @@ class ScreenshotFirstTests(unittest.TestCase):
             )
 
             result = run_diff(old, new, DiffOptions(visual_watchdog=False))
-            outputs = write_reports(result, root / "report", DiffOptions())
+            outputs = write_reports(result, root / "report", result.comparison_options or DiffOptions())
             payload = json.loads(outputs["json"].read_text(encoding="utf-8"))
             html = outputs["html"].read_text(encoding="utf-8")
 
